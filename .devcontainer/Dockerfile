@@ -21,16 +21,17 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN echo '#!/bin/bash\n\
-    Xvfb :99 -screen 0 1024x768x24 &\n\
-    export DISPLAY=:99\n\
-    sleep 1\n\
-    exec "$@"' > /usr/local/bin/start-xvfb \
-    && chmod +x /usr/local/bin/start-xvfb
+COPY ./start-xvfb.sh /usr/local/bin/start-xvfb.sh
+RUN chmod +x /usr/local/bin/start-xvfb.sh && \
+    echo '. /usr/local/bin/start-xvfb.sh' >> /root/.bashrc && \
+    echo '. /usr/local/bin/start-xvfb.sh' >> /home/vscode/.bashrcS
 
 # Optionally install cmake from source
+COPY start-xvfb.sh /usr/local/bin/start-xvfb
 COPY ./reinstall-cmake.sh /tmp/
+
 RUN if [ "${REINSTALL_CMAKE_VERSION_FROM_SOURCE}" != "none" ]; then \
     chmod +x /tmp/reinstall-cmake.sh && /tmp/reinstall-cmake.sh ${REINSTALL_CMAKE_VERSION_FROM_SOURCE}; \
     fi \
     && rm -f /tmp/reinstall-cmake.sh
+
