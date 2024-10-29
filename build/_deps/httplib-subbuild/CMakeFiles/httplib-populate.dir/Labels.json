@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/CMakeFiles/httplib-populate"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/CMakeFiles/httplib-populate.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/CMakeFiles/httplib-populate-complete.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-build.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-configure.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-download.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-install.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-mkdir.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-patch.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-test.rule"
+		},
+		{
+			"file" : "/workspaces/theseo-anysearch/build/_deps/httplib-subbuild/httplib-populate-prefix/src/httplib-populate-stamp/httplib-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"httplib-populate"
+		],
+		"name" : "httplib-populate"
+	}
+}

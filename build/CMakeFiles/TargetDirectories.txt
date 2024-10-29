@@ -1,0 +1,13 @@
+/workspaces/theseo-anysearch/build/CMakeFiles/Project.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/edit_cache.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/rebuild_cache.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/list_install_components.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/install.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/install/local.dir
+/workspaces/theseo-anysearch/build/CMakeFiles/install/strip.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/edit_cache.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/rebuild_cache.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/list_install_components.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/install.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/install/local.dir
+/workspaces/theseo-anysearch/build/_deps/httplib-build/CMakeFiles/install/strip.dir
