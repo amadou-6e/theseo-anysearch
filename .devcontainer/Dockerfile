@@ -4,7 +4,8 @@ ARG REINSTALL_CMAKE_VERSION_FROM_SOURCE="none"
 
 # Install OpenGL and development dependencies
 USER root
-RUN apt-get update && apt-get install -y \
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test && \
+    apt-get update && apt-get install -y \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
     libglfw3-dev \
@@ -19,6 +20,12 @@ RUN apt-get update && apt-get install -y \
     mesa-utils \
     x11-xserver-utils \
     libxrender1 \
+    libopenvdb-dev \
+    libassimp-dev \
+    build-essential \ 
+    cmake \
+    libboost-all-dev\ 
+    libtbb-dev\
     && rm -rf /var/lib/apt/lists/*
 
 COPY ./start-xvfb.sh /usr/local/bin/start-xvfb.sh
