@@ -2,7 +2,8 @@ FROM mcr.microsoft.com/devcontainers/cpp:1-debian-12
 
 ARG REINSTALL_CMAKE_VERSION_FROM_SOURCE="none"
 
-# Install OpenGL, X11, and development dependencies
+# Install OpenGL and development dependencies
+USER root
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
@@ -20,8 +21,11 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a virtual framebuffer X server script
-RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1024x768x24 &\nexport DISPLAY=:99\nexec "$@"' > /usr/local/bin/start-xvfb \
+RUN echo '#!/bin/bash\n\
+    Xvfb :99 -screen 0 1024x768x24 &\n\
+    export DISPLAY=:99\n\
+    sleep 1\n\
+    exec "$@"' > /usr/local/bin/start-xvfb \
     && chmod +x /usr/local/bin/start-xvfb
 
 # Optionally install cmake from source
