@@ -1,0 +1,41 @@
+experiment:
+  name: sac-baseline
+  output_dir: ./runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/pipe_junction.stl
+  scale: 40.0
+  agent_count: 4
+  max_steps: 200
+
+training:
+  algorithm: sac
+  runner: local
+  iterations: 500
+  checkpoint_interval: 50
+  trajectory_every: 10
+  video_every: 100
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 256       # SAC is off-policy; smaller batches from replay buffer
+  tau: 0.005
+  target_entropy: auto
+  n_step: 1
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 3
+
+renders:
+  camera_positions:
+    - name: front
+      yaw: 245.0
+      pitch: 20.0
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000
