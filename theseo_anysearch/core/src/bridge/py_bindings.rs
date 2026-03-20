@@ -1158,6 +1158,90 @@ impl PyMultiVoxelEnv {
     pub fn goal_positions(&self) -> Vec<Option<(u16, u16, u16)>> {
         self.inner.agents.iter().map(|a| a.goal).collect()
     }
+
+    /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
+    /// 1.0 = that neighbor cell is filled, 0.0 = empty or out of bounds.
+    pub fn face_neighbors(&self, agent_idx: usize) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let dirs: [(i32, i32, i32); 6] = [
+            (1, 0, 0), (-1, 0, 0),
+            (0, 1, 0), (0, -1, 0),
+            (0, 0, 1), (0, 0, -1),
+        ];
+        dirs.iter().map(|&(dx, dy, dz)| {
+            let x = cx as i32 + dx;
+            let y = cy as i32 + dy;
+            let z = cz as i32 + dz;
+            if x > 0 && y > 0 && z > 0 && x < 1000 && y < 1000 && z < 1000 {
+                self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+            } else {
+                0.0
+            }
+        }).collect()
+    }
+
+    /// Flattened (2*radius+1)³ binary box observation centred on agent `agent_idx`'s cursor.
+    /// 1.0 = filled, 0.0 = empty or out of bounds. Ordered x-outer, y-mid, z-inner.
+    pub fn box_obs(&self, agent_idx: usize, radius: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let r = radius as i32;
+        let side = (2 * r + 1) as usize;
+        let mut result = Vec::with_capacity(side * side * side);
+        for dx in -r..=r {
+            for dy in -r..=r {
+                for dz in -r..=r {
+                    let x = cx as i32 + dx;
+                    let y = cy as i32 + dy;
+                    let z = cz as i32 + dz;
+                    let filled = if x > 0 && y > 0 && z > 0 && x < 1000 && y < 1000 && z < 1000 {
+                        self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                    } else {
+                        0.0
+                    };
+                    result.push(filled);
+                }
+            }
+        }
+        result
+    }
+
+    /// 27-element ray-cast observation from agent `agent_idx`'s cursor, one value per
+    /// direction (dx,dy,dz) ∈ {-1,0,+1}³ sorted lexicographically on (dx+1,dy+1,dz+1).
+    ///
+    /// Encoding (distance, not proximity):
+    ///   0.0                        — filled cell immediately adjacent (d=1) or self filled (0,0,0)
+    ///   (d-1) as f32 / max_len     — hit at step d (d ∈ 2..=max_len); larger = farther
+    ///   1.0                        — no hit within max_len, or self empty for (0,0,0)
+    pub fn ray_cast(&self, agent_idx: usize, max_len: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let mut result = Vec::with_capacity(27);
+        for dx in -1i32..=1 {
+            for dy in -1i32..=1 {
+                for dz in -1i32..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        let filled = self.inner.world.is_filled((cx, cy, cz));
+                        result.push(if filled { 0.0 } else { 1.0 });
+                    } else {
+                        let mut value = 1.0f32;
+                        for step in 1..=max_len {
+                            let nx = cx as i32 + dx * step as i32;
+                            let ny = cy as i32 + dy * step as i32;
+                            let nz = cz as i32 + dz * step as i32;
+                            if nx <= 0 || ny <= 0 || nz <= 0 || nx >= 1000 || ny >= 1000 || nz >= 1000 {
+                                break;
+                            }
+                            if self.inner.world.is_filled((nx as u16, ny as u16, nz as u16)) {
+                                value = (step - 1) as f32 / max_len as f32;
+                                break;
+                            }
+                        }
+                        result.push(value);
+                    }
+                }
+            }
+        }
+        result
+    }
 }
 
 /// Python-visible observation returned by PySurfaceEnv.reset() and .step().

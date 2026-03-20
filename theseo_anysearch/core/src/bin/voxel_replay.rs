@@ -816,6 +816,10 @@ impl eframe::App for VoxelReplayApp {
             if is_multi {
                 // ---- Multi-agent: per-agent colored trails and cursors ----
                 let n_agents = render_steps.first().map(|s| s.cursors.len()).unwrap_or(0);
+                // Determine whether placed_per_agent is populated (new trajectories)
+                // or absent/all-false (old trajectories saved before the fix).
+                let has_placed_data = render_steps.iter().any(|s| s.placed_per_agent.iter().any(|&p| p));
+
                 for ai in 0..n_agents {
                     let trail_color = agent_trail_colors[ai % agent_trail_colors.len()];
                     let mut trail: HashSet<(u16, u16, u16)> = HashSet::new();
@@ -823,7 +827,12 @@ impl eframe::App for VoxelReplayApp {
                         let s = &render_steps[i];
                         if ai < s.cursors.len() {
                             let c = s.cursors[ai];
-                            let placed = s.placed_per_agent.get(ai).copied().unwrap_or(false);
+                            let placed = if has_placed_data {
+                                s.placed_per_agent.get(ai).copied().unwrap_or(false)
+                            } else {
+                                // Fall back: a voxel was placed if cursor moved from previous step.
+                                i == 0 || render_steps[i - 1].cursors.get(ai).copied() != Some(c)
+                            };
                             if placed && !geometry.contains(&(c[0], c[1], c[2])) {
                                 trail.insert((c[0], c[1], c[2]));
                             }

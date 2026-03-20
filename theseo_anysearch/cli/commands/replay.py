@@ -5,11 +5,50 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
+from typer.core import TyperGroup
+
+
+class _SoftGroup(TyperGroup):
+    """TyperGroup that treats unknown subcommand names as positional args.
+
+    In Click 8.3+, Group.invoke checks ``ctx._protected_args`` first: if it is
+    non-empty it calls ``resolve_command`` and immediately ``assert cmd is not
+    None``, so there is no way to handle unknown names after the fact.  The fix
+    is to intercept in ``parse_args``: if the first remaining token is not a
+    registered subcommand name we move it out of ``_protected_args`` into
+    ``ctx.args``, leaving ``_protected_args`` empty.  An empty
+    ``_protected_args`` causes Click to take the ``invoke_without_command``
+    branch instead, which calls only the group callback — which then reads the
+    ref from ``ctx.args``.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        rest = super().parse_args(ctx, args)
+        # _protected_args[0] is the candidate subcommand name.  If it is not a
+        # known command, demote it to ctx.args so the callback can handle it.
+        protected = getattr(ctx, "_protected_args", [])
+        if protected and self.get_command(ctx, protected[0]) is None:
+            ctx.args = [*protected, *ctx.args]
+            ctx._protected_args = []
+        return rest
+
 
 app = typer.Typer(
+    cls=_SoftGroup,
     invoke_without_command=True,
-    help="Replay recorded VoxelEnv trajectories in the eframe viewer.",
+    help=(
+        "Replay recorded VoxelEnv trajectories in the eframe viewer.\n\n"
+        "Usage:\n\n"
+        "  anysearch replay <name>             — auto-detect training or tune sweep\n\n"
+        "  anysearch replay <name:tag>         — browse all trials (T/Y keys)\n\n"
+        "  anysearch replay <name:run_id>      — all periodic snapshots\n\n"
+        "  anysearch replay <name:run_id> --best\n\n"
+        "  anysearch replay file <path.json>   — open any trajectory file directly\n\n"
+        "Training vs tuning and the STL geometry are inferred automatically from\n"
+        "the saved run configuration — no extra flags needed."
+    ),
     # allow_interspersed_args lets options like --best appear after the ref argument.
     context_settings={"allow_interspersed_args": True},
 )
@@ -119,12 +158,16 @@ def replay(
 
     REF is the first non-option argument (options may appear before or after it).
     """
-    if ctx.invoked_subcommand is not None:
-        return  # let subcommands handle it
-
-    # ref is the first positional arg; with allow_interspersed_args=True and no
-    # declared positional, it lands in ctx.protected_args after option parsing.
-    ref: Optional[str] = ctx.protected_args[0] if ctx.protected_args else None
+    # ref is the first positional arg.  When a known subcommand name (file/
+    # tune/list) is given, Click dispatches it normally and _protected_args
+    # holds the name.  When an unknown ref is given, _SoftGroup.parse_args has
+    # moved it to ctx.args so Click takes the invoke_without_command path and
+    # calls only this callback.
+    protected = getattr(ctx, "_protected_args", ctx.protected_args)
+    if protected:
+        # Known subcommand — let Click dispatch it.
+        return
+    ref: Optional[str] = ctx.args[0] if ctx.args else None
 
     if ref is None:
         typer.echo(ctx.get_help())
@@ -179,7 +222,7 @@ def replay(
         candidate = Path(ref)
         if candidate.exists() and candidate.is_dir():
             _replay_sweep_dir(candidate)
-            return
+            raise typer.Exit()
 
         # Resolve output_dir from YAML and auto-detect a single sweep or run
         try:
@@ -195,7 +238,7 @@ def replay(
                             sweep_dirs.append(child)
                 if len(sweep_dirs) == 1:
                     _replay_sweep_dir(sweep_dirs[0])
-                    return
+                    raise typer.Exit()
                 if len(sweep_dirs) > 1:
                     typer.echo("Available tags — specify one:", err=True)
                     for s in sorted(sweep_dirs, key=lambda p: p.name):
@@ -238,7 +281,7 @@ def replay(
         for p in sweep_candidate.iterdir()
     ):
         _replay_sweep_dir(sweep_candidate)
-        return
+        raise typer.Exit()
 
     # Otherwise treat identifier as a run_id
     run_dir = _find_run_dir(search_root, identifier)
@@ -260,6 +303,7 @@ def replay(
         typer.echo(f"Replaying {len(files)} iteration(s) from {traj_dir}")
 
     subprocess.run([str(binary)] + [str(f) for f in files], check=True)
+    raise typer.Exit()
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -10,6 +11,9 @@ from theseo_anysearch.environments.pettingzoo.base import RustParallelEnv
 
 def _max_manhattan(grid_size: int) -> float:
     return 3.0 * (grid_size - 1)
+
+def _max_euclidean(grid_size: int) -> float:
+    return math.sqrt(3.0) * (grid_size - 1)
 
 
 class MultiVoxelEnv(RustParallelEnv):
@@ -22,10 +26,17 @@ class MultiVoxelEnv(RustParallelEnv):
     Trail mode auto-fills each agent's destination on successful moves.
 
     Observation space per agent:
-        steps_remaining: Box(1,)   normalised steps remaining [0, 1]
-        voxel_count:     Box(1,)   total agent-filled cells
         cursor_pos:      Box(3,)   normalised cursor position [0, 1]³
-        goal_distance:   Box(1,)   normalised Manhattan distance (when geometry set)
+        face_neighbors:  Box(6,)   binary fill state of 6 cardinal neighbors (+x-x+y-y+z-z)
+        local_grid:      Box(N³,)  binary fill state of (2*box_radius+1)³ box around cursor
+        ray_cast:        Box(27,)  distance to nearest filled cell in 27 directions (0=adjacent, 1=none)
+        goal_distance:   Box(1,)   normalised distance to goal (when geometry set)
+        goal_direction:  Box(3,)   unit vector toward goal, zeros when at goal (when geometry set)
+
+    Config keys:
+        box_radius:       int  (default 2)         — local_grid cube side = 2*box_radius+1
+        ray_max_len:      int  (default 16)        — maximum ray length for ray_cast
+        distance_metric:  str  (default "euclidean") — "euclidean" or "manhattan"
 
     Action space per agent: Discrete(26) — all 26 face/edge/corner neighbors
     """
@@ -69,41 +80,64 @@ class MultiVoxelEnv(RustParallelEnv):
         return bool(self._config.get("geometry_boxes"))
 
     def _observation_space(self, agent: str) -> gymnasium.Space:
+        radius = self._config.get("box_radius", 2)
+        n = 2 * radius + 1
         base = {
-            "steps_remaining": spaces.Box(0.0, 1.0, (1,), np.float32),
-            "voxel_count":     spaces.Box(0.0, np.inf, (1,), np.float32),
-            "cursor_pos":      spaces.Box(0.0, 1.0, (3,), np.float32),
+            "cursor_pos":     spaces.Box(0.0, 1.0, (3,),    np.float32),
+            "face_neighbors": spaces.Box(0.0, 1.0, (6,),    np.float32),
+            "local_grid":     spaces.Box(0.0, 1.0, (n**3,), np.float32),
+            "ray_cast":       spaces.Box(0.0, 1.0, (27,),   np.float32),
         }
         if self._has_goal():
-            base["goal_distance"] = spaces.Box(0.0, 1.0, (1,), np.float32)
+            base["goal_distance"]  = spaces.Box(0.0, 1.0,  (1,), np.float32)
+            base["goal_direction"] = spaces.Box(-1.0, 1.0, (3,), np.float32)
         return spaces.Dict(base)
 
     def _action_space(self, agent: str) -> gymnasium.Space:
         return spaces.Discrete(26)
 
     def _fanout_obs(self, rust_obs: Any) -> dict:
-        max_steps = self._config.get("max_steps", 200)
         grid_size = self._config.get("grid_size", 32)
         norm = float(max(grid_size - 1, 1))
-        steps_norm = np.array([rust_obs.steps_remaining / max(max_steps, 1)], dtype=np.float32)
-        voxel_count = np.array([rust_obs.voxel_count], dtype=np.float32)
+        radius = self._config.get("box_radius", 2)
+        ray_max_len = self._config.get("ray_max_len", 16)
+        use_euclidean = self._config.get("distance_metric", "euclidean") == "euclidean"
+
+        goal_positions = self._rust_env.goal_positions() if self._has_goal() else []
 
         result = {}
         for i, agent_id in enumerate(self.agents):
             if i < len(rust_obs.cursors):
                 cx, cy, cz = rust_obs.cursors[i]
-                cursor_pos = np.array(
-                    [(cx - 1) / norm, (cy - 1) / norm, (cz - 1) / norm], dtype=np.float32
-                )
                 obs = {
-                    "steps_remaining": steps_norm,
-                    "voxel_count": voxel_count,
-                    "cursor_pos": cursor_pos,
+                    "cursor_pos":     np.array(
+                        [(cx - 1) / norm, (cy - 1) / norm, (cz - 1) / norm], dtype=np.float32
+                    ),
+                    "face_neighbors": np.array(
+                        self._rust_env.face_neighbors(i), dtype=np.float32
+                    ),
+                    "local_grid":     np.array(
+                        self._rust_env.box_obs(i, radius), dtype=np.float32
+                    ),
+                    "ray_cast":       np.array(
+                        self._rust_env.ray_cast(i, ray_max_len), dtype=np.float32
+                    ),
                 }
-                if self._has_goal() and i < len(rust_obs.goal_distances):
-                    gd = rust_obs.goal_distances[i]
-                    dist = (gd / _max_manhattan(grid_size)) if gd is not None else 0.0
+                if self._has_goal() and i < len(goal_positions) and goal_positions[i] is not None:
+                    gx, gy, gz = goal_positions[i]
+                    dx, dy, dz = gx - cx, gy - cy, gz - cz
+                    eucl = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    if use_euclidean:
+                        dist = eucl / _max_euclidean(grid_size)
+                    else:
+                        dist = (abs(dx) + abs(dy) + abs(dz)) / _max_manhattan(grid_size)
                     obs["goal_distance"] = np.array([dist], dtype=np.float32)
+                    if eucl > 0.0:
+                        obs["goal_direction"] = np.array(
+                            [dx / eucl, dy / eucl, dz / eucl], dtype=np.float32
+                        )
+                    else:
+                        obs["goal_direction"] = np.zeros(3, dtype=np.float32)
             else:
                 obs = self._zero_obs(agent_id)
             result[agent_id] = obs

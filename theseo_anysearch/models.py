@@ -27,6 +27,7 @@ class EnvConfig(BaseModel):
     collision_cost: float = 0.0         # extra penalty subtracted on blocked moves
     goal_reward: float = 1.0            # bonus when cursor reaches goal position
     distance_shaping: float = 0.0       # potential-based shaping coefficient toward goal
+    distance_metric: Literal["euclidean", "manhattan"] = "euclidean"
 
 
 class TrainingConfig(BaseModel):

@@ -37,12 +37,16 @@ class MultiAgentVoxelPPOTrainer(Trainer):
         env_config = {
             "agent_count":      env_cfg.agent_count,
             "max_steps":        env_cfg.max_steps,
+            "seed":             env_cfg.seed,
             "trail_mode":       env_cfg.trail_mode,
             "geometry_boxes":   env_cfg.geometry_boxes,
             "step_cost":        env_cfg.step_cost,
             "goal_reward":      env_cfg.goal_reward,
             "distance_shaping": env_cfg.distance_shaping,
             "collision_cost":   env_cfg.collision_cost,
+            "box_radius":       getattr(env_cfg, "box_radius", 2),
+            "ray_max_len":      getattr(env_cfg, "ray_max_len", 16),
+            "distance_metric":  getattr(env_cfg, "distance_metric", "euclidean"),
         }
 
         env_id = "multi_voxel_ppo_env"

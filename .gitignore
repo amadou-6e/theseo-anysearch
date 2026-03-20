@@ -65,6 +65,9 @@ Thumbs.db
 # Configs (user-supplied, not version controlled per spec)
 configs/
 
+# Downloaded map assets (large binary files)
+usage/maps/
+
 # Secrets / env files
 .env
 *.env

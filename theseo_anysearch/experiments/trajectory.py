@@ -211,6 +211,19 @@ def collect_multi_eval_episode(
                 action = 0
             actions[agent_id] = action
 
+        # Snapshot cursor positions before the step for placement detection.
+        pre_cursors: list[tuple[int, int, int]] = []
+        for agent_id in env.possible_agents:
+            cp = obs.get(agent_id, {}).get("cursor_pos")
+            if cp is not None:
+                pre_cursors.append((
+                    int(round(cp[0] * 31)) + 1,
+                    int(round(cp[1] * 31)) + 1,
+                    int(round(cp[2] * 31)) + 1,
+                ))
+            else:
+                pre_cursors.append((1, 1, 1))
+
         obs_next, rewards, terms, truncs, _ = env.step(actions)
         done = all(terms.values())
 
@@ -238,12 +251,8 @@ def collect_multi_eval_episode(
                     )
             cursors.append(cur)
 
-            # Detect placement: voxel_count increased or goal reached (reward > 0.5)
-            prev_vc = obs.get(agent_id, {}).get("voxel_count", [0])
-            next_vc = obs_next.get(agent_id, {}).get("voxel_count", [0])
-            p = float(next_vc[0] if hasattr(next_vc, "__len__") else next_vc) > \
-                float(prev_vc[0] if hasattr(prev_vc, "__len__") else prev_vc)
-            placed.append(p)
+            # Detect placement: agent moved to a new cell (trail mode fills destination).
+            placed.append(cur != pre_cursors[i])
 
         steps.append(MultiVoxelStepData(
             step=step_count,
