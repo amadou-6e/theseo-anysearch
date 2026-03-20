@@ -59,20 +59,29 @@ def ray_session(tmp_path_factory):
     """
     Initialize Ray once for the whole test session and shut it down at the end.
     Kills any stale Ray instance (from previous crashed runs) before starting.
+
+    Ray's _temp_dir is placed under the system temp dir (not the project tree)
+    to keep paths short on Windows.  Ray appends session_YYYY-MM-DD_HH-MM-SS_PID/
+    artifacts/YYYY-MM-DD_HH-MM-SS/{run_name}/driver_artifacts/ plus UUID temp
+    filenames, which easily exceeds MAX_PATH (260) when rooted in a deep project
+    directory.
     """
+    import os
+    import tempfile
     import ray as _ray
     # Ensure we start clean regardless of zombie instances from prior runs.
     try:
         _ray.shutdown()
     except Exception:
         pass
-    ray_root = tmp_path_factory.mktemp("ray_session")
+    ray_tmp = os.path.join(tempfile.gettempdir(), "anysearch_ray_session")
+    os.makedirs(ray_tmp, exist_ok=True)
     _ray.init(
-        num_cpus=1,
+        num_cpus=4,  # 4 CPUs: enough for 1-driver + up to 3 env-runner workers per trial
         ignore_reinit_error=True,
         include_dashboard=False,
         log_to_driver=False,
-        _temp_dir=str(Path(ray_root).joinpath("runtime")),
+        _temp_dir=ray_tmp,
     )
     yield
     try:

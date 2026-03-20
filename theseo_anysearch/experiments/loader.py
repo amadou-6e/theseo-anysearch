@@ -44,14 +44,34 @@ def load_experiment(path: Path) -> Union[ExperimentConfig, SweepConfig]:
     - Otherwise → ExperimentConfig
 
     Call ``expand_sweep(sweep)`` to get a list[ExperimentConfig] from a SweepConfig.
+
+    output_dir resolution:
+    - If specified in YAML and relative → resolved relative to the YAML's parent directory
+    - If absent (using model default)   → set to the YAML's parent directory
+    - If absolute                       → used unchanged
     """
     raw: dict = yaml.safe_load(path.read_text()) or {}
+    yaml_dir = path.resolve().parent
 
     if "sweep" in raw:
         return SweepConfig(**raw["sweep"])
 
     resolved = _resolve_typed_configs(raw)
-    return ExperimentConfig(**resolved)
+    config = ExperimentConfig(**resolved)
+
+    # Resolve output_dir relative to the YAML's parent
+    has_output_dir = "output_dir" in raw.get("experiment", {})
+    out = config.experiment.output_dir
+    if has_output_dir and not out.is_absolute():
+        abs_out = (yaml_dir / out).resolve()
+    elif not has_output_dir:
+        abs_out = yaml_dir
+    else:
+        abs_out = out  # already absolute
+
+    return config.model_copy(
+        update={"experiment": config.experiment.model_copy(update={"output_dir": abs_out})}
+    )
 
 
 def expand_sweep(sweep: SweepConfig) -> list[ExperimentConfig]:

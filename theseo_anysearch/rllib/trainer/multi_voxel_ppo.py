@@ -27,7 +27,7 @@ class MultiAgentVoxelPPOTrainer(Trainer):
 
         from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
 
-        _ensure_ray_runtime(str(config.training.output_dir))
+        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
 
         env_cfg = config.env
         algo_cfg = config.algorithm_config
@@ -84,10 +84,10 @@ class MultiAgentVoxelPPOTrainer(Trainer):
                 lambda_=algo_cfg.lambda_,
                 kl_coeff=algo_cfg.kl_coeff,
             )
-            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu))
+            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus))
             .framework("torch")
         )
-        rllib_config.num_env_runners = 0
+        rllib_config.num_env_runners = config.training.num_env_runners
 
         return rllib_config.build_algo()
 

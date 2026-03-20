@@ -18,7 +18,7 @@ training:
   checkpoint_interval: 1
   trajectory_every: 1
   best_trajectory: true
-  output_dir: runtime/experiments
+  output_dir: ../../../runtime/experiments
 
 algorithm_config:
   lr: 0.0003

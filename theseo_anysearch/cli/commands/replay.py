@@ -10,6 +10,8 @@ import typer
 app = typer.Typer(
     invoke_without_command=True,
     help="Replay recorded VoxelEnv trajectories in the eframe viewer.",
+    # allow_interspersed_args lets options like --best appear after the ref argument.
+    context_settings={"allow_interspersed_args": True},
 )
 
 _BINARY_NAME = "voxel-replay"
@@ -70,14 +72,31 @@ def _all_iter_trajectories(run_dir: Path) -> list[Path]:
     return files
 
 
+def _replay_sweep_dir(sweep_dir: Path) -> None:
+    """Open a sweep directory (containing Ray Tune trial subdirs) in the viewer."""
+    trial_dirs = [
+        p for p in sweep_dir.iterdir()
+        if p.is_dir() and (p / "ray_runtime.json").exists()
+    ]
+    if not trial_dirs:
+        typer.echo(
+            f"No trial directories found under {sweep_dir}.\n"
+            "Make sure this is a valid Ray Tune sweep output directory.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    binary = _find_binary()
+    typer.echo(f"Opening sweep ({len(trial_dirs)} trials): {sweep_dir}")
+    subprocess.run([str(binary), "--tune-dir", str(sweep_dir)], check=True)
+
+
 # ---------------------------------------------------------------------------
-# Default command: anysearch replay <run_id> [--best] [--iter N]
+# Default command: anysearch replay <ref> [--best] [--iter N]
 # ---------------------------------------------------------------------------
 
 @app.callback(invoke_without_command=True)
 def replay(
     ctx: typer.Context,
-    run_id: Optional[str] = typer.Argument(None, help="Run ID (8-char hex) to replay."),
     best: bool = typer.Option(False, "--best", help="Open best.json only."),
     iteration: Optional[int] = typer.Option(
         None, "--iter", "-i", help="Open a specific iteration snapshot."
@@ -85,26 +104,144 @@ def replay(
     output_dir: Path = typer.Option(
         Path("runtime/experiments"),
         "--output-dir",
-        help="Base experiments directory.",
+        help="Fallback base experiments directory (used when ref has no directory component).",
     ),
 ) -> None:
     """
     Replay a run's trajectories in the eframe viewer.
 
     \b
-    anysearch replay <run_id>          — all periodic snapshots (default)
-    anysearch replay <run_id> --best   — best.json only
-    anysearch replay <run_id> --iter 5 — a single specific iteration
+    anysearch replay <name:run_id>            — all periodic snapshots
+    anysearch replay <name:run_id> --best     — best.json only
+    anysearch replay <name:run_id> --iter 5   — a single iteration
+    anysearch replay <name:tag>               — sweep: browse all trials (T/Y keys)
+    anysearch replay <name>                   — auto-open single tag or list available tags
+
+    REF is the first non-option argument (options may appear before or after it).
     """
     if ctx.invoked_subcommand is not None:
         return  # let subcommands handle it
 
-    if run_id is None:
+    # ref is the first positional arg; with allow_interspersed_args=True and no
+    # declared positional, it lands in ctx.protected_args after option parsing.
+    ref: Optional[str] = ctx.protected_args[0] if ctx.protected_args else None
+
+    if ref is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
     from theseo_anysearch.experiments.runner import _find_run_dir
-    run_dir = _find_run_dir(output_dir, run_id)
+    from theseo_anysearch.cli.registry import resolve_ref, resolve_config_and_dir
+
+    experiment_dir, identifier = resolve_ref(ref)
+
+    # Resolve the YAML for this ref without including the :identifier suffix.
+    def _config_path_for(exp_dir: Path) -> Path | None:
+        try:
+            # Try the registered name (first colon-segment of ref, handling Windows drive letters)
+            from theseo_anysearch.cli.registry import load_registry
+            parts = ref.split(":")
+            name = parts[2] if (len(parts) >= 3 and len(parts[0]) == 1 and parts[0].isalpha()) else parts[0]
+            reg = load_registry()
+            if name in reg:
+                p = Path(reg[name])
+                if p.suffix in (".yaml", ".yml") and p.exists():
+                    return p
+            # Fall back to looking for a unique YAML in exp_dir
+            yamls = list(exp_dir.glob("*.yaml")) + list(exp_dir.glob("*.yml"))
+            if len(yamls) == 1:
+                return yamls[0]
+        except Exception:
+            pass
+        return None
+
+    def _read_output_dir(config_path: Path) -> Path | None:
+        try:
+            import yaml as _yaml
+            raw = _yaml.safe_load(config_path.read_text()) or {}
+            out_raw = raw.get("experiment", {}).get("output_dir")
+            if out_raw is not None:
+                p = Path(out_raw)
+                return (config_path.parent / p).resolve() if not p.is_absolute() else p
+        except Exception:
+            pass
+        return None
+
+    def _read_exp_name(config_path: Path) -> str | None:
+        try:
+            import yaml as _yaml
+            return (_yaml.safe_load(config_path.read_text()) or {}).get("experiment", {}).get("name")
+        except Exception:
+            return None
+
+    # If identifier is None, try to resolve from the experiment's output directory
+    if identifier is None:
+        candidate = Path(ref)
+        if candidate.exists() and candidate.is_dir():
+            _replay_sweep_dir(candidate)
+            return
+
+        # Resolve output_dir from YAML and auto-detect a single sweep or run
+        try:
+            config_path = _config_path_for(experiment_dir)
+            resolved_out = _read_output_dir(config_path) if config_path else None
+            exp_name = _read_exp_name(config_path) if config_path else None
+            if resolved_out:
+                search = (resolved_out / exp_name) if exp_name else resolved_out
+                sweep_dirs = []
+                if search.exists():
+                    for child in search.iterdir():
+                        if child.is_dir() and any((d / "ray_runtime.json").exists() for d in child.iterdir() if d.is_dir()):
+                            sweep_dirs.append(child)
+                if len(sweep_dirs) == 1:
+                    _replay_sweep_dir(sweep_dirs[0])
+                    return
+                if len(sweep_dirs) > 1:
+                    typer.echo("Available tags — specify one:", err=True)
+                    for s in sorted(sweep_dirs, key=lambda p: p.name):
+                        typer.echo(f"  anysearch replay {ref}:{s.name}", err=True)
+                    raise typer.Exit(1)
+                # No sweep tags — check for single-run dirs
+                if search.exists():
+                    run_dirs = [d for d in search.iterdir() if d.is_dir() and (d / "run.json").exists()]
+                    if run_dirs:
+                        typer.echo("Available runs — specify one:", err=True)
+                        for d in sorted(run_dirs, key=lambda p: p.name):
+                            typer.echo(f"  anysearch replay {ref}:{d.name}", err=True)
+                        raise typer.Exit(1)
+        except (typer.Exit, subprocess.CalledProcessError, SystemExit):
+            raise
+        except Exception:
+            pass
+
+        typer.echo(
+            f"Error: no runs found for '{ref}'. "
+            "Use: anysearch replay <name:tag>  or  anysearch replay <name:run_id>",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    # Resolve output_dir and experiment name from the YAML via the already-known experiment_dir.
+    _cfg = _config_path_for(experiment_dir)
+    resolved_output = _read_output_dir(_cfg) if _cfg else None
+    _exp_name = _read_exp_name(_cfg) if _cfg else None
+
+    base_root = resolved_output or (experiment_dir if experiment_dir.exists() else output_dir)
+    if _exp_name and (base_root / _exp_name).exists():
+        base_root = base_root / _exp_name
+    search_root = base_root
+
+    # Check if identifier resolves to a sweep tag (dir whose children have ray_runtime.json)
+    sweep_candidate = search_root / identifier
+    if sweep_candidate.is_dir() and any(
+        p.is_dir() and (p / "ray_runtime.json").exists()
+        for p in sweep_candidate.iterdir()
+    ):
+        _replay_sweep_dir(sweep_candidate)
+        return
+
+    # Otherwise treat identifier as a run_id
+    run_dir = _find_run_dir(search_root, identifier)
     traj_dir = run_dir / "trajectories"
     binary = _find_binary()
 
@@ -143,21 +280,71 @@ def file(
 
 
 # ---------------------------------------------------------------------------
+# replay tune  (open a full tune sweep with trial navigation)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def tune(
+    tune_dir: Path = typer.Argument(
+        ...,
+        help="Path to a tune sweep output directory (e.g. runtime/experiments/v11).",
+    ),
+) -> None:
+    """
+    Open a tune sweep directory in the eframe viewer with trial navigation.
+
+    \b
+    Keyboard shortcuts inside the viewer:
+      T / Y       next / prev trial  (sorted best-first by reward)
+      [ / ]       next / prev iteration within the current trial
+      ← / →       step forward / backward
+      Space       play / pause
+    """
+    if not tune_dir.exists():
+        typer.echo(f"Directory not found: {tune_dir}", err=True)
+        raise typer.Exit(1)
+
+    # Check that at least one trial subdir exists (identified by ray_runtime.json).
+    trial_dirs = [
+        p for p in tune_dir.iterdir()
+        if p.is_dir() and (p / "ray_runtime.json").exists()
+    ]
+    if not trial_dirs:
+        typer.echo(
+            f"No trial directories found under {tune_dir}.\n"
+            "Make sure this is a valid Ray Tune sweep output directory.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    binary = _find_binary()
+    typer.echo(f"Opening tune sweep ({len(trial_dirs)} trials): {tune_dir}")
+    subprocess.run([str(binary), "--tune-dir", str(tune_dir)], check=True)
+
+
+# ---------------------------------------------------------------------------
 # replay list  (show available trajectory iterations for a run)
 # ---------------------------------------------------------------------------
 
 @app.command(name="list")
 def list_trajectories(
-    run_id: str = typer.Argument(..., help="Run ID (8-char hex)."),
+    ref: str = typer.Argument(..., help="Run reference: name:run_id, dir:run_id, or bare run_id."),
     output_dir: Path = typer.Option(
         Path("runtime/experiments"),
         "--output-dir",
-        help="Base experiments directory.",
+        help="Fallback base experiments directory.",
     ),
 ) -> None:
     """List available trajectory iterations for a run."""
     from theseo_anysearch.experiments.runner import _find_run_dir
-    run_dir = _find_run_dir(output_dir, run_id)
+    from theseo_anysearch.cli.registry import resolve_ref
+    experiment_dir, identifier = resolve_ref(ref)
+    if identifier is None:
+        typer.echo(f"Error: ref must include a run_id, e.g. name:{ref}", err=True)
+        raise typer.Exit(1)
+    search_root = experiment_dir if experiment_dir.exists() else output_dir
+    run_dir = _find_run_dir(search_root, identifier)
+    run_id = identifier
     traj_dir = run_dir / "trajectories"
     if not traj_dir.exists():
         typer.echo("No trajectories directory found.")

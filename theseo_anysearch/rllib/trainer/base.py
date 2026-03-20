@@ -42,12 +42,16 @@ def _patch_rllib_replay_buffer_type_check() -> None:
 _patch_rllib_replay_buffer_type_check()
 
 
-def _detect_num_gpus(require_gpu: bool = False) -> int:
-    """Return GPU count available to Ray (0 or 1 for single-node).
+def _detect_num_gpus(require_gpu: bool = False, *, num_gpus: float | None = None) -> float:
+    """Return GPU count to allocate per RLlib algorithm.
 
+    If *num_gpus* is provided it is returned directly (allows fractional values
+    for concurrent Tune trials sharing one GPU, e.g. 0.5).
     When *require_gpu* is True, raises AssertionError if no CUDA device is found.
     Install hint: pip install .[torch-gpu] --index-url https://download.pytorch.org/whl/cu124
     """
+    if num_gpus is not None:
+        return num_gpus
     import torch
 
     n = torch.cuda.device_count()
@@ -188,6 +192,29 @@ class Trainer(ABC):
     def on_iteration_end(self, result: TrainResult) -> None:
         """Called after every training iteration. Override to add callbacks."""
 
+    def _env_config_dict(self) -> dict:
+        """Build the env config dict passed to VoxelEnv / MultiVoxelEnv."""
+        env = self._config.env
+        return {
+            "stl_path": str(env.stl_path) if env.stl_path else None,
+            "scale": env.scale,
+            "agent_count": env.agent_count,
+            "max_steps": env.max_steps,
+            "seed": env.seed,
+            "obs_mode": env.obs_mode,
+            "box_radius": env.box_radius,
+            "box_radii": env.box_radii,
+            "ray_max_len": env.ray_max_len,
+            "grid_size": env.grid_size,
+            "trail_mode": env.trail_mode,
+            "geometry_boxes": env.geometry_boxes,
+            "waypoints_file": env.waypoints_file,
+            "step_cost": env.step_cost,
+            "collision_cost": env.collision_cost,
+            "goal_reward": env.goal_reward,
+            "distance_shaping": env.distance_shaping,
+        }
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -197,11 +224,32 @@ class Trainer(ABC):
         Run the training loop for config.training.iterations steps.
         Returns a list of TrainResult, one per iteration.
         """
+        import warnings
+
         if self._algo is None:
             self._algo = self._build_algorithm()
 
         training = self._config.training
         results: list[TrainResult] = []
+
+        # --- Trajectory writer setup (lazy import to keep CLI fast) ---
+        traj_every = training.trajectory_every
+        best_traj = training.best_trajectory
+        _traj_writer = None
+        _is_multi = training.algorithm == "multi_agent_voxel_ppo"
+        _env_cfg: dict | None = None
+        if traj_every or best_traj:
+            from theseo_anysearch.experiments.output import OutputStore
+            from theseo_anysearch.experiments.trajectory import (
+                MultiTrajectoryWriter,
+                TrajectoryWriter,
+            )
+            _store = OutputStore(self._output_dir)
+            _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
+            _traj_writer = _Writer(_store, traj_every, best_traj)
+            _run_id = self._output_dir.name
+            _exp_name = self._output_dir.parent.name
+            _env_cfg = self._env_config_dict()
 
         for i in range(self._iteration, training.iterations):
             t0 = time.perf_counter()
@@ -220,6 +268,32 @@ class Trainer(ABC):
 
             if self._iteration % training.checkpoint_interval == 0:
                 self.checkpoint()
+
+            # --- Trajectory recording ---
+            if _traj_writer is not None and _env_cfg is not None:
+                try:
+                    if _is_multi:
+                        from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
+                        episode = collect_multi_eval_episode(
+                            self._algo, _env_cfg, seed=self._iteration
+                        )
+                    else:
+                        from theseo_anysearch.experiments.trajectory import collect_eval_episode
+                        episode = collect_eval_episode(
+                            self._algo, _env_cfg, seed=self._iteration
+                        )
+                    _traj_writer.record(episode)
+                    _traj_writer.on_iteration_end(
+                        self._iteration,
+                        result.episode_reward_mean,
+                        _exp_name,
+                        _run_id,
+                    )
+                except Exception as exc:
+                    warnings.warn(
+                        f"trajectory collection failed at iter {self._iteration}: {exc}",
+                        stacklevel=2,
+                    )
 
         return results
 

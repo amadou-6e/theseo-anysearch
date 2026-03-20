@@ -13,7 +13,7 @@ ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON = str(Path(REPO_ROOT, ".venv", "Scripts", "python.exe"))
+ANYSEARCH = str(Path(REPO_ROOT, ".venv", "Scripts", "anysearch.exe"))
 
 RAY_CLI_YAML = textwrap.dedent("""    experiment:
       name: cli-ray-test
@@ -62,7 +62,7 @@ def _run_cli(
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
-        [PYTHON, "-m", "theseo_anysearch.cli.main"] + args,
+        [ANYSEARCH] + args,
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,

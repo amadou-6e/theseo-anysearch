@@ -28,7 +28,7 @@ class SACTrainer(Trainer):
     def build_algorithm_from_settings(config: Settings) -> Any:
         from ray.rllib.algorithms.sac import SACConfig as RllibSACConfig
 
-        _ensure_ray_runtime(str(config.training.output_dir))
+        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
 
         env = config.env
         algo_cfg = config.algorithm_config
@@ -84,11 +84,11 @@ class SACTrainer(Trainer):
                     "prioritized_replay_eps": 1e-6,
                 },
             )
-            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu))
+            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus))
             .framework("torch")
         )
 
-        rllib_config.num_env_runners = 0
+        rllib_config.num_env_runners = config.training.num_env_runners
         return rllib_config.build_algo()
 
     def _build_algorithm(self) -> Any:

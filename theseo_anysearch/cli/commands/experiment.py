@@ -7,7 +7,20 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="Manage training experiments (run, resume, repeat, inspect, list).")
+app = typer.Typer(help="[deprecated] Use top-level anysearch run / inspect / resume / repeat / list.")
+
+_DEPRECATION_PREFIX = (
+    "[deprecated] anysearch experiment {sub} is deprecated. "
+    "Use: anysearch {modern}\n"
+)
+
+_MODERN = {
+    "run":     "run <dir>",
+    "resume":  "resume <name:run_id>",
+    "repeat":  "repeat <name:run_id>",
+    "inspect": "inspect <name:run_id>",
+    "list":    "list [<name>]",
+}
 
 
 def _load(config_path: Path) -> "ExperimentConfig | SweepConfig":  # noqa: F821
@@ -31,8 +44,12 @@ def run(
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", help="Override the output_dir in the YAML."
     ),
+    tag: Optional[str] = typer.Option(
+        None, "--tag", help="Override the run tag (tune sweep subdirectory name)."
+    ),
 ) -> None:
     """Run a training experiment or sweep from a YAML config file."""
+    typer.echo(_DEPRECATION_PREFIX.format(sub="run", modern=_MODERN["run"]), err=True)
     from theseo_anysearch.experiments.loader import expand_sweep, load_experiment
     from theseo_anysearch.experiments.models import ExperimentConfig, SweepConfig
     from theseo_anysearch.experiments.runner import ExperimentRunner
@@ -59,10 +76,22 @@ def run(
                     update={"output_dir": output_dir}
                 )
             })
-        runner = ExperimentRunner(experiment, config)
-        typer.echo(f"Running experiment '{experiment.experiment.name}' ...")
-        info = runner.run()
-        print(json.dumps(info.model_dump(), indent=2, default=str))
+        if experiment.tune_config is not None:
+            from theseo_anysearch.experiments.tune_runner import TuneRunner
+            run_tag = tag or experiment.experiment.name
+            typer.echo(
+                f"Running tune sweep '{run_tag}' "
+                f"({experiment.tune_config.num_samples} trials, "
+                f"scheduler={experiment.tune_config.scheduler}) ..."
+            )
+            runner_tune = TuneRunner(experiment, config, tag=run_tag)
+            result = runner_tune.run()
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            runner = ExperimentRunner(experiment, config)
+            typer.echo(f"Running experiment '{experiment.experiment.name}' ...")
+            info = runner.run()
+            print(json.dumps(info.model_dump(), indent=2, default=str))
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +114,7 @@ def resume(
     ),
 ) -> None:
     """Continue a training run from its latest checkpoint."""
+    typer.echo(_DEPRECATION_PREFIX.format(sub="resume", modern=_MODERN["resume"]), err=True)
     from theseo_anysearch.experiments.loader import load_experiment
     from theseo_anysearch.experiments.models import ExperimentConfig
     from theseo_anysearch.experiments.runner import ExperimentRunner, _find_run_dir
@@ -137,6 +167,7 @@ def repeat(
     ),
 ) -> None:
     """Re-run a completed experiment from scratch with the same config."""
+    typer.echo(_DEPRECATION_PREFIX.format(sub="repeat", modern=_MODERN["repeat"]), err=True)
     from theseo_anysearch.experiments.runner import ExperimentRunner, _find_run_dir
     from theseo_anysearch.experiments.loader import load_experiment
     from theseo_anysearch.experiments.models import ExperimentConfig
@@ -172,6 +203,7 @@ def inspect(
     ),
 ) -> None:
     """Print resolved config, metrics summary, and artifact paths for a run."""
+    typer.echo(_DEPRECATION_PREFIX.format(sub="inspect", modern=_MODERN["inspect"]), err=True)
     from theseo_anysearch.experiments.runner import ExperimentRunner
     result = ExperimentRunner.inspect(run_id, output_dir)
     print(json.dumps(result.model_dump(), indent=2, default=str))
@@ -190,6 +222,7 @@ def list_runs(
     ),
 ) -> None:
     """List all runs found under the output directory."""
+    typer.echo(_DEPRECATION_PREFIX.format(sub="list", modern=_MODERN["list"]), err=True)
     from theseo_anysearch.experiments.runner import ExperimentRunner
     runs = ExperimentRunner.list_runs(output_dir)
     print(json.dumps(runs, indent=2, default=str))

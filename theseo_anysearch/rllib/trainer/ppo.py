@@ -13,7 +13,8 @@ def _build_rllib_ppo(config: Settings) -> Any:
     return PPOTrainer.build_algorithm_from_settings(config)
 
 
-def _ensure_ray_runtime(output_dir: str) -> None:
+def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
+    import os as _os
     from pathlib import Path
 
     import ray
@@ -25,11 +26,12 @@ def _ensure_ray_runtime(output_dir: str) -> None:
         _write_ray_runtime_metadata(output_path)
         return
 
-    import os as _os
     _os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
     ray_root = VoxelEnvPathHelper.ray_root(output_dir)
+    # num_env_runners workers @ 1 CPU each + 1 for the learner/driver
+    num_cpus = max(num_env_runners + 1, 1)
     ray.init(
-        num_cpus=1,
+        num_cpus=num_cpus,
         ignore_reinit_error=True,
         include_dashboard=False,
         log_to_driver=False,
@@ -104,7 +106,7 @@ class PPOTrainer(Trainer):
     def build_algorithm_from_settings(config: Settings) -> Any:
         from ray.rllib.algorithms.ppo import PPOConfig as RllibPPOConfig
 
-        _ensure_ray_runtime(str(config.training.output_dir))
+        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
 
         env = config.env
         algo_cfg = config.algorithm_config
@@ -150,9 +152,9 @@ class PPOTrainer(Trainer):
             kl_coeff=algo_cfg.kl_coeff,
             grad_clip=algo_cfg.grad_clip,
             model=rllib_model,
-        ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu)).framework("torch"))
+        ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus)).framework("torch"))
 
-        rllib_config.num_env_runners = 0
+        rllib_config.num_env_runners = config.training.num_env_runners
 
         return rllib_config.build_algo()
 

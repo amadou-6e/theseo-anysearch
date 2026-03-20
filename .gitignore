@@ -11,12 +11,14 @@ build/
 .eggs/
 pip-wheel-metadata/
 *.whl
-.claude
+.claude*
+.anysearch
 spec*
 Agent*
 context
 later
 experiments
+CLAUDE.md
 
 # Virtual environments
 .venv/

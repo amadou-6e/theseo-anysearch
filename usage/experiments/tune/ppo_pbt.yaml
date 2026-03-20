@@ -1,6 +1,6 @@
 experiment:
   name: ppo-pbt-evolution
-  output_dir: ./runtime/experiments
+  output_dir: ../../../runtime/experiments
   seed: 99
 
 env:

@@ -1148,6 +1148,16 @@ impl PyMultiVoxelEnv {
     pub fn filled_voxels(&self) -> Vec<(u16, u16, u16)> {
         self.inner.world.iter_filled().copied().collect()
     }
+
+    /// Returns each agent's current cursor position.
+    pub fn cursor_positions(&self) -> Vec<(u16, u16, u16)> {
+        self.inner.agents.iter().map(|a| a.cursor).collect()
+    }
+
+    /// Returns each agent's current goal position, or None if unset.
+    pub fn goal_positions(&self) -> Vec<Option<(u16, u16, u16)>> {
+        self.inner.agents.iter().map(|a| a.goal).collect()
+    }
 }
 
 /// Python-visible observation returned by PySurfaceEnv.reset() and .step().

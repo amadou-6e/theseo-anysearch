@@ -17,6 +17,7 @@ class RustParallelEnv(ParallelEnv, ABC):
     def __init__(self, config: dict) -> None:
         super().__init__()
         self._config = config
+        self._reset_count = 0
         self._possible_agents: list[str] = self._init_possible_agents(config)
         self.agents: list[str] = list(self._possible_agents)
         self._rust_env: Any = self._build_rust_env(config)
@@ -49,7 +50,8 @@ class RustParallelEnv(ParallelEnv, ABC):
 
     def reset(self, seed: int | None = None, options: dict | None = None):
         self.agents = list(self._possible_agents)
-        seed_val = seed if seed is not None else self._config.get("seed", 42)
+        self._reset_count += 1
+        seed_val = seed if seed is not None else self._config.get("seed", 42) + self._reset_count
         if self._rust_env is not None:
             rust_obs = self._rust_env.reset(seed_val)
             obs = self._fanout_obs(rust_obs)

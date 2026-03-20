@@ -1,6 +1,6 @@
 experiment:
   name: ppo-lr-batchsize-asha
-  output_dir: ./runtime/experiments
+  output_dir: ../../../runtime/experiments
   seed: 42
 
 env:

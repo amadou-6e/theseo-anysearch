@@ -148,6 +148,14 @@ class TuneConfig(BaseModel):
     optuna_config: OptunaSchedulerConfig | None = None
     cmaes_config: CMAESSchedulerConfig | None = None
     flaml_config: FLAMLSchedulerConfig | None = None
+    # Windows MAX_PATH mitigation — see spec/bugs.md
+    # Ray writes deep nested paths under both of these roots.  On Windows the
+    # combined path can exceed 260 characters when rooted in a deep workspace.
+    # Set either field to a short absolute path (e.g. C:/ray_tmp) to avoid the
+    # FileNotFoundError that Ray raises when it cannot create those files.
+    # Both default to the system temp dir; override only if you see that error.
+    ray_storage_dir: Path | None = None  # where Ray Tune writes driver_artifacts & search state
+    ray_temp_dir: Path | None = None     # where Ray writes session temp files (actor logs, etc.)
 
 
 # ---------------------------------------------------------------------------

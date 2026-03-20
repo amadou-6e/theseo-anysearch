@@ -96,9 +96,13 @@ fn default_grid_size() -> u32 { 32 }
 
 struct TrialEntry {
     trial_id: String,
+    /// Human-readable name: `experiment_tag` from ray_runtime.json, or the dir name.
+    trial_name: String,
     best_reward: f32,
     params: serde_json::Value,
     trajectory_dir: PathBuf,
+    /// Chronological index parsed from the `_N` suffix of the Ray Tune dir name.
+    sort_key: u64,
 }
 
 /// Scan a tune run directory for `trial_*/trajectories/` subdirs.
@@ -121,10 +125,30 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
             Some(n) => n.to_string(),
             None => continue,
         };
-        if !dir_name.starts_with("trial_") { continue; }
+
+        // Identify trial dirs by the presence of ray_runtime.json (Ray Tune's marker file).
+        // Trial dirs are named {hash}_{num} by Ray, not trial_* as in older layouts.
+        let runtime_path = path.join("ray_runtime.json");
+        if !runtime_path.exists() { continue; }
 
         let traj_dir = path.join("trajectories");
         if !traj_dir.exists() { continue; }
+
+        // Read ray_runtime.json for human-readable trial metadata.
+        let runtime_val: serde_json::Value = std::fs::read_to_string(&runtime_path).ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        // `experiment_tag` is Ray Tune's human-readable trial name, e.g. "lr=0.001,batch=4096".
+        let trial_name = runtime_val["experiment_tag"].as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&dir_name)
+            .to_string();
+
+        // Chronological sort key: parse the numeric `_N` suffix from the dir name.
+        // Ray names dirs `{8-char-hash}_{N}` where N increments from 0.
+        let sort_key: u64 = dir_name.rsplit('_').next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(u64::MAX);
 
         // Try best_meta.json first, then fall back to reading best.json directly.
         let best_reward = {
@@ -150,12 +174,11 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .unwrap_or(serde_json::Value::Object(Default::default()));
 
-        entries.push(TrialEntry { trial_id: dir_name, best_reward, params, trajectory_dir: traj_dir });
+        entries.push(TrialEntry { trial_id: dir_name, trial_name, best_reward, params, trajectory_dir: traj_dir, sort_key });
     }
 
-    // Best trial first.
-    entries.sort_by(|a, b| b.best_reward.partial_cmp(&a.best_reward)
-        .unwrap_or(std::cmp::Ordering::Equal));
+    // Chronological order (earliest trial first, by the _N suffix Ray appends to dir names).
+    entries.sort_by_key(|e| e.sort_key);
     entries
 }
 
@@ -395,6 +418,11 @@ struct UiEvents {
     last_step:   bool,
     jump_step:   Option<usize>,
     toggle_play: bool,
+    // Tune-mode trial navigation
+    prev_trial:  bool,
+    next_trial:  bool,
+    first_trial: bool,
+    last_trial:  bool,
 }
 
 impl VoxelReplayApp {
@@ -500,7 +528,8 @@ impl eframe::App for VoxelReplayApp {
         let kb_prev_step   = ctx.input(|i| i.key_pressed(Key::ArrowLeft));
         let kb_next_step   = ctx.input(|i| i.key_pressed(Key::ArrowRight));
         let kb_play_pause  = ctx.input(|i| i.key_pressed(Key::Space));
-        // Tune mode: T = next trial (lower rank), Y = previous trial (higher rank)
+        // Tune mode: ] / [ also navigate trials when at first/last iter of a trial.
+        // Dedicated keys: N = next trial, P = prev trial.
         let kb_next_trial  = ctx.input(|i| i.key_pressed(Key::T));
         let kb_prev_trial  = ctx.input(|i| i.key_pressed(Key::Y));
 
@@ -572,12 +601,20 @@ impl eframe::App for VoxelReplayApp {
                 } else {
                     "n/a".to_string()
                 };
+                ui.label(egui::RichText::new("Trial").strong());
+                ui.label(egui::RichText::new(&trial.trial_name).monospace());
                 ui.label(egui::RichText::new(format!(
-                    "Trial {} / {}  (reward: {})",
+                    "{} / {}  ·  best reward: {}",
                     self.current_trial + 1, n_trials, reward_str
-                )).strong());
-                ui.label(egui::RichText::new(format!("  {}", trial.trial_id)).weak().small());
-                ui.label(egui::RichText::new("  T / Y: next / prev trial").small().weak());
+                )).weak().small());
+                ui.label(egui::RichText::new(format!("dir: {}", trial.trial_id)).weak().small());
+                ui.horizontal(|ui| {
+                    if ui.button("|<").clicked() { ev.first_trial = true; }
+                    if ui.button(" < ").clicked() { ev.prev_trial  = true; }
+                    if ui.button(" > ").clicked() { ev.next_trial  = true; }
+                    if ui.button(">|").clicked() { ev.last_trial  = true; }
+                });
+                ui.label(egui::RichText::new("  T / Y keys").small().weak());
                 ui.separator();
 
                 // Params panel
@@ -748,6 +785,22 @@ impl eframe::App for VoxelReplayApp {
                 Color32::from_rgb(200,  80, 200),  // purple
                 Color32::from_rgb(220, 200,  50),  // yellow
             ];
+            // Start marker: agent color darkened (~65%).
+            let tint_dark = |c: Color32| -> Color32 {
+                Color32::from_rgb(
+                    (c.r() as u16 * 65 / 100) as u8,
+                    (c.g() as u16 * 65 / 100) as u8,
+                    (c.b() as u16 * 65 / 100) as u8,
+                )
+            };
+            // Goal marker: agent color lightened (~40% blend toward white).
+            let tint_light = |c: Color32| -> Color32 {
+                Color32::from_rgb(
+                    (c.r() as u16 + (255 - c.r() as u16) * 40 / 100) as u8,
+                    (c.g() as u16 + (255 - c.g() as u16) * 40 / 100) as u8,
+                    (c.b() as u16 + (255 - c.b() as u16) * 40 / 100) as u8,
+                )
+            };
 
             let trail_end = (step_idx + 1).min(render_steps.len());
 
@@ -794,31 +847,17 @@ impl eframe::App for VoxelReplayApp {
                         draw_cursor(&painter, c[0], c[1], c[2], rect, cam, &b);
                     }
                 }
-                // Draw start markers (orange tones per agent).
-                let start_marker_colors = [
-                    Color32::from_rgb(230, 130,  30),
-                    Color32::from_rgb(200,  90,  20),
-                    Color32::from_rgb(240, 160,  60),
-                    Color32::from_rgb(210, 110,  10),
-                    Color32::from_rgb(250, 180,  80),
-                ];
+                // Draw start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
                     if let Some([sx, sy, sz]) = start_opt {
-                        let col = start_marker_colors[ai % start_marker_colors.len()];
+                        let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
                         draw_marker(&painter, *sx, *sy, *sz, rect, cam, &b, col);
                     }
                 }
-                // Draw goal markers (green tones per agent).
-                let goal_marker_colors = [
-                    Color32::from_rgb( 40, 200,  80),
-                    Color32::from_rgb( 20, 170,  60),
-                    Color32::from_rgb( 80, 220, 120),
-                    Color32::from_rgb( 10, 190,  90),
-                    Color32::from_rgb(100, 230, 140),
-                ];
+                // Draw goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
                     if let Some([gx, gy, gz]) = goal_opt {
-                        let col = goal_marker_colors[ai % goal_marker_colors.len()];
+                        let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
                         draw_marker(&painter, *gx, *gy, *gz, rect, cam, &b, col);
                     }
                 }
@@ -843,10 +882,10 @@ impl eframe::App for VoxelReplayApp {
                 }
 
                 if let Some([sx, sy, sz]) = render_start {
-                    draw_marker(&painter, sx, sy, sz, rect, cam, &b, Color32::from_rgb(230, 130, 30));
+                    draw_marker(&painter, sx, sy, sz, rect, cam, &b, tint_dark(agent_trail_colors[0]));
                 }
                 if let Some([gx, gy, gz]) = render_goal {
-                    draw_marker(&painter, gx, gy, gz, rect, cam, &b, Color32::from_rgb(40, 200, 80));
+                    draw_marker(&painter, gx, gy, gz, rect, cam, &b, tint_light(agent_trail_colors[0]));
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
@@ -875,18 +914,33 @@ impl eframe::App for VoxelReplayApp {
         });
 
         // ---- Apply collected events to state --------------------------------
+        // Extract trial nav flags before ev is consumed by apply_events.
+        let (trial_first, trial_last, trial_next, trial_prev) =
+            (ev.first_trial, ev.last_trial, ev.next_trial, ev.prev_trial);
         self.apply_events(ev);
 
-        // ---- Tune mode: trial navigation (T/Y) ------------------------------
+        // ---- Tune mode: trial navigation (buttons + T/Y keys) ---------------
         // Handled after apply_events so iter/step resets from load_trial override
         // any stale iter/step values that apply_events may have set.
         if in_tune_mode {
-            if kb_next_trial {
-                let next = (self.current_trial + 1).min(n_trials.saturating_sub(1));
-                if next != self.current_trial { self.load_trial(next); }
-            } else if kb_prev_trial && self.current_trial > 0 {
-                let prev = self.current_trial - 1;
-                self.load_trial(prev);
+            let want_first = trial_first;
+            let want_last  = trial_last;
+            let want_next  = trial_next || kb_next_trial;
+            let want_prev  = trial_prev || kb_prev_trial;
+
+            let target = if want_first {
+                Some(0)
+            } else if want_last {
+                Some(n_trials.saturating_sub(1))
+            } else if want_next {
+                Some((self.current_trial + 1).min(n_trials.saturating_sub(1)))
+            } else if want_prev && self.current_trial > 0 {
+                Some(self.current_trial - 1)
+            } else {
+                None
+            };
+            if let Some(t) = target {
+                if t != self.current_trial { self.load_trial(t); }
             }
         }
 

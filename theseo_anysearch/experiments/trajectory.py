@@ -184,22 +184,17 @@ def collect_multi_eval_episode(
     agent_count = len(env.possible_agents)
 
     init_filled: list[tuple[int, int, int]] = []
-    if hasattr(env, "_rust_env") and env._rust_env is not None:
-        init_filled = [(int(x), int(y), int(z)) for x, y, z in env._rust_env.filled_voxels()]
-
-    # Capture start/goal from first obs (normalised cursor_pos → grid coords).
-    max_steps = env_config.get("max_steps", 200)
     start_positions: list[tuple[int, int, int] | None] = [None] * agent_count
     goal_positions:  list[tuple[int, int, int] | None] = [None] * agent_count
-    for i, agent_id in enumerate(env.possible_agents):
-        if agent_id in obs:
-            cp = obs[agent_id].get("cursor_pos")
-            if cp is not None:
-                start_positions[i] = (
-                    int(round(cp[0] * 31)) + 1,
-                    int(round(cp[1] * 31)) + 1,
-                    int(round(cp[2] * 31)) + 1,
-                )
+    if hasattr(env, "_rust_env") and env._rust_env is not None:
+        init_filled = [(int(x), int(y), int(z)) for x, y, z in env._rust_env.filled_voxels()]
+        for i, pos in enumerate(env._rust_env.cursor_positions()):
+            start_positions[i] = (int(pos[0]), int(pos[1]), int(pos[2]))
+        for i, pos in enumerate(env._rust_env.goal_positions()):
+            if pos is not None:
+                goal_positions[i] = (int(pos[0]), int(pos[1]), int(pos[2]))
+
+    max_steps = env_config.get("max_steps", 200)
 
     steps: list[MultiVoxelStepData] = []
     total_rewards = [0.0] * agent_count

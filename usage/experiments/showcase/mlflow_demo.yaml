@@ -1,6 +1,6 @@
 experiment:
   name: mlflow-demo
-  output_dir: ./runtime/experiments
+  output_dir: ../../../runtime/experiments
   seed: 42
 
 env:

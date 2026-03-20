@@ -16,6 +16,7 @@ class RustGymnasiumEnv(gymnasium.Env, ABC):
     def __init__(self, config: dict) -> None:
         super().__init__()
         self._config = config
+        self._reset_count = 0
         self.observation_space = self._observation_space()
         self.action_space = self._action_space()
         self._rust_env: Any = self._build_rust_env(config)
@@ -37,7 +38,8 @@ class RustGymnasiumEnv(gymnasium.Env, ABC):
         """Convert a Rust observation struct to a dict of numpy arrays."""
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        seed_val = seed if seed is not None else self._config.get("seed", 42)
+        self._reset_count += 1
+        seed_val = seed if seed is not None else self._config.get("seed", 42) + self._reset_count
         if self._rust_env is not None:
             rust_obs = self._rust_env.reset(seed_val)
             obs = self._obs_to_numpy(rust_obs)

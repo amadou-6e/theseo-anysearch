@@ -1,6 +1,6 @@
 experiment:
   name: ppo-corridor-routing
-  output_dir: ./runtime/experiments
+  output_dir: ../../../runtime/experiments
   seed: 1337
 
 env:

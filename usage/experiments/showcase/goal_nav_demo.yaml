@@ -1,6 +1,6 @@
 experiment:
   name: goal-nav-demo
-  output_dir: ./runtime/experiments
+  output_dir: ../../../runtime/experiments
   seed: 42
 
 env:

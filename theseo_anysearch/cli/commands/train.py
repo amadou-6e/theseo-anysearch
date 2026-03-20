@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-app = typer.Typer(help="Run a training experiment.")
+app = typer.Typer(help="[deprecated] Use: anysearch run <dir>")
 
 
 @app.callback(invoke_without_command=True)
@@ -28,6 +28,10 @@ def train(
     disable_culling: bool = typer.Option(True, help="Disable back-face culling."),
 ) -> None:
     """Train a surface-pathfinding agent using the Rust simulation backend."""
+    typer.echo(
+        "[deprecated] anysearch train is deprecated. Use: anysearch run <dir>\n",
+        err=True,
+    )
     try:
         import theseo_core
     except ImportError:

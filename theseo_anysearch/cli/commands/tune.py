@@ -12,7 +12,7 @@ import typer
 from theseo_anysearch.models import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 
-app = typer.Typer(help="Run a hyperparameter search experiment via Ray Tune.")
+app = typer.Typer(help="[deprecated] Use: anysearch run <dir> --tag <tag>")
 
 
 def _print_error(message: str, **extra: Any) -> None:
@@ -303,6 +303,7 @@ def _build_scheduler(
     scheduler_name: str,
     max_iterations: int,
     hyperparam_mutations: dict[str, Any],
+    asha_config: "Any | None" = None,
 ) -> Any:
     from ray.tune.schedulers import (
         ASHAScheduler,
@@ -312,11 +313,18 @@ def _build_scheduler(
     )
 
     if scheduler_name == "asha":
+        if asha_config is not None:
+            grace_period = asha_config.grace_period
+            reduction_factor = asha_config.reduction_factor
+        else:
+            # Default: let trials run for at least 20% of max_t before pruning.
+            grace_period = max(10, max_iterations // 5)
+            reduction_factor = 3
         return ASHAScheduler(
             time_attr="training_iteration",
             max_t=max_iterations,
-            grace_period=max(1, min(5, max_iterations)),
-            reduction_factor=2,
+            grace_period=min(grace_period, max_iterations),
+            reduction_factor=reduction_factor,
         )
 
     if scheduler_name == "pbt":
@@ -350,10 +358,11 @@ def _build_scheduler(
         )
 
     if scheduler_name == "optuna":
+        grace_period = max(10, max_iterations // 5)
         return ASHAScheduler(
             time_attr="training_iteration",
             max_t=max_iterations,
-            grace_period=max(1, min(5, max_iterations)),
+            grace_period=min(grace_period, max_iterations),
             reduction_factor=3,
         )
 
@@ -781,6 +790,10 @@ def tune(
     ),
 ) -> None:
     """Run a hyperparameter search experiment via Ray Tune."""
+    typer.echo(
+        "[deprecated] anysearch tune is deprecated. Use: anysearch run <dir> --tag <tag>\n",
+        err=True,
+    )
     try:
         import ray
         from ray import tune as ray_tune
@@ -968,28 +981,11 @@ def tune(
     )
 
     # On Windows, Ray's storage layer uses `.as_posix()` which produces forward-slash
-    # paths.  `os.path.join` then mixes separators producing an unresolvable path
-    # like `C:/foo/dir\\.tmpfile`.  Patch `_atomic_save` to normalise the directory
-    # before joining so all separators are consistent.
-    if os.name == "nt":
-        import ray.tune.utils.util as _tune_util
-        _orig_atomic_save = _tune_util._atomic_save
-
-        def _win_atomic_save(state, checkpoint_dir, file_name, tmp_file_name):
-            return _orig_atomic_save(
-                state,
-                os.path.normpath(checkpoint_dir),
-                file_name,
-                tmp_file_name,
-            )
-
-        _tune_util._atomic_save = _win_atomic_save
-        # Also patch the reference used by basic_variant searcher.
-        try:
-            import ray.tune.search.basic_variant as _bv
-            _bv._atomic_save = _win_atomic_save
-        except Exception:
-            pass
+    # paths that mix with os.path.join backslashes, causing FileNotFoundError.
+    # apply_win_atomic_save_patch() normalises separators and emits an actionable
+    # error message (pointing to spec/bugs.md) if the path still exceeds MAX_PATH.
+    from theseo_anysearch.experiments.tune_runner import apply_win_atomic_save_patch
+    apply_win_atomic_save_patch()
 
     # Attach TensorBoard callback if tensorboard/tensorboardX is available
     tb_callbacks = []
@@ -1030,7 +1026,7 @@ def tune(
                 search_alg=search_alg_obj,
                 trial_name_creator=_trial_label,
                 trial_dirname_creator=_trial_label,
-                reuse_actors=True,
+                reuse_actors=False,  # True causes stale PG bundle refs after ~14 trials
             ),
             run_config=ray_tune.RunConfig(
                 name=run_tag,
