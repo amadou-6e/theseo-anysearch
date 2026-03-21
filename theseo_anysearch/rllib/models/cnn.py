@@ -324,6 +324,107 @@ class VoxelHierarchicalBox3DCNN(TorchModelV2, nn.Module):
         return self._value_out.squeeze(1)
 
 
+class VoxelBox3DCNNPretrained(TorchModelV2, nn.Module):
+    """
+    3D CNN policy that uses a frozen garden encoder as the local_grid feature extractor.
+
+    The encoder weights are loaded from the garden store at construction time and
+    kept frozen throughout training.  A small FC head sits on top of the latent
+    vector (concatenated with scalar features) and outputs policy/value logits.
+
+    Config keys (``custom_model_config``)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    pretrained_encoder : str
+        Garden model name[:tag] registered via ``anysearch garden train``.
+    freeze_encoder : bool
+        Whether to freeze encoder weights. Default True.
+    fc_hiddens : list[int]
+        FC trunk hidden sizes. Default [256, 256].
+
+    Example YAML::
+
+        model_config:
+          custom_model: voxel_box_3d_cnn_pretrained
+          custom_model_config:
+            pretrained_encoder: voxel_ae_v1
+            freeze_encoder: true
+            fc_hiddens: [256, 256]
+    """
+
+    def __init__(
+        self,
+        obs_space: Any,
+        action_space: Any,
+        num_outputs: int,
+        model_config: dict,
+        name: str,
+    ) -> None:
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        cfg = model_config.get("custom_model_config", {}) or {}
+        encoder_ref: str = cfg["pretrained_encoder"]
+        freeze: bool = cfg.get("freeze_encoder", True)
+        fc_hiddens: list[int] = cfg.get("fc_hiddens", [256, 256])
+        n_scalars = 5  # steps_remaining(1) + voxel_count(1) + cursor_pos(3)
+
+        # --- Load encoder from garden store ---
+        from theseo_anysearch.garden.store import GardenStore
+        from theseo_anysearch.garden.models.ae import VoxelEncoder3D
+        import json
+
+        model_dir, _ = GardenStore.resolve_ref(encoder_ref)
+        meta = json.loads((model_dir / "meta.json").read_text())
+        box_radius: int = meta["box_radius"]
+        n = 2 * box_radius + 1
+        latent_dim: int = meta["latent_dim"]
+        conv_channels: list[int] = meta["conv_channels"]
+
+        self._n = n
+        encoder = VoxelEncoder3D(n=n, channels=conv_channels, latent_dim=latent_dim)
+        state = GardenStore(model_dir.parent).load_encoder_state(model_dir.name)
+        encoder.load_state_dict(state)
+
+        if freeze:
+            for p in encoder.parameters():
+                p.requires_grad_(False)
+            encoder.eval()
+
+        self._encoder = encoder
+        self._freeze = freeze
+
+        self._fc, fc_out = _build_fc_stack(latent_dim + n_scalars, fc_hiddens)
+        self._policy_head = nn.Linear(fc_out, num_outputs)
+        self._value_head = nn.Linear(fc_out, 1)
+        self._value_out: torch.Tensor | None = None
+
+    def forward(self, input_dict: dict, state: list, seq_lens: torch.Tensor) -> tuple[torch.Tensor, list]:
+        obs = input_dict["obs"]
+        grid = obs["local_grid"]  # (B, N³)
+        b = grid.shape[0]
+        grid_3d = grid.view(b, self._n, self._n, self._n)
+
+        if self._freeze:
+            with torch.no_grad():
+                z = self._encoder(grid_3d)  # (B, latent_dim)
+        else:
+            z = self._encoder(grid_3d)
+
+        scalars = torch.cat([
+            obs["steps_remaining"],
+            obs["voxel_count"],
+            obs["cursor_pos"],
+        ], dim=1)
+        x = torch.cat([z, scalars], dim=1)
+        x = self._fc(x)
+        self._value_out = self._value_head(x)
+        return self._policy_head(x), state
+
+    def value_function(self) -> torch.Tensor:
+        assert self._value_out is not None
+        return self._value_out.squeeze(1)
+
+
 def register_voxel_cnn_models() -> None:
     """Register all VoxelCNN custom models with RLlib's ModelCatalog."""
     from ray.rllib.models import ModelCatalog
@@ -331,4 +432,7 @@ def register_voxel_cnn_models() -> None:
     ModelCatalog.register_custom_model("voxel_box_3d_cnn", VoxelBox3DCNN)
     ModelCatalog.register_custom_model(
         "voxel_hierarchical_box_3d_cnn", VoxelHierarchicalBox3DCNN
+    )
+    ModelCatalog.register_custom_model(
+        "voxel_box_3d_cnn_pretrained", VoxelBox3DCNNPretrained
     )

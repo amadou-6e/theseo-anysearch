@@ -1,0 +1,51 @@
+# Garden preset: r3 — radius 3, 7×7×7 local patch (~2M params)
+#
+# Wide view. Encodes a 7-cell cube — the agent sees roughly 3 cells
+# ahead in every direction. Good for corridor navigation and planning
+# around corners. ~4× more parameters than r2.
+#
+# Train: anysearch garden train r3 --tag v1
+# Use:   pretrained_encoder: r3:v1
+name: r3
+approach: autoencoder
+architecture: voxel_box_3dcnn
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 200
+          num_boxes: [1, 10]
+          box_min_size: [2, 2, 2]
+          box_max_size: [18, 18, 18]
+          grid_size: 40
+          total_samples: 60000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 2.0
+
+encoder:
+  box_radius: 3
+  conv_channels: [32, 64, 128]
+  latent_dim: 128
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.05
+  translation_jitter: 1
+  morph_prob: 0.2
+  cutout:
+    count: 2
+    min_size: 1
+    max_size: 3
+
+training:
+  epochs: 75
+  batch_size: 64
+  lr: 2.0e-4
+  lr_scheduler: cosine
+  early_stop_patience: 18
+  focal_gamma: 2.0

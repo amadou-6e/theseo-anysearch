@@ -1,0 +1,1 @@
+# Garden encoder model implementations.

@@ -31,6 +31,7 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        self._obs_rng = np.random.default_rng(config.get("seed", 42))
         super().__init__(config)
         self._init_obs_cache(config)
 
@@ -71,21 +72,28 @@ class VoxelEnv(RustGymnasiumEnv):
         return cls.ray_env_id
 
     def _build_rust_env(self, config: dict) -> Any:
+        from theseo_anysearch.environments.pettingzoo.multi_voxel_env import _load_stl_geometry
         import theseo_core
 
+        grid_size = config.get("grid_size", 32)
         geometry: list[tuple[int, int, int]] = []
-        for box in config.get("geometry_boxes") or []:
-            xmin, ymin, zmin, xmax, ymax, zmax = box
-            for bx in range(xmin, xmax + 1):
-                for by in range(ymin, ymax + 1):
-                    for bz in range(zmin, zmax + 1):
-                        geometry.append((bx, by, bz))
+
+        if config.get("stl_path"):
+            scale = float(config.get("scale", 1.0))
+            geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size)
+        else:
+            for box in config.get("geometry_boxes") or []:
+                xmin, ymin, zmin, xmax, ymax, zmax = box
+                for bx in range(xmin, xmax + 1):
+                    for by in range(ymin, ymax + 1):
+                        for bz in range(zmin, zmax + 1):
+                            geometry.append((bx, by, bz))
 
         env = theseo_core.PyVoxelEnv(
             max_steps=config.get("max_steps", 200),
             trail_mode=config.get("trail_mode", True),
             geometry=geometry or None,
-            grid_size=config.get("grid_size", 32),
+            grid_size=grid_size,
             step_cost=config.get("step_cost", -0.01),
             goal_reward=config.get("goal_reward", 1.0),
             distance_shaping=config.get("distance_shaping", 0.0),
@@ -118,12 +126,27 @@ class VoxelEnv(RustGymnasiumEnv):
             )
             return None
 
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
+        scale_range = self._config.get("scale_range")
+        stl_path = self._config.get("stl_path")
+        if scale_range and stl_path:
+            lo, hi = float(scale_range[0]), float(scale_range[1])
+            new_scale = float(self._obs_rng.uniform(lo, hi))
+            cfg = dict(self._config)
+            cfg["scale"] = new_scale
+            self._rust_env = self._build_rust_env(cfg)
+        return super().reset(seed=seed, options=options)
+
     def _encode_action(self, action: Any) -> Any:
         return int(action)
 
     def _has_goal(self) -> bool:
         """True when geometry is configured so a goal can be selected."""
-        return bool(self._config.get("geometry_boxes") or self._config.get("waypoints_file"))
+        return bool(
+            self._config.get("geometry_boxes")
+            or self._config.get("waypoints_file")
+            or self._config.get("stl_path")
+        )
 
     def _observation_space(self) -> gymnasium.Space:
         mode = self._config.get("obs_mode", "scalar")
@@ -196,7 +219,9 @@ class VoxelEnv(RustGymnasiumEnv):
 
         if self._obs_mode == "box":
             self._buf_grid[:] = self._rust_env.box_obs(self._box_radius)
-            base["local_grid"] = self._buf_grid.copy()
+            grid = self._buf_grid.copy()
+            grid = self._augment_grid(grid, 2 * self._box_radius + 1)
+            base["local_grid"] = grid
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
             base["ray_hits"] = self._buf_rays.copy()
@@ -214,3 +239,21 @@ class VoxelEnv(RustGymnasiumEnv):
                 "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
             )
         return base
+
+    def _augment_grid(self, flat: np.ndarray, n: int) -> np.ndarray:
+        noise_prob   = self._config.get("obs_noise_prob", 0.0)
+        cutout_count = self._config.get("obs_cutout_count", 0)
+        cutout_size  = self._config.get("obs_cutout_size", 1)
+        if noise_prob <= 0.0 and cutout_count <= 0:
+            return flat
+        grid = flat.reshape(n, n, n).copy()
+        if noise_prob > 0.0:
+            mask = self._obs_rng.random(grid.shape) < noise_prob
+            grid[mask] = 1.0 - grid[mask]
+        for _ in range(cutout_count):
+            s = int(self._obs_rng.integers(1, max(2, cutout_size + 1)))
+            x = int(self._obs_rng.integers(0, max(1, n - s + 1)))
+            y = int(self._obs_rng.integers(0, max(1, n - s + 1)))
+            z = int(self._obs_rng.integers(0, max(1, n - s + 1)))
+            grid[x:x + s, y:y + s, z:z + s] = 0.0
+        return grid.flatten()

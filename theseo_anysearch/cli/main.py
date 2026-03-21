@@ -7,6 +7,7 @@ from typing import Optional
 import typer
 
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
+from theseo_anysearch.cli.commands import garden as garden_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
 from theseo_anysearch.cli.commands import ray_cmd
 from theseo_anysearch.cli.commands import replay as replay_cmd
@@ -29,18 +30,117 @@ def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
 
     console = Console(file=sys.stdout, highlight=False)
     table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
-    table.add_column(style="dim", min_width=14)
-    table.add_column()
+    table.add_column(style="dim", min_width=18, no_wrap=True)
+    table.add_column(overflow="fold")
+
+    # Core
     table.add_row("name", name)
     table.add_row("algorithm", experiment.training.algorithm)
     table.add_row("iterations", str(experiment.training.iterations))
+    chk = experiment.training.checkpoint_interval
+    if chk:
+        table.add_row("checkpoint every", str(chk))
+    gpu = experiment.training.require_gpu
+    table.add_row("gpu", "required" if gpu else "not required")
+
+    # Env
+    env = experiment.env
+    table.add_row("", "")
+    if getattr(env, "stl_path", None):
+        table.add_row("stl", str(env.stl_path))
+        scale = getattr(env, "scale", None)
+        scale_range = getattr(env, "scale_range", None)
+        if scale_range:
+            table.add_row("scale range", f"{scale_range[0]} – {scale_range[1]}")
+        elif scale is not None:
+            table.add_row("scale", str(scale))
+    table.add_row("grid size", str(getattr(env, "grid_size", 32)))
+    table.add_row("obs mode", str(getattr(env, "obs_mode", "scalar")))
+    box_radius = getattr(env, "box_radius", None)
+    if box_radius is not None:
+        table.add_row("box radius", str(box_radius))
+    agents = getattr(env, "agent_count", None)
+    if agents:
+        table.add_row("agents", str(agents))
+    table.add_row("max steps", str(getattr(env, "max_steps", "?")))
+
+    # Model
+    mc = experiment.model_cfg
+    custom_model = (mc.get("custom_model") if isinstance(mc, dict) else getattr(mc, "custom_model", None)) if mc else None
+    if custom_model:
+        table.add_row("", "")
+        table.add_row("model", str(custom_model))
+        cmc = (mc.get("custom_model_config") if isinstance(mc, dict) else getattr(mc, "custom_model_config", None)) or {}
+        if cmc.get("pretrained_encoder"):
+            table.add_row("encoder", str(cmc["pretrained_encoder"]))
+            table.add_row("freeze encoder", str(cmc.get("freeze_encoder", False)))
+
+    # Algo highlights
+    ac = experiment.algorithm_config or {}
+    lr = ac.get("lr") if isinstance(ac, dict) else getattr(ac, "lr", None)
+    bs = ac.get("train_batch_size") if isinstance(ac, dict) else getattr(ac, "train_batch_size", None)
+    if lr is not None or bs is not None:
+        table.add_row("", "")
+    if lr is not None:
+        table.add_row("lr", str(lr))
+    if bs is not None:
+        table.add_row("batch size", str(bs))
+
+    # Paths
+    table.add_row("", "")
     table.add_row("output", str(experiment.run_output_dir))
     if config_path:
         table.add_row("config", str(config_path))
+
     try:
         console.print(Panel(table, title="[bold]Starting run[/bold]", title_align="left"), new_line_start=True)
     except UnicodeEncodeError:
         typer.echo(f"\nRunning '{name}' ({experiment.training.algorithm}, {experiment.training.iterations} iters) ...")
+
+
+def _print_tune_summary(name: str, experiment, config_path: Path | None, tag: str | None) -> None:
+    """Print a Rich panel summarising a tune sweep before it starts."""
+    import sys
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+
+    console = Console(file=sys.stdout, highlight=False)
+    table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+    table.add_column(style="dim", min_width=18)
+    table.add_column()
+
+    tc = experiment.tune_config
+    table.add_row("name", name)
+    table.add_row("algorithm", experiment.training.algorithm)
+    table.add_row("scheduler", str(getattr(tc, "scheduler", "?")))
+    table.add_row("trials", str(getattr(tc, "num_samples", "?")))
+    table.add_row("concurrency", str(getattr(tc, "max_concurrent", "?")))
+    table.add_row("iterations", str(experiment.training.iterations))
+    table.add_row("tag", tag or "latest")
+    gpu = experiment.training.require_gpu
+    table.add_row("gpu", "required" if gpu else "not required")
+
+    # Search space keys
+    ss = getattr(tc, "search_space", None) or {}
+    if ss:
+        table.add_row("", "")
+        for section, params in ss.items():
+            if isinstance(params, dict):
+                for k in params:
+                    table.add_row(f"search  {section}.{k}", "")
+
+    # Paths
+    table.add_row("", "")
+    table.add_row("output", str(experiment.run_output_dir))
+    if config_path:
+        table.add_row("config", str(config_path))
+    table.add_row("tensorboard", f"anysearch tensorboard {name}")
+
+    try:
+        console.print(Panel(table, title="[bold]Starting tune sweep[/bold]", title_align="left"), new_line_start=True)
+    except UnicodeEncodeError:
+        typer.echo(f"\nTune sweep '{name}' ({experiment.training.algorithm}, {getattr(tc, 'num_samples', '?')} trials) ...")
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +202,7 @@ def run(
     elif experiment.tune_config is not None:
         from theseo_anysearch.experiments.tune_runner import TuneRunner
         experiment = _apply_output(experiment, effective_output)
+        _print_tune_summary(name, experiment, config_path, tag)
         runner_tune = TuneRunner(experiment, config_path, tag=tag or None)
         result = runner_tune.run()
         print(json.dumps(result, indent=2, default=str))
@@ -569,7 +670,9 @@ def tensorboard(
     from theseo_anysearch.cli.registry import resolve_ref
 
     if ref is None:
-        logdir = Path(".").resolve()
+        logdir = (Path(".") / "runtime" / "experiments").resolve()
+        if not logdir.exists():
+            logdir = Path(".").resolve()
     else:
         config_path, experiment_dir = None, None
         try:
@@ -621,6 +724,13 @@ def tensorboard(
         )
     except KeyboardInterrupt:
         pass
+    except subprocess.CalledProcessError:
+        typer.echo(
+            f"Error: TensorBoard exited with an error. "
+            f"If port {port} is already in use, try: anysearch tensorboard {ref or ''} --port {port + 1}".strip(),
+            err=True,
+        )
+        raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +740,7 @@ def tensorboard(
 app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(mlflow_cmd.app, name="mlflow")
 app.add_typer(ray_cmd.app, name="ray")
+app.add_typer(garden_cmd.app, name="garden")
 
 # Deprecated groups — kept for backward compatibility
 app.add_typer(

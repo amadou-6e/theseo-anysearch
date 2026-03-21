@@ -29,6 +29,20 @@ class EnvConfig(BaseModel):
     distance_shaping: float = 0.0       # potential-based shaping coefficient toward goal
     distance_metric: Literal["euclidean", "manhattan"] = "euclidean"
 
+    # --- Training diversity ---
+    # Geometry pool: pre-load N geometries at init; at each reset pick one randomly.
+    # stl_paths + scale_range: voxelise each STL at M random scales → large pool.
+    # geometry_pool_size alone: procedural random-box geometries.
+    stl_paths: list[Path] | None = None           # multiple STL maps to cycle through
+    scale_range: list[float] | None = None        # [min, max] voxelisation scale for stl_paths
+    geometry_pool_size: int = 0                   # >0: use this many random-box geometries
+    scale_variants_per_map: int = 4               # STL re-voxelisations per scale sweep
+
+    # Observation augmentation (applied to local_grid at every step)
+    obs_noise_prob: float = 0.0    # bit-flip probability per voxel
+    obs_cutout_count: int = 0      # number of rectangular cutout patches zeroed out
+    obs_cutout_size: int = 1       # max side length of each cutout cube
+
 
 class TrainingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
