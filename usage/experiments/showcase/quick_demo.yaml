@@ -1,0 +1,30 @@
+experiment:
+  name: quick-demo
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/cube.stl
+  scale: 40.0
+  agent_count: 1
+  max_steps: 50
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  checkpoint_interval: 5
+  trajectory_every: 1
+  best_trajectory: true
+  video_every: 999
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 200
+  num_sgd_iter: 1
+
+model_config:
+  hidden_sizes: [64, 64]
+
+# tracking_uri omitted → defaults to sqlite:///runtime/experiments/mlflow.db
+mlflow: {}

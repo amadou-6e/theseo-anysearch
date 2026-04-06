@@ -1,0 +1,70 @@
+experiment:
+  name: multi_agent_ppo_asha
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 3
+  max_steps: 200
+  trail_mode: true
+  geometry_boxes:
+    - [18, 18, 18, 28, 28, 28]   # same obstacle region as ppo_asha baseline
+  step_cost: -0.01
+  goal_reward: 1.0
+  distance_shaping: 0.1
+  collision_cost: 0.0
+  box_radius: 2                  # local_grid = 5³ = 125 cells
+  ray_max_len: 16                # ray_cast max distance
+  distance_metric: euclidean     # goal_distance uses Euclidean norm
+
+training:
+  algorithm: multi_agent_voxel_ppo
+  runner: local
+  iterations: 100            # max per trial; ASHA will stop bad ones early
+  checkpoint_interval: 50
+  trajectory_every: 20
+  video_every: 100
+  require_gpu: true
+  num_env_runners: 0         # inline rollouts in trial actor — env runner workers run theseo_core
+                             # (Rust) in raylet-managed processes and SIGSEGV corrupts the raylet,
+                             # breaking PG bundle allocation for all subsequent trials (bundle_count=1).
+                             # With 0 runners the trial actor runs the Rust code; a crash kills only
+                             # that trial and leaves the raylet healthy.
+
+algorithm_config:            # defaults; overridden per trial by search_space below
+  clip_param: 0.2
+  num_sgd_iter: 5
+  lambda_: 0.95
+  minibatch_size: 256        # SGD minibatch
+  train_batch_size: 512      # default; overridden by search_space
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 3
+
+tune_config:
+  scheduler: asha
+  num_samples: 30
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 12          # 0.5 GPU per trial
+  asha_config:
+    max_t: 100
+    grace_period: 20         # min iterations before ASHA can prune (20% of max_t)
+    reduction_factor: 3
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [256, 512, 1024]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+    model_config:
+      encoder_depth:    {choice: [2, 3, 4]}
+
+renders:
+  camera_positions:
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: sqlite:///runtime/mlflow.db

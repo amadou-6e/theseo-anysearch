@@ -1,0 +1,40 @@
+experiment:
+  name: ppo-arch-search
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/stepped_terrain.stl
+  scale: 40.0
+  agent_count: 4
+  max_steps: 200
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 40             # max per trial; ASHA prunes bad trials early
+  checkpoint_interval: 40
+  trajectory_every: 10
+  video_every: 999
+
+tune_config:
+  scheduler: asha
+  num_samples: 24
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 2          # keep RAM usage reasonable (2 Ray PPO workers)
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [512, 1024, 2048, 4096]}
+      gamma:            {uniform: [0.95, 0.999]}
+      clip_param:       {uniform: [0.1, 0.3]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+      num_sgd_iter:     {choice: [5, 10, 20, 30]}
+      lambda_:          {uniform: [0.9, 1.0]}
+    model_config:
+      num_layers:       {choice: [1, 2, 3, 4]}
+      layer_size:       {choice: [64, 128, 256, 512]}
+
+mlflow:
+  tracking_uri: sqlite:///experiments/mlflow.db

@@ -1,0 +1,59 @@
+experiment:
+  name: ppo-pbt-evolution
+  output_dir: ../../../runtime/experiments
+  seed: 99
+
+env:
+  stl_path: usage/geometries/pipe_junction.stl
+  scale: 40.0
+  agent_count: 4
+  max_steps: 200
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 400
+  checkpoint_interval: 20    # PBT checkpoints frequently to copy between trials
+  trajectory_every: 20
+  video_every: 100
+
+algorithm_config:
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+
+model_config:
+  use_position_encoding: true
+
+tune_config:
+  scheduler: pbt
+  num_samples: 8             # PBT works best with 8–16 concurrent trials
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 8
+  pbt_config:
+    perturbation_interval: 20
+    resample_probability: 0.25
+    hyperparam_mutations:
+      algorithm_config:
+        lr:               {loguniform: [1.0e-5, 1.0e-2]}
+        train_batch_size: {choice: [2048, 4096, 8192]}
+        kl_coeff:         {uniform: [0.05, 0.5]}
+      model_config:
+        encoder_depth:    {choice: [2, 3, 4]}
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [2048, 4096, 8192]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+    model_config:
+      encoder_depth:    {choice: [2, 3, 4]}
+
+renders:
+  camera_positions:
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000

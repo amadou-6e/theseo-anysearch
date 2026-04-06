@@ -1,0 +1,42 @@
+experiment:
+  name: ppo-spiral-ramp
+  output_dir: ../../../runtime/experiments
+  seed: 7
+
+env:
+  stl_path: usage/geometries/ramp_spiral.stl
+  scale: 25.0
+  agent_count: 2
+  max_steps: 400             # longer episodes — vertical routing takes more steps
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 600
+  checkpoint_interval: 100
+  trajectory_every: 20
+  video_every: 100
+
+algorithm_config:
+  lr: 2.0e-4
+  train_batch_size: 4096
+  clip_param: 0.2
+  num_sgd_iter: 15           # more SGD iterations — harder geometry
+  lambda_: 0.95
+  kl_coeff: 0.2
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 4            # deeper encoder — 3-D geometry is more complex
+
+renders:
+  camera_positions:
+    - name: perspective
+      yaw: 210.0
+      pitch: 30.0
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000

@@ -1,0 +1,53 @@
+experiment:
+  name: goal-nav-demo
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
+  scale: 40.0
+  agent_count: 1
+  max_steps: 200
+  seed: 42
+
+  # Navigation mode: no trail, agent must reach the goal position.
+  # Start and goal are chosen randomly from cells adjacent to the geometry
+  # (surface cells) each episode.
+  trail_mode: true
+  target_fill: 0   # disabled — done is triggered only by goal_reached or max_steps
+
+  # Geometry: a solid wall at x=14..16, spanning y=1..10, z=1..32.
+  # Surface cells on either side of the wall become the start/goal candidates.
+  geometry_boxes:
+    - [14, 1, 1, 16, 10, 32]
+
+  # Reward shaping: reach the goal for +5.
+  # Flat step penalty provides time pressure.
+  step_cost: -0.05
+  collision_cost: 0.02
+  goal_reward: 5.0
+  distance_shaping: 0.2
+
+  # Box observations so the agent sees its local surroundings (5×5×5 window)
+  # plus a normalised goal_distance scalar.
+  obs_mode: box
+  box_radius: 2
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 1
+  checkpoint_interval: 1
+  trajectory_every: 1
+  best_trajectory: true
+  video_every: 999
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 2000
+  num_sgd_iter: 4
+
+model_config:
+  hidden_sizes: [256, 256]
+
+mlflow: {}
