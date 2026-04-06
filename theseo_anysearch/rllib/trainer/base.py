@@ -12,6 +12,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from theseo_anysearch.models import Settings
 
 
+def _resolve_pool_dir(geometry_pool: dict | None) -> dict | None:
+    """Return geometry_pool with pool_dir resolved to an absolute path.
+
+    The CLI resolves relative pool_dir values before calling any trainer, so
+    this is typically a no-op.  It exists as a safety net for callers that
+    build trainers directly (e.g. tests) with relative paths.
+    """
+    if not geometry_pool or not geometry_pool.get("pool_dir"):
+        return geometry_pool
+    pool_dir = Path(str(geometry_pool["pool_dir"]))
+    if not pool_dir.is_absolute():
+        pool_dir = Path.cwd() / pool_dir
+    return {**geometry_pool, "pool_dir": str(pool_dir.resolve())}
+
+
 def _patch_rllib_replay_buffer_type_check() -> None:
     """
     Work around a Ray bug in Algorithm._create_local_replay_buffer_if_necessary.
@@ -198,6 +213,7 @@ class Trainer(ABC):
         return {
             "stl_path": str(env.stl_path) if env.stl_path else None,
             "scale": env.scale,
+            "scale_range": env.scale_range,
             "agent_count": env.agent_count,
             "max_steps": env.max_steps,
             "seed": env.seed,
@@ -208,6 +224,8 @@ class Trainer(ABC):
             "grid_size": env.grid_size,
             "trail_mode": env.trail_mode,
             "geometry_boxes": env.geometry_boxes,
+            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
+            "geometry_padding": env.geometry_padding,
             "waypoints_file": env.waypoints_file,
             "step_cost": env.step_cost,
             "collision_cost": env.collision_cost,
@@ -270,6 +288,7 @@ class Trainer(ABC):
                 self.checkpoint()
 
             # --- Trajectory recording ---
+            _is_last_iter = self._iteration == training.iterations
             if _traj_writer is not None and _env_cfg is not None:
                 try:
                     if _is_multi:
@@ -288,6 +307,7 @@ class Trainer(ABC):
                         result.episode_reward_mean,
                         _exp_name,
                         _run_id,
+                        force=_is_last_iter,
                     )
                 except Exception as exc:
                     warnings.warn(

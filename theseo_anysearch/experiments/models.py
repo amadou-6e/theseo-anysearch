@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from theseo_anysearch.models import (
+    AlgorithmEnvCompatibilityMixin,
     AlgorithmConfig,
     AnyscaleConfig,
     EnvConfig,
@@ -162,7 +163,7 @@ class TuneConfig(BaseModel):
 # Full experiment config
 # ---------------------------------------------------------------------------
 
-class ExperimentConfig(BaseModel):
+class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     """
     A single fully-specified experiment.  Extends the base Settings fields
     with experiment meta, renders, MLflow, and an optional tune_config.

@@ -166,7 +166,7 @@ def trainer_settings(tmp_path: Path) -> "Settings":  # noqa: F821
         env:
           stl_path: /tmp/test.stl
           scale: 1.0
-          agent_count: 2
+          agent_count: 1
           max_steps: 50
           seed: 0
 

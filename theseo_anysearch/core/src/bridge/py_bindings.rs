@@ -8,7 +8,7 @@ use crate::{
     bridge::dto::{EnvConfig, GeometrySubmission},
     environments::{Environment, VoxelAction, VoxelEnv, SurfaceAction, SurfaceEnv},
     world::{
-        ingest::{parse_ascii_stl, voxelize_mesh},
+        ingest::{parse_ascii_stl, voxelize_mesh, voxelize_mesh_f32},
         Block, BlockUpdate, Coord, World, WorldState,
     },
 };
@@ -956,6 +956,14 @@ impl PyVoxelEnv {
         self.inner.clear_waypoints();
     }
 
+    /// Replace geometry in-place without reinstantiating the env.
+    /// Each element of `filled_cells` is (x, y, z) in [1, grid_size]³.
+    /// Clears all filled cells (geometry + trail) and recomputes surface cells.
+    /// Call reset() afterwards to start a fresh episode on the new geometry.
+    pub fn set_geometry(&mut self, filled_cells: Vec<(u16, u16, u16)>) {
+        self.inner.set_geometry(filled_cells);
+    }
+
     /// Returns a flattened (2*radius+1)³ binary array centred on the cursor.
     /// Each element is 1.0 if the world cell at (cursor + offset) is filled, else 0.0.
     /// Cells outside world bounds [0, 999] are 0.0.
@@ -1157,6 +1165,14 @@ impl PyMultiVoxelEnv {
     /// Returns each agent's current goal position, or None if unset.
     pub fn goal_positions(&self) -> Vec<Option<(u16, u16, u16)>> {
         self.inner.agents.iter().map(|a| a.goal).collect()
+    }
+
+    /// Replace geometry in-place without reinstantiating the env.
+    /// Each element of `filled_cells` is (x, y, z) in [1, grid_size]³.
+    /// Clears all filled cells (geometry + trail) and recomputes surface cells.
+    /// Call reset() afterwards to start a fresh episode on the new geometry.
+    pub fn set_geometry(&mut self, filled_cells: Vec<(u16, u16, u16)>) {
+        self.inner.set_geometry(filled_cells);
     }
 
     /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
@@ -1438,6 +1454,57 @@ impl PyVoxelSampler {
         let mesh = parse_ascii_stl(&contents)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
         let placements = voxelize_mesh(&mesh, (1, 1, 1), scale);
+        self.world = crate::world::WorldState::new();
+        let gs = self.grid_size;
+        let mut count = 0usize;
+        for p in &placements {
+            let (x, y, z) = p.coord;
+            if x >= 1 && x <= gs && y >= 1 && y <= gs && z >= 1 && z <= gs {
+                let _ = self.world.set_block(p.coord, p.block.clone());
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    /// Load and voxelize an ASCII STL file, normalising the geometry to start at
+    /// (origin_x, origin_y, origin_z) in voxel space regardless of the STL's
+    /// original coordinate offset. Enables padding-aware placement:
+    ///   origin = padding + 1,  scale = (grid_size - 2*padding) / max_extent
+    pub fn load_stl_normalized(
+        &mut self,
+        path: String,
+        scale: f32,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+    ) -> PyResult<usize> {
+        use std::io::Read;
+        let mut f = std::fs::File::open(&path)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("{path}: {e}")))?;
+        let mut contents = String::new();
+        f.read_to_string(&mut contents)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("{path}: {e}")))?;
+        let mesh = parse_ascii_stl(&contents)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
+
+        // Compute per-axis bounding box minimum so the mesh is normalised to start at origin.
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut min_z = f32::MAX;
+        for tri in &mesh.triangles {
+            for v in tri {
+                if v[0] < min_x { min_x = v[0]; }
+                if v[1] < min_y { min_y = v[1]; }
+                if v[2] < min_z { min_z = v[2]; }
+            }
+        }
+        if min_x == f32::MAX { min_x = 0.0; min_y = 0.0; min_z = 0.0; }
+
+        // Adjusted origin so that vertex at (min_x, min_y, min_z) maps to (origin_x, origin_y, origin_z).
+        let adj = (origin_x - min_x * scale, origin_y - min_y * scale, origin_z - min_z * scale);
+
+        let placements = voxelize_mesh_f32(&mesh, adj, scale);
         self.world = crate::world::WorldState::new();
         let gs = self.grid_size;
         let mut count = 0usize;

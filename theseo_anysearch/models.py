@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EnvConfig(BaseModel):
@@ -37,11 +37,13 @@ class EnvConfig(BaseModel):
     scale_range: list[float] | None = None        # [min, max] voxelisation scale for stl_paths
     geometry_pool_size: int = 0                   # >0: use this many random-box geometries
     scale_variants_per_map: int = 4               # STL re-voxelisations per scale sweep
+    geometry_padding: int = 2                     # free voxels on each side of the geometry (circumnavigation margin)
 
-    # Observation augmentation (applied to local_grid at every step)
-    obs_noise_prob: float = 0.0    # bit-flip probability per voxel
-    obs_cutout_count: int = 0      # number of rectangular cutout patches zeroed out
-    obs_cutout_size: int = 1       # max side length of each cutout cube
+    # --- Geometry pool (pre-computed .npy files built by `anysearch extract`) ---
+    # When set, each episode loads a random .npy file from pool_dir instead of
+    # re-voxelizing at runtime. stl_path / scale_range still work independently.
+    geometry_pool: dict | None = None             # {pool_dir, augmentation: {paste_boxes: {...}}}
+
 
 
 class TrainingConfig(BaseModel):
@@ -86,7 +88,21 @@ class ModelConfig(BaseModel):
     custom_model_config: dict[str, Any] | None = None
 
 
-class Settings(BaseModel):
+class AlgorithmEnvCompatibilityMixin:
+    @model_validator(mode="after")
+    def _validate_algorithm_env_compatibility(self):
+        single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
+        algorithm = self.training.algorithm.lower()
+        if algorithm in single_agent_algorithms and self.env.agent_count != 1:
+            raise ValueError(
+                f"training.algorithm='{self.training.algorithm}' only supports single-agent "
+                f"VoxelEnv, but env.agent_count={self.env.agent_count}. "
+                "Use env.agent_count=1 or switch to training.algorithm='multi_agent_voxel_ppo'."
+            )
+        return self
+
+
+class Settings(AlgorithmEnvCompatibilityMixin, BaseModel):
     # Pydantic v2 reserves 'model_config' as a class variable.
     # The YAML key is 'model_config'; stored as 'model_cfg' with an alias.
     model_config = ConfigDict(extra="forbid", populate_by_name=True)

@@ -85,6 +85,13 @@ class TestNoWrite:
 # ---------------------------------------------------------------------------
 
 class TestPeriodicSave:
+    def test_writes_first_iteration_even_off_interval(self, tmp_path):
+        writer, store = _make_writer(tmp_path, trajectory_every=10, best_trajectory=False)
+        writer.record(_make_episode())
+        result = writer.on_iteration_end(1, 0.5, "exp", "run1")
+        assert "trajectories/iter_000001.json" in result
+        assert store.exists("trajectories/iter_000001.json")
+
     def test_writes_at_interval(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=5, best_trajectory=False)
         writer.record(_make_episode())
@@ -103,10 +110,10 @@ class TestPeriodicSave:
 
     def test_skips_non_interval(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=10, best_trajectory=False)
-        for it in [1, 2, 3, 9]:
+        for it in [2, 3, 9]:
             writer.record(_make_episode())
             writer.on_iteration_end(it, 0.5, "exp", "run1")
-        assert not store.exists("trajectories/iter_000001.json")
+        assert not store.exists("trajectories/iter_000002.json")
         assert not store.exists("trajectories/iter_000009.json")
 
 
@@ -190,7 +197,7 @@ class TestEpisodeSelection:
 class TestPayload:
     def test_payload_has_expected_top_level_keys(self):
         ep = _make_episode()
-        payload = _build_payload(ep, 10, 0.75, "my-exp", "abc1")
+        payload = _build_payload(ep, 10, 0.75, "my-exp", "abc1", init_filled_file="init.npy")
         for key in ("experiment_name", "run_id", "iteration",
                     "episode_reward_mean", "grid_size", "agent_count",
                     "max_steps", "obs_mode", "episode"):
@@ -198,7 +205,7 @@ class TestPayload:
 
     def test_payload_metadata(self):
         ep = _make_episode()
-        payload = _build_payload(ep, 10, 0.75, "my-exp", "abc1")
+        payload = _build_payload(ep, 10, 0.75, "my-exp", "abc1", init_filled_file="init.npy")
         assert payload["experiment_name"] == "my-exp"
         assert payload["run_id"] == "abc1"
         assert payload["iteration"] == 10
@@ -207,7 +214,7 @@ class TestPayload:
 
     def test_payload_episode_fields(self):
         ep = _make_episode(total_reward=2.5, n_steps=4)
-        payload = _build_payload(ep, 1, 0.5, "e", "r")
+        payload = _build_payload(ep, 1, 0.5, "e", "r", init_filled_file="init.npy")
         epi = payload["episode"]
         assert epi["total_reward"] == pytest.approx(2.5)
         assert epi["steps_taken"] == 4
@@ -215,18 +222,19 @@ class TestPayload:
 
     def test_payload_step_fields(self):
         ep = _make_episode(n_steps=1)
-        payload = _build_payload(ep, 1, 0.5, "e", "r")
+        payload = _build_payload(ep, 1, 0.5, "e", "r", init_filled_file="init.npy")
         step = payload["episode"]["steps"][0]
         for key in ("step", "action", "reward", "done",
                     "cursor_x", "cursor_y", "cursor_z",
                     "voxel_count", "placed"):
             assert key in step
 
-    def test_payload_init_filled_serialised(self):
+    def test_payload_init_filled_file_serialised(self):
         ep = _make_episode()
         ep.init_filled = [(1, 2, 3), (4, 5, 6)]
-        payload = _build_payload(ep, 1, 0.5, "e", "r")
-        assert payload["episode"]["init_filled"] == [[1, 2, 3], [4, 5, 6]]
+        payload = _build_payload(ep, 1, 0.5, "e", "r", init_filled_file="init.npy")
+        assert payload["episode"]["init_filled_file"] == "init.npy"
+        assert "init_filled" not in payload["episode"]
 
     def test_roundtrip_json(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=1, best_trajectory=False)
@@ -237,6 +245,9 @@ class TestPayload:
         assert data["episode"]["total_reward"] == pytest.approx(0.77)
         assert data["experiment_name"] == "round-trip"
         assert data["run_id"] == "xyz9"
+        assert data["episode"]["init_filled_file"].endswith("_init_filled.npy")
+        sidecar = Path("trajectories", data["episode"]["init_filled_file"])
+        assert store.exists(str(sidecar))
 
 
 # ---------------------------------------------------------------------------

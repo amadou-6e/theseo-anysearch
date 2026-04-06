@@ -58,6 +58,8 @@ struct EpisodeData {
     success: bool,
     #[serde(default)]
     init_filled: Vec<[u16; 3]>,
+    #[serde(default)]
+    init_filled_file: Option<String>,
     steps: Vec<StepData>,
     #[serde(default)]
     start_pos: Option<[u16; 3]>,
@@ -68,6 +70,75 @@ struct EpisodeData {
     start_positions: Vec<Option<[u16; 3]>>,
     #[serde(default)]
     goal_positions: Vec<Option<[u16; 3]>>,
+}
+
+fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
+    if bytes.len() < 10 || &bytes[0..6] != b"\x93NUMPY" {
+        return Err("not a numpy file".into());
+    }
+    let major = bytes[6];
+    let (header_len, hdr_offset) = if major == 1 {
+        (u16::from_le_bytes(bytes[8..10].try_into().unwrap()) as usize, 10)
+    } else {
+        if bytes.len() < 12 {
+            return Err("truncated v2 header".into());
+        }
+        (u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize, 12)
+    };
+    let hdr_end = hdr_offset + header_len;
+    if bytes.len() < hdr_end {
+        return Err("truncated header data".into());
+    }
+    let header = std::str::from_utf8(&bytes[hdr_offset..hdr_end])
+        .map_err(|e| format!("header utf-8: {e}"))?;
+    if !header.contains("<u2") {
+        return Err("expected uint16 numpy array".into());
+    }
+
+    let shape_pos = header
+        .find("'shape'")
+        .or_else(|| header.find("\"shape\""))
+        .ok_or("no 'shape' key in header")?;
+    let after = &header[shape_pos..];
+    let tuple_start = after.find('(').ok_or("no '(' in shape")? + shape_pos;
+    let tuple_end = header[tuple_start..].find(')').ok_or("no ')' in shape")? + tuple_start;
+    let tuple_str = &header[tuple_start + 1..tuple_end];
+    let dims: Vec<usize> = tuple_str
+        .split(',')
+        .filter_map(|s| s.trim().parse::<usize>().ok())
+        .collect();
+    if dims.len() != 2 || dims[1] != 3 {
+        return Err(format!("expected shape (N, 3), got {:?}", dims));
+    }
+
+    let expected = dims[0] * dims[1] * std::mem::size_of::<u16>();
+    let data_bytes = &bytes[hdr_end..];
+    if data_bytes.len() < expected {
+        return Err(format!("data too short: {} < {}", data_bytes.len(), expected));
+    }
+
+    let mut coords = Vec::with_capacity(dims[0]);
+    for chunk in data_bytes[..expected].chunks_exact(6) {
+        coords.push([
+            u16::from_le_bytes([chunk[0], chunk[1]]),
+            u16::from_le_bytes([chunk[2], chunk[3]]),
+            u16::from_le_bytes([chunk[4], chunk[5]]),
+        ]);
+    }
+    Ok(coords)
+}
+
+fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
+    let json = std::fs::read_to_string(path).ok()?;
+    let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
+    if traj.episode.init_filled.is_empty() {
+        if let Some(sidecar) = &traj.episode.init_filled_file {
+            let npy_path = path.parent().unwrap_or(std::path::Path::new(".")).join(sidecar);
+            let bytes = std::fs::read(&npy_path).ok()?;
+            traj.episode.init_filled = parse_npy_uint16_2d_3cols(&bytes).ok()?;
+        }
+    }
+    Some(traj)
 }
 
 #[derive(Deserialize, Clone)]
@@ -204,10 +275,7 @@ fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
     }
 
     let mut trajs: Vec<TrajectoryData> = files.iter()
-        .filter_map(|p| {
-            std::fs::read_to_string(p).ok()
-                .and_then(|s| serde_json::from_str::<TrajectoryData>(&s).ok())
-        })
+        .filter_map(|p| load_trajectory(p))
         .collect();
     trajs.sort_by_key(|t| t.iteration);
     trajs
@@ -720,19 +788,29 @@ impl eframe::App for VoxelReplayApp {
             let r = resp.rect;
             painter.rect_filled(r, 2.0, Color32::from_gray(25));
             if step_rewards.len() > 1 {
-                let min_r = step_rewards.iter().cloned().fold(f32::INFINITY, f32::min);
-                let max_r = step_rewards.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                let range = (max_r - min_r).max(0.001);
+                let max_abs = step_rewards
+                    .iter()
+                    .map(|rv| rv.abs())
+                    .fold(0.0f32, f32::max)
+                    .max(0.001);
                 let bar_w = r.width() / step_rewards.len() as f32;
+                let zero_y = r.center().y;
+                painter.line_segment(
+                    [Pos2::new(r.left(), zero_y), Pos2::new(r.right(), zero_y)],
+                    Stroke::new(1.0, Color32::from_gray(70)),
+                );
                 for (i, &rv) in step_rewards.iter().enumerate() {
-                    let h = ((rv - min_r) / range) * r.height();
+                    let h = (rv.abs() / max_abs) * (r.height() * 0.5);
                     let x0 = r.left() + i as f32 * bar_w;
                     let col = if i == step_idx { Color32::YELLOW }
                               else if rv >= 0.0 { Color32::from_rgb(60, 180, 100) }
                               else { Color32::from_rgb(200, 60, 60) };
+                    let y0 = if rv >= 0.0 { zero_y - h } else { zero_y };
                     painter.rect_filled(
-                        Rect::from_min_size(Pos2::new(x0, r.bottom() - h),
-                                            Vec2::new(bar_w.max(1.0), h.max(1.0))),
+                        Rect::from_min_size(
+                            Pos2::new(x0, y0),
+                            Vec2::new(bar_w.max(1.0), h.max(1.0)),
+                        ),
                         0.0, col,
                     );
                 }
@@ -1027,12 +1105,9 @@ fn main() -> eframe::Result<()> {
     let mut trajectories: Vec<TrajectoryData> = Vec::new();
     for arg in &args {
         let path = PathBuf::from(arg);
-        let json = std::fs::read_to_string(&path).map_err(|e| {
-            eframe::Error::AppCreation(format!("Cannot read '{}': {e}", path.display()).into())
-        })?;
-        let traj: TrajectoryData = serde_json::from_str(&json).map_err(|e| {
+        let traj = load_trajectory(&path).ok_or_else(|| {
             eframe::Error::AppCreation(
-                format!("JSON parse error in '{}': {e}", path.display()).into()
+                format!("Cannot load trajectory '{}'", path.display()).into()
             )
         })?;
         trajectories.push(traj);

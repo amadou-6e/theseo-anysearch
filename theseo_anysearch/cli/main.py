@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 
@@ -144,6 +144,74 @@ def _print_tune_summary(name: str, experiment, config_path: Path | None, tag: st
 
 
 # ---------------------------------------------------------------------------
+# Geometry pool validation (used by run before starting training)
+# ---------------------------------------------------------------------------
+
+def _resolve_geometry_pool_path(experiment: Any, config_path: Path) -> Any:
+    """Return experiment with geometry_pool.pool_dir resolved to an absolute path.
+
+    The YAML stores a path relative to the config file's directory.  Ray workers
+    run with a different CWD, so we must resolve to absolute here in the main
+    process before the config is serialised and shipped to workers.
+    """
+    env = getattr(experiment, "env", None)
+    if env is None:
+        return experiment
+    pool_cfg = getattr(env, "geometry_pool", None)
+    if not isinstance(pool_cfg, dict) or not pool_cfg.get("pool_dir"):
+        return experiment
+    pool_dir = Path(str(pool_cfg["pool_dir"]))
+    if pool_dir.is_absolute():
+        return experiment
+    resolved = str((config_path.parent / pool_dir).resolve())
+    new_pool_cfg = {**pool_cfg, "pool_dir": resolved}
+    new_env = env.model_copy(update={"geometry_pool": new_pool_cfg})
+    return experiment.model_copy(update={"env": new_env})
+
+
+def _check_geometry_pool(experiment: Any, config_path: Path) -> None:
+    """If the experiment uses a geometry pool, validate it and exit with a hint if not ready."""
+    env = getattr(experiment, "env", None)
+    pool_cfg = None
+    if env is not None:
+        pool_cfg = getattr(env, "geometry_pool", None)
+        if pool_cfg is None and isinstance(env, dict):
+            pool_cfg = env.get("geometry_pool")
+    if not pool_cfg:
+        return
+
+    pool_dir_raw = (
+        pool_cfg.get("pool_dir") if isinstance(pool_cfg, dict)
+        else getattr(pool_cfg, "pool_dir", None)
+    )
+    if not pool_dir_raw:
+        return
+
+    pool_dir = Path(str(pool_dir_raw))
+    if not pool_dir.is_absolute():
+        pool_dir = config_path.parent / pool_dir
+
+    try:
+        from theseo_anysearch.environments.geometry_pool import GeometryPool
+        gp = GeometryPool(pool_dir)
+        ok, msg = gp.validate(min_per_source=10)
+        if not ok:
+            typer.echo(
+                f"\nError: geometry pool '{pool_dir}' is not ready:\n  {msg}\n\n"
+                f"Run first:\n\n  anysearch extract <config_or_stl> --pool-dir {pool_dir}\n",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"Pool: {msg}")
+    except FileNotFoundError as exc:
+        typer.echo(
+            f"\nError: {exc}\n\nRun first:\n\n  anysearch extract <config_or_stl> --pool-dir {pool_dir}\n",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Hot path: run
 # ---------------------------------------------------------------------------
 
@@ -181,6 +249,10 @@ def run(
     name = add_experiment(_reg_path)
 
     experiment = load_experiment(config_path)
+    experiment = _resolve_geometry_pool_path(experiment, config_path)
+
+    # --- Pool validation ---
+    _check_geometry_pool(experiment, config_path)
 
     # --output-dir overrides the output_dir already resolved by load_experiment
     def _apply_output(exp: ExperimentConfig, out: Path) -> ExperimentConfig:
@@ -736,6 +808,347 @@ def tensorboard(
 # ---------------------------------------------------------------------------
 # Subcommand groups
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# show-data
+# ---------------------------------------------------------------------------
+
+@app.command(name="show-data")
+def show_data(
+    source: Path = typer.Argument(
+        ..., help="YAML experiment config, .stl file, .npy pool entry, or pool directory."
+    ),
+    scale: Optional[float] = typer.Option(
+        None, "--scale", help="Override: voxels on the longest edge."
+    ),
+    grid_size: Optional[int] = typer.Option(
+        None, "--grid-size", "-g", help="Override: voxel grid side length."
+    ),
+    padding: int = typer.Option(
+        2, "--padding", help="Free voxels on each side of the geometry (circumnavigation margin)."
+    ),
+    no_viewer: bool = typer.Option(
+        False, "--no-viewer", help="Skip opening the eframe viewer."
+    ),
+) -> None:
+    """Show geometry stats and open the voxelized geometry in the eframe viewer."""
+    import collections
+    import json
+    import sys
+    import tempfile
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    console = Console(file=sys.stdout, highlight=False)
+
+    if not source.exists():
+        typer.echo(f"Error: {source} not found", err=True)
+        raise typer.Exit(1)
+
+    # --- .npy pool entry or pool directory → pool-explorer binary ---
+    if source.suffix.lower() == ".npy" or (source.is_dir() and (source / "pool_meta.json").exists()):
+        import subprocess
+        import sys
+
+        suffix = ".exe" if sys.platform == "win32" else ""
+        candidates = [
+            Path("theseo_anysearch/core/target/release") / f"pool-explorer{suffix}",
+            Path("theseo_anysearch/core/target/debug") / f"pool-explorer{suffix}",
+        ]
+        binary = next((p for p in candidates if p.exists()), None)
+        if binary is None:
+            typer.echo(
+                "pool-explorer binary not found. Build it with:\n"
+                "  cd theseo_anysearch/core && cargo build --bin pool-explorer",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        if not no_viewer:
+            typer.echo(f"Opening Pool Explorer: {source}")
+            subprocess.run([str(binary), str(source)], check=True)
+        return
+
+    # Resolve STL path, scale, and grid_size from YAML or direct STL argument.
+    stl_path: Path | None = None
+    eff_scale: float = scale if scale is not None else 32.0
+    eff_grid: int = grid_size if grid_size is not None else 32
+
+    if source.suffix.lower() == ".stl":
+        stl_path = source
+    else:
+        from theseo_anysearch.experiments.loader import load_experiment
+        experiment = load_experiment(source)
+        env = experiment.env
+        raw_stl = getattr(env, "stl_path", None)
+        if raw_stl is None:
+            typer.echo("Error: no stl_path found in config", err=True)
+            raise typer.Exit(1)
+        stl_path = Path(raw_stl)
+        if not stl_path.is_absolute() and not stl_path.exists():
+            stl_path = source.parent / stl_path
+        if scale is None:
+            eff_scale = float(getattr(env, "scale", 32.0))
+        if grid_size is None:
+            eff_grid = int(getattr(env, "grid_size", 32))
+        padding = int(getattr(env, "geometry_padding", padding))
+
+    if not stl_path.exists():
+        typer.echo(f"Error: STL not found: {stl_path}", err=True)
+        raise typer.Exit(1)
+
+    # Voxelize with the same logic as the env.
+    from theseo_anysearch.environments.pettingzoo.multi_voxel_env import _load_stl_geometry
+    console.print(
+        f"[dim]Voxelizing {stl_path.name}  scale={eff_scale}  grid={eff_grid}  padding={padding}...[/dim]"
+    )
+    geometry = _load_stl_geometry(str(stl_path), eff_scale, eff_grid, padding=padding)
+
+    total = eff_grid ** 3
+    filled = len(geometry)
+    free = total - filled
+    fill_pct = 100.0 * filled / total
+
+    # BFS connectivity on navigable (free) voxels.
+    filled_set = set(geometry)
+    free_cells = [
+        (x, y, z)
+        for x in range(1, eff_grid + 1)
+        for y in range(1, eff_grid + 1)
+        for z in range(1, eff_grid + 1)
+        if (x, y, z) not in filled_set
+    ]
+    connected = 0
+    if free_cells:
+        visited: set[tuple[int, int, int]] = {free_cells[0]}
+        q: collections.deque[tuple[int, int, int]] = collections.deque([free_cells[0]])
+        while q:
+            cx, cy, cz = q.popleft()
+            for dx, dy, dz in ((1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)):
+                nb = (cx + dx, cy + dy, cz + dz)
+                if (
+                    nb not in visited
+                    and nb not in filled_set
+                    and 1 <= nb[0] <= eff_grid
+                    and 1 <= nb[1] <= eff_grid
+                    and 1 <= nb[2] <= eff_grid
+                ):
+                    visited.add(nb)
+                    q.append(nb)
+        connected = len(visited)
+    conn_pct = 100.0 * connected / free if free > 0 else 0.0
+    conn_ok = connected >= 0.8 * free
+
+    # Geometry voxel-space bounds.
+    if geometry:
+        gxs = [c[0] for c in geometry]
+        gys = [c[1] for c in geometry]
+        gzs = [c[2] for c in geometry]
+        bounds = f"x[{min(gxs)},{max(gxs)}]  y[{min(gys)},{max(gys)}]  z[{min(gzs)},{max(gzs)}]"
+    else:
+        bounds = "empty"
+
+    # Print Rich summary panel.
+    table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+    table.add_column(style="dim", min_width=20)
+    table.add_column(overflow="fold")
+    table.add_row("stl", stl_path.name)
+    table.add_row("scale", f"{eff_scale:.1f}  (longest edge -> {eff_scale:.0f} voxels)")
+    table.add_row("grid", f"{eff_grid}^3 = {total:,} voxels total")
+    table.add_row("padding", str(padding))
+    table.add_row("", "")
+    table.add_row("filled (geometry)", f"{filled:,}  ({fill_pct:.1f}%)")
+    table.add_row("free (navigable)", f"{free:,}  ({100-fill_pct:.1f}%)")
+    conn_label = "[green]OK[/green]" if conn_ok else "[red]LOW[/red]"
+    table.add_row("connected free", f"{connected:,} / {free:,}  ({conn_pct:.1f}%)  {conn_label}")
+    table.add_row("geometry bounds", bounds)
+    try:
+        console.print(Panel(table, title="[bold]Geometry preview[/bold]", title_align="left"), new_line_start=True)
+    except UnicodeEncodeError:
+        typer.echo(
+            f"\nGeometry preview: {stl_path.name}  scale={eff_scale}  grid={eff_grid}^3"
+            f"\n  filled={filled:,} ({fill_pct:.1f}%)  free={free:,}  connected={connected:,} ({conn_pct:.1f}%)"
+            f"\n  bounds: {bounds}"
+        )
+
+    if not no_viewer:
+        import subprocess
+        from theseo_anysearch.cli.commands.replay import _find_binary
+
+        # Write a geometry-only trajectory JSON (no agent steps) and open in eframe.
+        traj = {
+            "experiment_name": stl_path.stem,
+            "run_id": "preview",
+            "iteration": 0,
+            "episode_reward_mean": 0.0,
+            "agent_count": 0,
+            "max_steps": 0,
+            "obs_mode": "box",
+            "episode": {
+                "total_reward": 0.0,
+                "steps_taken": 0,
+                "success": False,
+                "init_filled": [[x, y, z] for x, y, z in geometry],
+                "start_positions": [],
+                "goal_positions": [],
+                "steps": [],
+            },
+        }
+        tmp = Path(tempfile.mktemp(suffix="_geometry_preview.json"))
+        tmp.write_text(json.dumps(traj))
+        typer.echo(f"Opening eframe viewer...")
+        try:
+            binary = _find_binary()
+            subprocess.run([str(binary), str(tmp)], check=True)
+        except FileNotFoundError as exc:
+            typer.echo(f"voxel-replay binary not found: {exc}", err=True)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# extract
+# ---------------------------------------------------------------------------
+
+@app.command(name="extract")
+def extract(
+    sources: list[Path] = typer.Argument(
+        ...,
+        help=(
+            "STL files, folders of STL files, or a single YAML extract config. "
+            "If a YAML file is provided all other flags are read from it."
+        ),
+    ),
+    target: int = typer.Option(40, "--target", "-n", help="Base geometries per source STL."),
+    scale_min: float = typer.Option(100.0, "--scale-min", help="Minimum scale (voxels on longest edge)."),
+    scale_max: float = typer.Option(500.0, "--scale-max", help="Maximum scale."),
+    rotate: bool = typer.Option(True, "--rotate/--no-rotate", help="Random SO(3) rotation per sample."),
+    pool_dir: Optional[Path] = typer.Option(None, "--pool-dir", help="Output directory for the geometry pool."),
+    workers: int = typer.Option(4, "--workers", "-w", help="Parallel worker processes."),
+    resume: bool = typer.Option(False, "--resume", help="Skip already-written .npy files."),
+    min_fill_pct: float = typer.Option(5.0, "--min-fill-pct", help="Reject if filled < N%%."),
+    min_free_pct: float = typer.Option(10.0, "--min-free-pct", help="Reject if free < N%%."),
+    no_connectivity_check: bool = typer.Option(False, "--no-connectivity-check"),
+    padding: int = typer.Option(2, "--padding", help="Free voxels on each side of the geometry."),
+    seed: int = typer.Option(0, "--seed", help="Base random seed."),
+) -> None:
+    """Build a geometry pool from STL files for training-time diversity.
+
+    Examples::
+
+      anysearch extract usage/geometries/ --target 40 \\
+          --scale-min 100 --scale-max 500 --rotate \\
+          --pool-dir runtime/geometry_pools/highres
+
+      anysearch extract usage/extract/highres.yaml
+
+      anysearch extract usage/geometries/ --target 40 --resume \\
+          --pool-dir runtime/geometry_pools/highres
+    """
+    from theseo_anysearch.cli.commands.extract import run_extract
+
+    # --- YAML config path? ---
+    stl_files: list[Path] = []
+    map_files: list[Path] = []
+    eff_pool_dir = pool_dir
+    eff_target = target
+    eff_scale_min = scale_min
+    eff_scale_max = scale_max
+    eff_rotate = rotate
+    eff_workers = workers
+    eff_resume = resume
+    eff_min_fill_pct = min_fill_pct
+    eff_min_free_pct = min_free_pct
+    eff_connectivity_check = not no_connectivity_check
+    eff_padding = padding
+    eff_seed = seed
+    # grid_size is derived after all params are resolved (see below)
+
+    if len(sources) == 1 and sources[0].suffix.lower() in (".yaml", ".yml"):
+        # Load config from YAML
+        import yaml  # type: ignore[import-untyped]
+        cfg = yaml.safe_load(sources[0].read_text())
+        ec = cfg.get("extract", {})
+        eff_pool_dir = Path(ec.get("pool_dir", str(pool_dir or "runtime/geometry_pools/default")))
+        eff_target = ec.get("target_per_source", target)
+        sr = ec.get("scale_range", [scale_min, scale_max])
+        eff_scale_min, eff_scale_max = float(sr[0]), float(sr[1])
+        eff_rotate = ec.get("rotate", rotate)
+        eff_workers = ec.get("workers", workers)
+        eff_min_fill_pct = ec.get("min_fill_pct", min_fill_pct)
+        eff_min_free_pct = ec.get("min_free_pct", min_free_pct)
+        eff_connectivity_check = ec.get("connectivity_check", not no_connectivity_check)
+        raw_sources = ec.get("sources", [])
+        for s in raw_sources:
+            p = Path(s)
+            if not p.is_absolute():
+                p = sources[0].parent / p
+            if p.is_dir():
+                stl_files.extend(sorted(p.glob("*.stl")))
+                map_files.extend(sorted(p.glob("*.3dmap.zip")))
+            elif p.suffix.lower() == ".stl" and p.exists():
+                stl_files.append(p)
+            elif p.name.endswith(".3dmap.zip") and p.exists():
+                map_files.append(p)
+            else:
+                typer.echo(f"Warning: source not found: {p}", err=True)
+    else:
+        # Expand folders and collect STL + map files from CLI args
+        for src in sources:
+            if src.is_dir():
+                stl_files.extend(sorted(src.glob("*.stl")))
+                map_files.extend(sorted(src.glob("*.3dmap.zip")))
+            elif src.suffix.lower() == ".stl" and src.exists():
+                stl_files.append(src)
+            elif src.name.endswith(".3dmap.zip") and src.exists():
+                map_files.append(src)
+            else:
+                typer.echo(f"Warning: {src} is not a .stl/.3dmap.zip file or folder — skipping", err=True)
+
+    if not stl_files and not map_files:
+        typer.echo("Error: no .stl or .3dmap.zip files found in the given sources.", err=True)
+        raise typer.Exit(1)
+
+    if eff_pool_dir is None:
+        typer.echo("Error: --pool-dir is required (or set pool_dir in YAML config).", err=True)
+        raise typer.Exit(1)
+
+    # STL grid_size derived from scale_max; map grid_size = int(scale_max) directly (crop window)
+    eff_grid_size = int(eff_scale_max) + 2 * eff_padding + 1
+    eff_map_grid_size = int(eff_scale_max)
+
+    parts = []
+    if stl_files:
+        parts.append(f"{len(stl_files)} STL (grid={eff_grid_size} derived)")
+    if map_files:
+        parts.append(f"{len(map_files)} map (grid={eff_map_grid_size})")
+    typer.echo(
+        f"Sources: {', '.join(parts)}  |  "
+        f"target={eff_target}/source  |  "
+        f"scale=[{eff_scale_min:.0f},{eff_scale_max:.0f}]  |  rotate={eff_rotate}"
+    )
+    typer.echo(f"Pool dir: {eff_pool_dir}")
+
+    run_extract(
+        stl_files=stl_files,
+        pool_dir=eff_pool_dir,
+        target_per_source=eff_target,
+        grid_size=eff_grid_size,
+        scale_range=(eff_scale_min, eff_scale_max),
+        padding=eff_padding,
+        rotate=eff_rotate,
+        workers=eff_workers,
+        resume=eff_resume,
+        min_fill_pct=eff_min_fill_pct,
+        min_free_pct=eff_min_free_pct,
+        connectivity_check=eff_connectivity_check,
+        seed=eff_seed,
+        map_files=map_files,
+        map_grid_size=eff_map_grid_size,
+    )
+
 
 app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(mlflow_cmd.app, name="mlflow")

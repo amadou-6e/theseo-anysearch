@@ -12,8 +12,8 @@
     128
   ],
   "epochs_trained": 75,
-  "final_val_loss": 2.0689082110547048e-05,
-  "created_at": "2026-03-21T19:59:47.355820+00:00",
+  "final_val_loss": 1.918107209572628e-05,
+  "created_at": "2026-03-22T00:05:23.626644+00:00",
   "augmentation": {
     "rotate90": true,
     "flip": true,

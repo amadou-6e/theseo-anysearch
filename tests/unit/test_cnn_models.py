@@ -219,14 +219,14 @@ class TestModelRegistration:
 
 
 # ---------------------------------------------------------------------------
-# _build_rllib_model_dict helper tests
+# build_rllib_model_dict helper tests
 # ---------------------------------------------------------------------------
 
 class TestBuildRllibModelDict:
     def setup_method(self):
-        from theseo_anysearch.rllib.models import _build_rllib_model_dict
+        from theseo_anysearch.rllib.models import build_rllib_model_dict
         from theseo_anysearch.models import ModelConfig
-        self._build = _build_rllib_model_dict
+        self._build = build_rllib_model_dict
         self.ModelConfig = ModelConfig
 
     def test_fcnet_path_when_no_custom_model(self):

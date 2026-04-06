@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 if TYPE_CHECKING:
     from theseo_anysearch.experiments.output import OutputStore
@@ -288,6 +291,8 @@ def _build_multi_payload(
     episode_reward_mean: float,
     experiment_name: str,
     run_id: str,
+    *,
+    init_filled_file: str,
 ) -> dict:
     return {
         "experiment_name": experiment_name,
@@ -301,7 +306,7 @@ def _build_multi_payload(
             "total_reward": sum(episode.total_rewards),
             "steps_taken": len(episode.steps),
             "success": len(episode.steps) < episode.max_steps,
-            "init_filled": [[x, y, z] for x, y, z in episode.init_filled],
+            "init_filled_file": init_filled_file,
             "start_positions": [list(p) if p else None for p in episode.start_positions],
             "goal_positions":  [list(p) if p else None for p in episode.goal_positions],
             "steps": [
@@ -332,30 +337,53 @@ class MultiTrajectoryWriter:
     def record(self, episode: MultiVoxelEpisodeData) -> None:
         self._buffer.append(episode)
 
+    def _write_snapshot(
+        self,
+        json_path: str,
+        episode: MultiVoxelEpisodeData,
+        iteration: int,
+        episode_reward_mean: float,
+        experiment_name: str,
+        run_id: str,
+    ) -> None:
+        init_filled_file = _init_filled_sidecar_path(json_path)
+        _write_init_filled_sidecar(self._store, init_filled_file, episode.init_filled)
+        payload = _build_multi_payload(
+            episode,
+            iteration,
+            episode_reward_mean,
+            experiment_name,
+            run_id,
+            init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+        )
+        self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+
     def on_iteration_end(
         self,
         iteration: int,
         episode_reward_mean: float,
         experiment_name: str,
         run_id: str,
+        force: bool = False,
     ) -> list[str]:
         if not self._buffer:
             return []
         best_ep = max(self._buffer, key=lambda e: sum(e.total_rewards))
         self._buffer.clear()
-
-        payload = _build_multi_payload(best_ep, iteration, episode_reward_mean, experiment_name, run_id)
-        serialised = json.dumps(payload, indent=2).encode()
         written: list[str] = []
 
-        if self._trajectory_every and iteration % self._trajectory_every == 0:
+        if (
+            force
+            or iteration == 1
+            or (self._trajectory_every and iteration % self._trajectory_every == 0)
+        ):
             path = f"trajectories/iter_{iteration:06d}.json"
-            self._store.write_bytes(path, serialised)
+            self._write_snapshot(path, best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             written.append(path)
 
         if self._best_trajectory and episode_reward_mean > self._best_reward:
             self._best_reward = episode_reward_mean
-            self._store.write_bytes("trajectories/best.json", serialised)
+            self._write_snapshot("trajectories/best.json", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             self._store.write_json(
                 "trajectories/best_meta.json",
                 {"iteration": iteration, "episode_reward_mean": episode_reward_mean},
@@ -412,12 +440,34 @@ class TrajectoryWriter:
         """Buffer one episode for the current iteration."""
         self._buffer.append(episode)
 
+    def _write_snapshot(
+        self,
+        json_path: str,
+        episode: VoxelEpisodeData,
+        iteration: int,
+        episode_reward_mean: float,
+        experiment_name: str,
+        run_id: str,
+    ) -> None:
+        init_filled_file = _init_filled_sidecar_path(json_path)
+        _write_init_filled_sidecar(self._store, init_filled_file, episode.init_filled)
+        payload = _build_payload(
+            episode,
+            iteration,
+            episode_reward_mean,
+            experiment_name,
+            run_id,
+            init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+        )
+        self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+
     def on_iteration_end(
         self,
         iteration: int,
         episode_reward_mean: float,
         experiment_name: str,
         run_id: str,
+        force: bool = False,
     ) -> list[str]:
         """
         Select the best-rewarded episode from the buffer, clear the buffer,
@@ -431,19 +481,20 @@ class TrajectoryWriter:
         best_ep = max(self._buffer, key=lambda e: e.total_reward)
         self._buffer.clear()
 
-        payload = _build_payload(best_ep, iteration, episode_reward_mean, experiment_name, run_id)
-        serialised = json.dumps(payload, indent=2).encode()
-
         written: list[str] = []
 
-        if self._trajectory_every and iteration % self._trajectory_every == 0:
+        if (
+            force
+            or iteration == 1
+            or (self._trajectory_every and iteration % self._trajectory_every == 0)
+        ):
             path = f"trajectories/iter_{iteration:06d}.json"
-            self._store.write_bytes(path, serialised)
+            self._write_snapshot(path, best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             written.append(path)
 
         if self._best_trajectory and episode_reward_mean > self._best_reward:
             self._best_reward = episode_reward_mean
-            self._store.write_bytes("trajectories/best.json", serialised)
+            self._write_snapshot("trajectories/best.json", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             self._store.write_json(
                 "trajectories/best_meta.json",
                 {"iteration": iteration, "episode_reward_mean": episode_reward_mean},
@@ -469,6 +520,8 @@ def _build_payload(
     episode_reward_mean: float,
     experiment_name: str,
     run_id: str,
+    *,
+    init_filled_file: str,
 ) -> dict:
     return {
         "experiment_name": experiment_name,
@@ -483,7 +536,7 @@ def _build_payload(
             "total_reward": episode.total_reward,
             "steps_taken": len(episode.steps),
             "success": episode.success,
-            "init_filled": [[x, y, z] for x, y, z in episode.init_filled],
+            "init_filled_file": init_filled_file,
             "start_pos": list(episode.start_pos) if episode.start_pos else None,
             "goal_pos": list(episode.goal_pos) if episode.goal_pos else None,
             "steps": [
@@ -502,3 +555,18 @@ def _build_payload(
             ],
         },
     }
+
+
+def _init_filled_sidecar_path(json_path: str) -> str:
+    return json_path.removesuffix(".json") + "_init_filled.npy"
+
+
+def _write_init_filled_sidecar(
+    store: "OutputStore",
+    rel_path: str,
+    init_filled: list[tuple[int, int, int]],
+) -> None:
+    array = np.asarray(init_filled, dtype=np.uint16).reshape((-1, 3))
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    store.write_bytes(rel_path, buffer.getvalue())

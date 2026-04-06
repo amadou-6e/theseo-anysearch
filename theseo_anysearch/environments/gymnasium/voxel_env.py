@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
+
+log = logging.getLogger(__name__)
 
 def _max_manhattan(grid_size: int) -> float:
     """Maximum Manhattan distance in a cubic grid of given side length."""
@@ -32,6 +35,16 @@ class VoxelEnv(RustGymnasiumEnv):
 
     def __init__(self, config: dict) -> None:
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
+        pool_config = (config.get("geometry_pool") or {})
+        if pool_config.get("pool_dir"):
+            from theseo_anysearch.environments.geometry_pool import GeometryPool
+            self._geo_pool: "GeometryPool | None" = GeometryPool(
+                pool_config["pool_dir"], seed=config.get("seed", 42)
+            )
+            self._augmentation_config: dict = pool_config.get("augmentation") or {}
+        else:
+            self._geo_pool = None
+            self._augmentation_config = {}
         super().__init__(config)
         self._init_obs_cache(config)
 
@@ -80,7 +93,8 @@ class VoxelEnv(RustGymnasiumEnv):
 
         if config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
-            geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size)
+            padding = int(config.get("geometry_padding", 2))
+            geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size, padding=padding)
         else:
             for box in config.get("geometry_boxes") or []:
                 xmin, ymin, zmin, xmax, ymax, zmax = box
@@ -127,11 +141,23 @@ class VoxelEnv(RustGymnasiumEnv):
             return None
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
+        if self._geo_pool is not None:
+            from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
+            grid = self._geo_pool.sample()
+            paste_cfg = self._augmentation_config.get("paste_boxes")
+            if paste_cfg:
+                grid = paste_boxes(grid, paste_cfg, self._obs_rng)
+            cells = GeometryPool.grid_to_cells(grid)
+            self._rust_env.set_geometry(cells)
+            log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
+            return super().reset(seed=seed, options=options)
+
         scale_range = self._config.get("scale_range")
         stl_path = self._config.get("stl_path")
         if scale_range and stl_path:
             lo, hi = float(scale_range[0]), float(scale_range[1])
             new_scale = float(self._obs_rng.uniform(lo, hi))
+            log.debug("VoxelEnv reset: scale=%.1f (range [%.1f, %.1f])", new_scale, lo, hi)
             cfg = dict(self._config)
             cfg["scale"] = new_scale
             self._rust_env = self._build_rust_env(cfg)
@@ -146,6 +172,7 @@ class VoxelEnv(RustGymnasiumEnv):
             self._config.get("geometry_boxes")
             or self._config.get("waypoints_file")
             or self._config.get("stl_path")
+            or self._config.get("geometry_pool")
         )
 
     def _observation_space(self) -> gymnasium.Space:
@@ -219,9 +246,7 @@ class VoxelEnv(RustGymnasiumEnv):
 
         if self._obs_mode == "box":
             self._buf_grid[:] = self._rust_env.box_obs(self._box_radius)
-            grid = self._buf_grid.copy()
-            grid = self._augment_grid(grid, 2 * self._box_radius + 1)
-            base["local_grid"] = grid
+            base["local_grid"] = self._buf_grid.copy()
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
             base["ray_hits"] = self._buf_rays.copy()
@@ -239,21 +264,3 @@ class VoxelEnv(RustGymnasiumEnv):
                 "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
             )
         return base
-
-    def _augment_grid(self, flat: np.ndarray, n: int) -> np.ndarray:
-        noise_prob   = self._config.get("obs_noise_prob", 0.0)
-        cutout_count = self._config.get("obs_cutout_count", 0)
-        cutout_size  = self._config.get("obs_cutout_size", 1)
-        if noise_prob <= 0.0 and cutout_count <= 0:
-            return flat
-        grid = flat.reshape(n, n, n).copy()
-        if noise_prob > 0.0:
-            mask = self._obs_rng.random(grid.shape) < noise_prob
-            grid[mask] = 1.0 - grid[mask]
-        for _ in range(cutout_count):
-            s = int(self._obs_rng.integers(1, max(2, cutout_size + 1)))
-            x = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            y = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            z = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            grid[x:x + s, y:y + s, z:z + s] = 0.0
-        return grid.flatten()

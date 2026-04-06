@@ -175,6 +175,20 @@ impl VoxelEnv {
     fn agent_filled(&self) -> usize {
         self.world.len().saturating_sub(self.geometry_len)
     }
+
+    /// Replace geometry in-place without reinstantiating the env.
+    /// Clears all filled cells (geometry + trail), fills the new geometry, and
+    /// recomputes surface cells. Does not reset steps or cursor — call reset()
+    /// after set_geometry() to start a new episode.
+    pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
+        self.world.clear();
+        for &coord in &geometry {
+            self.world.set(coord, true);
+        }
+        self.geometry_len = geometry.len();
+        self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
+        self.geometry = geometry;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -364,8 +378,9 @@ impl Environment for VoxelEnv {
 
         StepResult {
             observation,
-            // Formula: step_cost + goal_reward - collision_cost + L2_shaping
-            reward: step_cost + goal_reward - collision_penalty + shaping,
+            // Formula: step_cost + goal_reward + collision_cost + L2_shaping
+            // collision_cost is negative (same sign convention as step_cost)
+            reward: step_cost + goal_reward + collision_penalty + shaping,
             done,
         }
     }

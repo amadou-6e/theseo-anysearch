@@ -53,9 +53,9 @@ class RainbowTrainer(Trainer):
         }
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
-        from theseo_anysearch.rllib.models import _build_rllib_model_dict
+        from theseo_anysearch.rllib.models import build_rllib_model_dict
         model_cfg = config.model_cfg
-        rllib_model = _build_rllib_model_dict(model_cfg)
+        rllib_model = build_rllib_model_dict(model_cfg)
 
         rllib_config = (
             RllibDQNConfig()

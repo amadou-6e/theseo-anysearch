@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
@@ -8,6 +9,8 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.pettingzoo.base import RustParallelEnv
+
+log = logging.getLogger(__name__)
 
 
 def _max_manhattan(grid_size: int) -> float:
@@ -18,8 +21,8 @@ def _max_euclidean(grid_size: int) -> float:
     return math.sqrt(3.0) * (grid_size - 1)
 
 
-def _stl_max_extent(path: str) -> float:
-    """Return the maximum bounding-box extent of an ASCII STL's vertices."""
+def _stl_bounding_box(path: str) -> tuple[float, float, float, float]:
+    """Return (max_extent, min_x, min_y, min_z) of an ASCII STL's vertices."""
     verts: list[list[float]] = []
     with open(path, encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -29,31 +32,42 @@ def _stl_max_extent(path: str) -> float:
                 if len(parts) >= 4:
                     verts.append([float(parts[1]), float(parts[2]), float(parts[3])])
     if not verts:
-        return 1.0
+        return 1.0, 0.0, 0.0, 0.0
     arr = np.array(verts, dtype=np.float64)
-    extent = float((arr.max(axis=0) - arr.min(axis=0)).max())
-    return extent if extent > 0.0 else 1.0
+    mins = arr.min(axis=0)
+    extent = float((arr.max(axis=0) - mins).max())
+    return (extent if extent > 0.0 else 1.0), float(mins[0]), float(mins[1]), float(mins[2])
 
 
-def _load_stl_geometry(path: str, scale: float, grid_size: int) -> list[tuple[int, int, int]]:
+def _load_stl_geometry(
+    path: str, scale: float, grid_size: int, padding: int = 2
+) -> list[tuple[int, int, int]]:
     """Voxelize an STL file and return the filled (solid) voxel coordinates.
 
-    ``scale`` is the *target resolution* — the number of voxels the STL's
-    longest axis should span.  It is converted to voxels-per-unit before
-    being passed to the Rust voxelizer, which prevents the sampler from
-    iterating over millions of sub-voxel steps on large STL meshes.
+    ``scale`` is the number of voxels the STL's longest axis should span.
+    Values larger than ``grid_size - 2*padding - 1`` are silently clamped so
+    the geometry always fits within the padded region.  The geometry is placed
+    with ``padding`` free voxels on each side for agent circumnavigation.
     """
     import theseo_core
-    max_extent = _stl_max_extent(path)
-    voxels_per_unit = scale / max_extent
+    max_extent, min_x, min_y, min_z = _stl_bounding_box(path)
+    # scale = voxels the STL's longest axis should span in the grid.
+    # Clamp so the geometry fits within the padded region.
+    max_span = grid_size - 2 * padding - 1
+    effective_scale = min(float(scale), float(max_span))
+    voxels_per_unit = effective_scale / max_extent
+    origin = float(padding + 1)
     sampler = theseo_core.PyVoxelSampler(grid_size=grid_size)
-    sampler.load_stl(path, voxels_per_unit)
+    sampler.load_stl_normalized(path, voxels_per_unit, origin, origin, origin)
     free = set(sampler.free_cells())
+    # Clip to padded region — f32 barycentric rounding can create stray surface
+    # voxels at padding, which corrupt solid_fill; exclude them explicitly.
+    lo, hi = padding + 1, grid_size - padding
     return [
         (x, y, z)
-        for x in range(1, grid_size + 1)
-        for y in range(1, grid_size + 1)
-        for z in range(1, grid_size + 1)
+        for x in range(lo, hi + 1)
+        for y in range(lo, hi + 1)
+        for z in range(lo, hi + 1)
         if (x, y, z) not in free
     ]
 
@@ -87,6 +101,16 @@ class MultiVoxelEnv(RustParallelEnv):
 
     def __init__(self, config: dict) -> None:
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
+        pool_config = (config.get("geometry_pool") or {})
+        if pool_config.get("pool_dir"):
+            from theseo_anysearch.environments.geometry_pool import GeometryPool
+            self._geo_pool: "GeometryPool | None" = GeometryPool(
+                pool_config["pool_dir"], seed=config.get("seed", 42)
+            )
+            self._augmentation_config: dict = pool_config.get("augmentation") or {}
+        else:
+            self._geo_pool = None
+            self._augmentation_config = {}
         super().__init__(config)
 
     @classmethod
@@ -107,7 +131,8 @@ class MultiVoxelEnv(RustParallelEnv):
 
         if config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
-            geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size)
+            padding = int(config.get("geometry_padding", 2))
+            geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size, padding=padding)
         else:
             for box in config.get("geometry_boxes") or []:
                 xmin, ymin, zmin, xmax, ymax, zmax = box
@@ -129,14 +154,32 @@ class MultiVoxelEnv(RustParallelEnv):
         )
 
     def _has_goal(self) -> bool:
-        return bool(self._config.get("geometry_boxes") or self._config.get("stl_path"))
+        return bool(
+            self._config.get("geometry_boxes")
+            or self._config.get("stl_path")
+            or self._config.get("geometry_pool")
+        )
 
     def reset(self, seed: int | None = None, options: dict | None = None):
+        if self._geo_pool is not None:
+            from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
+            grid = self._geo_pool.sample()
+            paste_cfg = self._augmentation_config.get("paste_boxes")
+            if paste_cfg:
+                grid = paste_boxes(grid, paste_cfg, self._obs_rng)
+            cells = GeometryPool.grid_to_cells(grid)
+            self._rust_env.set_geometry(cells)
+            log.debug(
+                "MultiVoxelEnv reset: pool sample -> %d filled cells", len(cells)
+            )
+            return super().reset(seed, options)
+
         scale_range = self._config.get("scale_range")
         stl_path = self._config.get("stl_path")
         if scale_range and stl_path:
             lo, hi = float(scale_range[0]), float(scale_range[1])
             new_scale = float(self._obs_rng.uniform(lo, hi))
+            log.debug("MultiVoxelEnv reset: scale=%.1f (range [%.1f, %.1f])", new_scale, lo, hi)
             cfg = dict(self._config)
             cfg["scale"] = new_scale
             self._rust_env = self._build_rust_env(cfg)
@@ -167,12 +210,6 @@ class MultiVoxelEnv(RustParallelEnv):
         use_euclidean = self._config.get("distance_metric", "euclidean") == "euclidean"
 
         goal_positions = self._rust_env.goal_positions() if self._has_goal() else []
-
-        noise_prob   = self._config.get("obs_noise_prob", 0.0)
-        cutout_count = self._config.get("obs_cutout_count", 0)
-        cutout_size  = self._config.get("obs_cutout_size", 1)
-        radius       = self._config.get("box_radius", 2)
-        n            = 2 * radius + 1
 
         result = {}
         for i, agent_id in enumerate(self.agents):
@@ -210,31 +247,8 @@ class MultiVoxelEnv(RustParallelEnv):
             else:
                 obs = self._zero_obs(agent_id)
 
-            if (noise_prob > 0.0 or cutout_count > 0) and "local_grid" in obs:
-                obs["local_grid"] = self._augment_grid(obs["local_grid"], n, noise_prob, cutout_count, cutout_size)
-
             result[agent_id] = obs
         return result
-
-    def _augment_grid(
-        self,
-        flat: np.ndarray,
-        n: int,
-        noise_prob: float,
-        cutout_count: int,
-        cutout_size: int,
-    ) -> np.ndarray:
-        grid = flat.reshape(n, n, n).copy()
-        if noise_prob > 0.0:
-            mask = self._obs_rng.random(grid.shape) < noise_prob
-            grid[mask] = 1.0 - grid[mask]
-        for _ in range(cutout_count):
-            s = int(self._obs_rng.integers(1, max(2, cutout_size + 1)))
-            x = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            y = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            z = int(self._obs_rng.integers(0, max(1, n - s + 1)))
-            grid[x:x + s, y:y + s, z:z + s] = 0.0
-        return grid.flatten()
 
     def _encode_actions(self, actions: dict) -> list[int]:
         return [int(actions.get(agent, 0)) for agent in self.possible_agents]

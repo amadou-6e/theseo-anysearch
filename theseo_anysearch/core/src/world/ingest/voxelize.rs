@@ -11,6 +11,12 @@ pub struct BlockPlacement {
 }
 
 pub fn voxelize_mesh(mesh: &StlMesh, origin: Coord, scale: f32) -> Vec<BlockPlacement> {
+    voxelize_mesh_f32(mesh, (origin.0 as f32, origin.1 as f32, origin.2 as f32), scale)
+}
+
+/// Like `voxelize_mesh` but accepts a floating-point origin, allowing sub-voxel
+/// placement adjustments (e.g. for padding-aware, normalised STL loading).
+pub fn voxelize_mesh_f32(mesh: &StlMesh, origin: (f32, f32, f32), scale: f32) -> Vec<BlockPlacement> {
     let mut coords = HashSet::new();
 
     for tri in &mesh.triangles {
@@ -142,7 +148,7 @@ fn solid_fill(surface: HashSet<Coord>) -> HashSet<Coord> {
 
 fn sample_edge(
     coords: &mut HashSet<Coord>,
-    origin: Coord,
+    origin: (f32, f32, f32),
     scale: f32,
     a: [f32; 3],
     b: [f32; 3],
@@ -166,7 +172,7 @@ fn sample_edge(
 
 fn sample_triangle(
     coords: &mut HashSet<Coord>,
-    origin: Coord,
+    origin: (f32, f32, f32),
     scale: f32,
     a: [f32; 3],
     b: [f32; 3],
@@ -288,10 +294,10 @@ const CUBE_STL: &str = r#"solid cube
   endfacet
 endsolid cube"#;
 
-fn insert_point(coords: &mut HashSet<Coord>, origin: Coord, scale: f32, point: [f32; 3]) {
-    let x = origin.0 as f32 + point[0] * scale;
-    let y = origin.1 as f32 + point[1] * scale;
-    let z = origin.2 as f32 + point[2] * scale;
+fn insert_point(coords: &mut HashSet<Coord>, origin: (f32, f32, f32), scale: f32, point: [f32; 3]) {
+    let x = origin.0 + point[0] * scale;
+    let y = origin.1 + point[1] * scale;
+    let z = origin.2 + point[2] * scale;
 
     if x < 0.0 || y < 0.0 || z < 0.0 {
         return;

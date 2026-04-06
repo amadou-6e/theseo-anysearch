@@ -19,6 +19,10 @@ path = "src/bin/voxel_replay.rs"
 name = "garden-show-data"
 path = "src/bin/garden_show_data.rs"
 
+[[bin]]
+name = "pool-explorer"
+path = "src/bin/pool_explorer.rs"
+
 [dependencies]
 eframe = "0.31"
 egui = "0.31"

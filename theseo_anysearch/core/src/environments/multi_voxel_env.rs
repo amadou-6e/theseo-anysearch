@@ -192,6 +192,20 @@ impl MultiAgentVoxelEnv {
 
     pub fn agent_count(&self) -> usize { self.agent_count }
 
+    /// Replace geometry in-place without reinstantiating the env.
+    /// Clears all filled cells (geometry + trail), fills the new geometry, and
+    /// recomputes surface cells. Does not reset steps or agent positions — call
+    /// reset() after set_geometry() to start a new episode.
+    pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
+        self.world.clear();
+        for &coord in &geometry {
+            self.world.set(coord, true);
+        }
+        self.geometry_len = geometry.len();
+        self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
+        self.geometry = geometry;
+    }
+
     /// Total agent-filled cells (excludes geometry).
     fn voxel_count(&self) -> usize {
         self.world.len().saturating_sub(self.geometry_len)
@@ -279,8 +293,8 @@ impl MultiAgentVoxelEnv {
                     self.world.set(dest, true);
                 }
             } else if dest == (x, y, z) {
-                // Boundary hit — blocked move costs collision_cost.
-                step_reward -= self.reward_config.collision_cost;
+                // Boundary hit — collision_cost is negative, so add it as a penalty.
+                step_reward += self.reward_config.collision_cost;
             }
             // Occupied-cell collision: no extra penalty (cursor stays, step consumed).
 

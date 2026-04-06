@@ -5,7 +5,7 @@ from typing import Any
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
-from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus
+from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
 
 
 # TODO! instead of private functions, create ustils file
@@ -116,6 +116,7 @@ class PPOTrainer(Trainer):
         env_config = {
             "stl_path": str(env.stl_path) if env.stl_path else None,
             "scale": env.scale,
+            "scale_range": env.scale_range,
             "agent_count": env.agent_count,
             "max_steps": env.max_steps,
             "seed": env.seed,
@@ -123,18 +124,22 @@ class PPOTrainer(Trainer):
             "box_radius": env.box_radius,
             "box_radii": env.box_radii,
             "ray_max_len": env.ray_max_len,
+            "grid_size": env.grid_size,
             "trail_mode": env.trail_mode,
             "geometry_boxes": env.geometry_boxes,
+            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
+            "geometry_padding": env.geometry_padding,
             "waypoints_file": env.waypoints_file,
             "step_cost": env.step_cost,
+            "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,
             "distance_shaping": env.distance_shaping,
         }
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
-        from theseo_anysearch.rllib.models import _build_rllib_model_dict
+        from theseo_anysearch.rllib.models import build_rllib_model_dict
         model_cfg = config.model_cfg
-        rllib_model = _build_rllib_model_dict(model_cfg)
+        rllib_model = build_rllib_model_dict(model_cfg)
         minibatch_size = algo_cfg.minibatch_size or min(
             128, algo_cfg.train_batch_size)
 
