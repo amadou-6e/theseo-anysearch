@@ -1,3 +1,5 @@
+"""Local runner implementation for RLlib training jobs."""
+
 from __future__ import annotations
 
 from theseo_anysearch.rllib.runner.base import Runner

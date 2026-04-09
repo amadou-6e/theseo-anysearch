@@ -1,3 +1,5 @@
+"""Single-agent PPO trainer integration for the voxel environment."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -42,6 +44,7 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
 
 # TODO! why is this a class? make helper if no reason
 class VoxelEnvPathHelper:
+    """Path helper for PPO runtime artifacts tied to voxel environment training."""
 
     @staticmethod
     def ray_root(output_dir: str) -> str:

@@ -18,6 +18,19 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class TrainResult:
+    """Summary of one completed garden training run.
+
+    Parameters
+    ----------
+    epochs_trained : int
+        Number of epochs completed.
+    loss_curve : list[dict]
+        Recorded train and validation loss values per epoch.
+    final_val_loss : float
+        Best validation loss observed during training.
+    stopped_early : bool
+        Whether training ended via early stopping.
+    """
     epochs_trained: int
     loss_curve: list[dict] = field(default_factory=list)
     final_val_loss: float = float("inf")

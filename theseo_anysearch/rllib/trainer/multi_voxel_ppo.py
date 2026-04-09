@@ -1,3 +1,5 @@
+"""Multi-agent PPO trainer integration for the voxel environment."""
+
 from __future__ import annotations
 
 from typing import Any

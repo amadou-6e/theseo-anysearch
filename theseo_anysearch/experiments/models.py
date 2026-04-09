@@ -1,3 +1,5 @@
+"""Experiment-level configuration models for runs, sweeps, rendering, and tracking."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,6 +27,17 @@ def _default_anyscale_config() -> AnyscaleConfig:
 # ---------------------------------------------------------------------------
 
 class ExperimentMeta(BaseModel):
+    """Experiment identity and output metadata.
+
+    Parameters
+    ----------
+    name : str
+        Experiment name used to derive output paths and registry references.
+    output_dir : Path
+        Base directory containing experiment outputs.
+    seed : int
+        Experiment-level seed used for reproducibility.
+    """
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -37,6 +50,17 @@ class ExperimentMeta(BaseModel):
 # ---------------------------------------------------------------------------
 
 class CameraPosition(BaseModel):
+    """Named camera preset used by rendering configuration.
+
+    Parameters
+    ----------
+    name : str
+        Camera preset name.
+    yaw : float
+        Yaw angle in degrees.
+    pitch : float
+        Pitch angle in degrees.
+    """
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -45,6 +69,13 @@ class CameraPosition(BaseModel):
 
 
 class RendersConfig(BaseModel):
+    """Rendering configuration for experiment visualization outputs.
+
+    Parameters
+    ----------
+    camera_positions : list[CameraPosition]
+        Named camera presets to use for rendered outputs.
+    """
     model_config = ConfigDict(extra="forbid")
 
     camera_positions: list[CameraPosition] = Field(default_factory=list)
@@ -55,6 +86,17 @@ class RendersConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class MLflowConfig(BaseModel):
+    """MLflow tracking configuration.
+
+    Parameters
+    ----------
+    tracking_uri : str | None
+        MLflow backend URI. When omitted, MLflow uses its default behavior.
+    experiment_name : str | None
+        MLflow experiment name override.
+    artifact_store : str | None
+        Artifact root override for MLflow-managed files.
+    """
     model_config = ConfigDict(extra="forbid")
 
     tracking_uri: str | None = None       # None → MLflow default (./mlruns)
@@ -67,6 +109,17 @@ class MLflowConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PBTConfig(BaseModel):
+    """Population Based Training scheduler configuration.
+
+    Parameters
+    ----------
+    perturbation_interval : int
+        Iteration interval between PBT mutations.
+    resample_probability : float
+        Probability of resampling a mutated hyperparameter.
+    hyperparam_mutations : dict[str, Any]
+        Mutation rules applied by the scheduler.
+    """
     model_config = ConfigDict(extra="forbid")
 
     perturbation_interval: int = 20
@@ -129,6 +182,41 @@ class FLAMLSchedulerConfig(BaseModel):
 
 
 class TuneConfig(BaseModel):
+    """Hyperparameter sweep configuration for experiment-level tuning.
+
+    Parameters
+    ----------
+    scheduler : str
+        Tune scheduler name.
+    num_samples : int
+        Number of sampled trials to run.
+    metric : str
+        Optimization metric name.
+    mode : {"max", "min"}
+        Optimization direction for ``metric``.
+    max_concurrent : int
+        Maximum number of concurrent trials.
+    search_space : dict[str, Any]
+        Search space specification expressed in YAML-friendly form.
+    asha_config : ASHASchedulerConfig | None
+        Optional ASHA scheduler overrides.
+    pbt_config : PBTConfig | None
+        Optional PBT scheduler overrides.
+    hyperband_config : HyperbandSchedulerConfig | None
+        Optional Hyperband scheduler overrides.
+    bohb_config : BOHBSchedulerConfig | None
+        Optional BOHB scheduler overrides.
+    optuna_config : OptunaSchedulerConfig | None
+        Optional Optuna scheduler overrides.
+    cmaes_config : CMAESSchedulerConfig | None
+        Optional CMA-ES scheduler overrides.
+    flaml_config : FLAMLSchedulerConfig | None
+        Optional FLAML scheduler overrides.
+    ray_storage_dir : Path | None
+        Override for Ray Tune storage root.
+    ray_temp_dir : Path | None
+        Override for Ray runtime temp directory.
+    """
     model_config = ConfigDict(extra="forbid")
 
     scheduler: Literal[

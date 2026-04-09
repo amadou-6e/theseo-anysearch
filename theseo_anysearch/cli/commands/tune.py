@@ -1,3 +1,5 @@
+"""CLI helpers for hyperparameter search and sweep execution."""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,5 @@
+"""Abstract ownership points for project algorithm configuration objects."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

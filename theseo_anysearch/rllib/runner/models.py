@@ -1,3 +1,5 @@
+"""Configuration models for RLlib runner selection and execution."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

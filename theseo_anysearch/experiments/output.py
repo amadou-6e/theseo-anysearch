@@ -1,3 +1,5 @@
+"""Structured output store for experiment artifacts, checkpoints, and trajectories."""
+
 from __future__ import annotations
 
 import json

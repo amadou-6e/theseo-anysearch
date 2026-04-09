@@ -1,3 +1,5 @@
+"""Run, resume, inspect, and finalize single experiment executions."""
+
 from __future__ import annotations
 
 import itertools
@@ -54,6 +56,29 @@ if TYPE_CHECKING:
 
 
 class RunInfo(BaseModel):
+    """Persisted metadata for a single experiment run.
+
+    Parameters
+    ----------
+    run_id : str
+        Unique identifier for the run directory.
+    experiment_name : str
+        Registered experiment name.
+    start_time : str
+        UTC ISO timestamp for run start.
+    end_time : str | None
+        UTC ISO timestamp for run end.
+    status : str
+        Current run status.
+    checkpoint_iterations : list[int]
+        Iterations for which checkpoints have been written.
+    trajectory_iterations : list[int]
+        Iterations for which periodic trajectories exist.
+    render_files : list[str]
+        Relative render artifact paths.
+    mlflow_run_url : str | None
+        Optional MLflow run URL for the experiment.
+    """
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
@@ -68,6 +93,31 @@ class RunInfo(BaseModel):
 
 
 class InspectResult(BaseModel):
+    """Structured result returned by run inspection.
+
+    Parameters
+    ----------
+    run_id : str
+        Unique identifier for the inspected run.
+    experiment_name : str
+        Experiment name.
+    status : str
+        Current run status.
+    start_time : str
+        UTC ISO timestamp for run start.
+    end_time : str | None
+        UTC ISO timestamp for run end.
+    config : dict[str, Any]
+        Parsed experiment configuration.
+    checkpoint_iterations : list[int]
+        Iterations with saved checkpoints.
+    trajectory_iterations : list[int]
+        Iterations with saved trajectories.
+    render_files : list[str]
+        Relative render artifact paths.
+    mlflow_run_url : str | None
+        Optional MLflow run URL for the experiment.
+    """
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
@@ -191,6 +241,16 @@ def _build_trainer(config: ExperimentConfig, output_dir: Path) -> Trainer:
 
 
 class ExperimentRunner:
+    """Run, resume, repeat, inspect, and finalize single experiments.
+
+    Parameters
+    ----------
+    config : ExperimentConfig
+        Validated experiment configuration to execute.
+    config_path : Path | None
+        Optional source YAML path written into run artifacts.
+    """
+
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
         self._config = config
         self._config_path = config_path

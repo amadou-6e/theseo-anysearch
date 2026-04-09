@@ -1,3 +1,5 @@
+"""Collect, serialize, and manage evaluation trajectories for runs and sweeps."""
+
 from __future__ import annotations
 
 import io
@@ -18,6 +20,25 @@ if TYPE_CHECKING:
 
 @dataclass
 class VoxelStepData:
+    """Per-step trajectory record for a single-agent voxel episode.
+
+    Parameters
+    ----------
+    step : int
+        Zero-based step index.
+    action : int
+        Discrete action index selected by the policy.
+    reward : float
+        Reward received after the action.
+    done : bool
+        Whether the episode ended after this step.
+    cursor_x, cursor_y, cursor_z : int
+        Cursor position after the step.
+    voxel_count : int
+        Total filled voxel count after the step.
+    placed : bool
+        Whether this step created a new filled voxel.
+    """
     step: int
     action: int        # 0..25 = index into 26-neighbor cube {-1,0,1}³ \ origin
     reward: float
@@ -31,6 +52,31 @@ class VoxelStepData:
 
 @dataclass
 class VoxelEpisodeData:
+    """Trajectory record for one single-agent evaluation episode.
+
+    Parameters
+    ----------
+    agent_count : int
+        Number of agents represented in the episode.
+    max_steps : int
+        Episode step limit.
+    obs_mode : str
+        Observation mode used during evaluation.
+    init_filled : list[tuple[int, int, int]]
+        Filled voxels present at episode start.
+    steps : list[VoxelStepData]
+        Recorded per-step data.
+    total_reward : float
+        Total episode reward.
+    success : bool
+        Whether the goal was reached before timeout.
+    grid_size : int
+        Side length of the voxel grid.
+    start_pos : tuple[int, int, int] | None
+        Start position, when available.
+    goal_pos : tuple[int, int, int] | None
+        Goal position, when available.
+    """
     agent_count: int
     max_steps: int
     obs_mode: str
@@ -149,6 +195,23 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
 
 @dataclass
 class MultiVoxelStepData:
+    """Per-step trajectory record for a multi-agent voxel episode.
+
+    Parameters
+    ----------
+    step : int
+        Zero-based step index.
+    actions : list[int]
+        Per-agent action indices.
+    rewards : list[float]
+        Per-agent rewards for the step.
+    done : bool
+        Whether the multi-agent episode ended after this step.
+    cursors : list[tuple[int, int, int]]
+        Per-agent cursor positions after the step.
+    placed : list[bool]
+        Per-agent placement flags for the step.
+    """
     step: int
     actions: list[int]           # per-agent, len == agent_count
     rewards: list[float]         # per-agent
@@ -159,6 +222,25 @@ class MultiVoxelStepData:
 
 @dataclass
 class MultiVoxelEpisodeData:
+    """Trajectory record for one multi-agent evaluation episode.
+
+    Parameters
+    ----------
+    agent_count : int
+        Number of agents represented in the episode.
+    max_steps : int
+        Episode step limit.
+    steps : list[MultiVoxelStepData]
+        Recorded per-step data.
+    total_rewards : list[float]
+        Per-agent cumulative rewards.
+    start_positions : list[tuple[int, int, int] | None]
+        Per-agent start positions.
+    goal_positions : list[tuple[int, int, int] | None]
+        Per-agent goal positions.
+    init_filled : list[tuple[int, int, int]]
+        Filled voxels present at episode start.
+    """
     agent_count: int
     max_steps: int
     steps: list[MultiVoxelStepData]

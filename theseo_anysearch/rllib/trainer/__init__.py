@@ -1,3 +1,5 @@
+"""Trainer package for algorithm-specific RLlib trainer implementations."""
+
 from theseo_anysearch.rllib.trainer.base import RllibTrainResult, TrainResult, Trainer
 from theseo_anysearch.rllib.trainer.ddpg import DDPGTrainer
 from theseo_anysearch.rllib.trainer.dqn import DQNTrainer

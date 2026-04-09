@@ -1,3 +1,5 @@
+"""Base ownership points for reward configuration objects."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

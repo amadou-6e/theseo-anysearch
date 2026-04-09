@@ -1,3 +1,5 @@
+"""Concrete reward configuration models used by RLlib integrations."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

@@ -1,3 +1,5 @@
+"""Load experiment YAML files and resolve typed configuration blocks."""
+
 from __future__ import annotations
 
 from pathlib import Path

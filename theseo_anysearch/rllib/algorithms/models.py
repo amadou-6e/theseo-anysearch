@@ -1,3 +1,5 @@
+"""Concrete RLlib algorithm configuration models and lookup helpers."""
+
 from __future__ import annotations
 
 from pydantic import ConfigDict
@@ -97,4 +99,16 @@ ALGORITHM_CONFIGS: dict[str, type[AlgorithmConfig]] = {
 
 
 def get_algorithm_config_class(name: str) -> type[AlgorithmConfig]:
+    """Return the concrete algorithm config class for a registered algorithm name.
+
+    Parameters
+    ----------
+    name : str
+        Registered algorithm name.
+
+    Returns
+    -------
+    type[AlgorithmConfig]
+        Matching config class, or ``AlgorithmConfig`` when the name is unknown.
+    """
     return ALGORITHM_CONFIGS.get(name.lower(), AlgorithmConfig)

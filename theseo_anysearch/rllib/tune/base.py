@@ -1,3 +1,5 @@
+"""Base ownership points for tune scheduler and search abstractions."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

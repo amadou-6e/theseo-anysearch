@@ -124,6 +124,24 @@ class VoxelEncoderTriplanar(nn.Module):
 
 
 def build_encoder(architecture: str, n: int, channels: list[int], latent_dim: int) -> nn.Module:
+    """Build an encoder module for the requested garden architecture.
+
+    Parameters
+    ----------
+    architecture : str
+        Encoder architecture family name.
+    n : int
+        Spatial side length of the voxel observation.
+    channels : list[int]
+        Convolution channel widths.
+    latent_dim : int
+        Latent embedding size.
+
+    Returns
+    -------
+    nn.Module
+        Encoder module matching the requested architecture.
+    """
     if architecture == "voxel_box_3dcnn":
         return VoxelEncoder3D(n, channels, latent_dim)
     if architecture == "voxel_box_2dcnn":

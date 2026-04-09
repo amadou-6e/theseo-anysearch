@@ -1,3 +1,5 @@
+"""Core Pydantic models shared across training, environments, and config loading."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +9,59 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EnvConfig(BaseModel):
+    """Environment configuration shared by training and experiment loading.
+
+    Parameters
+    ----------
+    stl_path : Path | None
+        Optional STL file to voxelize into the environment geometry.
+    scale : float
+        Fixed STL voxelization scale when ``scale_range`` is not used.
+    agent_count : int
+        Number of agents requested by the environment configuration.
+    max_steps : int
+        Maximum number of environment steps per episode.
+    seed : int
+        Base random seed for resets and procedural choices.
+    obs_mode : {"scalar", "box", "radial", "hierarchical_box"}
+        Observation encoding exposed to the policy.
+    box_radius : int
+        Radius used for single-scale local voxel box observations.
+    box_radii : list[int] | None
+        Radii used for hierarchical box observations.
+    ray_max_len : int
+        Maximum ray length for radial observations.
+    grid_size : int
+        Side length of the cubic voxel grid.
+    trail_mode : bool
+        Whether movement automatically fills visited cells.
+    geometry_boxes : list[list[int]] | None
+        Procedural box geometry definitions.
+    waypoints_file : str | None
+        Optional JSON file with fixed start and goal waypoints.
+    step_cost : float
+        Per-step reward penalty.
+    collision_cost : float
+        Additional reward penalty on blocked moves.
+    goal_reward : float
+        Terminal reward awarded when the goal is reached.
+    distance_shaping : float
+        Potential-based shaping coefficient toward the goal.
+    distance_metric : {"euclidean", "manhattan"}
+        Distance metric used for shaping.
+    stl_paths : list[Path] | None
+        Optional set of STL files used for map diversity.
+    scale_range : list[float] | None
+        Minimum and maximum voxelization scale for STL diversity.
+    geometry_pool_size : int
+        Number of procedural geometries to pre-generate.
+    scale_variants_per_map : int
+        Number of STL re-voxelizations generated per map.
+    geometry_padding : int
+        Free-space padding around imported geometry.
+    geometry_pool : dict | None
+        Precomputed geometry pool configuration produced by extraction tools.
+    """
     model_config = ConfigDict(extra="forbid")
 
     stl_path: Path | None = None
@@ -47,6 +102,35 @@ class EnvConfig(BaseModel):
 
 
 class TrainingConfig(BaseModel):
+    """Training configuration for RLlib runs.
+
+    Parameters
+    ----------
+    algorithm : str
+        Registered trainer algorithm name.
+    model : str
+        Registered model configuration family name.
+    runner : {"local", "anyscale"}
+        Execution backend used for training.
+    iterations : int
+        Number of training iterations to run.
+    checkpoint_interval : int
+        Iteration interval for checkpoint creation.
+    require_gpu : bool
+        Whether training must fail if no GPU is available.
+    num_gpus : float | None
+        Explicit RLlib GPU allocation override.
+    num_env_runners : int
+        Number of rollout workers or env runners.
+    trajectory_every : int
+        Iteration interval for periodic trajectory snapshots.
+    best_trajectory : bool
+        Whether to keep a best-so-far evaluation trajectory.
+    output_dir : Path
+        Base output directory for runtime artifacts.
+    video_every : int
+        Iteration interval for rendered videos.
+    """
     model_config = ConfigDict(extra="forbid")
 
     algorithm: str
@@ -64,6 +148,17 @@ class TrainingConfig(BaseModel):
 
 
 class AnyscaleConfig(BaseModel):
+    """Anyscale execution configuration.
+
+    Parameters
+    ----------
+    cluster_env : str
+        Cluster environment name.
+    compute_config : str
+        Compute configuration name.
+    project : str
+        Anyscale project identifier.
+    """
     model_config = ConfigDict(extra="forbid")
 
     cluster_env: str
@@ -72,6 +167,17 @@ class AnyscaleConfig(BaseModel):
 
 
 class AlgorithmConfig(BaseModel):
+    """Base algorithm hyperparameters shared by multiple trainers.
+
+    Parameters
+    ----------
+    lr : float
+        Learning rate.
+    gamma : float
+        Discount factor.
+    train_batch_size : int
+        Training batch size passed into RLlib.
+    """
     model_config = ConfigDict(extra="forbid")
 
     lr: float = 3e-4
@@ -80,6 +186,19 @@ class AlgorithmConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
+    """Base model configuration shared by trainer integrations.
+
+    Parameters
+    ----------
+    hidden_sizes : list[int]
+        Hidden layer sizes for the default fully connected policy.
+    activation : {"relu", "tanh", "elu"}
+        Hidden activation used by the default policy.
+    custom_model : str | None
+        Registered RLlib custom model name.
+    custom_model_config : dict[str, Any] | None
+        Extra configuration passed to the custom model.
+    """
     model_config = ConfigDict(extra="forbid")
 
     hidden_sizes: list[int] = [256, 256]
@@ -89,8 +208,11 @@ class ModelConfig(BaseModel):
 
 
 class AlgorithmEnvCompatibilityMixin:
+    """Validate algorithm and environment combinations after model creation."""
+
     @model_validator(mode="after")
     def _validate_algorithm_env_compatibility(self):
+        """Reject unsupported algorithm and agent-count combinations."""
         single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
         if algorithm in single_agent_algorithms and self.env.agent_count != 1:
@@ -103,6 +225,21 @@ class AlgorithmEnvCompatibilityMixin:
 
 
 class Settings(AlgorithmEnvCompatibilityMixin, BaseModel):
+    """Validated runtime settings consumed by trainers and runners.
+
+    Parameters
+    ----------
+    env : EnvConfig
+        Environment configuration.
+    training : TrainingConfig
+        Training execution configuration.
+    anyscale : AnyscaleConfig
+        Anyscale execution configuration.
+    algorithm_config : AlgorithmConfig
+        Algorithm-specific hyperparameter block.
+    model_cfg : ModelConfig
+        Model configuration block loaded from ``model_config`` in YAML.
+    """
     # Pydantic v2 reserves 'model_config' as a class variable.
     # The YAML key is 'model_config'; stored as 'model_cfg' with an alias.
     model_config = ConfigDict(extra="forbid", populate_by_name=True)

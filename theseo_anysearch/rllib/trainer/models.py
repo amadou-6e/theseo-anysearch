@@ -1,3 +1,5 @@
+"""Trainer-specific helper models used by RLlib training code."""
+
 from __future__ import annotations
 
 from pydantic import ConfigDict

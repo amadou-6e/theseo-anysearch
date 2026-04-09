@@ -1,3 +1,5 @@
+"""Single-agent Gymnasium voxel environment backed by the Rust core."""
+
 from __future__ import annotations
 
 import json
