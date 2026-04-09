@@ -81,6 +81,71 @@ def _detect_num_gpus(require_gpu: bool = False, *, num_gpus: float | None = None
     return n
 
 
+class _TensorBoardRunWriter:
+    """Write per-iteration training metrics to a run-local TensorBoard logdir.
+
+    The writer keeps TensorBoard ownership in the project trainer layer instead of
+    relying on RLlib's legacy logger placement, which may write to opaque Ray temp
+    locations. Event files are emitted under ``<run_dir>/tensorboard`` so
+    ``anysearch tensorboard`` can point at the run directory directly.
+    """
+
+    def __init__(self, output_dir: Path) -> None:
+        self._log_dir = output_dir.joinpath("tensorboard")
+        self._writer: Any | None = None
+
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+        except Exception:
+            return
+
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._writer = SummaryWriter(log_dir=str(self._log_dir))
+
+    @property
+    def enabled(self) -> bool:
+        """Return True when TensorBoard writing is active."""
+        return self._writer is not None
+
+    @property
+    def log_dir(self) -> Path:
+        """Return the concrete TensorBoard log directory."""
+        return self._log_dir
+
+    def log_iteration(self, result: "TrainResult") -> None:
+        """Append one iteration of scalar metrics to the event stream."""
+        if self._writer is None:
+            return
+
+        self._writer.add_scalar(
+            "train/episode_reward_mean",
+            result.episode_reward_mean,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/episode_len_mean",
+            result.episode_len_mean,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/episodes_total",
+            result.episodes_total,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/elapsed_s",
+            result.elapsed_s,
+            result.iteration,
+        )
+        self._writer.flush()
+
+    def close(self) -> None:
+        """Close the underlying SummaryWriter when it exists."""
+        if self._writer is None:
+            return
+        self._writer.close()
+
+
 class RllibTrainResult(BaseModel):
     """Normalized view over RLlib training results.
 
@@ -268,6 +333,7 @@ class Trainer(ABC):
 
         training = self._config.training
         results: list[TrainResult] = []
+        tb_writer = _TensorBoardRunWriter(self._output_dir)
 
         # --- Trajectory writer setup (lazy import to keep CLI fast) ---
         traj_every = training.trajectory_every
@@ -288,51 +354,55 @@ class Trainer(ABC):
             _exp_name = self._output_dir.parent.name
             _env_cfg = self._env_config_dict()
 
-        for i in range(self._iteration, training.iterations):
-            t0 = time.perf_counter()
-            rllib_result = self._algo.train()
-            elapsed = time.perf_counter() - t0
+        try:
+            for i in range(self._iteration, training.iterations):
+                t0 = time.perf_counter()
+                rllib_result = self._algo.train()
+                elapsed = time.perf_counter() - t0
 
-            self._iteration = i + 1
-            parsed = RllibTrainResult.from_raw(rllib_result)
-            self._episodes_total = parsed.parse_episodes_total(
-            ) or self._episodes_total
+                self._iteration = i + 1
+                parsed = RllibTrainResult.from_raw(rllib_result)
+                self._episodes_total = parsed.parse_episodes_total(
+                ) or self._episodes_total
 
-            result = TrainResult.from_rllib(self._iteration, rllib_result,
-                                            elapsed)
-            results.append(result)
-            self.on_iteration_end(result)
+                result = TrainResult.from_rllib(self._iteration, rllib_result,
+                                                elapsed)
+                results.append(result)
+                tb_writer.log_iteration(result)
+                self.on_iteration_end(result)
 
-            if self._iteration % training.checkpoint_interval == 0:
-                self.checkpoint()
+                if self._iteration % training.checkpoint_interval == 0:
+                    self.checkpoint()
 
-            # --- Trajectory recording ---
-            _is_last_iter = self._iteration == training.iterations
-            if _traj_writer is not None and _env_cfg is not None:
-                try:
-                    if _is_multi:
-                        from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
-                        episode = collect_multi_eval_episode(
-                            self._algo, _env_cfg, seed=self._iteration
+                # --- Trajectory recording ---
+                _is_last_iter = self._iteration == training.iterations
+                if _traj_writer is not None and _env_cfg is not None:
+                    try:
+                        if _is_multi:
+                            from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
+                            episode = collect_multi_eval_episode(
+                                self._algo, _env_cfg, seed=self._iteration
+                            )
+                        else:
+                            from theseo_anysearch.experiments.trajectory import collect_eval_episode
+                            episode = collect_eval_episode(
+                                self._algo, _env_cfg, seed=self._iteration
+                            )
+                        _traj_writer.record(episode)
+                        _traj_writer.on_iteration_end(
+                            self._iteration,
+                            result.episode_reward_mean,
+                            _exp_name,
+                            _run_id,
+                            force=_is_last_iter,
                         )
-                    else:
-                        from theseo_anysearch.experiments.trajectory import collect_eval_episode
-                        episode = collect_eval_episode(
-                            self._algo, _env_cfg, seed=self._iteration
+                    except Exception as exc:
+                        warnings.warn(
+                            f"trajectory collection failed at iter {self._iteration}: {exc}",
+                            stacklevel=2,
                         )
-                    _traj_writer.record(episode)
-                    _traj_writer.on_iteration_end(
-                        self._iteration,
-                        result.episode_reward_mean,
-                        _exp_name,
-                        _run_id,
-                        force=_is_last_iter,
-                    )
-                except Exception as exc:
-                    warnings.warn(
-                        f"trajectory collection failed at iter {self._iteration}: {exc}",
-                        stacklevel=2,
-                    )
+        finally:
+            tb_writer.close()
 
         return results
 
