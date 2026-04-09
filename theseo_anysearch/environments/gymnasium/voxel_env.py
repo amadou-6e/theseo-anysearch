@@ -26,7 +26,8 @@ class VoxelEnv(RustGymnasiumEnv):
     Single-agent Gymnasium wrapper for the Rust VoxelEnv.
 
     Observation space: Dict(steps_remaining: Box(1,), voxel_count: Box(1,),
-                            [goal_distance: Box(1,)] when geometry is present)
+                            [goal_distance: Box(1,), goal_direction: Box(3,)]
+                            when geometry is present)
     Action space: Discrete(26) — all 26 face/edge/corner neighbors in {-1,0,1}³
 
     Movement collision (boundary hit or occupied cell) cancels the move —
@@ -68,13 +69,15 @@ class VoxelEnv(RustGymnasiumEnv):
         self._buf_steps = np.zeros(1, dtype=np.float32)
         self._buf_voxel = np.zeros(1, dtype=np.float32)
         self._buf_goal  = np.zeros(1, dtype=np.float32)
+        self._buf_goal_direction = np.zeros(3, dtype=np.float32)
         if self._obs_mode != "scalar":
             self._buf_cursor = np.zeros(3, dtype=np.float32)
         if self._obs_mode == "box":
             n = 2 * self._box_radius + 1
             self._buf_grid = np.empty(n ** 3, dtype=np.float32)
         elif self._obs_mode == "radial":
-            self._buf_rays = np.empty(27, dtype=np.float32)
+            self._buf_rays = np.empty(26, dtype=np.float32)
+            self._buf_ray_types = np.empty(26, dtype=np.float32)
         elif self._obs_mode == "hierarchical_box":
             flat_size = sum((2 * r + 1) ** 3 for r in self._box_radii)
             self._buf_grid = np.empty(flat_size, dtype=np.float32)
@@ -179,8 +182,14 @@ class VoxelEnv(RustGymnasiumEnv):
 
     def _observation_space(self) -> gymnasium.Space:
         mode = self._config.get("obs_mode", "scalar")
-        goal_space = {"goal_distance": spaces.Box(0.0, 1.0, (1,), np.float32)} \
-            if self._has_goal() else {}
+        goal_space = (
+            {
+                "goal_distance": spaces.Box(0.0, 1.0, (1,), np.float32),
+                "goal_direction": spaces.Box(-1.0, 1.0, (3,), np.float32),
+            }
+            if self._has_goal()
+            else {}
+        )
 
         if mode == "scalar":
             return spaces.Dict({
@@ -202,7 +211,8 @@ class VoxelEnv(RustGymnasiumEnv):
                 "steps_remaining": spaces.Box(0.0, 1.0,   (1,),  np.float32),
                 "voxel_count":     spaces.Box(0.0, np.inf, (1,),  np.float32),
                 "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),  np.float32),
-                "ray_hits":        spaces.Box(0.0, 1.0,   (27,), np.float32),
+                "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
+                "ray_hit_types":   spaces.Box(0.0, 255.0, (26,), np.float32),
                 **goal_space,
             })
         if mode == "hierarchical_box":
@@ -235,6 +245,9 @@ class VoxelEnv(RustGymnasiumEnv):
         if self._has_goal_flag and rust_obs.goal_distance is not None:
             self._buf_goal[0] = rust_obs.goal_distance * self._inv_max_manhattan
             base["goal_distance"] = self._buf_goal.copy()
+            if rust_obs.goal_direction is not None:
+                self._buf_goal_direction[:] = rust_obs.goal_direction
+                base["goal_direction"] = self._buf_goal_direction.copy()
 
         if self._obs_mode == "scalar":
             return base
@@ -251,7 +264,9 @@ class VoxelEnv(RustGymnasiumEnv):
             base["local_grid"] = self._buf_grid.copy()
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
+            self._buf_ray_types[:] = self._rust_env.radial_obs_types(self._ray_max_len)
             base["ray_hits"] = self._buf_rays.copy()
+            base["ray_hit_types"] = self._buf_ray_types.copy()
         elif self._obs_mode == "hierarchical_box":
             offset = 0
             for r in self._box_radii:
