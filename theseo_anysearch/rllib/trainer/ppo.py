@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
@@ -15,6 +17,21 @@ def _build_rllib_ppo(config: Settings) -> Any:
     return PPOTrainer.build_algorithm_from_settings(config)
 
 
+def _log_stage(message: str) -> None:
+    """Print a timestamped PPO startup message for foreground debugging."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[ppo] {ts} {message}", flush=True)
+
+
+def _append_stage_log(output_dir: str, scope: str, message: str) -> None:
+    """Append a timestamped stage marker to the run-local debug log."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = Path(output_dir, "debug_stage.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{scope}] {ts} {message}\n")
+
+
 def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
     import os as _os
     from pathlib import Path
@@ -25,6 +42,8 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
     output_path.mkdir(parents=True, exist_ok=True)
 
     if ray.is_initialized():
+        _log_stage("Ray runtime already initialized")
+        _append_stage_log(output_dir, "ppo", "Ray runtime already initialized")
         _write_ray_runtime_metadata(output_path)
         return
 
@@ -32,6 +51,14 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
     ray_root = VoxelEnvPathHelper.ray_root(output_dir)
     # num_env_runners workers @ 1 CPU each + 1 for the learner/driver
     num_cpus = max(num_env_runners + 1, 1)
+    _log_stage(
+        f"Initializing Ray runtime with num_cpus={num_cpus} temp_dir={ray_root}"
+    )
+    _append_stage_log(
+        output_dir,
+        "ppo",
+        f"Initializing Ray runtime with num_cpus={num_cpus} temp_dir={ray_root}",
+    )
     ray.init(
         num_cpus=num_cpus,
         ignore_reinit_error=True,
@@ -39,6 +66,8 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
         log_to_driver=False,
         _temp_dir=str(ray_root),
     )
+    _log_stage("Ray runtime initialized")
+    _append_stage_log(output_dir, "ppo", "Ray runtime initialized")
     _write_ray_runtime_metadata(output_path)
 
 
@@ -109,6 +138,12 @@ class PPOTrainer(Trainer):
     def build_algorithm_from_settings(config: Settings) -> Any:
         from ray.rllib.algorithms.ppo import PPOConfig as RllibPPOConfig
 
+        _log_stage("Starting PPO algorithm build")
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            "Starting PPO algorithm build",
+        )
         _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
 
         env = config.env
@@ -137,15 +172,55 @@ class PPOTrainer(Trainer):
             "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,
             "distance_shaping": env.distance_shaping,
+            "debug_log_path": str(Path(config.training.output_dir, "env_debug.log")),
         }
+        _log_stage(
+            f"Registering VoxelEnv with obs_mode={env.obs_mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+        )
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            (
+                "Registering VoxelEnv with "
+                f"obs_mode={env.obs_mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+            ),
+        )
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
+        _log_stage(f"Registered VoxelEnv as {env_id}")
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            f"Registered VoxelEnv as {env_id}",
+        )
 
         from theseo_anysearch.rllib.models import build_rllib_model_dict
         model_cfg = config.model_cfg
+        _log_stage(
+            f"Building RLlib model config type={type(model_cfg).__name__}"
+        )
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            f"Building RLlib model config type={type(model_cfg).__name__}",
+        )
         rllib_model = build_rllib_model_dict(model_cfg)
         minibatch_size = algo_cfg.minibatch_size or min(
             128, algo_cfg.train_batch_size)
 
+        _log_stage(
+            "Constructing RLlib PPOConfig "
+            f"train_batch_size={algo_cfg.train_batch_size} "
+            f"num_env_runners={config.training.num_env_runners}"
+        )
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            (
+                "Constructing RLlib PPOConfig "
+                f"train_batch_size={algo_cfg.train_batch_size} "
+                f"num_env_runners={config.training.num_env_runners}"
+            ),
+        )
         rllib_config = (RllibPPOConfig().api_stack(
             enable_rl_module_and_learner=False,
             enable_env_runner_and_connector_v2=False,
@@ -164,7 +239,20 @@ class PPOTrainer(Trainer):
 
         rllib_config.num_env_runners = config.training.num_env_runners
 
-        return rllib_config.build_algo()
+        _log_stage("Calling RLlib build_algo()")
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            "Calling RLlib build_algo()",
+        )
+        algo = rllib_config.build_algo()
+        _log_stage("RLlib algorithm build completed")
+        _append_stage_log(
+            str(config.training.output_dir),
+            "ppo",
+            "RLlib algorithm build completed",
+        )
+        return algo
 
     def _build_algorithm(self) -> Any:
         return self.build_algorithm_from_settings(self._config)

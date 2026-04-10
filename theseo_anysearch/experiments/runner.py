@@ -140,6 +140,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _append_run_stage(run_dir: Path, message: str) -> None:
+    """Append a timestamped run-stage marker under the concrete run directory."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = run_dir.joinpath("debug_stage.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[runner] {ts} {message}\n")
+
+
 def _lookup_registered_name(run_dir: Path) -> str | None:
     """Return the registry name whose directory contains run_dir, or None."""
     try:
@@ -261,19 +270,23 @@ class ExperimentRunner:
         run_id = _new_run_id()
         run_dir = self._config.run_output_dir.joinpath(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
+        _append_run_stage(run_dir, "Run directory created")
         run_info = RunInfo(
             run_id=run_id,
             experiment_name=self._config.experiment.name,
             start_time=_now_iso(),
         )
         (run_dir / "run.json").write_text(json.dumps(run_info.model_dump()))
+        _append_run_stage(run_dir, "Initial run.json written")
 
         with _loading_throbber():
+            _append_run_stage(run_dir, "Entering loading throbber setup")
             from theseo_anysearch.experiments.output import OutputStore
             from theseo_anysearch.experiments.tracking import MLflowTracker, _flatten_config
 
             run_dir = self._config.run_output_dir.joinpath(run_id)
             store = OutputStore(run_dir)
+            _append_run_stage(run_dir, "OutputStore ready")
 
             if self._config_path:
                 store.write_yaml("experiment.yaml", self._config_path)
@@ -282,20 +295,28 @@ class ExperimentRunner:
                     "experiment.yaml",
                     self._config.model_dump(by_alias=True, mode="json"),
                 )
+            _append_run_stage(run_dir, "experiment.yaml written")
 
             tracker = MLflowTracker(
                 _resolve_mlflow_config(self._config),
                 self._config.experiment.name,
             )
+            _append_run_stage(run_dir, "MLflowTracker created")
             tracker.start_run(run_name=run_id, tags={"project_run_id": run_id})
+            _append_run_stage(run_dir, "MLflow run started")
 
             run_info = run_info.model_copy(update={"mlflow_run_url": tracker.run_url})
             store.write_json("run.json", run_info.model_dump())
+            _append_run_stage(run_dir, "run.json updated with MLflow URL")
             trainer = _build_trainer(self._config, run_dir)
+            _append_run_stage(run_dir, "Trainer built")
 
         try:
+            _append_run_stage(run_dir, "Logging MLflow params")
             tracker.log_params(_flatten_config(self._config))
+            _append_run_stage(run_dir, "MLflow params logged")
             tracker.log_artifact(run_dir / "experiment.yaml")
+            _append_run_stage(run_dir, "experiment.yaml logged to MLflow")
 
             _orig_hook = trainer.on_iteration_end
 
@@ -313,15 +334,20 @@ class ExperimentRunner:
 
             trainer.on_iteration_end = _combined_hook  # type: ignore[method-assign]
 
+            _append_run_stage(run_dir, "Calling trainer.train()")
             trainer.train()
+            _append_run_stage(run_dir, "trainer.train() returned")
             tracker.end_run("FINISHED")
+            _append_run_stage(run_dir, "MLflow run finished")
             return self._finalise(store, run_info, "COMPLETED")
         except KeyboardInterrupt:
             tracker.end_run("FAILED")
+            _append_run_stage(run_dir, "KeyboardInterrupt during run")
             self._finalise(store, run_info, "INTERRUPTED")
             raise
         except Exception:
             tracker.end_run("FAILED")
+            _append_run_stage(run_dir, "Exception during run")
             self._finalise(store, run_info, "FAILED")
             raise
 

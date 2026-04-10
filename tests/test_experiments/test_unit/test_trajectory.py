@@ -15,6 +15,7 @@ import pytest
 
 from theseo_anysearch.experiments.output import OutputStore
 from theseo_anysearch.experiments.trajectory import (
+    EpisodeRunMetrics,
     TrajectoryWriter,
     VoxelEpisodeData,
     VoxelStepData,
@@ -353,3 +354,112 @@ class TestCollectEvalEpisode:
 
         placed_steps = [s for s in ep.steps if s.placed]
         assert len(placed_steps) == n
+
+
+class TestEpisodeRunMetrics:
+    """Tests EpisodeRunMetrics."""
+
+    def test_from_voxel_episode_counts_collisions(self):
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=10,
+            obs_mode="radial",
+            init_filled=[],
+            total_reward=-1.0,
+            success=False,
+            start_pos=(4, 4, 4),
+            goal_pos=(4, 4, 7),
+            steps=[
+                VoxelStepData(
+                    step=0,
+                    action=0,
+                    reward=-0.55,
+                    done=False,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=4,
+                    voxel_count=1,
+                    placed=False,
+                ),
+                VoxelStepData(
+                    step=1,
+                    action=1,
+                    reward=-0.03,
+                    done=False,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=5,
+                    voxel_count=2,
+                    placed=True,
+                ),
+            ],
+        )
+
+        metrics = EpisodeRunMetrics.from_voxel_episode(episode)
+
+        assert metrics.collision_count == 1
+        assert metrics.collision_rate == pytest.approx(0.5)
+        assert metrics.finish_count == 0
+        assert metrics.finish_rate == pytest.approx(0.0)
+
+    def test_from_voxel_episode_computes_success_and_goal_progress(self):
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=10,
+            obs_mode="radial",
+            init_filled=[],
+            total_reward=9.94,
+            success=True,
+            start_pos=(4, 4, 4),
+            goal_pos=(4, 4, 6),
+            steps=[
+                VoxelStepData(
+                    step=0,
+                    action=1,
+                    reward=-0.03,
+                    done=False,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=5,
+                    voxel_count=2,
+                    placed=True,
+                ),
+                VoxelStepData(
+                    step=1,
+                    action=1,
+                    reward=9.97,
+                    done=True,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=6,
+                    voxel_count=3,
+                    placed=True,
+                ),
+            ],
+        )
+
+        metrics = EpisodeRunMetrics.from_voxel_episode(episode)
+
+        assert metrics.finish_count == 1
+        assert metrics.finish_rate == pytest.approx(1.0)
+        assert metrics.mean_steps_on_success == pytest.approx(2.0)
+        assert metrics.goal_progress_mean == pytest.approx(2.0)
+
+    def test_as_scalar_dict_uses_tensorboard_tags(self):
+        metrics = EpisodeRunMetrics(
+            collision_count=2,
+            collision_rate=0.25,
+            finish_count=1,
+            finish_rate=1.0,
+            mean_steps_on_success=8.0,
+            goal_progress_mean=5.0,
+        )
+
+        assert metrics.as_scalar_dict() == {
+            "eval/collision_count": 2.0,
+            "eval/collision_rate": 0.25,
+            "eval/finish_count": 1.0,
+            "eval/finish_rate": 1.0,
+            "eval/mean_steps_on_success": 8.0,
+            "eval/goal_progress_mean": 5.0,
+        }

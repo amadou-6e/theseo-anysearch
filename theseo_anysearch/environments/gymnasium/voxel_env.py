@@ -234,6 +234,11 @@ class VoxelEnv(RustGymnasiumEnv):
         return spaces.Discrete(26)  # all 26 neighbors in {-1,0,1}³ \ {origin}
 
     def _obs_to_numpy(self, rust_obs: Any) -> dict:
+        self._obs_log_count += 1
+        if self._obs_log_count <= 5:
+            self._log_env_stage(
+                f"obs_to_numpy start index={self._obs_log_count} mode={self._obs_mode}"
+            )
         # Write into pre-allocated buffers; copy before returning so RLlib's
         # sample collector (which holds per-step references) sees stable data.
         self._buf_steps[0] = rust_obs.steps_remaining * self._inv_max_steps
@@ -280,4 +285,6 @@ class VoxelEnv(RustGymnasiumEnv):
                 f"Unknown obs_mode: {self._obs_mode!r}. "
                 "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
             )
+        if self._obs_log_count <= 5:
+            self._log_env_stage(f"obs_to_numpy done index={self._obs_log_count}")
         return base

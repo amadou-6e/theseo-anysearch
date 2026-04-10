@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_num_gpus
 from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +259,61 @@ class TestOutputSanity:
         assert ("train/episode_reward_mean", 4.0, 4) in writer.scalars
         assert writer.flush_calls == trainer_settings.training.iterations
         assert writer.closed is True
+
+    def test_train_writes_eval_metrics_under_run_dir(self, trainer_settings: Any):
+        FakeSummaryWriter.instances.clear()
+        trainer_settings.training.trajectory_every = 1
+        trainer_settings.training.best_trajectory = True
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=10,
+            obs_mode="radial",
+            init_filled=[],
+            total_reward=9.94,
+            success=True,
+            start_pos=(4, 4, 4),
+            goal_pos=(4, 4, 6),
+            steps=[
+                VoxelStepData(
+                    step=0,
+                    action=1,
+                    reward=-0.03,
+                    done=False,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=5,
+                    voxel_count=2,
+                    placed=True,
+                ),
+                VoxelStepData(
+                    step=1,
+                    action=1,
+                    reward=9.97,
+                    done=True,
+                    cursor_x=4,
+                    cursor_y=4,
+                    cursor_z=6,
+                    voxel_count=3,
+                    placed=True,
+                ),
+            ],
+        )
+        with patch(
+            "torch.utils.tensorboard.SummaryWriter",
+            new=FakeSummaryWriter,
+        ), patch(
+            "theseo_anysearch.experiments.trajectory.collect_eval_episode",
+            return_value=episode,
+        ):
+            t = make_trainer(trainer_settings)
+            t.train()
+
+        writer = FakeSummaryWriter.instances[0]
+        assert ("eval/collision_count", 0.0, 1) in writer.scalars
+        assert ("eval/finish_count", 1.0, 1) in writer.scalars
+        assert ("eval/finish_rate", 1.0, 1) in writer.scalars
+        assert ("eval/mean_steps_on_success", 2.0, 1) in writer.scalars
+        assert ("eval/goal_progress_mean", 2.0, 1) in writer.scalars
 
     def test_checkpoint_creates_state_json(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)

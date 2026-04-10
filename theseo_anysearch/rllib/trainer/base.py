@@ -5,13 +5,30 @@ from __future__ import annotations
 import json
 import time
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from typing import ClassVar
+from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import Settings
+
+
+def _log_trainer_stage(message: str) -> None:
+    """Print a timestamped trainer progress message for foreground debugging."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[trainer] {ts} {message}", flush=True)
+
+
+def _append_trainer_stage_log(output_dir: Path, message: str) -> None:
+    """Append a timestamped trainer stage marker to the run-local debug log."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = output_dir.joinpath("debug_stage.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[trainer] {ts} {message}\n")
 
 
 def _resolve_pool_dir(geometry_pool: dict | None) -> dict | None:
@@ -137,6 +154,15 @@ class _TensorBoardRunWriter:
             result.elapsed_s,
             result.iteration,
         )
+        self._writer.flush()
+
+    def log_scalars(self, iteration: int, scalars: Mapping[str, float]) -> None:
+        """Append additional scalar metrics for one iteration."""
+        if self._writer is None:
+            return
+
+        for tag, value in scalars.items():
+            self._writer.add_scalar(tag, value, iteration)
         self._writer.flush()
 
     def close(self) -> None:
@@ -329,7 +355,11 @@ class Trainer(ABC):
         import warnings
 
         if self._algo is None:
+            _log_trainer_stage("Building algorithm instance")
+            _append_trainer_stage_log(self._output_dir, "Building algorithm instance")
             self._algo = self._build_algorithm()
+            _log_trainer_stage("Algorithm instance ready")
+            _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
 
         training = self._config.training
         results: list[TrainResult] = []
@@ -344,21 +374,37 @@ class Trainer(ABC):
         if traj_every or best_traj:
             from theseo_anysearch.experiments.output import OutputStore
             from theseo_anysearch.experiments.trajectory import (
+                EpisodeRunMetrics,
                 MultiTrajectoryWriter,
                 TrajectoryWriter,
             )
             _store = OutputStore(self._output_dir)
             _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
             _traj_writer = _Writer(_store, traj_every, best_traj)
+            _metrics_cls = EpisodeRunMetrics
             _run_id = self._output_dir.name
             _exp_name = self._output_dir.parent.name
             _env_cfg = self._env_config_dict()
 
         try:
             for i in range(self._iteration, training.iterations):
+                _log_trainer_stage(
+                    f"Starting train iteration {i + 1}/{training.iterations}"
+                )
+                _append_trainer_stage_log(
+                    self._output_dir,
+                    f"Starting train iteration {i + 1}/{training.iterations}",
+                )
                 t0 = time.perf_counter()
                 rllib_result = self._algo.train()
                 elapsed = time.perf_counter() - t0
+                _log_trainer_stage(
+                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s"
+                )
+                _append_trainer_stage_log(
+                    self._output_dir,
+                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s",
+                )
 
                 self._iteration = i + 1
                 parsed = RllibTrainResult.from_raw(rllib_result)
@@ -378,6 +424,13 @@ class Trainer(ABC):
                 _is_last_iter = self._iteration == training.iterations
                 if _traj_writer is not None and _env_cfg is not None:
                     try:
+                        _log_trainer_stage(
+                            f"Collecting eval trajectory for iteration {self._iteration}"
+                        )
+                        _append_trainer_stage_log(
+                            self._output_dir,
+                            f"Collecting eval trajectory for iteration {self._iteration}",
+                        )
                         if _is_multi:
                             from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
                             episode = collect_multi_eval_episode(
@@ -388,6 +441,11 @@ class Trainer(ABC):
                             episode = collect_eval_episode(
                                 self._algo, _env_cfg, seed=self._iteration
                             )
+                        if _is_multi:
+                            metrics = _metrics_cls.from_multi_voxel_episode(episode)
+                        else:
+                            metrics = _metrics_cls.from_voxel_episode(episode)
+                        tb_writer.log_scalars(self._iteration, metrics.as_scalar_dict())
                         _traj_writer.record(episode)
                         _traj_writer.on_iteration_end(
                             self._iteration,
@@ -395,6 +453,13 @@ class Trainer(ABC):
                             _exp_name,
                             _run_id,
                             force=_is_last_iter,
+                        )
+                        _log_trainer_stage(
+                            f"Recorded eval trajectory for iteration {self._iteration}"
+                        )
+                        _append_trainer_stage_log(
+                            self._output_dir,
+                            f"Recorded eval trajectory for iteration {self._iteration}",
                         )
                     except Exception as exc:
                         warnings.warn(
