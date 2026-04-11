@@ -38,6 +38,22 @@ def make_train_val_datasets(
     aug_cfg: AugmentationConfig,
     split_cfg: SplitConfig,
 ) -> tuple[GardenDataset, GardenDataset]:
+    """Split voxel grids into train and validation datasets.
+
+    Parameters
+    ----------
+    grids : np.ndarray
+        Collected voxel grids with shape ``(N, n, n, n)``.
+    aug_cfg : AugmentationConfig
+        Online augmentation settings applied to the training split.
+    split_cfg : SplitConfig
+        Random split configuration.
+
+    Returns
+    -------
+    tuple[GardenDataset, GardenDataset]
+        Training and validation datasets.
+    """
     rng = np.random.default_rng(split_cfg.seed)
     idx = rng.permutation(len(grids))
     n_val = max(1, int(len(grids) * split_cfg.val_fraction))

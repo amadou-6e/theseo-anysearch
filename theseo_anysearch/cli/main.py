@@ -1,3 +1,16 @@
+"""Typer entrypoint for the AnySearch command-line interface.
+
+Examples
+--------
+Run a training config::
+
+    anysearch run usage/experiments/train/ppo_maps.yaml
+
+Replay a saved run::
+
+    anysearch replay ppo-maps:7367dc57
+"""
+
 from __future__ import annotations
 
 import json
@@ -224,13 +237,23 @@ def run(
     tag: Optional[str] = typer.Option(
         None, "--tag", "-t", help="Sweep tag / output subdirectory name (tune sweeps only)."
     ),
+    resume_tune: bool = typer.Option(
+        False,
+        "--resume-tune",
+        help="Resume the most recent interrupted tune sweep segment for the selected tag.",
+    ),
+    extra_trials: int = typer.Option(
+        0,
+        "--extra-trials",
+        help="Append more trials to an existing completed tune sweep tag.",
+    ),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", help="Override output location (default: the experiment directory)."
     ),
 ) -> None:
     """Start a training run or sweep from an experiment directory or YAML file."""
     from theseo_anysearch.cli.registry import (
-        add_experiment, resolve_config_and_dir,
+        RegistryAccessError, add_experiment, resolve_config_and_dir,
     )
     from theseo_anysearch.experiments.loader import expand_sweep, load_experiment
     from theseo_anysearch.experiments.models import ExperimentConfig, SweepConfig
@@ -246,7 +269,11 @@ def run(
     # For canonical names like config.yaml inside a dedicated directory, register
     # the directory instead so the name comes from the directory basename.
     _reg_path = experiment_dir if config_path.name in ("config.yaml", "experiment.yaml") else config_path
-    name = add_experiment(_reg_path)
+    try:
+        name = add_experiment(_reg_path)
+    except RegistryAccessError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
 
     experiment = load_experiment(config_path)
     experiment = _resolve_geometry_pool_path(experiment, config_path)
@@ -275,7 +302,13 @@ def run(
         from theseo_anysearch.experiments.tune_runner import TuneRunner
         experiment = _apply_output(experiment, effective_output)
         _print_tune_summary(name, experiment, config_path, tag)
-        runner_tune = TuneRunner(experiment, config_path, tag=tag or None)
+        runner_tune = TuneRunner(
+            experiment,
+            config_path,
+            tag=tag or None,
+            resume=resume_tune,
+            extra_trials=extra_trials,
+        )
         result = runner_tune.run()
         print(json.dumps(result, indent=2, default=str))
     else:
@@ -453,8 +486,14 @@ def add(
     from rich.panel import Panel
     from rich.table import Table
 
+    from theseo_anysearch.cli.registry import RegistryAccessError
+
     # Pass the path as-is; add_experiment handles YAML vs directory naming
-    registered_name = add_experiment(directory, name)
+    try:
+        registered_name = add_experiment(directory, name)
+    except RegistryAccessError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
 
     console = Console(file=sys.stdout, highlight=False)
     table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
@@ -605,8 +644,12 @@ def delete(
             console.print(f"  [red]Deleted[/red]  {d}")
 
     if run_id is None and name_in_registry:
-        from theseo_anysearch.cli.registry import save_registry
-        save_registry({k: v for k, v in reg.items() if k != name_in_registry})
+        from theseo_anysearch.cli.registry import RegistryAccessError, save_registry
+        try:
+            save_registry({k: v for k, v in reg.items() if k != name_in_registry})
+        except RegistryAccessError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1)
         console.print(f"  [dim]Removed[/dim]  {name_in_registry} from registry")
 
 
@@ -1177,6 +1220,13 @@ app.add_typer(
 
 
 def main() -> None:
+    """Run the AnySearch Typer application.
+
+    Returns
+    -------
+    None
+        This function delegates to the root Typer app.
+    """
     app()
 
 

@@ -28,6 +28,20 @@ def _config_registry_file() -> Path:
 
 
 def register_config(name: str, path: Path) -> None:
+    """Register a named garden config path in the local config registry.
+
+    Parameters
+    ----------
+    name : str
+        Short config name used for lookup.
+    path : Path
+        Filesystem path to the garden YAML file.
+
+    Returns
+    -------
+    None
+        This function updates the registry in place.
+    """
     f = _config_registry_file()
     reg: dict[str, str] = yaml.safe_load(f.read_text()) or {} if f.exists() else {}
     reg[name] = str(path.resolve())
@@ -48,6 +62,13 @@ def resolve_config(name: str) -> Path | None:
 
 
 def list_configs() -> dict[str, str]:
+    """Return all registered garden config entries.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from short config names to absolute YAML paths.
+    """
     f = _config_registry_file()
     return yaml.safe_load(f.read_text()) or {} if f.exists() else {}
 
@@ -122,6 +143,14 @@ def register_builtin_presets() -> None:
 
 
 class GardenStore:
+    """Persist, discover, and resolve pretrained garden model artifacts.
+
+    Parameters
+    ----------
+    root : Path
+        Root directory containing saved garden model families.
+    """
+
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 

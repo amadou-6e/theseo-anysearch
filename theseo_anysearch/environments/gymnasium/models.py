@@ -1,3 +1,5 @@
+"""Configuration models for Gymnasium environment wrappers."""
+
 from __future__ import annotations
 
 from pydantic import ConfigDict

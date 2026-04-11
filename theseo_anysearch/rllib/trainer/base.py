@@ -1,3 +1,5 @@
+"""Shared trainer logic for building, training, checkpointing, and trajectory recording."""
+
 from __future__ import annotations
 
 import json
@@ -80,6 +82,23 @@ def _detect_num_gpus(require_gpu: bool = False, *, num_gpus: float | None = None
 
 
 class RllibTrainResult(BaseModel):
+    """Normalized view over RLlib training results.
+
+    Parameters
+    ----------
+    env_runners : dict[str, Any]
+        New API stack result block for env runner metrics.
+    episode_reward_mean : float | None
+        Legacy top-level mean episode reward.
+    episode_len_mean : float | None
+        Legacy top-level mean episode length.
+    episodes_total : int | None
+        Legacy total number of episodes seen.
+    training_iteration : int | None
+        RLlib-reported training iteration.
+    time_this_iter_s : float | None
+        Duration of the iteration in seconds.
+    """
     model_config = ConfigDict(extra="allow")
 
     env_runners: dict[str, Any] = Field(default_factory=dict)

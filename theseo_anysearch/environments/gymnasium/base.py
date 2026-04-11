@@ -1,3 +1,5 @@
+"""Base models and helpers for Gymnasium-backed environments."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

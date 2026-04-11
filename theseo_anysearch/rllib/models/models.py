@@ -1,3 +1,5 @@
+"""Model configuration types and lookup helpers for RLlib training."""
+
 from __future__ import annotations
 
 from pydantic import ConfigDict
@@ -25,4 +27,16 @@ MODEL_CONFIGS: dict[str, type[ModelConfig]] = {
 
 # TODO! Dependencies should import MODEL_CONFIGS directly no wrapping function needed
 def get_model_config_class(name: str) -> type[ModelConfig]:
+    """Return the concrete model config class for a registered model name.
+
+    Parameters
+    ----------
+    name : str
+        Registered model family name.
+
+    Returns
+    -------
+    type[ModelConfig]
+        Matching config class, or ``ModelConfig`` when the name is unknown.
+    """
     return MODEL_CONFIGS.get(name.lower(), ModelConfig)

@@ -192,6 +192,22 @@ def _split_by_fill(obs: np.ndarray, min_fill_pct: float) -> tuple[np.ndarray, np
 
 
 class PositionSampleCollector:
+    """Collect garden observations by sampling positions from geometry sources.
+
+    Parameters
+    ----------
+    source : PositionSampleSourceConfig
+        Source definition describing how geometry observations are collected.
+    cache_cfg : CacheConfig
+        Cache settings used for observation reuse.
+    box_radius : int
+        Radius of the local observation cube to sample.
+    min_fill_pct : float
+        Minimum occupied percentage required for a sample to count as non-empty.
+    empty_sample_ratio : float
+        Fraction of the final dataset reserved for empty samples.
+    """
+
     def __init__(
         self,
         source: PositionSampleSourceConfig,

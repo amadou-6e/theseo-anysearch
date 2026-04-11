@@ -1,3 +1,5 @@
+"""Multi-agent voxel environment adapter backed by the Rust core."""
+
 from __future__ import annotations
 
 import logging

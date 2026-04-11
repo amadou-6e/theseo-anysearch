@@ -1,3 +1,5 @@
+"""CLI helpers for listing, inspecting, repeating, and resuming experiments."""
+
 from __future__ import annotations
 
 import json

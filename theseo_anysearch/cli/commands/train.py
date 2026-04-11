@@ -1,3 +1,5 @@
+"""CLI helpers for starting and managing training runs."""
+
 from __future__ import annotations
 
 import json

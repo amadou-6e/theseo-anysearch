@@ -1,3 +1,5 @@
+"""Environment package for voxel and surface navigation tasks."""
+
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.environments.pettingzoo.surface_env import SurfaceEnv
 from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv

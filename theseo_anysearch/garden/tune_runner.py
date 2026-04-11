@@ -116,6 +116,16 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
 
 
 class GardenTuneRunner:
+    """Run Ray Tune sweeps for garden encoder pretraining.
+
+    Parameters
+    ----------
+    config_path : Path
+        Path to the garden config YAML file.
+    tag : str | None
+        Optional run tag appended to the sweep name.
+    """
+
     def __init__(self, config_path: Path, tag: str | None = None) -> None:
         from theseo_anysearch.garden.data_config import load_garden_config
         self._cfg = load_garden_config(config_path)

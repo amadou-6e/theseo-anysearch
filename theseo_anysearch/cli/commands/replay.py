@@ -1,3 +1,16 @@
+"""CLI helpers for replaying saved trajectories and tune sweeps.
+
+Examples
+--------
+Replay the best episode from a run::
+
+    anysearch replay ppo-maps:7367dc57 --best
+
+Browse all trajectories in a sweep::
+
+    anysearch replay multi_agent_ppo_asha:latest
+"""
+
 from __future__ import annotations
 
 import subprocess
