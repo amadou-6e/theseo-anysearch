@@ -1,3 +1,7 @@
+pub const BLOCK_KIND_FILLED: u8 = 1;
+pub const BLOCK_KIND_START: u8 = 2;
+pub const BLOCK_KIND_GOAL: u8 = 3;
+
 #[derive(Clone, Debug)]
 pub struct Block {
     pub kind: u8,
@@ -8,7 +12,7 @@ pub struct Block {
 impl Default for Block {
     fn default() -> Self {
         Self {
-            kind: 1,
+            kind: BLOCK_KIND_FILLED,
             active: true,
             reward_weight: 1.0,
         }

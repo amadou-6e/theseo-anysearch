@@ -45,6 +45,10 @@ impl WorldState {
         self.filled.contains_key(&coord)
     }
 
+    pub fn is_blocking(&self, coord: Coord) -> bool {
+        self.filled.get(&coord).is_some_and(|block| block.active)
+    }
+
     pub fn set(&mut self, coord: Coord, filled: bool) {
         if filled {
             let _ = self.set_block(coord, Block::default());

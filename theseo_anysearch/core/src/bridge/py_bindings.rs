@@ -792,6 +792,9 @@ pub struct PyVoxelObservation {
     /// Manhattan distance to the active goal, or None if no goal is set.
     #[pyo3(get)]
     pub goal_distance: Option<u32>,
+    /// Signed normalized delta from cursor to goal in x, y, z, or None if unset.
+    #[pyo3(get)]
+    pub goal_direction: Option<(f32, f32, f32)>,
 }
 
 /// Python-visible step result returned by PyVoxelEnv.step().
@@ -822,6 +825,29 @@ impl PyStepResultVoxel {
 #[pyclass]
 pub struct PyVoxelEnv {
     inner: VoxelEnv,
+}
+
+impl PyVoxelEnv {
+    fn to_py_observation(
+        &self,
+        obs: crate::environments::voxel_env::VoxelObservation,
+    ) -> PyVoxelObservation {
+        let goal_direction = self.inner.active_goal().map(|(gx, gy, gz)| {
+            let (cx, cy, cz) = self.inner.cursor();
+            let inv = 1.0f32 / f32::from(self.inner.grid_size.saturating_sub(1).max(1));
+            (
+                (f32::from(gx) - f32::from(cx)) * inv,
+                (f32::from(gy) - f32::from(cy)) * inv,
+                (f32::from(gz) - f32::from(cz)) * inv,
+            )
+        });
+        PyVoxelObservation {
+            filled: obs.filled,
+            steps_remaining: obs.steps_remaining,
+            goal_distance: obs.goal_distance,
+            goal_direction,
+        }
+    }
 }
 
 #[pymethods]
@@ -866,11 +892,7 @@ impl PyVoxelEnv {
     /// Cursor is placed at the randomly-selected (or fixed) start position.
     pub fn reset(&mut self, seed: u64) -> PyVoxelObservation {
         let obs = self.inner.reset(seed);
-        PyVoxelObservation {
-            filled: obs.filled,
-            steps_remaining: obs.steps_remaining,
-            goal_distance: obs.goal_distance,
-        }
+        self.to_py_observation(obs)
     }
 
     /// Step the environment.
@@ -910,7 +932,7 @@ impl PyVoxelEnv {
         let rust_action = if dest == (x, y, z) {
             // Hit grid boundary or unknown action — blocked.
             VoxelAction::Collision
-        } else if self.inner.world().is_filled(dest) {
+        } else if self.inner.world().is_blocking(dest) {
             // Occupied cell — blocked, cursor stays.
             VoxelAction::Collision
         } else {
@@ -925,11 +947,7 @@ impl PyVoxelEnv {
 
         let result = self.inner.step(rust_action);
         PyStepResultVoxel {
-            obs: PyVoxelObservation {
-                filled: result.observation.filled,
-                steps_remaining: result.observation.steps_remaining,
-                goal_distance: result.observation.goal_distance,
-            },
+            obs: self.to_py_observation(result.observation),
             reward: result.reward,
             done: result.done,
         }
@@ -993,42 +1011,74 @@ impl PyVoxelEnv {
         result
     }
 
-    /// Returns a 27-element proximity array, one per direction
-    /// (dx, dy, dz) ∈ {-1,0,+1}³ sorted lexicographically on (dx+1, dy+1, dz+1).
+    /// Returns a 26-element proximity array, one per non-self direction
+    /// (dx, dy, dz) ∈ {-1,0,+1}³ \ {(0,0,0)} sorted lexicographically on
+    /// (dx+1, dy+1, dz+1).
     ///
     /// Encoding:
-    ///   0.0                              — no hit within max_len (or cursor cell empty for (0,0,0))
+    ///   0.0                              — no hit within max_len
     ///   1.0 - (d - 1) as f32 / max_len  — hit at step d  (d ∈ 1..=max_len)
-    ///   1.0                              — (0,0,0) direction: cursor cell is filled
     ///
-    /// Index 13 = direction (0,0,0). Lower value = no detection; higher = closer hit.
+    /// Lower value = no detection; higher = closer hit.
     pub fn radial_obs(&self, max_len: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.cursor();
-        let mut result = Vec::with_capacity(27);
+        let mut result = Vec::with_capacity(26);
         for dx in -1i32..=1 {
             for dy in -1i32..=1 {
                 for dz in -1i32..=1 {
                     if dx == 0 && dy == 0 && dz == 0 {
-                        let self_filled = self.inner.world().is_filled((cx, cy, cz)) as u8 as f32;
-                        result.push(self_filled);
-                    } else {
-                        let mut proximity = 0.0f32;
-                        for step in 1..=max_len {
-                            let nx = cx as i32 + dx * step as i32;
-                            let ny = cy as i32 + dy * step as i32;
-                            let nz = cz as i32 + dz * step as i32;
-                            if nx < 0 || ny < 0 || nz < 0
-                                || nx >= 1000 || ny >= 1000 || nz >= 1000
-                            {
-                                break;
-                            }
-                            if self.inner.world().is_filled((nx as u16, ny as u16, nz as u16)) {
-                                proximity = 1.0 - (step - 1) as f32 / max_len as f32;
-                                break;
-                            }
-                        }
-                        result.push(proximity);
+                        continue;
                     }
+                    let mut proximity = 0.0f32;
+                    for step in 1..=max_len {
+                        let nx = cx as i32 + dx * step as i32;
+                        let ny = cy as i32 + dy * step as i32;
+                        let nz = cz as i32 + dz * step as i32;
+                        if nx < 0 || ny < 0 || nz < 0
+                            || nx >= 1000 || ny >= 1000 || nz >= 1000
+                        {
+                            break;
+                        }
+                        if self.inner.world().is_filled((nx as u16, ny as u16, nz as u16)) {
+                            proximity = 1.0 - (step - 1) as f32 / max_len as f32;
+                            break;
+                        }
+                    }
+                    result.push(proximity);
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a 26-element kind array aligned with the action-space ray order.
+    /// Each value is the ``Block.kind`` of the first filled voxel hit in that
+    /// direction, or 0.0 when no hit is detected within ``max_len``.
+    pub fn radial_obs_types(&self, max_len: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.cursor();
+        let mut result = Vec::with_capacity(26);
+        for dx in -1i32..=1 {
+            for dy in -1i32..=1 {
+                for dz in -1i32..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
+                    }
+                    let mut kind = 0.0f32;
+                    for step in 1..=max_len {
+                        let nx = cx as i32 + dx * step as i32;
+                        let ny = cy as i32 + dy * step as i32;
+                        let nz = cz as i32 + dz * step as i32;
+                        if nx < 0 || ny < 0 || nz < 0
+                            || nx >= 1000 || ny >= 1000 || nz >= 1000
+                        {
+                            break;
+                        }
+                        if let Some(block) = self.inner.world().get_block((nx as u16, ny as u16, nz as u16)) {
+                            kind = f32::from(block.kind);
+                            break;
+                        }
+                    }
+                    result.push(kind);
                 }
             }
         }
@@ -1697,9 +1747,9 @@ mod tests {
     // ----- radial_obs -----
 
     #[test]
-    fn radial_obs_length_is_27() {
+    fn radial_obs_length_is_26() {
         let env = env_at_cursor((1, 1, 1));
-        assert_eq!(env.radial_obs(16).len(), 27);
+        assert_eq!(env.radial_obs(16).len(), 26);
     }
 
     #[test]
@@ -1710,27 +1760,12 @@ mod tests {
     }
 
     #[test]
-    fn radial_obs_self_cell_filled_index_13() {
-        // cursor at (1,1,1), fill (1,1,1)
-        let env = env_with_block((1, 1, 1), (1, 1, 1));
-        let obs = env.radial_obs(16);
-        assert_eq!(obs[13], 1.0); // index 13 = (0,0,0)
-    }
-
-    #[test]
-    fn radial_obs_self_cell_empty_index_13() {
-        let env = env_at_cursor((1, 1, 1)); // (1,1,1) empty
-        let obs = env.radial_obs(16);
-        assert_eq!(obs[13], 0.0);
-    }
-
-    #[test]
     fn radial_obs_adjacent_hit_proximity_is_1() {
         // cursor at (5,5,5), fill (6,5,5) — direction (+1,0,0), step d=1
         let env = env_with_block((5, 5, 5), (6, 5, 5));
         let obs = env.radial_obs(16);
-        // direction (+1,0,0): index = (1+1)*9 + (0+1)*3 + (0+1) = 18+3+1 = 22
-        assert_eq!(obs[22], 1.0);
+        // direction (+1,0,0): index 21 in the 26-direction non-self ordering
+        assert_eq!(obs[21], 1.0);
     }
 
     #[test]
@@ -1739,9 +1774,9 @@ mod tests {
         // expected: 1.0 - (8-1)/16.0 = 1.0 - 7/16.0 = 0.5625
         let env = env_with_block((5, 5, 5), (13, 5, 5));
         let obs = env.radial_obs(16);
-        // direction (+1,0,0): index 22
+        // direction (+1,0,0): index 21
         let expected = 1.0 - 7.0f32 / 16.0;
-        assert!((obs[22] - expected).abs() < 1e-6);
+        assert!((obs[21] - expected).abs() < 1e-6);
     }
 
     #[test]
@@ -1751,8 +1786,8 @@ mod tests {
         let env = env_with_block((5, 5, 5), (21, 5, 5));
         let obs = env.radial_obs(16);
         let expected = 1.0f32 / 16.0;
-        assert!((obs[22] - expected).abs() < 1e-6);
-        assert!(obs[22] > 0.0);
+        assert!((obs[21] - expected).abs() < 1e-6);
+        assert!(obs[21] > 0.0);
     }
 
     #[test]
@@ -1760,6 +1795,6 @@ mod tests {
         // empty world, direction (+1,0,0) should be 0.0
         let env = env_at_cursor((5, 5, 5));
         let obs = env.radial_obs(16);
-        assert_eq!(obs[22], 0.0);
+        assert_eq!(obs[21], 0.0);
     }
 }

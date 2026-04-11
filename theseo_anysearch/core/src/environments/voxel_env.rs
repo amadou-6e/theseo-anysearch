@@ -1,4 +1,11 @@
-use crate::world::{Block, Coord, World, WorldState};
+use crate::world::{
+    Block,
+    Coord,
+    World,
+    WorldState,
+    BLOCK_KIND_GOAL,
+    BLOCK_KIND_START,
+};
 
 use super::traits::{Environment, StepResult};
 
@@ -115,7 +122,14 @@ impl VoxelEnv {
     /// Pre-fill geometry obstacle cells. Computes surface cells automatically.
     pub fn with_geometry(mut self, geometry: Vec<Coord>) -> Self {
         for &coord in &geometry {
-            let _ = self.world.set_block(coord, Block::default());
+            let _ = self.world.set_block(
+                coord,
+                Block {
+                    kind: crate::world::BLOCK_KIND_FILLED,
+                    active: true,
+                    reward_weight: 0.0,
+                },
+            );
         }
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
@@ -173,7 +187,14 @@ impl VoxelEnv {
     }
 
     fn agent_filled(&self) -> usize {
-        self.world.len().saturating_sub(self.geometry_len)
+        self.world
+            .iter_filled()
+            .filter(|&&coord| {
+                self.world
+                    .get_block(coord)
+                    .is_some_and(|block| block.active && block.reward_weight > 0.0)
+            })
+            .count()
     }
 
     /// Replace geometry in-place without reinstantiating the env.
@@ -183,7 +204,14 @@ impl VoxelEnv {
     pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
         self.world.clear();
         for &coord in &geometry {
-            self.world.set(coord, true);
+            let _ = self.world.set_block(
+                coord,
+                Block {
+                    kind: crate::world::BLOCK_KIND_FILLED,
+                    active: true,
+                    reward_weight: 0.0,
+                },
+            );
         }
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
@@ -326,6 +354,24 @@ impl Environment for VoxelEnv {
         self.cursor = start;
         // Only set a goal when there are real surface cells or explicit waypoints.
         self.active_goal = if goal != start { Some(goal) } else { None };
+        let _ = self.world.set_block(
+            start,
+            Block {
+                kind: BLOCK_KIND_START,
+                active: false,
+                reward_weight: 0.0,
+            },
+        );
+        if let Some(active_goal) = self.active_goal {
+            let _ = self.world.set_block(
+                active_goal,
+                Block {
+                    kind: BLOCK_KIND_GOAL,
+                    active: false,
+                    reward_weight: 0.0,
+                },
+            );
+        }
 
         let goal_distance = self.active_goal.map(|g| manhattan(self.cursor, g));
         self.prev_goal_dist_l2 = self.active_goal.map_or(0.0, |g| l2(self.cursor, g));
