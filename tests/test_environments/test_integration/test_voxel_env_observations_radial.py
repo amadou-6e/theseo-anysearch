@@ -13,6 +13,7 @@ from ._voxel_validity_support import (
     ACTION_PLUS_Z,
     GOAL,
     MAX_STEPS,
+    RAY_INDEX_MINUS_X,
     RAY_INDEX_PLUS_X,
     RAY_TYPE_INDEX_PLUS_Z,
     START,
@@ -135,3 +136,10 @@ class TestVoxelEnvObservationsRadial:
         )
         geometry_obs, _ = geometry_env.reset(seed=0)
         assert geometry_obs["ray_hit_types"][RAY_INDEX_PLUS_X] == pytest.approx(BLOCK_KIND_FILLED)
+
+    def test_ray_hits_show_grid_boundary_as_blocked_space(self, tmp_path):
+        env = make_radial_test_env(tmp_path, start=(1, 4, 4), goal=GOAL)
+        obs, _ = env.reset(seed=0)
+
+        assert obs["ray_hits"][RAY_INDEX_MINUS_X] == pytest.approx(1.0)
+        assert obs["ray_hit_types"][RAY_INDEX_MINUS_X] == pytest.approx(BLOCK_KIND_FILLED)
