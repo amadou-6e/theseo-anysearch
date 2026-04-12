@@ -89,6 +89,96 @@ class VoxelEpisodeData:
     goal_pos: tuple[int, int, int] | None = None
 
 
+@dataclass
+class EpisodeRunMetrics:
+    """TensorBoard-friendly metrics derived from one evaluation trajectory.
+
+    Parameters
+    ----------
+    collision_count : int
+        Number of blocked movement steps inferred from the trajectory.
+    collision_rate : float
+        Collision count divided by steps taken.
+    finish_count : int
+        Number of successful finishes represented by the episode summary.
+    finish_rate : float
+        Finish count divided by the number of summarized episodes.
+    mean_steps_on_success : float
+        Steps taken when the episode succeeds, else ``0.0``.
+    goal_progress_mean : float
+        Net Manhattan-distance reduction from start to final cursor position.
+    """
+
+    collision_count: int
+    collision_rate: float
+    finish_count: int
+    finish_rate: float
+    mean_steps_on_success: float
+    goal_progress_mean: float
+
+    @classmethod
+    def from_voxel_episode(cls, episode: VoxelEpisodeData) -> "EpisodeRunMetrics":
+        """Summarize one single-agent evaluation trajectory."""
+        steps_taken = len(episode.steps)
+        finish_count = 1 if episode.success else 0
+        collision_count = _count_voxel_collisions(episode)
+        return cls(
+            collision_count=collision_count,
+            collision_rate=(collision_count / steps_taken) if steps_taken else 0.0,
+            finish_count=finish_count,
+            finish_rate=float(finish_count),
+            mean_steps_on_success=float(steps_taken) if episode.success else 0.0,
+            goal_progress_mean=_goal_progress(episode.start_pos, _last_cursor(episode), episode.goal_pos),
+        )
+
+    @classmethod
+    def from_multi_voxel_episode(
+        cls,
+        episode: MultiVoxelEpisodeData,
+    ) -> "EpisodeRunMetrics":
+        """Summarize one multi-agent evaluation trajectory."""
+        steps_taken = len(episode.steps)
+        collision_count = _count_multi_voxel_collisions(episode)
+        finish_count = sum(
+            1
+            for start_pos, goal_pos, final_cursor in zip(
+                episode.start_positions,
+                episode.goal_positions,
+                _last_multi_cursors(episode),
+            )
+            if goal_pos is not None and final_cursor == goal_pos
+        )
+        goal_progress = [
+            _goal_progress(start_pos, final_cursor, goal_pos)
+            for start_pos, goal_pos, final_cursor in zip(
+                episode.start_positions,
+                episode.goal_positions,
+                _last_multi_cursors(episode),
+            )
+        ]
+        return cls(
+            collision_count=collision_count,
+            collision_rate=(collision_count / (steps_taken * episode.agent_count))
+            if steps_taken and episode.agent_count
+            else 0.0,
+            finish_count=finish_count,
+            finish_rate=(finish_count / episode.agent_count) if episode.agent_count else 0.0,
+            mean_steps_on_success=float(steps_taken) if finish_count else 0.0,
+            goal_progress_mean=(sum(goal_progress) / len(goal_progress)) if goal_progress else 0.0,
+        )
+
+    def as_scalar_dict(self) -> dict[str, float]:
+        """Return scalar TensorBoard tags and values."""
+        return {
+            "eval/collision_count": float(self.collision_count),
+            "eval/collision_rate": self.collision_rate,
+            "eval/finish_count": float(self.finish_count),
+            "eval/finish_rate": self.finish_rate,
+            "eval/mean_steps_on_success": self.mean_steps_on_success,
+            "eval/goal_progress_mean": self.goal_progress_mean,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Eval episode collector
 # ---------------------------------------------------------------------------
@@ -485,6 +575,71 @@ def _extract_voxel_count(obs: Any) -> int:
         return int(float(vc[0]) if hasattr(vc, "__len__") else float(vc))
     except Exception:
         return 0
+
+
+def _last_cursor(episode: VoxelEpisodeData) -> tuple[int, int, int] | None:
+    """Return the final cursor position for a single-agent episode."""
+    if episode.steps:
+        last_step = episode.steps[-1]
+        return (last_step.cursor_x, last_step.cursor_y, last_step.cursor_z)
+    return episode.start_pos
+
+
+def _last_multi_cursors(
+    episode: MultiVoxelEpisodeData,
+) -> list[tuple[int, int, int] | None]:
+    """Return the final cursor position for each agent in a multi-agent episode."""
+    if episode.steps:
+        return list(episode.steps[-1].cursors)
+    return list(episode.start_positions)
+
+
+def _count_voxel_collisions(episode: VoxelEpisodeData) -> int:
+    """Infer blocked movement steps from cursor and placement changes."""
+    if episode.start_pos is None:
+        return 0
+
+    collisions = 0
+    prev_cursor = episode.start_pos
+    for step in episode.steps:
+        cursor = (step.cursor_x, step.cursor_y, step.cursor_z)
+        if not step.placed and cursor == prev_cursor:
+            collisions += 1
+        prev_cursor = cursor
+    return collisions
+
+
+def _count_multi_voxel_collisions(episode: MultiVoxelEpisodeData) -> int:
+    """Infer blocked movement steps for all agents in a multi-agent episode."""
+    prev_cursors = list(episode.start_positions)
+    collisions = 0
+    for step in episode.steps:
+        for index, cursor in enumerate(step.cursors):
+            if not step.placed[index] and prev_cursors[index] == cursor:
+                collisions += 1
+            prev_cursors[index] = cursor
+    return collisions
+
+
+def _manhattan_distance(
+    start: tuple[int, int, int],
+    goal: tuple[int, int, int],
+) -> int:
+    """Return Manhattan distance between two voxel coordinates."""
+    return abs(start[0] - goal[0]) + abs(start[1] - goal[1]) + abs(start[2] - goal[2])
+
+
+def _goal_progress(
+    start_pos: tuple[int, int, int] | None,
+    end_pos: tuple[int, int, int] | None,
+    goal_pos: tuple[int, int, int] | None,
+) -> float:
+    """Return net Manhattan-distance reduction toward the goal."""
+    if start_pos is None or end_pos is None or goal_pos is None:
+        return 0.0
+    start_distance = _manhattan_distance(start_pos, goal_pos)
+    end_distance = _manhattan_distance(end_pos, goal_pos)
+    return float(start_distance - end_distance)
 
 
 # ---------------------------------------------------------------------------

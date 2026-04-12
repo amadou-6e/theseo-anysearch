@@ -46,6 +46,18 @@ def _section(title: str) -> None:
 # ---------------------------------------------------------------------------
 
 def bench_raw_rust(env_cfg: dict) -> None:
+    """Benchmark raw Rust environment stepping through the PyO3 boundary.
+
+    Parameters
+    ----------
+    env_cfg : dict
+        Environment configuration dictionary used to initialize the benchmark.
+
+    Returns
+    -------
+    None
+        This function prints throughput metrics to stdout.
+    """
     _section("1. Raw Rust step (PyO3 boundary)")
     import theseo_core
 
@@ -85,6 +97,18 @@ def bench_raw_rust(env_cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def bench_voxel_env(env_cfg: dict) -> None:
+    """Benchmark full Python ``VoxelEnv.step`` execution.
+
+    Parameters
+    ----------
+    env_cfg : dict
+        Environment configuration dictionary used to initialize the benchmark.
+
+    Returns
+    -------
+    None
+        This function prints throughput metrics to stdout.
+    """
     _section("2. Full VoxelEnv.step (Rust + obs conversion)")
     from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
@@ -130,6 +154,18 @@ def bench_voxel_env(env_cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def bench_obs_conversion(env_cfg: dict) -> None:
+    """Benchmark observation conversion and allocation overhead in isolation.
+
+    Parameters
+    ----------
+    env_cfg : dict
+        Environment configuration dictionary used to initialize the benchmark.
+
+    Returns
+    -------
+    None
+        This function prints throughput metrics to stdout.
+    """
     _section("3. _obs_to_numpy allocation cost")
     import theseo_core
     from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
@@ -164,6 +200,21 @@ def bench_obs_conversion(env_cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def profile_episode(env_cfg: dict, output_file: str | None = None) -> None:
+    """Profile repeated environment episodes with ``cProfile``.
+
+    Parameters
+    ----------
+    env_cfg : dict
+        Environment configuration dictionary used to initialize the profiler.
+    output_file : str | None
+        Optional output path for serialized profiling data.
+
+    Returns
+    -------
+    None
+        This function prints the top cumulative profile entries and may write a
+        profile artifact when ``output_file`` is provided.
+    """
     _section("4. cProfile — one full VoxelEnv episode (200 steps)")
     from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
@@ -199,6 +250,18 @@ def profile_episode(env_cfg: dict, output_file: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 def bench_rllib_timers(env_cfg: dict) -> None:
+    """Run one RLlib iteration and print trainer timing metrics.
+
+    Parameters
+    ----------
+    env_cfg : dict
+        Environment configuration dictionary used to initialize the trainer.
+
+    Returns
+    -------
+    None
+        This function prints timing information to stdout.
+    """
     _section("5. RLlib iteration timer breakdown")
     import ray
     from theseo_anysearch.models import (
@@ -255,6 +318,13 @@ def bench_rllib_timers(env_cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """Parse CLI arguments and run the selected profiling routines.
+
+    Returns
+    -------
+    None
+        This function orchestrates the profiling workflow and prints results.
+    """
     parser = argparse.ArgumentParser(description="Profile anysearch environments")
     parser.add_argument("--rllib",  action="store_true", help="Also run RLlib iteration timers (starts Ray)")
     parser.add_argument("--pstats", action="store_true", help="Dump cProfile output to profile.out")

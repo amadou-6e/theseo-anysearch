@@ -285,7 +285,7 @@ impl MultiAgentVoxelEnv {
             };
 
             let moved = dest != (x, y, z) && !self.world.is_filled(dest);
-            let mut step_reward = self.reward_config.step_cost;
+            let mut step_reward = 0.0f32;
 
             if moved {
                 agent.cursor = dest;
@@ -301,15 +301,19 @@ impl MultiAgentVoxelEnv {
             // Goal reward + distance shaping.
             if let Some(goal) = agent.goal {
                 let new_l2 = l2(agent.cursor, goal);
-                let shaping = self.reward_config.distance_shaping * (agent.prev_l2 - new_l2);
+                step_reward += self.reward_config.base_step_reward(
+                    agent.prev_l2,
+                    new_l2,
+                    self.grid_size,
+                );
                 agent.prev_l2 = new_l2;
 
                 if agent.cursor == goal {
                     step_reward += self.reward_config.goal_reward;
                     agent.goal_reached = true;
-                } else {
-                    step_reward += shaping;
                 }
+            } else {
+                step_reward += self.reward_config.step_cost;
             }
 
             rewards[i] = step_reward;

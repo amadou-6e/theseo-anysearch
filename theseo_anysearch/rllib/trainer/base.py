@@ -5,13 +5,30 @@ from __future__ import annotations
 import json
 import time
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from typing import ClassVar
+from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import Settings
+
+
+def _log_trainer_stage(message: str) -> None:
+    """Print a timestamped trainer progress message for foreground debugging."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[trainer] {ts} {message}", flush=True)
+
+
+def _append_trainer_stage_log(output_dir: Path, message: str) -> None:
+    """Append a timestamped trainer stage marker to the run-local debug log."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = output_dir.joinpath("debug_stage.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[trainer] {ts} {message}\n")
 
 
 def _resolve_pool_dir(geometry_pool: dict | None) -> dict | None:
@@ -79,6 +96,80 @@ def _detect_num_gpus(require_gpu: bool = False, *, num_gpus: float | None = None
             "--index-url https://download.pytorch.org/whl/cu124"
         )
     return n
+
+
+class _TensorBoardRunWriter:
+    """Write per-iteration training metrics to a run-local TensorBoard logdir.
+
+    The writer keeps TensorBoard ownership in the project trainer layer instead of
+    relying on RLlib's legacy logger placement, which may write to opaque Ray temp
+    locations. Event files are emitted under ``<run_dir>/tensorboard`` so
+    ``anysearch tensorboard`` can point at the run directory directly.
+    """
+
+    def __init__(self, output_dir: Path) -> None:
+        self._log_dir = output_dir.joinpath("tensorboard")
+        self._writer: Any | None = None
+
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+        except Exception:
+            return
+
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._writer = SummaryWriter(log_dir=str(self._log_dir))
+
+    @property
+    def enabled(self) -> bool:
+        """Return True when TensorBoard writing is active."""
+        return self._writer is not None
+
+    @property
+    def log_dir(self) -> Path:
+        """Return the concrete TensorBoard log directory."""
+        return self._log_dir
+
+    def log_iteration(self, result: "TrainResult") -> None:
+        """Append one iteration of scalar metrics to the event stream."""
+        if self._writer is None:
+            return
+
+        self._writer.add_scalar(
+            "train/episode_reward_mean",
+            result.episode_reward_mean,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/episode_len_mean",
+            result.episode_len_mean,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/episodes_total",
+            result.episodes_total,
+            result.iteration,
+        )
+        self._writer.add_scalar(
+            "train/elapsed_s",
+            result.elapsed_s,
+            result.iteration,
+        )
+        self._writer.flush()
+
+    def log_scalars(self, iteration: int, scalars: Mapping[str, float]) -> None:
+        """Append additional scalar metrics for one iteration."""
+        if self._writer is None:
+            return
+
+        for tag, value in scalars.items():
+            self._writer.add_scalar(tag, value, iteration)
+        self._writer.flush()
+
+    def close(self) -> None:
+        """Close the underlying SummaryWriter when it exists."""
+        if self._writer is None:
+            return
+        self._writer.close()
 
 
 class RllibTrainResult(BaseModel):
@@ -250,6 +341,10 @@ class Trainer(ABC):
             "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,
             "distance_shaping": env.distance_shaping,
+            "distance_reward_mode": env.distance_reward_mode,
+            "zone_reward_min": env.zone_reward_min,
+            "zone_reward_max": env.zone_reward_max,
+            "zone_reward_curve": env.zone_reward_curve,
         }
 
     # ------------------------------------------------------------------
@@ -264,10 +359,15 @@ class Trainer(ABC):
         import warnings
 
         if self._algo is None:
+            _log_trainer_stage("Building algorithm instance")
+            _append_trainer_stage_log(self._output_dir, "Building algorithm instance")
             self._algo = self._build_algorithm()
+            _log_trainer_stage("Algorithm instance ready")
+            _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
 
         training = self._config.training
         results: list[TrainResult] = []
+        tb_writer = _TensorBoardRunWriter(self._output_dir)
 
         # --- Trajectory writer setup (lazy import to keep CLI fast) ---
         traj_every = training.trajectory_every
@@ -278,61 +378,100 @@ class Trainer(ABC):
         if traj_every or best_traj:
             from theseo_anysearch.experiments.output import OutputStore
             from theseo_anysearch.experiments.trajectory import (
+                EpisodeRunMetrics,
                 MultiTrajectoryWriter,
                 TrajectoryWriter,
             )
             _store = OutputStore(self._output_dir)
             _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
             _traj_writer = _Writer(_store, traj_every, best_traj)
+            _metrics_cls = EpisodeRunMetrics
             _run_id = self._output_dir.name
             _exp_name = self._output_dir.parent.name
             _env_cfg = self._env_config_dict()
 
-        for i in range(self._iteration, training.iterations):
-            t0 = time.perf_counter()
-            rllib_result = self._algo.train()
-            elapsed = time.perf_counter() - t0
+        try:
+            for i in range(self._iteration, training.iterations):
+                _log_trainer_stage(
+                    f"Starting train iteration {i + 1}/{training.iterations}"
+                )
+                _append_trainer_stage_log(
+                    self._output_dir,
+                    f"Starting train iteration {i + 1}/{training.iterations}",
+                )
+                t0 = time.perf_counter()
+                rllib_result = self._algo.train()
+                elapsed = time.perf_counter() - t0
+                _log_trainer_stage(
+                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s"
+                )
+                _append_trainer_stage_log(
+                    self._output_dir,
+                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s",
+                )
 
-            self._iteration = i + 1
-            parsed = RllibTrainResult.from_raw(rllib_result)
-            self._episodes_total = parsed.parse_episodes_total(
-            ) or self._episodes_total
+                self._iteration = i + 1
+                parsed = RllibTrainResult.from_raw(rllib_result)
+                self._episodes_total = parsed.parse_episodes_total(
+                ) or self._episodes_total
 
-            result = TrainResult.from_rllib(self._iteration, rllib_result,
-                                            elapsed)
-            results.append(result)
-            self.on_iteration_end(result)
+                result = TrainResult.from_rllib(self._iteration, rllib_result,
+                                                elapsed)
+                results.append(result)
+                tb_writer.log_iteration(result)
+                self.on_iteration_end(result)
 
-            if self._iteration % training.checkpoint_interval == 0:
-                self.checkpoint()
+                if self._iteration % training.checkpoint_interval == 0:
+                    self.checkpoint()
 
-            # --- Trajectory recording ---
-            _is_last_iter = self._iteration == training.iterations
-            if _traj_writer is not None and _env_cfg is not None:
-                try:
-                    if _is_multi:
-                        from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
-                        episode = collect_multi_eval_episode(
-                            self._algo, _env_cfg, seed=self._iteration
+                # --- Trajectory recording ---
+                _is_last_iter = self._iteration == training.iterations
+                if _traj_writer is not None and _env_cfg is not None:
+                    try:
+                        _log_trainer_stage(
+                            f"Collecting eval trajectory for iteration {self._iteration}"
                         )
-                    else:
-                        from theseo_anysearch.experiments.trajectory import collect_eval_episode
-                        episode = collect_eval_episode(
-                            self._algo, _env_cfg, seed=self._iteration
+                        _append_trainer_stage_log(
+                            self._output_dir,
+                            f"Collecting eval trajectory for iteration {self._iteration}",
                         )
-                    _traj_writer.record(episode)
-                    _traj_writer.on_iteration_end(
-                        self._iteration,
-                        result.episode_reward_mean,
-                        _exp_name,
-                        _run_id,
-                        force=_is_last_iter,
-                    )
-                except Exception as exc:
-                    warnings.warn(
-                        f"trajectory collection failed at iter {self._iteration}: {exc}",
-                        stacklevel=2,
-                    )
+                        if _is_multi:
+                            from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
+                            episode = collect_multi_eval_episode(
+                                self._algo, _env_cfg, seed=self._iteration
+                            )
+                        else:
+                            from theseo_anysearch.experiments.trajectory import collect_eval_episode
+                            episode = collect_eval_episode(
+                                self._algo, _env_cfg, seed=self._iteration
+                            )
+                        if _is_multi:
+                            metrics = _metrics_cls.from_multi_voxel_episode(episode)
+                        else:
+                            metrics = _metrics_cls.from_voxel_episode(episode)
+                        tb_writer.log_scalars(self._iteration, metrics.as_scalar_dict())
+                        _traj_writer.record(episode)
+                        _traj_writer.on_iteration_end(
+                            self._iteration,
+                            result.episode_reward_mean,
+                            _exp_name,
+                            _run_id,
+                            force=_is_last_iter,
+                        )
+                        _log_trainer_stage(
+                            f"Recorded eval trajectory for iteration {self._iteration}"
+                        )
+                        _append_trainer_stage_log(
+                            self._output_dir,
+                            f"Recorded eval trajectory for iteration {self._iteration}",
+                        )
+                    except Exception as exc:
+                        warnings.warn(
+                            f"trajectory collection failed at iter {self._iteration}: {exc}",
+                            stacklevel=2,
+                        )
+        finally:
+            tb_writer.close()
 
         return results
 

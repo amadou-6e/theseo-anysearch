@@ -16,6 +16,7 @@ use image::{
     codecs::gif::{GifEncoder, Repeat},
     Delay, Frame, Rgba, RgbaImage,
 };
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Serialize;
 
@@ -863,7 +864,10 @@ impl PyVoxelEnv {
     #[new]
     #[pyo3(signature = (max_steps, trail_mode=true, geometry=None,
                         grid_size=32, step_cost=-0.01, goal_reward=1.0,
-                        distance_shaping=0.0, collision_cost=0.0))]
+                        distance_shaping=0.0, collision_cost=0.0,
+                        distance_reward_mode="progress".to_string(),
+                        zone_reward_min=-1.0, zone_reward_max=-0.01,
+                        zone_reward_curve="linear".to_string()))]
     pub fn new(
         max_steps: u32,
         trail_mode: bool,
@@ -873,19 +877,37 @@ impl PyVoxelEnv {
         goal_reward: f32,
         distance_shaping: f32,
         collision_cost: f32,
-    ) -> Self {
+        distance_reward_mode: String,
+        zone_reward_min: f32,
+        zone_reward_max: f32,
+        zone_reward_curve: String,
+    ) -> PyResult<Self> {
+        let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
+            distance_reward_mode.as_str(),
+        ).ok_or_else(|| PyValueError::new_err(
+            "distance_reward_mode must be 'progress' or 'zone'",
+        ))?;
+        let zone_reward_curve = crate::environments::voxel_env::ZoneRewardCurve::from_name(
+            zone_reward_curve.as_str(),
+        ).ok_or_else(|| PyValueError::new_err(
+            "zone_reward_curve must be 'linear' or 'exponential'",
+        ))?;
         let reward_config = crate::environments::voxel_env::RewardConfig {
             step_cost,
             goal_reward,
             distance_shaping,
             collision_cost,
+            distance_reward_mode,
+            zone_reward_min,
+            zone_reward_max,
+            zone_reward_curve,
         };
         let env = VoxelEnv::new(WorldState::new(), max_steps)
             .with_grid_size(grid_size)
             .with_geometry(geometry.unwrap_or_default())
             .with_trail_mode(trail_mode)
             .with_reward_config(reward_config);
-        Self { inner: env }
+        Ok(Self { inner: env })
     }
 
     /// Reset the environment and return the initial observation.
@@ -1152,7 +1174,10 @@ impl PyMultiVoxelEnv {
     #[new]
     #[pyo3(signature = (agent_count, max_steps, trail_mode=true, geometry=None,
                         grid_size=32, step_cost=-0.01, goal_reward=1.0,
-                        distance_shaping=0.0, collision_cost=0.0))]
+                        distance_shaping=0.0, collision_cost=0.0,
+                        distance_reward_mode="progress".to_string(),
+                        zone_reward_min=-1.0, zone_reward_max=-0.01,
+                        zone_reward_curve="linear".to_string()))]
     pub fn new(
         agent_count: usize,
         max_steps: u32,
@@ -1163,9 +1188,30 @@ impl PyMultiVoxelEnv {
         goal_reward: f32,
         distance_shaping: f32,
         collision_cost: f32,
-    ) -> Self {
+        distance_reward_mode: String,
+        zone_reward_min: f32,
+        zone_reward_max: f32,
+        zone_reward_curve: String,
+    ) -> PyResult<Self> {
+        let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
+            distance_reward_mode.as_str(),
+        ).ok_or_else(|| PyValueError::new_err(
+            "distance_reward_mode must be 'progress' or 'zone'",
+        ))?;
+        let zone_reward_curve = crate::environments::voxel_env::ZoneRewardCurve::from_name(
+            zone_reward_curve.as_str(),
+        ).ok_or_else(|| PyValueError::new_err(
+            "zone_reward_curve must be 'linear' or 'exponential'",
+        ))?;
         let reward_config = crate::environments::voxel_env::RewardConfig {
-            step_cost, goal_reward, distance_shaping, collision_cost,
+            step_cost,
+            goal_reward,
+            distance_shaping,
+            collision_cost,
+            distance_reward_mode,
+            zone_reward_min,
+            zone_reward_max,
+            zone_reward_curve,
         };
         let inner = crate::environments::multi_voxel_env::MultiAgentVoxelEnv::new(
             agent_count,
@@ -1175,7 +1221,7 @@ impl PyMultiVoxelEnv {
             reward_config,
             grid_size,
         );
-        Self { inner }
+        Ok(Self { inner })
     }
 
     pub fn reset(&mut self, seed: u64) -> PyMultiVoxelObs {

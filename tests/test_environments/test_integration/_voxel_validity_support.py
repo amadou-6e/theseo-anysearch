@@ -76,6 +76,7 @@ def make_radial_test_env(
     start=START,
     goal=GOAL,
     geometry_boxes: list[list[int]] | None = None,
+    reward_overrides: dict | None = None,
 ) -> VoxelEnv:
     """Create a deterministic single-agent radial voxel environment.
 
@@ -89,6 +90,8 @@ def make_radial_test_env(
         Fixed goal coordinate.
     geometry_boxes : list[list[int]] | None, optional
         Filled geometry boxes to load into the world.
+    reward_overrides : dict | None, optional
+        Reward config values that override the default deterministic setup.
 
     Returns
     -------
@@ -111,6 +114,7 @@ def make_radial_test_env(
         "waypoints_file": str(waypoints_file),
         "geometry_boxes": geometry_boxes or [],
     }
+    config.update(reward_overrides or {})
     return VoxelEnv(config)
 
 

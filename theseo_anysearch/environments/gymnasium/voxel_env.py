@@ -117,6 +117,10 @@ class VoxelEnv(RustGymnasiumEnv):
             goal_reward=config.get("goal_reward", 1.0),
             distance_shaping=config.get("distance_shaping", 0.0),
             collision_cost=config.get("collision_cost", 0.0),
+            distance_reward_mode=config.get("distance_reward_mode", "progress"),
+            zone_reward_min=config.get("zone_reward_min", -1.0),
+            zone_reward_max=config.get("zone_reward_max", -0.01),
+            zone_reward_curve=config.get("zone_reward_curve", "linear"),
         )
 
         # Load fixed waypoints from file if specified.
@@ -234,6 +238,11 @@ class VoxelEnv(RustGymnasiumEnv):
         return spaces.Discrete(26)  # all 26 neighbors in {-1,0,1}³ \ {origin}
 
     def _obs_to_numpy(self, rust_obs: Any) -> dict:
+        self._obs_log_count += 1
+        if self._obs_log_count <= 5:
+            self._log_env_stage(
+                f"obs_to_numpy start index={self._obs_log_count} mode={self._obs_mode}"
+            )
         # Write into pre-allocated buffers; copy before returning so RLlib's
         # sample collector (which holds per-step references) sees stable data.
         self._buf_steps[0] = rust_obs.steps_remaining * self._inv_max_steps
@@ -280,4 +289,6 @@ class VoxelEnv(RustGymnasiumEnv):
                 f"Unknown obs_mode: {self._obs_mode!r}. "
                 "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
             )
+        if self._obs_log_count <= 5:
+            self._log_env_stage(f"obs_to_numpy done index={self._obs_log_count}")
         return base

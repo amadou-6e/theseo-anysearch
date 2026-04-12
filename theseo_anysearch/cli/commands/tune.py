@@ -497,6 +497,10 @@ def _real_trainable(
             collision_cost=float(env_base.get("collision_cost", 0.0)),
             goal_reward=float(env_base.get("goal_reward", 1.0)),
             distance_shaping=float(env_base.get("distance_shaping", 0.0)),
+            distance_reward_mode=env_base.get("distance_reward_mode", "progress"),
+            zone_reward_min=float(env_base.get("zone_reward_min", -1.0)),
+            zone_reward_max=float(env_base.get("zone_reward_max", -0.01)),
+            zone_reward_curve=env_base.get("zone_reward_curve", "linear"),
         ),
         training=TrainingConfig(
             algorithm="ppo",
@@ -546,6 +550,10 @@ def _real_trainable(
         "step_cost": env.step_cost,
         "goal_reward": env.goal_reward,
         "distance_shaping": env.distance_shaping,
+        "distance_reward_mode": env.distance_reward_mode,
+        "zone_reward_min": env.zone_reward_min,
+        "zone_reward_max": env.zone_reward_max,
+        "zone_reward_curve": env.zone_reward_curve,
     }
 
     # Set up trajectory writer if enabled.

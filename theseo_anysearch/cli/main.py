@@ -459,7 +459,8 @@ def list_experiments(
 
     typer.echo(
         "\n  To replay:   anysearch replay <name:tag>\n"
-        "  To inspect:  anysearch inspect <name:run_id>"
+        "  To inspect:  anysearch inspect <name:run_id>\n"
+        "  TensorBoard: anysearch tensorboard <name:tag-or-run_id>"
     )
 
 

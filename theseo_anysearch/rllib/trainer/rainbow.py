@@ -52,6 +52,10 @@ class RainbowTrainer(Trainer):
             "step_cost": env.step_cost,
             "goal_reward": env.goal_reward,
             "distance_shaping": env.distance_shaping,
+            "distance_reward_mode": env.distance_reward_mode,
+            "zone_reward_min": env.zone_reward_min,
+            "zone_reward_max": env.zone_reward_max,
+            "zone_reward_curve": env.zone_reward_curve,
         }
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 

@@ -26,6 +26,71 @@ pub struct RewardConfig {
     /// Extra penalty subtracted when a movement is blocked (boundary hit or
     /// occupied cell).  Positive value = bigger penalty.  Default 0.0.
     pub collision_cost: f32,
+    /// Distance reward strategy. "progress" preserves potential shaping.
+    /// "zone" gives a negative per-step reward based on absolute goal distance.
+    pub distance_reward_mode: DistanceRewardMode,
+    /// Most negative zone reward, applied at maximum possible goal distance.
+    pub zone_reward_min: f32,
+    /// Least negative zone reward, applied at the goal distance.
+    pub zone_reward_max: f32,
+    /// Interpolation curve used by zone reward mode.
+    pub zone_reward_curve: ZoneRewardCurve,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DistanceRewardMode {
+    Progress,
+    Zone,
+}
+
+impl DistanceRewardMode {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "progress" => Some(Self::Progress),
+            "zone" => Some(Self::Zone),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ZoneRewardCurve {
+    Linear,
+    Exponential,
+}
+
+impl ZoneRewardCurve {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "linear" => Some(Self::Linear),
+            "exponential" => Some(Self::Exponential),
+            _ => None,
+        }
+    }
+}
+
+impl RewardConfig {
+    pub fn base_step_reward(&self, previous_l2: f32, current_l2: f32, grid_size: u16) -> f32 {
+        match self.distance_reward_mode {
+            DistanceRewardMode::Progress => {
+                self.step_cost + self.distance_shaping * (previous_l2 - current_l2)
+            }
+            DistanceRewardMode::Zone => self.zone_reward(current_l2, grid_size),
+        }
+    }
+
+    fn zone_reward(&self, distance_l2: f32, grid_size: u16) -> f32 {
+        let max_l2 = (3.0f32).sqrt() * f32::from(grid_size.saturating_sub(1).max(1));
+        let normalized = (distance_l2 / max_l2).clamp(0.0, 1.0);
+        let curved = match self.zone_reward_curve {
+            ZoneRewardCurve::Linear => normalized,
+            ZoneRewardCurve::Exponential => {
+                let steepness = 3.0f32;
+                (steepness * normalized).exp_m1() / steepness.exp_m1()
+            }
+        };
+        self.zone_reward_max + (self.zone_reward_min - self.zone_reward_max) * curved
+    }
 }
 
 impl Default for RewardConfig {
@@ -35,6 +100,10 @@ impl Default for RewardConfig {
             goal_reward: 1.0,
             distance_shaping: 0.1,
             collision_cost: 0.0,
+            distance_reward_mode: DistanceRewardMode::Progress,
+            zone_reward_min: -1.0,
+            zone_reward_max: -0.01,
+            zone_reward_curve: ZoneRewardCurve::Linear,
         }
     }
 }
@@ -326,7 +395,14 @@ impl Environment for VoxelEnv {
         self.steps = 0;
         self.world.clear();
         for &coord in &self.geometry {
-            let _ = self.world.set_block(coord, Block::default());
+            let _ = self.world.set_block(
+                coord,
+                Block {
+                    kind: crate::world::BLOCK_KIND_FILLED,
+                    active: true,
+                    reward_weight: 0.0,
+                },
+            );
         }
 
         // Determine start and goal for this episode.
@@ -404,14 +480,17 @@ impl Environment for VoxelEnv {
 
         let agent_filled = self.agent_filled();
 
-        let shaping = if self.active_goal.is_some() {
-            self.reward_config.distance_shaping * (self.prev_goal_dist_l2 - new_l2)
+        let base_step_reward = if self.active_goal.is_some() {
+            self.reward_config.base_step_reward(
+                self.prev_goal_dist_l2,
+                new_l2,
+                self.grid_size,
+            )
         } else {
-            0.0
+            self.reward_config.step_cost
         };
         self.prev_goal_dist_l2 = new_l2;
 
-        let step_cost = self.reward_config.step_cost;
         let collision_penalty = if is_collision { self.reward_config.collision_cost } else { 0.0 };
 
         let done = self.steps >= self.max_steps || goal_reached;
@@ -424,9 +503,9 @@ impl Environment for VoxelEnv {
 
         StepResult {
             observation,
-            // Formula: step_cost + goal_reward + collision_cost + L2_shaping
-            // collision_cost is negative (same sign convention as step_cost)
-            reward: step_cost + goal_reward + collision_penalty + shaping,
+            // Formula: base distance reward + goal_reward + collision_cost.
+            // collision_cost is negative (same sign convention as step rewards)
+            reward: base_step_reward + goal_reward + collision_penalty,
             done,
         }
     }
@@ -439,7 +518,6 @@ impl Environment for VoxelEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::World;
 
     fn make_env(max_steps: u32) -> VoxelEnv {
         VoxelEnv::new(WorldState::new(), max_steps)
@@ -451,6 +529,19 @@ mod tests {
             .with_trail_mode(true)
     }
 
+    fn zone_reward_config() -> RewardConfig {
+        RewardConfig {
+            step_cost: -0.05,
+            goal_reward: 10.0,
+            distance_shaping: 0.02,
+            collision_cost: -0.5,
+            distance_reward_mode: DistanceRewardMode::Zone,
+            zone_reward_min: -1.0,
+            zone_reward_max: -0.01,
+            zone_reward_curve: ZoneRewardCurve::Linear,
+        }
+    }
+
     #[test]
     fn reset_clears_world_no_geometry() {
         let mut env = make_env(10);
@@ -458,7 +549,8 @@ mod tests {
         let obs = env.reset(42);
         assert_eq!(obs.filled, 0);
         assert_eq!(obs.steps_remaining, 10);
-        assert!(!env.world().is_filled((1, 1, 1)));
+        assert!(env.world().is_filled((1, 1, 1)));
+        assert!(!env.world().is_blocking((1, 1, 1)));
     }
 
     #[test]
@@ -470,7 +562,7 @@ mod tests {
         // geometry_len=2, agent_filled=0
         assert_eq!(obs.filled, 0);
         assert!(env.world().is_filled((5, 5, 5)));
-        assert!(!env.world().is_filled((1, 1, 1)));
+        assert!(!env.world().is_blocking(env.cursor()));
     }
 
     #[test]
@@ -581,6 +673,37 @@ mod tests {
         assert!(sr.done, "episode must end when cursor reaches goal");
         assert!(sr.reward >= env.reward_config.goal_reward - 1.0,
                 "goal reward must be included");
+    }
+
+    #[test]
+    fn zone_reward_prefers_closer_absolute_distance() {
+        let mut closer_env = make_env(10).with_reward_config(zone_reward_config());
+        let mut farther_env = make_env(10).with_reward_config(zone_reward_config());
+        closer_env.set_waypoints((4, 4, 4), (4, 4, 6));
+        farther_env.set_waypoints((4, 4, 4), (4, 4, 6));
+        closer_env.reset(0);
+        farther_env.reset(0);
+
+        closer_env.set_cursor((4, 4, 5));
+        farther_env.set_cursor((4, 4, 3));
+        let closer = closer_env.step(VoxelAction::Noop).reward;
+        let farther = farther_env.step(VoxelAction::Noop).reward;
+
+        assert!(farther < closer);
+        assert!(closer < 0.0);
+    }
+
+    #[test]
+    fn zone_reward_goal_step_adds_terminal_bonus() {
+        let mut env = make_env(10).with_reward_config(zone_reward_config());
+        env.set_waypoints((4, 4, 4), (4, 4, 6));
+        env.reset(0);
+
+        env.set_cursor((4, 4, 6));
+        let sr = env.step(VoxelAction::Noop);
+
+        assert!(sr.done);
+        assert!((sr.reward - 9.99).abs() < 0.0001);
     }
 
     #[test]
