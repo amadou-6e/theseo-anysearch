@@ -47,6 +47,14 @@ class EnvConfig(BaseModel):
         Terminal reward awarded when the goal is reached.
     distance_shaping : float
         Potential-based shaping coefficient toward the goal.
+    distance_reward_mode : {"progress", "zone"}
+        Strategy used for distance-based per-step rewards.
+    zone_reward_min : float
+        Most negative per-step zone reward when far from the goal.
+    zone_reward_max : float
+        Least negative per-step zone reward when near the goal.
+    zone_reward_curve : {"linear", "exponential"}
+        Curve used to interpolate between zone reward values.
     distance_metric : {"euclidean", "manhattan"}
         Distance metric used for shaping.
     stl_paths : list[Path] | None
@@ -82,6 +90,10 @@ class EnvConfig(BaseModel):
     collision_cost: float = 0.0         # extra penalty subtracted on blocked moves
     goal_reward: float = 1.0            # bonus when cursor reaches goal position
     distance_shaping: float = 0.0       # potential-based shaping coefficient toward goal
+    distance_reward_mode: Literal["progress", "zone"] = "progress"
+    zone_reward_min: float = -1.0       # farthest-from-goal reward in zone mode
+    zone_reward_max: float = -0.01      # nearest-to-goal reward in zone mode
+    zone_reward_curve: Literal["linear", "exponential"] = "linear"
     distance_metric: Literal["euclidean", "manhattan"] = "euclidean"
 
     # --- Training diversity ---
@@ -98,6 +110,18 @@ class EnvConfig(BaseModel):
     # When set, each episode loads a random .npy file from pool_dir instead of
     # re-voxelizing at runtime. stl_path / scale_range still work independently.
     geometry_pool: dict | None = None             # {pool_dir, augmentation: {paste_boxes: {...}}}
+
+    @model_validator(mode="after")
+    def validate_zone_rewards(self) -> "EnvConfig":
+        """Ensure zone reward configuration remains negative and ordered."""
+
+        if self.zone_reward_min > self.zone_reward_max:
+            raise ValueError("zone_reward_min must be less than or equal to zone_reward_max")
+        if self.zone_reward_max >= 0.0:
+            raise ValueError("zone_reward_max must stay negative")
+        if self.zone_reward_min >= 0.0:
+            raise ValueError("zone_reward_min must stay negative")
+        return self
 
 
 

@@ -117,6 +117,10 @@ class VoxelEnv(RustGymnasiumEnv):
             goal_reward=config.get("goal_reward", 1.0),
             distance_shaping=config.get("distance_shaping", 0.0),
             collision_cost=config.get("collision_cost", 0.0),
+            distance_reward_mode=config.get("distance_reward_mode", "progress"),
+            zone_reward_min=config.get("zone_reward_min", -1.0),
+            zone_reward_max=config.get("zone_reward_max", -0.01),
+            zone_reward_curve=config.get("zone_reward_curve", "linear"),
         )
 
         # Load fixed waypoints from file if specified.

@@ -172,6 +172,10 @@ class PPOTrainer(Trainer):
             "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,
             "distance_shaping": env.distance_shaping,
+            "distance_reward_mode": env.distance_reward_mode,
+            "zone_reward_min": env.zone_reward_min,
+            "zone_reward_max": env.zone_reward_max,
+            "zone_reward_curve": env.zone_reward_curve,
             "debug_log_path": str(Path(config.training.output_dir, "env_debug.log")),
         }
         _log_stage(
