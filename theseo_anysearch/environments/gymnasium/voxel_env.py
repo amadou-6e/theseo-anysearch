@@ -16,6 +16,9 @@ from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
 
 log = logging.getLogger(__name__)
 
+MAX_RAY_HIT_TYPE = 5.0
+
+
 def _max_manhattan(grid_size: int) -> float:
     """Maximum Manhattan distance in a cubic grid of given side length."""
     return 3.0 * (grid_size - 1)
@@ -216,7 +219,7 @@ class VoxelEnv(RustGymnasiumEnv):
                 "voxel_count":     spaces.Box(0.0, np.inf, (1,),  np.float32),
                 "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),  np.float32),
                 "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
-                "ray_hit_types":   spaces.Box(0.0, 255.0, (26,), np.float32),
+                "ray_hit_types":   spaces.Box(0.0, 1.0,   (26,), np.float32),
                 **goal_space,
             })
         if mode == "hierarchical_box":
@@ -274,6 +277,7 @@ class VoxelEnv(RustGymnasiumEnv):
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
             self._buf_ray_types[:] = self._rust_env.radial_obs_types(self._ray_max_len)
+            self._buf_ray_types *= 1.0 / MAX_RAY_HIT_TYPE
             base["ray_hits"] = self._buf_rays.copy()
             base["ray_hit_types"] = self._buf_ray_types.copy()
         elif self._obs_mode == "hierarchical_box":

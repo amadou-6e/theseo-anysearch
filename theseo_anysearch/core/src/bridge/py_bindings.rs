@@ -9,7 +9,7 @@ use crate::{
     environments::{Environment, VoxelAction, VoxelEnv, SurfaceAction, SurfaceEnv},
     world::{
         ingest::{parse_ascii_stl, voxelize_mesh, voxelize_mesh_f32},
-        Block, BlockUpdate, Coord, World, WorldState, BLOCK_KIND_FILLED,
+        Block, BlockUpdate, Coord, World, WorldState, BLOCK_KIND_BOUNDARY,
     },
 };
 use image::{
@@ -1097,7 +1097,7 @@ impl PyVoxelEnv {
                         if nx < 1 || ny < 1 || nz < 1
                             || nx > g || ny > g || nz > g
                         {
-                            kind = f32::from(BLOCK_KIND_FILLED);
+                            kind = f32::from(BLOCK_KIND_BOUNDARY);
                             break;
                         }
                         if let Some(block) = self.inner.world().get_block((nx as u16, ny as u16, nz as u16)) {
@@ -1859,6 +1859,6 @@ mod tests {
         let obs = env.radial_obs(16);
         let types = env.radial_obs_types(16);
         assert_eq!(obs[4], 1.0);
-        assert_eq!(types[4], f32::from(BLOCK_KIND_FILLED));
+        assert_eq!(types[4], f32::from(BLOCK_KIND_BOUNDARY));
     }
 }

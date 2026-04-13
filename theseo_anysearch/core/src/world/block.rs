@@ -1,6 +1,8 @@
-pub const BLOCK_KIND_FILLED: u8 = 1;
+pub const BLOCK_KIND_OCCUPIED: u8 = 1;
 pub const BLOCK_KIND_START: u8 = 2;
 pub const BLOCK_KIND_GOAL: u8 = 3;
+pub const BLOCK_KIND_BOUNDARY: u8 = 4;
+pub const BLOCK_KIND_FILLED: u8 = 5;
 
 #[derive(Clone, Debug)]
 pub struct Block {
