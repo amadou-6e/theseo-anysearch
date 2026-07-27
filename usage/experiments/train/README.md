@@ -21,7 +21,6 @@ These configurations are longer-running policy-training baselines and task-speci
 
 ## Reproduction and diagnostics
 
-- [`ppo_box_r10_reproduction.yaml`](ppo_box_r10_reproduction.yaml) reproduces the historical successful radius-10 stepped-terrain run with fixed waypoints.
 - [`ppo_tiny_overfit.yaml`](ppo_tiny_overfit.yaml) is an intentionally tiny fixed task used to diagnose whether PPO, evaluation, and replay can learn and report a simple solution.
 
 Use the showcase configurations for fast installation checks; use these files when comparing learning behavior or producing durable checkpoints.
