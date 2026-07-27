@@ -114,6 +114,39 @@ class TestExperimentRunnerRun:
         assert collect.call_args.args[1] == "weighted_astar"
         assert collect.call_args.kwargs["weight"] == pytest.approx(2.0)
         write.assert_called_once()
+    def test_standalone_heuristic_skips_trainer_build(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        config = experiment_config.model_copy(
+            update={
+                "training": experiment_config.training.model_copy(
+                    update={"algorithm": "heuristic"}
+                ),
+                "heuristic": HeuristicConfig(enabled=True, type="dijkstra"),
+            }
+        )
+        episode = MagicMock(name="heuristic_episode")
+        with (
+            patch.object(runner_mod, "_build_trainer") as build_trainer,
+            patch(
+                "theseo_anysearch.experiments.trajectory.collect_heuristic_episode",
+                return_value=episode,
+            ) as collect,
+            patch(
+                "theseo_anysearch.experiments.trajectory.write_heuristic_trajectory",
+                return_value="trajectories/heuristic_dijkstra.json",
+            ) as write,
+        ):
+            info = ExperimentRunner(config).run()
+
+        assert info.status == "COMPLETED"
+        build_trainer.assert_not_called()
+        collect.assert_called_once()
+        assert collect.call_args.args[1] == "dijkstra"
+        write.assert_called_once()
 
 class TestExperimentRunnerFailure:
     """Verify runner failure bookkeeping."""

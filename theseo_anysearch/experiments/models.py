@@ -311,8 +311,17 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
 
     @model_validator(mode="after")
     def validate_heuristic_compatibility(self) -> "ExperimentConfig":
+        standalone = self.training.algorithm.lower() == "heuristic"
         if self.heuristic.enabled and self.env.agent_count != 1:
             raise ValueError("heuristic evaluation requires env.agent_count: 1")
+        if standalone and not self.heuristic.enabled:
+            raise ValueError(
+                "training.algorithm='heuristic' requires heuristic.enabled: true"
+            )
+        if standalone and self.training.runner != "local":
+            raise ValueError("standalone heuristic execution requires runner: local")
+        if standalone and self.tune_config is not None:
+            raise ValueError("standalone heuristic execution does not support tune_config")
         return self
     @property
     def run_output_dir(self) -> Path:

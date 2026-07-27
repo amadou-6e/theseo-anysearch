@@ -138,3 +138,25 @@ class TestHeuristicConfig:
 
         with pytest.raises(ValueError, match="agent_count"):
             ExperimentConfig.model_validate(payload)
+    def test_standalone_heuristic_requires_enabled_config(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["algorithm"] = "heuristic"
+
+        with pytest.raises(ValueError, match="enabled"):
+            ExperimentConfig.model_validate(payload)
+
+    def test_standalone_heuristic_accepts_local_single_agent(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["algorithm"] = "heuristic"
+        payload["heuristic"] = {"enabled": True, "type": "dijkstra"}
+
+        config = ExperimentConfig.model_validate(payload)
+
+        assert config.training.algorithm == "heuristic"
+        assert config.heuristic.type == "dijkstra"
