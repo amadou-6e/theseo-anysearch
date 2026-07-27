@@ -457,6 +457,7 @@ def _real_trainable(
     run_tag: str = "latest",
     trajectory_every: int = 1,
     best_trajectory: bool = True,
+    num_env_runners: int = 0,
 ) -> None:
     import torch.version  # noqa — must be imported before RLlib accesses torch.version.hip
     from ray import tune as _tune
@@ -519,6 +520,7 @@ def _real_trainable(
             video_every=max_iterations,
             require_gpu=num_gpus > 0,
             num_gpus=num_gpus,
+            num_env_runners=num_env_runners,
         ),
         anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
         algorithm_config=PPOConfig(
@@ -649,6 +651,7 @@ def _make_trainable(
     run_tag: str = "latest",
     trajectory_every: int = 1,
     best_trajectory: bool = True,
+    num_env_runners: int = 0,
 ) -> Any:
     from ray import tune
 
@@ -672,6 +675,7 @@ def _make_trainable(
         run_tag=run_tag,
         trajectory_every=trajectory_every,
         best_trajectory=best_trajectory,
+        num_env_runners=num_env_runners,
     )
     # Tell Ray to allocate GPU resources per trial so CUDA_VISIBLE_DEVICES is
     # set before RLlib tries to claim GPU IDs from the Ray resource pool.
@@ -1042,6 +1046,7 @@ def tune(
                 run_tag=run_tag,
                 trajectory_every=trajectory_every,
                 best_trajectory=best_trajectory,
+                num_env_runners=int(training_cfg.get("num_env_runners", 0)),
             ),
             param_space=search_space,
             tune_config=ray_tune.TuneConfig(
