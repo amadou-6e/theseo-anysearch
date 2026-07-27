@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import typer
 
+from theseo_anysearch.imitation.models import ImitationConfig
 from theseo_anysearch.settings import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 
@@ -449,6 +450,7 @@ def _real_trainable(
     num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
+    imitation_config: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
     mlflow_experiment_name: str = "tune",
     mlflow_parent_run_id: str = "",
@@ -536,6 +538,7 @@ def _real_trainable(
             hidden_sizes=[int(cfg.get("layer_size", 256))]
                          * int(cfg.get("num_layers", cfg.get("encoder_depth", 2))),
         ),
+        imitation=ImitationConfig.model_validate(imitation_config or {}),
     )
 
     import yaml
@@ -639,6 +642,7 @@ def _make_trainable(
     num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
+    imitation_config: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
     mlflow_experiment_name: str = "tune",
     mlflow_parent_run_id: str = "",
@@ -661,6 +665,7 @@ def _make_trainable(
         num_gpus=num_gpus,
         base_config=base_config,
         env_base=env_base,
+        imitation_config=imitation_config,
         mlflow_tracking_uri=mlflow_tracking_uri,
         mlflow_experiment_name=mlflow_experiment_name,
         mlflow_parent_run_id=mlflow_parent_run_id,
@@ -1030,6 +1035,7 @@ def tune(
                 num_gpus=num_gpus,
                 base_config=base_config,
                 env_base=env_base,
+                imitation_config=raw_cfg.get("imitation", {}),
                 mlflow_tracking_uri=mlflow_tracking_uri,
                 mlflow_experiment_name=experiment_name,
                 mlflow_parent_run_id=parent_run_id,
