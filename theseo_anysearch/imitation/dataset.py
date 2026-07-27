@@ -43,9 +43,21 @@ def dataset_fingerprint(
 ) -> str:
     """Hash every contract that affects demonstration compatibility."""
 
+    normalized_env = dict(env_config)
+    for path_key in ("stl_path", "waypoints_file"):
+        path_value = normalized_env.get(path_key)
+        if path_value:
+            normalized_env[path_key] = str(Path(str(path_value)).resolve())
+    geometry_pool = normalized_env.get("geometry_pool")
+    if isinstance(geometry_pool, dict) and geometry_pool.get("pool_dir"):
+        normalized_env["geometry_pool"] = {
+            **geometry_pool,
+            "pool_dir": str(Path(str(geometry_pool["pool_dir"])).resolve()),
+        }
+
     payload = {
         "schema_version": 1,
-        "env": env_config,
+        "env": normalized_env,
         "geometry": _geometry_fingerprint(env_config),
         "teacher": imitation.teacher.model_dump(mode="json"),
         "collection": {

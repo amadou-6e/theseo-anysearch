@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from theseo_anysearch.imitation.dataset import (
     DemonstrationDataset,
     collect_demonstrations,
+    dataset_fingerprint,
     load_compatible_dataset,
     save_dataset,
 )
@@ -139,6 +140,25 @@ def test_dataset_reuse_rejects_schema_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         load_compatible_dataset(tmp_path, "different")
+
+
+def test_dataset_fingerprint_canonicalizes_geometry_paths(tmp_path, monkeypatch):
+    geometry = tmp_path.joinpath("geometry.stl")
+    geometry.write_bytes(b"solid test")
+    monkeypatch.chdir(tmp_path)
+    config = ImitationConfig(collection={"episodes": 2, "max_attempts": 2})
+
+    relative = dataset_fingerprint(
+        {"stl_path": "geometry.stl"}, config, observation_size=36, action_count=26
+    )
+    absolute = dataset_fingerprint(
+        {"stl_path": str(geometry.resolve())},
+        config,
+        observation_size=36,
+        action_count=26,
+    )
+
+    assert relative == absolute
 
 
 def test_astar_collection_records_pre_action_observations(tmp_path):
