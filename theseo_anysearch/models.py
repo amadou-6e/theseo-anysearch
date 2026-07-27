@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from theseo_anysearch.environments.task import TaskConfig
+
 
 class EnvConfig(BaseModel):
     """Environment configuration shared by training and experiment loading.
@@ -96,6 +98,10 @@ class EnvConfig(BaseModel):
     zone_reward_max: float = -0.01      # nearest-to-goal reward in zone mode
     zone_reward_curve: Literal["linear", "exponential"] = "linear"
     distance_metric: Literal["euclidean", "manhattan"] = "euclidean"
+    invalid_action_cost: float = 0.0
+    construction_residual_weight: float = Field(default=0.0, ge=0.0)
+    construction_overshoot_weight: float = Field(default=0.0, ge=0.0)
+    task: TaskConfig = Field(default_factory=TaskConfig)
 
     # --- Training diversity ---
     # Geometry pool: pre-load N geometries at init; at each reset pick one randomly.

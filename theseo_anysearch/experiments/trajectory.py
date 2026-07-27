@@ -48,6 +48,8 @@ class VoxelStepData:
     cursor_z: int
     voxel_count: int   # total filled voxels AFTER this step
     placed: bool       # True if a new voxel was filled this step (Place or trail)
+    reward_breakdown: dict[str, float] | None = None
+    termination_reason: str = "in_progress"
 
 
 @dataclass
@@ -87,6 +89,12 @@ class VoxelEpisodeData:
     grid_size: int = 32
     start_pos: tuple[int, int, int] | None = None
     goal_pos: tuple[int, int, int] | None = None
+    termination_reason: str = "unknown"
+    initial_goal_distance: float | None = None
+    final_goal_distance: float | None = None
+    minimum_goal_distance: float | None = None
+    reward_breakdown: dict[str, float] | None = None
+    unshaped_return: float | None = None
 
 
 @dataclass
@@ -327,6 +335,8 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
             cursor_z=int(cursor[2]),
             voxel_count=voxel_count,
             placed=placed,
+            reward_breakdown=dict(final_info.get("reward_breakdown", {})),
+            termination_reason=str(final_info.get("termination_reason", "in_progress")),
         ))
 
         total_reward += float(reward)
@@ -356,6 +366,12 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
         success=success,
         start_pos=start_pos,
         goal_pos=goal_pos,
+        termination_reason=str(final_info.get("termination_reason", "unknown")),
+        initial_goal_distance=final_info.get("initial_goal_distance"),
+        final_goal_distance=final_info.get("final_goal_distance"),
+        minimum_goal_distance=final_info.get("minimum_goal_distance"),
+        reward_breakdown=dict(final_info.get("episode_reward_breakdown", {})),
+        unshaped_return=sum(step.reward - (step.reward_breakdown or {}).get("distance_progress", 0.0) for step in steps),
     )
 
 

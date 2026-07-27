@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvaluationMetrics(BaseModel):
@@ -28,6 +28,7 @@ class EvaluationMetrics(BaseModel):
     unshaped_return_mean: float
     goal_progress_mean: float
     status: str
+    reward_component_means: dict[str, float] = Field(default_factory=dict)
 
     @classmethod
     def from_voxel_episodes(
@@ -68,6 +69,11 @@ class EvaluationMetrics(BaseModel):
             _unshaped_return(episode, env_config) for episode in episodes
         ]
         count = len(episodes)
+        component_names = set().union(*(episode.reward_breakdown or {} for episode in episodes))
+        component_means = {
+            name: sum((episode.reward_breakdown or {}).get(name, 0.0) for episode in episodes) / count
+            for name in component_names
+        }
         successes = len(successful_steps)
         success_rate = successes / count
         progress = sum(
@@ -102,6 +108,7 @@ class EvaluationMetrics(BaseModel):
             unshaped_return_mean=sum(unshaped_returns) / count,
             goal_progress_mean=progress,
             status=status,
+            reward_component_means=component_means,
         )
 
 
@@ -205,6 +212,10 @@ class EvaluationMetrics(BaseModel):
             "evaluation_shaped_return_mean": self.shaped_return_mean,
             "evaluation_unshaped_return_mean": self.unshaped_return_mean,
             "evaluation_goal_progress_mean": self.goal_progress_mean,
+            **{
+                f"evaluation_reward_{name}_mean": value
+                for name, value in self.reward_component_means.items()
+            },
         }
 
     def tensorboard_metrics(self) -> dict[str, float]:
@@ -232,7 +243,9 @@ def _final_position(episode: Any) -> tuple[int, int, int] | None:
 
 
 def _unshaped_return(episode: Any, env_config: dict[str, Any]) -> float:
-    """Reconstruct task return with distance shaping removed."""
+    """Return recorded unshaped task return, with legacy reconstruction fallback."""
+    if getattr(episode, "unshaped_return", None) is not None:
+        return float(episode.unshaped_return)
     step_cost = float(env_config.get("step_cost", -0.01))
     collision_cost = float(env_config.get("collision_cost", 0.0))
     goal_reward = float(env_config.get("goal_reward", 1.0))

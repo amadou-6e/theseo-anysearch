@@ -386,6 +386,10 @@ class Trainer(ABC):
             "zone_reward_min": env.zone_reward_min,
             "zone_reward_max": env.zone_reward_max,
             "zone_reward_curve": env.zone_reward_curve,
+            "invalid_action_cost": env.invalid_action_cost,
+            "construction_residual_weight": env.construction_residual_weight,
+            "construction_overshoot_weight": env.construction_overshoot_weight,
+            "task": env.task.model_dump(mode="json"),
         }
 
     # ------------------------------------------------------------------
