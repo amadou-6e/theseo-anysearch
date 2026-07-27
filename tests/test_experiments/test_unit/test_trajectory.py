@@ -463,3 +463,15 @@ class TestEpisodeRunMetrics:
             "eval/mean_steps_on_success": 8.0,
             "eval/goal_progress_mean": 5.0,
         }
+
+
+def test_episode_run_metrics_aggregate_one_evaluation_batch() -> None:
+    failed = _make_episode(total_reward=-1.0, n_steps=4)
+    successful = _make_episode(total_reward=1.0, n_steps=2)
+    successful.success = True
+
+    metrics = EpisodeRunMetrics.from_voxel_episodes([failed, successful])
+
+    assert metrics.finish_count == 1
+    assert metrics.finish_rate == pytest.approx(0.5)
+    assert metrics.mean_steps_on_success == pytest.approx(2.0)

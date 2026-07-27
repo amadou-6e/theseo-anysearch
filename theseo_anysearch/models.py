@@ -70,6 +70,7 @@ class EnvConfig(BaseModel):
     geometry_pool : dict | None
         Precomputed geometry pool configuration produced by extraction tools.
     """
+    include_voxel_count: bool = True
     model_config = ConfigDict(extra="forbid")
 
     stl_path: Path | None = None
@@ -169,6 +170,7 @@ class TrainingConfig(BaseModel):
     best_trajectory: bool = True
     output_dir: Path = Path("runtime/")
     video_every: int = 10
+    evaluation_episodes: int = Field(default=1, ge=1)
 
 
 class AnyscaleConfig(BaseModel):

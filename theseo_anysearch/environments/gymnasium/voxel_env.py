@@ -198,17 +198,23 @@ class VoxelEnv(RustGymnasiumEnv):
             else {}
         )
 
+        voxel_count_space = (
+            {"voxel_count": spaces.Box(0.0, np.inf, (1,), np.float32)}
+            if self._config.get("include_voxel_count", True)
+            else {}
+        )
+
         if mode == "scalar":
             return spaces.Dict({
                 "steps_remaining": spaces.Box(0.0, 1.0, (1,), np.float32),
-                "voxel_count":     spaces.Box(0.0, np.inf, (1,), np.float32),
+                **voxel_count_space,
                 **goal_space,
             })
         if mode == "box":
             n = 2 * self._config.get("box_radius", 2) + 1
             return spaces.Dict({
                 "steps_remaining": spaces.Box(0.0, 1.0,   (1,),    np.float32),
-                "voxel_count":     spaces.Box(0.0, np.inf, (1,),   np.float32),
+                **voxel_count_space,
                 "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),    np.float32),
                 "local_grid":      spaces.Box(0.0, 1.0,   (n**3,), np.float32),
                 **goal_space,
@@ -216,7 +222,7 @@ class VoxelEnv(RustGymnasiumEnv):
         if mode == "radial":
             return spaces.Dict({
                 "steps_remaining": spaces.Box(0.0, 1.0,   (1,),  np.float32),
-                "voxel_count":     spaces.Box(0.0, np.inf, (1,),  np.float32),
+                **voxel_count_space,
                 "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),  np.float32),
                 "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
                 "ray_hit_types":   spaces.Box(0.0, 1.0,   (26,), np.float32),
@@ -227,7 +233,7 @@ class VoxelEnv(RustGymnasiumEnv):
             flat_size = sum((2 * r + 1) ** 3 for r in radii)
             return spaces.Dict({
                 "steps_remaining": spaces.Box(0.0, 1.0,    (1,),         np.float32),
-                "voxel_count":     spaces.Box(0.0, np.inf,  (1,),         np.float32),
+                **voxel_count_space,
                 "cursor_pos":      spaces.Box(0.0, 1.0,    (3,),         np.float32),
                 "local_grid":      spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
                 **goal_space,
@@ -250,10 +256,9 @@ class VoxelEnv(RustGymnasiumEnv):
         # sample collector (which holds per-step references) sees stable data.
         self._buf_steps[0] = rust_obs.steps_remaining * self._inv_max_steps
         self._buf_voxel[0] = rust_obs.filled
-        base = {
-            "steps_remaining": self._buf_steps.copy(),
-            "voxel_count":     self._buf_voxel.copy(),
-        }
+        base = {"steps_remaining": self._buf_steps.copy()}
+        if self._config.get("include_voxel_count", True):
+            base["voxel_count"] = self._buf_voxel.copy()
         if self._has_goal_flag and rust_obs.goal_distance is not None:
             self._buf_goal[0] = rust_obs.goal_distance * self._inv_max_manhattan
             base["goal_distance"] = self._buf_goal.copy()

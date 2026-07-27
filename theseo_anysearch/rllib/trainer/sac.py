@@ -48,6 +48,7 @@ class SACTrainer(Trainer):
             "box_radius": env.box_radius,
             "box_radii": env.box_radii,
             "ray_max_len": env.ray_max_len,
+            "include_voxel_count": env.include_voxel_count,
             "grid_size": env.grid_size,
             "trail_mode": env.trail_mode,
             "geometry_boxes": env.geometry_boxes,

@@ -376,6 +376,9 @@ class ExperimentRunner:
                             "episode_len_mean": result.episode_len_mean,
                             "episodes_total": float(result.episodes_total),
                             "elapsed_s": result.elapsed_s,
+                            "evaluation_episodes": float(result.evaluation_episodes),
+                            "evaluation_goals_reached": float(result.evaluation_goals_reached),
+                            "evaluation_success_rate": result.evaluation_success_rate,
                         },
                         step=result.iteration,
                     )

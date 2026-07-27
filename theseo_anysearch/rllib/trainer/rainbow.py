@@ -46,6 +46,7 @@ class RainbowTrainer(Trainer):
             "box_radius": env.box_radius,
             "box_radii": env.box_radii,
             "ray_max_len": env.ray_max_len,
+            "include_voxel_count": env.include_voxel_count,
             "trail_mode": env.trail_mode,
             "geometry_boxes": env.geometry_boxes,
             "waypoints_file": env.waypoints_file,
