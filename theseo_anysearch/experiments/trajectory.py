@@ -189,8 +189,8 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
     return the trajectory as a VoxelEpisodeData.
 
     Creates a fresh VoxelEnv directly (not through Ray workers) so it runs
-    in the main process.  Falls back to random actions if compute_single_action
-    is unavailable.
+    in the main process. Policy inference failures are surfaced so invalid fallback
+    trajectories cannot be mistaken for policy rollouts.
 
     Raises ImportError if theseo_core is not installed.
 
@@ -220,13 +220,22 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
     step_count = 0
     prev_voxel_count = _extract_voxel_count(obs)
 
+    final_info: dict[str, Any] = {}
     while True:
-        try:
-            action = int(algo.compute_single_action(obs, policy_id="default_policy"))
-        except Exception:
-            action = 0  # fallback: move +X
+        raw_action = algo.compute_single_action(
+            obs,
+            policy_id="default_policy",
+            explore=False,
+        )
+        if (
+            isinstance(raw_action, tuple)
+            and len(raw_action) == 3
+            and isinstance(raw_action[2], dict)
+        ):
+            raw_action = raw_action[0]
+        action = int(raw_action)
 
-        obs_next, reward, terminated, truncated, _info = env.step(action)
+        obs_next, reward, terminated, truncated, final_info = env.step(raw_action)
         done = terminated or truncated
         voxel_count = _extract_voxel_count(obs_next)
         placed = voxel_count > prev_voxel_count
@@ -263,7 +272,7 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
         pass
 
     max_steps = env_config.get("max_steps", 200)
-    success = step_count < max_steps  # ended before the time limit
+    success = bool(final_info.get("goal_reached", False))
 
     return VoxelEpisodeData(
         agent_count=1,
