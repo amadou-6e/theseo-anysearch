@@ -185,6 +185,18 @@ class Trainer(BaseTrainer):
             self._build_algorithm,
         )
 
+        if self._config.imitation.enabled and self._iteration == 0:
+            from theseo_anysearch.imitation.pretraining import (
+                run_imitation_pretraining,
+            )
+
+            run_imitation_pretraining(
+                self._algo,
+                self._env_config_dict(),
+                self._config.imitation,
+                self._output_dir,
+            )
+
         training = self._config.training
         evaluation = self._config.evaluation
         results: list[TrainResult] = []

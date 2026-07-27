@@ -1,0 +1,74 @@
+description: >
+  Pretrains the tiny radial PPO policy from A-star demonstrations, then continues normal PPO training. Compare it with ppo_tiny_overfit.yaml to measure whether heuristic imitation improves initial policy quality and learning speed.
+
+experiment:
+  name: ppo-tiny-overfit-imitation
+  output_dir: runtime/tiny_overfit_imitation
+  seed: 42
+
+env:
+  waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
+  grid_size: 8
+  max_steps: 10
+  seed: 42
+  agent_count: 1
+  obs_mode: radial
+  ray_max_len: 10
+  trail_mode: false
+
+  step_cost: -0.5
+  collision_cost: -0.02
+  goal_reward: 2.0
+  distance_shaping: 0.25
+  distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  model: radial_grouped_encoder
+  runner: local
+  iterations: 50
+  checkpoint_interval: 50
+  require_gpu: false
+  num_env_runners: 0
+  evaluation_episodes: 20
+  trajectory_every: 1
+  best_trajectory: true
+  video_every: 0
+
+imitation:
+  enabled: true
+  strategy: pretrain_then_rl
+  teacher:
+    type: astar
+    weight: null
+  collection:
+    episodes: 64
+    seed_start: 1000
+    max_attempts: 128
+    require_success: true
+    validation_fraction: 0.1
+    reuse_dataset: true
+  pretraining:
+    epochs: 20
+    batch_size: 128
+    learning_rate: 0.0003
+    label_smoothing: 0.0
+    early_stopping_patience: 3
+  handoff:
+    initialize_encoder: true
+    initialize_policy: true
+    initialize_value_head: false
+
+algorithm_config:
+  lr: 0.001
+  gamma: 0.95
+  train_batch_size: 512
+  minibatch_size: 128
+  num_sgd_iter: 4
+  clip_param: 0.2
+  lambda_: 0.95
+  kl_coeff: 0.1
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu
