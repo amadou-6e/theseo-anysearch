@@ -198,6 +198,7 @@ class RllibTrainResult(BaseModel):
     episodes_total: int | None = None
     training_iteration: int | None = None
     time_this_iter_s: float | None = None
+    timesteps_total: int | None = None
 
     @classmethod
     def from_raw(cls, result: dict[str, Any]) -> "RllibTrainResult":
@@ -225,6 +226,12 @@ class RllibTrainResult(BaseModel):
         return int(
             self.episodes_total) if self.episodes_total is not None else 0
 
+    def parse_environment_steps_total(self) -> int:
+        value = self.env_runners.get("num_env_steps_sampled_lifetime")
+        if value is not None:
+            return int(value)
+        return int(self.timesteps_total) if self.timesteps_total is not None else 0
+
 
 class TrainResult(BaseModel):
     """Project-level summary of one RLlib training iteration."""
@@ -235,6 +242,7 @@ class TrainResult(BaseModel):
     episode_len_mean: float
     episodes_total: int
     elapsed_s: float
+    environment_steps_total: int = 0
     episodes_this_iter: int = 0
     goals_reached_this_iter: int = 0
     goals_reached_total: int = 0
@@ -259,6 +267,7 @@ class TrainResult(BaseModel):
             "evaluation_goals_reached": float(self.evaluation_goals_reached),
             "evaluation_success_rate": self.evaluation_success_rate,
             "elapsed_s": self.elapsed_s,
+            "environment_steps_total": float(self.environment_steps_total),
         }
         metrics.update({
             key: float(value)
@@ -282,6 +291,7 @@ class TrainResult(BaseModel):
             episode_len_mean=parsed.parse_episode_len(),
             episodes_total=parsed.parse_episodes_total(),
             elapsed_s=elapsed_s,
+            environment_steps_total=parsed.parse_environment_steps_total(),
             extra={
                 "training_iteration": parsed.training_iteration or iteration,
                 "time_this_iter_s": parsed.time_this_iter_s,

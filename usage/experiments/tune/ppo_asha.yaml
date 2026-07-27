@@ -9,7 +9,7 @@ experiment:
 env:
   stl_path: usage/geometries/stepped_terrain.stl
   scale: 40.0
-  agent_count: 4
+  agent_count: 1
   max_steps: 200
   goal_reward: 1.0
   step_cost: -0.01
@@ -25,6 +25,8 @@ training:
   trajectory_every: 20
   video_every: 100
   require_gpu: false         # set true to assert a GPU is available before training
+  evaluation_episodes: 8
+  evaluation_min_success_rate: 0.75
 
 algorithm_config:            # defaults; overridden per trial by search_space below
   clip_param: 0.2
@@ -38,9 +40,14 @@ model_config:
 tune_config:
   scheduler: asha
   num_samples: 30
-  metric: episode_reward_mean
+  metric: evaluation_success_rate
   mode: max
   max_concurrent: 4
+  checkpoint_frequency: 1
+  max_environment_steps: 5000000
+  max_wall_time_s: 3600
+  target_success_rate: 0.75
+  preserve_trial_artifacts: true
   search_space:
     algorithm_config:
       lr:               {loguniform: [1.0e-5, 1.0e-2]}

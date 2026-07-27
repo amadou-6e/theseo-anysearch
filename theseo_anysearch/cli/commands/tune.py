@@ -445,16 +445,16 @@ def _real_trainable(
     max_iterations: int,
     output_dir: str,
     metric: str,
-    mode: str,
-    num_gpus: int,
-    base_config: dict[str, Any],
-    env_base: dict[str, Any],
-    mlflow_tracking_uri: str,
-    mlflow_experiment_name: str,
-    mlflow_parent_run_id: str,
-    run_tag: str,
-    trajectory_every: int,
-    best_trajectory: bool,
+    mode: str = "max",
+    num_gpus: int = 0,
+    base_config: dict[str, Any] | None = None,
+    env_base: dict[str, Any] | None = None,
+    mlflow_tracking_uri: str = "",
+    mlflow_experiment_name: str = "tune",
+    mlflow_parent_run_id: str = "",
+    run_tag: str = "latest",
+    trajectory_every: int = 1,
+    best_trajectory: bool = True,
 ) -> None:
     import torch.version  # noqa — must be imported before RLlib accesses torch.version.hip
     from ray import tune as _tune
@@ -475,6 +475,9 @@ def _real_trainable(
     trial_dir = Path(output_dir, run_tag, trial_id)
     trial_dir.mkdir(parents=True, exist_ok=True)
 
+    base_config = base_config or {}
+    env_base = env_base or {}
+
     # Merge: YAML base defaults < trial search-space sample.
     # This means any param not in the search space falls back to the YAML value,
     # and any param not in either falls back to the Pydantic model default.
@@ -484,7 +487,7 @@ def _real_trainable(
         env=EnvConfig(
             stl_path=Path(stl),
             scale=float(env_base.get("scale", 1.0)),
-            agent_count=agents,
+            agent_count=1,
             max_steps=max_steps,
             seed=seed,
             obs_mode=env_base.get("obs_mode", "scalar"),
@@ -507,7 +510,9 @@ def _real_trainable(
             model="voxel_encoder",
             runner="local",
             iterations=max_iterations,
-            checkpoint_interval=max(1, max_iterations),
+            checkpoint_interval=max_iterations + 1,
+            trajectory_every=trajectory_every,
+            best_trajectory=best_trajectory,
             output_dir=trial_dir,
             video_every=max_iterations,
             require_gpu=num_gpus > 0,
@@ -532,41 +537,16 @@ def _real_trainable(
         ),
     )
 
-    # Build env_config dict matching what PPOTrainer uses, so collect_eval_episode
-    # can create a VoxelEnv with the same settings as the training environment.
-    env = settings.env
-    _env_config_for_eval: dict[str, Any] = {
-        "stl_path": str(env.stl_path) if env.stl_path else None,
-        "scale": env.scale,
-        "agent_count": env.agent_count,
-        "max_steps": env.max_steps,
-        "seed": env.seed,
-        "obs_mode": env.obs_mode,
-        "box_radius": env.box_radius,
-        "ray_max_len": env.ray_max_len,
-        "trail_mode": env.trail_mode,
-        "geometry_boxes": env.geometry_boxes,
-        "waypoints_file": str(env.waypoints_file) if env.waypoints_file else None,
-        "step_cost": env.step_cost,
-        "goal_reward": env.goal_reward,
-        "distance_shaping": env.distance_shaping,
-        "distance_reward_mode": env.distance_reward_mode,
-        "zone_reward_min": env.zone_reward_min,
-        "zone_reward_max": env.zone_reward_max,
-        "zone_reward_curve": env.zone_reward_curve,
-    }
+    import yaml
 
-    # Set up trajectory writer if enabled.
-    _traj_writer = None
-    if trajectory_every > 0 or best_trajectory:
-        from theseo_anysearch.experiments.output import OutputStore
-        from theseo_anysearch.experiments.trajectory import TrajectoryWriter
-        _traj_writer = TrajectoryWriter(
-            OutputStore(trial_dir),
-            trajectory_every=trajectory_every,
-            best_trajectory=best_trajectory,
-        )
-
+    trial_dir.joinpath("experiment.yaml").write_text(
+        yaml.safe_dump(settings.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+    trial_dir.joinpath("sampled_config.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
     mlflow_cfg = MLflowConfig(tracking_uri=mlflow_tracking_uri) if mlflow_tracking_uri else None
     tracker = MLflowTracker(mlflow_cfg, mlflow_experiment_name)
     tracker.start_child_run(
@@ -576,61 +556,74 @@ def _real_trainable(
     )
     tracker.log_params({k: str(v) for k, v in config.items()})
 
+    trainer = PPOTrainer(settings)
+    from theseo_anysearch.experiments.tune_runner import (
+        _append_tune_history,
+        _ray_checkpoint,
+        _restore_reported_checkpoint,
+        _selected_metric,
+        _trial_resource_metrics,
+        _write_tune_status,
+    )
+
+    _restore_reported_checkpoint(trainer, _tune)
+    resource_metrics: dict[str, float] | None = None
+    hook_called = False
+    last_iteration = 0
+
+    def _report_iteration(result: Any) -> None:
+        nonlocal resource_metrics, last_iteration, hook_called
+        hook_called = True
+        last_iteration = result.iteration
+        if resource_metrics is None:
+            resource_metrics = _trial_resource_metrics(trainer, settings)
+            trial_dir.joinpath("resources.json").write_text(
+                json.dumps(resource_metrics, indent=2),
+                encoding="utf-8",
+            )
+        payload: dict[str, Any] = {
+            **result.standard_metrics(),
+            **resource_metrics,
+            "training_iteration": result.iteration,
+            "trial_id": trial_id,
+            "evaluation_status": result.evaluation_status,
+        }
+        payload[metric] = _selected_metric(
+            payload,
+            metric,
+            fallback=result.episode_reward_mean,
+            mode=mode,
+        )
+        tracker.log_metrics(
+            {
+                key: value
+                for key, value in payload.items()
+                if isinstance(value, (int, float))
+            },
+            step=result.iteration,
+        )
+        _append_tune_history(trial_dir, payload)
+        _write_tune_status(trial_dir, "RUNNING", iteration=result.iteration)
+        report_options: dict[str, Any] = {}
+        checkpoint = _ray_checkpoint(trainer.checkpoint())
+        if checkpoint is not None:
+            report_options["checkpoint"] = checkpoint
+        _tune.report(payload, **report_options)
+
+    trainer.on_iteration_end = _report_iteration
+
     try:
-        trainer = PPOTrainer(settings)
-
-        # Attach trajectory-recording hook if enabled.
-        # `trainer.on_iteration_end` is a virtual method; replacing the instance
-        # attribute shadows the class method and gets called by trainer.train().
-        if _traj_writer is not None:
-            _writer = _traj_writer
-            _env_cfg = _env_config_for_eval
-            _tid = trial_id
-
-            def _traj_on_iter(result: Any) -> None:
-                import warnings
-                try:
-                    from theseo_anysearch.experiments.trajectory import collect_eval_episode as _coll
-                    ep = _coll(trainer._algo, _env_cfg)
-                    _writer.record(ep)
-                    _writer.on_iteration_end(
-                        result.iteration,
-                        result.episode_reward_mean,
-                        "tune",
-                        _tid,
-                    )
-                except Exception as _exc:
-                    warnings.warn(
-                        f"Trajectory recording skipped at iter {result.iteration}: {_exc}"
-                    )
-
-            trainer.on_iteration_end = _traj_on_iter
-
         results = trainer.train()
-        for result in results:
-            tracker.log_metrics(
-                {
-                    "episode_reward_mean": result.episode_reward_mean,
-                    "episode_len_mean": result.episode_len_mean,
-                    "episodes_total": float(result.episodes_total),
-                },
-                step=result.iteration,
-            )
-            reported_metric = _sanitize_metric(result.episode_reward_mean, mode)
-            _tune.report(
-                {
-                    metric: reported_metric,
-                    "episode_reward_mean": reported_metric,
-                    "episode_len_mean": result.episode_len_mean,
-                    "episodes_total": result.episodes_total,
-                    "training_iteration": result.iteration,
-                }
-            )
+        # Lightweight trainer doubles may return results without invoking hooks.
+        if not hook_called:
+            for result in results:
+                _report_iteration(result)
+        _write_tune_status(trial_dir, "COMPLETED", iteration=last_iteration)
         tracker.end_child_run("FINISHED")
     except Exception:
+        _write_tune_status(trial_dir, "FAILED", iteration=last_iteration)
         tracker.end_child_run("FAILED")
         raise
-
 
 def _make_trainable(
     stl: Path,
@@ -640,16 +633,16 @@ def _make_trainable(
     max_iterations: int,
     output_dir: Path,
     metric: str,
-    mode: str,
-    num_gpus: int,
-    base_config: dict[str, Any],
-    env_base: dict[str, Any],
-    mlflow_tracking_uri: str,
-    mlflow_experiment_name: str,
-    mlflow_parent_run_id: str,
-    run_tag: str,
-    trajectory_every: int,
-    best_trajectory: bool,
+    mode: str = "max",
+    num_gpus: int = 0,
+    base_config: dict[str, Any] | None = None,
+    env_base: dict[str, Any] | None = None,
+    mlflow_tracking_uri: str = "",
+    mlflow_experiment_name: str = "tune",
+    mlflow_parent_run_id: str = "",
+    run_tag: str = "latest",
+    trajectory_every: int = 1,
+    best_trajectory: bool = True,
 ) -> Any:
     from ray import tune
 
@@ -1058,6 +1051,13 @@ def tune(
             ),
         )
         results = tuner.fit()
+        from theseo_anysearch.experiments.tune_runner import _persist_trial_outcomes
+
+        _persist_trial_outcomes(
+            Path(output_dir, run_tag),
+            results,
+            max_iterations=max_iterations,
+        )
         best_result = results.get_best_result(metric=metric, mode=mode)
         tracker.log_params({"best_" + k: str(v) for k, v in (best_result.config or {}).items()})
         # Terminate all child runs from the driver process — worker processes are

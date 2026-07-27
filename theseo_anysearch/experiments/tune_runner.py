@@ -15,6 +15,149 @@ _tune: Any | None = None
 Trainer: Any | None = None
 
 
+
+
+
+def _tune_stop_criteria(
+    tune_config: Any,
+    *,
+    max_iterations: int,
+) -> dict[str, float | int]:
+    """Build Tune stop criteria from the explicit trial budget."""
+    stop: dict[str, float | int] = {
+        "training_iteration": max_iterations,
+    }
+    if tune_config.max_environment_steps is not None:
+        stop["environment_steps_total"] = tune_config.max_environment_steps
+    if tune_config.max_wall_time_s is not None:
+        stop["time_total_s"] = tune_config.max_wall_time_s
+    if tune_config.target_success_rate is not None:
+        stop["evaluation_success_rate"] = tune_config.target_success_rate
+    return stop
+
+def _selected_metric(
+    payload: dict[str, Any],
+    metric: str,
+    *,
+    fallback: float,
+    mode: str,
+) -> float:
+    """Resolve and sanitize the actual metric configured for Tune."""
+    value = float(payload.get(metric, fallback))
+    if math.isfinite(value):
+        return value
+    return -1e9 if mode == "max" else 1e9
+
+def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
+    """Return comparable per-trial compute and architecture metadata."""
+    algorithm = settings.algorithm_config
+    model = settings.model_cfg
+    hidden_sizes = list(getattr(model, "hidden_sizes", []))
+    parameter_count = 0
+    observation_size = 0
+    try:
+        policy = trainer._algo.get_policy()
+        policy_model = getattr(policy, "model", None)
+        if policy_model is not None:
+            parameter_count = sum(
+                int(parameter.numel()) for parameter in policy_model.parameters()
+            )
+        from gymnasium.spaces.utils import flatdim
+
+        observation_size = int(flatdim(policy.observation_space))
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
+        pass
+
+    return {
+        "resource/train_batch_size": float(
+            getattr(algorithm, "train_batch_size", 0)
+        ),
+        "resource/num_sgd_iter": float(
+            getattr(algorithm, "num_sgd_iter", 0)
+        ),
+        "resource/model_parameter_count": float(parameter_count),
+        "resource/observation_size": float(observation_size),
+        "resource/hidden_layer_count": float(len(hidden_sizes)),
+        "resource/hidden_layer_width": float(max(hidden_sizes, default=0)),
+        "resource/num_env_runners": float(settings.training.num_env_runners),
+        "resource/num_gpus": float(settings.training.num_gpus or 0.0),
+    }
+
+
+def _append_tune_history(
+    trial_dir: Path,
+    payload: dict[str, Any],
+) -> None:
+    """Persist the same per-iteration payload reported to Tune."""
+    history_path = trial_dir.joinpath("tune_history.jsonl")
+    with history_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
+def _write_tune_status(
+    trial_dir: Path,
+    status: str,
+    *,
+    iteration: int,
+) -> None:
+    trial_dir.joinpath("tune_status.json").write_text(
+        json.dumps(
+            {"status": status, "training_iteration": iteration},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+
+def _persist_trial_outcomes(
+    sweep_dir: Path,
+    results: Any,
+    *,
+    max_iterations: int,
+) -> None:
+    """Classify completed, pruned, and failed trials in project artifacts."""
+    if results is None:
+        return
+    for result in results:
+        metrics = result.metrics or {}
+        trial_id = metrics.get("trial_id")
+        if not trial_id:
+            continue
+        iteration = int(metrics.get("training_iteration", 0))
+        if result.error is not None:
+            status = "FAILED"
+        elif iteration < max_iterations:
+            status = "PRUNED"
+        else:
+            status = "COMPLETED"
+        trial_dir = sweep_dir.joinpath(str(trial_id))
+        if trial_dir.is_dir():
+            _write_tune_status(trial_dir, status, iteration=iteration)
+
+def _restore_reported_checkpoint(trainer: Any, tune_api: Any) -> bool:
+    """Restore a project trainer from Ray's incoming function checkpoint."""
+    try:
+        checkpoint = tune_api.get_checkpoint()
+    except RuntimeError:
+        return False
+    if checkpoint is None:
+        return False
+    if not checkpoint.__class__.__module__.startswith("ray."):
+        return False
+    with checkpoint.as_directory() as checkpoint_dir:
+        trainer.restore(Path(checkpoint_dir))
+    return True
+
+
+def _ray_checkpoint(checkpoint_dir: Any) -> Any | None:
+    """Convert a real project checkpoint directory into a Ray checkpoint."""
+    if not isinstance(checkpoint_dir, Path) or not checkpoint_dir.is_dir():
+        return None
+    from ray.train import Checkpoint
+
+    return Checkpoint.from_directory(str(checkpoint_dir))
+
 # ---------------------------------------------------------------------------
 # Module-level trainable (must be picklable by cloudpickle / Ray)
 # ---------------------------------------------------------------------------
@@ -31,6 +174,8 @@ def _experiment_trainable(
     mlflow_parent_run_id: str,
     run_tag: str,
     trial_prefix: str = "",
+    checkpoint_frequency: int = 1,
+    preserve_trial_artifacts: bool = True,
 ) -> None:
     """
     Generic Ray Tune function trainable for any algorithm in Trainer._registry.
@@ -85,7 +230,7 @@ def _experiment_trainable(
     # and would raise a Pydantic validation error if PPO-only fields were  #
     # passed to a non-PPO config via model_copy().                         #
     # ------------------------------------------------------------------ #
-    valid_algo_fields = set(exp_config.algorithm_config.model_fields.keys())
+    valid_algo_fields = set(type(exp_config.algorithm_config).model_fields.keys())
     algo_updates = {k: v for k, v in config.items() if k in valid_algo_fields}
     new_algo = exp_config.algorithm_config.model_copy(update=algo_updates)
 
@@ -116,9 +261,17 @@ def _experiment_trainable(
     )
     trial_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write per-trial config snapshot so anysearch inspect/repeat works on trial dirs.
-    import json as _json
-    (trial_dir / "experiment.yaml").write_text(_json.dumps(experiment_dict, indent=2))
+    # Write a true YAML snapshot so inspect/repeat works on trial directories.
+    import yaml
+
+    trial_dir.joinpath("experiment.yaml").write_text(
+        yaml.safe_dump(experiment_dict, sort_keys=False),
+        encoding="utf-8",
+    )
+    trial_dir.joinpath("sampled_config.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
 
     # ------------------------------------------------------------------ #
     # Build Settings for this trial                                        #
@@ -138,6 +291,17 @@ def _experiment_trainable(
         "training": base_settings.training.model_copy(update={
             "output_dir": trial_dir,
             "iterations": max_iterations,
+            "checkpoint_interval": max_iterations + 1,
+            "trajectory_every": (
+                1
+                if preserve_trial_artifacts
+                else base_settings.training.trajectory_every
+            ),
+            "best_trajectory": (
+                True
+                if preserve_trial_artifacts
+                else base_settings.training.best_trajectory
+            ),
         }),
         "algorithm_config": new_algo,
         "model_cfg": new_model,
@@ -160,41 +324,67 @@ def _experiment_trainable(
     # Train                                                                #
     # ------------------------------------------------------------------ #
     trainer = Trainer.from_settings(settings)
+    _restore_reported_checkpoint(trainer, _tune)
+    resource_metrics: dict[str, float] | None = None
+    last_iteration = 0
 
     def _iteration_hook(result: TrainResult) -> None:
+        nonlocal resource_metrics, last_iteration
+        last_iteration = result.iteration
+        if resource_metrics is None:
+            resource_metrics = _trial_resource_metrics(trainer, settings)
+            trial_dir.joinpath("resources.json").write_text(
+                json.dumps(resource_metrics, indent=2),
+                encoding="utf-8",
+            )
+
+        payload: dict[str, Any] = {
+            **result.standard_metrics(),
+            **resource_metrics,
+            "training_iteration": result.iteration,
+            "trial_id": output_trial_id,
+            "evaluation_status": result.evaluation_status,
+        }
+        sanitized = _selected_metric(
+            payload,
+            metric,
+            fallback=result.episode_reward_mean,
+            mode=mode,
+        )
+        payload[metric] = sanitized
+        if metric == "episode_reward_mean":
+            payload["episode_reward_mean"] = sanitized
+
         tracker.log_metrics(
-            result.standard_metrics(),
+            {
+                key: value
+                for key, value in payload.items()
+                if isinstance(value, (int, float))
+            },
             step=result.iteration,
         )
-        sanitized: float = result.episode_reward_mean
-        if sanitized is None or not math.isfinite(sanitized):  # type: ignore[arg-type]
-            sanitized = -1e9 if mode == "max" else 1e9
-        _tune.report(
-            {
-                **result.standard_metrics(),
-                metric: sanitized,
-                "episode_reward_mean": sanitized,
-                "episode_len_mean": result.episode_len_mean,
-                "episodes_total": result.episodes_total,
-                "episodes_this_iter": result.episodes_this_iter,
-                "goals_reached_this_iter": result.goals_reached_this_iter,
-                "goals_reached_total": result.goals_reached_total,
-                "training_success_rate": result.training_success_rate,
-                "evaluation_episodes": float(result.evaluation_episodes),
-                "evaluation_goals_reached": float(result.evaluation_goals_reached),
-                "evaluation_success_rate": result.evaluation_success_rate,
-                "training_iteration": result.iteration,
-                "trial_id": output_trial_id,
-                "evaluation_status": result.evaluation_status,
-            }
+        _append_tune_history(trial_dir, payload)
+        _write_tune_status(
+            trial_dir,
+            "RUNNING",
+            iteration=result.iteration,
         )
+
+        report_options: dict[str, Any] = {}
+        if result.iteration % checkpoint_frequency == 0:
+            tune_checkpoint = _ray_checkpoint(trainer.checkpoint())
+            if tune_checkpoint is not None:
+                report_options["checkpoint"] = tune_checkpoint
+        _tune.report(payload, **report_options)
 
     trainer.on_iteration_end = _iteration_hook  # type: ignore[method-assign]
 
     try:
         trainer.train()
+        _write_tune_status(trial_dir, "COMPLETED", iteration=last_iteration)
         tracker.end_child_run("FINISHED")
     except Exception:
+        _write_tune_status(trial_dir, "FAILED", iteration=last_iteration)
         tracker.end_child_run("FAILED")
         raise
     finally:
@@ -798,6 +988,8 @@ class TuneRunner:
             mlflow_parent_run_id=parent_run_id,
             run_tag=run_tag,
             trial_prefix=trial_prefix,
+            checkpoint_frequency=tc.checkpoint_frequency,
+            preserve_trial_artifacts=tc.preserve_trial_artifacts,
         )
 
         # ------------------------------------------------------------------ #
@@ -850,6 +1042,10 @@ class TuneRunner:
             mlflow_tracking_uri=mlflow_tracking_uri,
         )
 
+        stop = _tune_stop_criteria(
+            tc,
+            max_iterations=self._config.training.iterations,
+        )
         # ------------------------------------------------------------------ #
         # TensorBoard callback (optional — skip if tensorboard not installed) #
         # Event files land under storage_path/run_tag/ (one subdir per trial) #
@@ -895,9 +1091,11 @@ class TuneRunner:
                         storage_path=storage_path,
                         verbose=1,
                         callbacks=tb_callbacks,
+                        stop=stop,
                     ),
                 )
             results = tuner.fit()
+
 
             try:
                 best = results.get_best_result(metric=tc.metric, mode=tc.mode)
@@ -910,6 +1108,11 @@ class TuneRunner:
                     ) from exc
                 raise
             best_trial_id = best.metrics.get("trial_id") if best.metrics else None
+            _persist_trial_outcomes(
+                sweep_dir,
+                results,
+                max_iterations=self._config.training.iterations,
+            )
             runtime_meta["active_segment"] = None
             runtime_meta["segments"] = [
                 {
