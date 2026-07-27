@@ -1,3 +1,6 @@
+description: >
+  Demonstrates PPO in trail mode, where visited cells become filled geometry and the policy must reach a target fill count. It showcases geometry-aware box observations and replay visualization.
+
 experiment:
   name: trail-geometry-demo
   output_dir: ../../../runtime/experiments

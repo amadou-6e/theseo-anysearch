@@ -1,0 +1,49 @@
+description: >
+  Trains PPO on high-resolution geometry-pool samples with aggressive box augmentation. It targets policy generalization across diverse obstacle layouts rather than overfitting one mesh.
+
+experiment:
+  name: ppo-diverse
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  obs_mode: box
+  box_radius: 2
+  agent_count: 4
+  max_steps: 200
+  step_cost: -0.01
+  goal_reward: 1.0
+  distance_shaping: 0.1
+  grid_size: 64
+
+  geometry_pool:
+    pool_dir: runtime/geometry_pools/highres   # built with: anysearch extract usage/extract/highres.yaml
+    augmentation:
+      paste_boxes:
+        num_boxes: [2, 12]
+        box_min_size: [2, 2, 2]
+        box_max_size: [20, 20, 20]
+        prob: 1.0
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 500
+  checkpoint_interval: 50
+  trajectory_every: 10
+  best_trajectory: true
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 4096
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+  kl_coeff: 0.2
+  gamma: 0.99
+
+model_config:
+  hidden_sizes: [256, 256]
+  activation: relu
+
+mlflow: {}

@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from theseo_anysearch.experiments.loader import expand_sweep, load_experiment
-from theseo_anysearch.experiments.models import ExperimentConfig, SweepConfig
+from theseo_anysearch.experiments.models import (
+    ExperimentConfig,
+    HeuristicConfig,
+    SweepConfig,
+)
 
 
 class TestExperimentModels:
@@ -95,3 +99,64 @@ class TestExperimentModels:
         result = load_experiment(path)
         assert isinstance(result, ExperimentConfig)
         assert result.to_settings().anyscale.project == "proj-1"
+
+class TestHeuristicConfig:
+    """Verify YAML-facing heuristic configuration and compatibility."""
+
+    def test_defaults_to_disabled_astar(self):
+        config = HeuristicConfig()
+
+        assert config.enabled is False
+        assert config.type == "astar"
+        assert config.weight is None
+
+    def test_weighted_astar_defaults_weight(self):
+        config = HeuristicConfig(enabled=True, type="weighted_astar")
+
+        assert config.weight == pytest.approx(1.5)
+
+    @pytest.mark.parametrize("weight", [0.0, -1.0])
+    def test_weighted_astar_requires_positive_weight(self, weight):
+        with pytest.raises(ValueError, match="greater than zero"):
+            HeuristicConfig(
+                enabled=True,
+                type="weighted_astar",
+                weight=weight,
+            )
+
+    def test_weight_is_rejected_for_other_types(self):
+        with pytest.raises(ValueError, match="only valid"):
+            HeuristicConfig(enabled=True, type="dijkstra", weight=2.0)
+
+    def test_enabled_heuristic_requires_single_agent(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["env"]["agent_count"] = 2
+        payload["heuristic"] = {"enabled": True, "type": "astar"}
+
+        with pytest.raises(ValueError, match="agent_count"):
+            ExperimentConfig.model_validate(payload)
+    def test_standalone_heuristic_requires_enabled_config(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["algorithm"] = "heuristic"
+
+        with pytest.raises(ValueError, match="enabled"):
+            ExperimentConfig.model_validate(payload)
+
+    def test_standalone_heuristic_accepts_local_single_agent(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["algorithm"] = "heuristic"
+        payload["heuristic"] = {"enabled": True, "type": "dijkstra"}
+
+        config = ExperimentConfig.model_validate(payload)
+
+        assert config.training.algorithm == "heuristic"
+        assert config.heuristic.type == "dijkstra"

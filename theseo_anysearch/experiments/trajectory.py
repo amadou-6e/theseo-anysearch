@@ -288,6 +288,127 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
     )
 
 
+def collect_heuristic_episode(
+    env_config: dict,
+    heuristic_type: str,
+    *,
+    weight: float | None = None,
+    env: Any = None,
+    seed: int | None = None,
+) -> VoxelEpisodeData:
+    """Collect one reference trajectory from a configured voxel heuristic."""
+
+    if env is None:
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv(env_config)
+    env.reset(seed=seed)
+
+    from theseo_anysearch.heuristic import (
+        VoxelReplanningAStarHeuristic,
+        build_voxel_heuristic,
+    )
+
+    rust_env = env._rust_env
+    init_filled = [
+        (int(x), int(y), int(z))
+        for x, y, z in rust_env.filled_voxels()
+    ]
+    raw_start = rust_env.cursor_pos()
+    start_pos = (int(raw_start[0]), int(raw_start[1]), int(raw_start[2]))
+    raw_goal = rust_env.goal_pos()
+    goal_pos = None if raw_goal is None else (
+        int(raw_goal[0]),
+        int(raw_goal[1]),
+        int(raw_goal[2]),
+    )
+
+    heuristic = build_voxel_heuristic(
+        env,
+        heuristic_type,
+        weight=weight,
+    )
+    if isinstance(heuristic, VoxelReplanningAStarHeuristic):
+        replay = heuristic.replay()
+    else:
+        replay = heuristic.replay(heuristic.plan())
+
+    trail_mode = bool(env_config.get("trail_mode", False))
+    filled = set(init_filled)
+    steps: list[VoxelStepData] = []
+    for index, (action, reward, cursor) in enumerate(
+        zip(
+            replay.action_indices,
+            replay.rewards,
+            replay.positions[1:],
+        )
+    ):
+        placed = trail_mode and cursor not in filled
+        if placed:
+            filled.add(cursor)
+        steps.append(
+            VoxelStepData(
+                step=index,
+                action=action,
+                reward=reward,
+                done=(
+                    index == replay.steps_executed - 1
+                    and (replay.terminated or replay.truncated)
+                ),
+                cursor_x=cursor[0],
+                cursor_y=cursor[1],
+                cursor_z=cursor[2],
+                voxel_count=len(filled),
+                placed=placed,
+            )
+        )
+
+    try:
+        env.close()
+    except Exception:
+        pass
+
+    return VoxelEpisodeData(
+        agent_count=1,
+        max_steps=int(env_config.get("max_steps", 200)),
+        obs_mode=str(env_config.get("obs_mode", "scalar")),
+        grid_size=int(env_config.get("grid_size", 32)),
+        init_filled=init_filled,
+        steps=steps,
+        total_reward=sum(replay.rewards),
+        success=replay.goal_reached,
+        start_pos=start_pos,
+        goal_pos=goal_pos,
+    )
+
+
+def write_heuristic_trajectory(
+    store: "OutputStore",
+    episode: VoxelEpisodeData,
+    *,
+    heuristic_type: str,
+    weight: float | None,
+    iteration: int,
+    experiment_name: str,
+    run_id: str,
+) -> str:
+    """Write a replayer-compatible heuristic reference trajectory."""
+
+    json_path = f"trajectories/heuristic_{heuristic_type}.json"
+    init_filled_file = _init_filled_sidecar_path(json_path)
+    _write_init_filled_sidecar(store, init_filled_file, episode.init_filled)
+    payload = _build_payload(
+        episode,
+        iteration,
+        episode.total_reward,
+        experiment_name,
+        run_id,
+        init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+    )
+    payload["heuristic"] = {"type": heuristic_type, "weight": weight}
+    store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+    return json_path
+
 # ---------------------------------------------------------------------------
 # Multi-agent data classes
 # ---------------------------------------------------------------------------

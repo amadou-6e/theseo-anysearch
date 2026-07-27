@@ -1,3 +1,6 @@
+description: >
+  Runs one fixed PPO configuration across several non-trivial geometries. It compares geometry difficulty before spending resources on a larger hyperparameter search.
+
 # Sweep: same PPO config evaluated on all four non-trivial geometries.
 # Useful to understand which geometry is hardest before committing to a full tune.
 

@@ -249,7 +249,47 @@ def _build_trainer(config: ExperimentConfig, output_dir: Path) -> Trainer:
     return _Trainer.from_settings(settings)
 
 
+def _collect_heuristic_reference(
+    config: ExperimentConfig,
+    store: Any,
+    run_dir: Path,
+    run_id: str,
+    tracker: Any,
+    env_config: dict[str, Any],
+    *,
+    iteration: int,
+) -> str:
+    """Collect, persist, and log one configured heuristic trajectory."""
+
+    from theseo_anysearch.experiments.trajectory import (
+        collect_heuristic_episode,
+        write_heuristic_trajectory,
+    )
+
+    heuristic_cfg = config.heuristic
+    _append_run_stage(run_dir, "Collecting heuristic trajectory")
+    episode = collect_heuristic_episode(
+        env_config,
+        heuristic_cfg.type,
+        weight=heuristic_cfg.weight,
+        seed=config.experiment.seed,
+    )
+    heuristic_path = write_heuristic_trajectory(
+        store,
+        episode,
+        heuristic_type=heuristic_cfg.type,
+        weight=heuristic_cfg.weight,
+        iteration=iteration,
+        experiment_name=config.experiment.name,
+        run_id=run_id,
+    )
+    tracker.log_artifact(run_dir.joinpath(heuristic_path))
+    _append_run_stage(run_dir, f"Heuristic trajectory written: {heuristic_path}")
+    return heuristic_path
+
+
 class ExperimentRunner:
+
     """Run, resume, repeat, inspect, and finalize single experiments.
 
     Parameters
@@ -308,8 +348,15 @@ class ExperimentRunner:
             run_info = run_info.model_copy(update={"mlflow_run_url": tracker.run_url})
             store.write_json("run.json", run_info.model_dump())
             _append_run_stage(run_dir, "run.json updated with MLflow URL")
-            trainer = _build_trainer(self._config, run_dir)
-            _append_run_stage(run_dir, "Trainer built")
+            standalone_heuristic = (
+                self._config.training.algorithm.lower() == "heuristic"
+            )
+            trainer = None
+            if not standalone_heuristic:
+                trainer = _build_trainer(self._config, run_dir)
+                _append_run_stage(run_dir, "Trainer built")
+            else:
+                _append_run_stage(run_dir, "Standalone heuristic mode selected")
 
         try:
             _append_run_stage(run_dir, "Logging MLflow params")
@@ -318,25 +365,48 @@ class ExperimentRunner:
             tracker.log_artifact(run_dir / "experiment.yaml")
             _append_run_stage(run_dir, "experiment.yaml logged to MLflow")
 
-            _orig_hook = trainer.on_iteration_end
+            if trainer is not None:
+                _orig_hook = trainer.on_iteration_end
 
-            def _combined_hook(result: TrainResult) -> None:
-                _orig_hook(result)
-                tracker.log_metrics(
-                    {
-                        "episode_reward_mean": result.episode_reward_mean,
-                        "episode_len_mean": result.episode_len_mean,
-                        "episodes_total": float(result.episodes_total),
-                        "elapsed_s": result.elapsed_s,
-                    },
-                    step=result.iteration,
+                def _combined_hook(result: TrainResult) -> None:
+                    _orig_hook(result)
+                    tracker.log_metrics(
+                        {
+                            "episode_reward_mean": result.episode_reward_mean,
+                            "episode_len_mean": result.episode_len_mean,
+                            "episodes_total": float(result.episodes_total),
+                            "elapsed_s": result.elapsed_s,
+                        },
+                        step=result.iteration,
+                    )
+
+                trainer.on_iteration_end = _combined_hook  # type: ignore[method-assign]
+
+            if trainer is None:
+                _collect_heuristic_reference(
+                    self._config,
+                    store,
+                    run_dir,
+                    run_id,
+                    tracker,
+                    self._config.env.model_dump(mode="python"),
+                    iteration=0,
                 )
+            else:
+                _append_run_stage(run_dir, "Calling trainer.train()")
+                trainer.train()
+                _append_run_stage(run_dir, "trainer.train() returned")
+                if self._config.heuristic.enabled:
+                    _collect_heuristic_reference(
+                        self._config,
+                        store,
+                        run_dir,
+                        run_id,
+                        tracker,
+                        trainer._env_config_dict(),
+                        iteration=self._config.training.iterations,
+                    )
 
-            trainer.on_iteration_end = _combined_hook  # type: ignore[method-assign]
-
-            _append_run_stage(run_dir, "Calling trainer.train()")
-            trainer.train()
-            _append_run_stage(run_dir, "trainer.train() returned")
             tracker.end_run("FINISHED")
             _append_run_stage(run_dir, "MLflow run finished")
             return self._finalise(store, run_info, "COMPLETED")

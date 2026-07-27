@@ -1,0 +1,25 @@
+description: >
+  Runs weighted A-star as a standalone voxel planner with weight 1.5. It favors faster planning over guaranteed path optimality and writes a replayable trajectory without policy training.
+
+experiment:
+  name: weighted-astar
+  output_dir: ../../../../runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/cube.stl
+  scale: 40.0
+  agent_count: 1
+  max_steps: 50
+  trail_mode: true
+
+training:
+  algorithm: heuristic
+  runner: local
+
+heuristic:
+  enabled: true
+  type: weighted_astar
+  weight: 1.5
+
+mlflow: {}

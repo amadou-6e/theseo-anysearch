@@ -1,3 +1,6 @@
+description: >
+  Trains the standard PPO baseline on stepped terrain with four agents and positional encoding. It is the general reference configuration for longer single-policy PPO experiments.
+
 experiment:
   name: ppo-baseline
   output_dir: ../../../runtime/experiments

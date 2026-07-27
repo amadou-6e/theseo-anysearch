@@ -1,0 +1,66 @@
+description: >
+  Uses ASHA to tune shared-policy multi-agent PPO initialized with a pretrained box encoder. It measures whether pretrained spatial features improve multi-agent sample efficiency and final reward.
+
+experiment:
+  name: multi_agent_ppo_asha_pretrained
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 3
+  max_steps: 200
+  trail_mode: true
+  geometry_boxes:
+    - [18, 18, 18, 28, 28, 28]
+  step_cost: -0.01
+  goal_reward: 1.0
+  distance_shaping: 0.1
+  collision_cost: 0.0
+  box_radius: 2                  # must match the garden encoder's box_radius
+  obs_mode: box                  # local_grid observation required by the pretrained encoder
+
+training:
+  algorithm: multi_agent_voxel_ppo
+  runner: local
+  iterations: 100
+  checkpoint_interval: 50
+  trajectory_every: 20
+  video_every: 100
+  require_gpu: true
+  num_env_runners: 0
+
+algorithm_config:
+  clip_param: 0.2
+  num_sgd_iter: 5
+  lambda_: 0.95
+  minibatch_size: 256
+  train_batch_size: 512
+
+model_config:
+  custom_model: voxel_box_3d_cnn_pretrained
+  custom_model_config:
+    pretrained_encoder: voxel_ae_v1   # name registered via anysearch garden train
+    freeze_encoder: true
+    fc_hiddens: [256, 256]
+
+tune_config:
+  scheduler: asha
+  num_samples: 20
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 8
+  asha_config:
+    max_t: 100
+    grace_period: 20
+    reduction_factor: 3
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [256, 512, 1024]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+    model_config:
+      fc_hiddens:       {choice: [[128, 128], [256, 256], [256, 256, 128]]}
+      freeze_encoder:   {choice: [true, false]}
+
+mlflow:
+  tracking_uri: sqlite:///runtime/mlflow.db

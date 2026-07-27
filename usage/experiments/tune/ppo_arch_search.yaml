@@ -1,3 +1,6 @@
+description: >
+  Uses ASHA to search PPO optimization parameters and fully connected network depth and width on stepped terrain. It is intended to identify compact architectures that reliably reach the goal.
+
 experiment:
   name: ppo-arch-search
   output_dir: ../../../runtime/experiments
