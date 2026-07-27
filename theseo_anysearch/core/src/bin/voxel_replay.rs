@@ -942,7 +942,11 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, cam))
                     .unwrap()
             });
-            for &(x, y, z) in &geo_sorted { draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false); }
+            if !self.occlude_agent {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
+                }
+            }
 
             if is_multi {
                 // ---- Multi-agent: per-agent colored trails and cursors ----
@@ -1030,6 +1034,12 @@ impl eframe::App for VoxelReplayApp {
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, rect, cam, &b);
+                }
+            }
+
+            if self.occlude_agent {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
                 }
             }
 
