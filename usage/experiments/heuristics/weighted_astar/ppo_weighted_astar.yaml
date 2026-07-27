@@ -1,6 +1,6 @@
 experiment:
-  name: heuristic-reference
-  output_dir: ../../../runtime/experiments
+  name: weighted-astar-reference
+  output_dir: ../../../../runtime/experiments
   seed: 42
 
 env:
