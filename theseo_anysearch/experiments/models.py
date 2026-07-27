@@ -229,6 +229,11 @@ class TuneConfig(BaseModel):
     mode: Literal["max", "min"] = "max"
     max_concurrent: int = 4
     search_space: dict[str, Any] = Field(default_factory=dict)
+    checkpoint_frequency: int = Field(default=1, ge=1)
+    max_environment_steps: int | None = Field(default=None, ge=1)
+    max_wall_time_s: float | None = Field(default=None, gt=0.0)
+    target_success_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    preserve_trial_artifacts: bool = True
     # Per-scheduler config blocks (all optional; None → use defaults)
     asha_config: ASHASchedulerConfig | None = None
     pbt_config: PBTConfig | None = None

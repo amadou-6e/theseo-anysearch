@@ -18,3 +18,5 @@ These files launch multi-trial searches or repeat one configuration across multi
 - [`ppo_sweep_geometries.yaml`](ppo_sweep_geometries.yaml) keeps PPO settings fixed while comparing performance across geometries.
 
 ASHA is appropriate for independent trials with early stopping. PBT is appropriate when strong trials should transfer weights and mutate their settings during training. The geometry sweep isolates environment difficulty rather than hyperparameter quality.
+
+Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop budgets are documented in [Tune lifecycle and trial budgets](../../../docs/tune-lifecycle.md).
