@@ -171,6 +171,8 @@ class TrainingConfig(BaseModel):
     output_dir: Path = Path("runtime/")
     video_every: int = 10
     evaluation_episodes: int = Field(default=1, ge=1)
+    evaluation_seed: int = 42
+    evaluation_min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class AnyscaleConfig(BaseModel):
