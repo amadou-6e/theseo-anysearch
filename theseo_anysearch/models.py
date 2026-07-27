@@ -10,6 +10,35 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from theseo_anysearch.environments.task import TaskConfig
 
 
+class WaypointAdvanceConfig(BaseModel):
+    """Condition used to advance a waypoint curriculum stage."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["fixed", "interval", "success"] = "fixed"
+    interval_iterations: int = Field(default=10, ge=1)
+    require_success: bool = True
+    successes_required: int = Field(default=1, ge=1)
+
+
+class WaypointCurriculumConfig(BaseModel):
+    """Evaluation-driven curriculum for reproducible start/goal changes."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    initial_start: tuple[int, int, int] | None = None
+    initial_goal: tuple[int, int, int] | None = None
+    seed: int = 42
+    advance: WaypointAdvanceConfig = Field(default_factory=WaypointAdvanceConfig)
+
+    @model_validator(mode="after")
+    def validate_initial_pair(self) -> "WaypointCurriculumConfig":
+        if self.enabled and (self.initial_start is None or self.initial_goal is None):
+            raise ValueError(
+                "enabled waypoint_curriculum requires initial_start and initial_goal"
+            )
+        return self
+
+
 class EnvConfig(BaseModel):
     """Environment configuration shared by training and experiment loading.
 
@@ -89,6 +118,9 @@ class EnvConfig(BaseModel):
     geometry_boxes: list[list[int]] | None = None  # [[xmin,ymin,zmin,xmax,ymax,zmax], ...]
     # Navigation / reward (modifiable from Python, computed in Rust)
     waypoints_file: str | None = None   # path to JSON {"start":[x,y,z],"goal":[x,y,z]}
+    waypoint_curriculum: WaypointCurriculumConfig = Field(
+        default_factory=WaypointCurriculumConfig
+    )
     step_cost: float = -0.01            # per-step reward penalty
     collision_cost: float = 0.0         # extra penalty subtracted on blocked moves
     goal_reward: float = 1.0            # bonus when cursor reaches goal position
@@ -128,6 +160,10 @@ class EnvConfig(BaseModel):
             raise ValueError("zone_reward_max must stay negative")
         if self.zone_reward_min >= 0.0:
             raise ValueError("zone_reward_min must stay negative")
+        if self.waypoint_curriculum.enabled and self.waypoints_file is not None:
+            raise ValueError(
+                "waypoints_file and enabled waypoint_curriculum are mutually exclusive"
+            )
         return self
 
 
@@ -249,6 +285,10 @@ class AlgorithmEnvCompatibilityMixin:
         """Reject unsupported algorithm and agent-count combinations."""
         single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
+        if self.env.waypoint_curriculum.enabled and algorithm != "ppo":
+            raise ValueError(
+                "waypoint_curriculum currently requires training.algorithm='ppo'"
+            )
         if algorithm in single_agent_algorithms and self.env.agent_count != 1:
             raise ValueError(
                 f"training.algorithm='{self.training.algorithm}' only supports single-agent "

@@ -169,6 +169,7 @@ class PPOTrainer(Trainer):
             "geometry_pool": _resolve_pool_dir(env.geometry_pool),
             "geometry_padding": env.geometry_padding,
             "waypoints_file": env.waypoints_file,
+            "waypoint_curriculum": env.waypoint_curriculum.model_dump(mode="json"),
             "step_cost": env.step_cost,
             "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,

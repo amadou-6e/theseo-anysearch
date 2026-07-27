@@ -326,6 +326,15 @@ class Trainer(ABC):
         self._iteration: int = 0
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
+        self._waypoint_curriculum: Any = None
+        if config.env.waypoint_curriculum.enabled:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                WaypointCurriculum,
+            )
+
+            self._waypoint_curriculum = WaypointCurriculum(
+                config.env.waypoint_curriculum
+            )
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -378,6 +387,7 @@ class Trainer(ABC):
             "geometry_pool": _resolve_pool_dir(env.geometry_pool),
             "geometry_padding": env.geometry_padding,
             "waypoints_file": env.waypoints_file,
+            "waypoint_curriculum": env.waypoint_curriculum.model_dump(mode="json"),
             "step_cost": env.step_cost,
             "collision_cost": env.collision_cost,
             "goal_reward": env.goal_reward,
@@ -427,6 +437,27 @@ class Trainer(ABC):
         from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
 
         _store = OutputStore(self._output_dir)
+        if self._waypoint_curriculum is not None:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                WaypointCurriculumState,
+                broadcast_waypoints,
+            )
+
+            if _store.exists("curriculum/state.json"):
+                self._waypoint_curriculum.state = WaypointCurriculumState.model_validate(
+                    _store.read_json("curriculum/state.json")
+                )
+            curriculum_state = self._waypoint_curriculum.state
+            _env_cfg["waypoints"] = {
+                "start": curriculum_state.start,
+                "goal": curriculum_state.goal,
+            }
+            broadcast_waypoints(
+                self._algo, curriculum_state.start, curriculum_state.goal
+            )
+            _store.write_json(
+                "curriculum/state.json", curriculum_state.model_dump(mode="json")
+            )
         if traj_every or best_traj:
             from theseo_anysearch.experiments.trajectory import (
                 MultiTrajectoryWriter,
@@ -549,6 +580,38 @@ class Trainer(ABC):
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
                     }
+                    if self._waypoint_curriculum is not None:
+                        from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                            broadcast_waypoints,
+                        )
+
+                        transitioned = self._waypoint_curriculum.observe(
+                            self._iteration, metrics.finish_count
+                        )
+                        if transitioned:
+                            start, goal = self._waypoint_curriculum.sample(_env_cfg)
+                            self._waypoint_curriculum.advance(
+                                self._iteration, start, goal
+                            )
+                            _env_cfg["waypoints"] = {
+                                "start": start,
+                                "goal": goal,
+                            }
+                            broadcast_waypoints(self._algo, start, goal)
+                        curriculum_state = self._waypoint_curriculum.state
+                        scalar_metrics.update(
+                            {
+                                "curriculum/stage": float(curriculum_state.stage),
+                                "curriculum/transition": float(transitioned),
+                                "curriculum/successes_in_stage": float(
+                                    curriculum_state.successes_in_stage
+                                ),
+                            }
+                        )
+                        _store.write_json(
+                            "curriculum/state.json",
+                            curriculum_state.model_dump(mode="json"),
+                        )
                     tb_writer.log_scalars(self._iteration, scalar_metrics)
                     _store.write_json(
                         f"evaluation/iter_{self._iteration:06d}.json",
