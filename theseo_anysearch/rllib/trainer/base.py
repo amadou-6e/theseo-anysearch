@@ -235,6 +235,13 @@ class TrainResult(BaseModel):
     episode_len_mean: float
     episodes_total: int
     elapsed_s: float
+    episodes_this_iter: int = 0
+    goals_reached_this_iter: int = 0
+    goals_reached_total: int = 0
+    training_success_rate: float = 0.0
+    evaluation_episodes: int = 0
+    evaluation_goals_reached: int = 0
+    evaluation_success_rate: float = 0.0
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -331,6 +338,7 @@ class Trainer(ABC):
             "box_radius": env.box_radius,
             "box_radii": env.box_radii,
             "ray_max_len": env.ray_max_len,
+            "include_voxel_count": env.include_voxel_count,
             "grid_size": env.grid_size,
             "trail_mode": env.trail_mode,
             "geometry_boxes": env.geometry_boxes,
@@ -369,26 +377,28 @@ class Trainer(ABC):
         results: list[TrainResult] = []
         tb_writer = _TensorBoardRunWriter(self._output_dir)
 
-        # --- Trajectory writer setup (lazy import to keep CLI fast) ---
+        # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
+        evaluation_episodes = training.evaluation_episodes
         _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
-        _env_cfg: dict | None = None
+        _env_cfg = self._env_config_dict()
+
+        from theseo_anysearch.experiments.output import OutputStore
+        from theseo_anysearch.experiments.trajectory import EpisodeRunMetrics
+
+        _store = OutputStore(self._output_dir)
         if traj_every or best_traj:
-            from theseo_anysearch.experiments.output import OutputStore
             from theseo_anysearch.experiments.trajectory import (
-                EpisodeRunMetrics,
                 MultiTrajectoryWriter,
                 TrajectoryWriter,
             )
-            _store = OutputStore(self._output_dir)
+
             _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
             _traj_writer = _Writer(_store, traj_every, best_traj)
-            _metrics_cls = EpisodeRunMetrics
             _run_id = self._output_dir.name
             _exp_name = self._output_dir.parent.name
-            _env_cfg = self._env_config_dict()
 
         try:
             for i in range(self._iteration, training.iterations):
@@ -415,61 +425,133 @@ class Trainer(ABC):
                 self._episodes_total = parsed.parse_episodes_total(
                 ) or self._episodes_total
 
-                result = TrainResult.from_rllib(self._iteration, rllib_result,
-                                                elapsed)
-                results.append(result)
-                tb_writer.log_iteration(result)
-                self.on_iteration_end(result)
+                result = TrainResult.from_rllib(
+                    self._iteration,
+                    rllib_result,
+                    elapsed,
+                )
 
-                if self._iteration % training.checkpoint_interval == 0:
-                    self.checkpoint()
-
-                # --- Trajectory recording ---
                 _is_last_iter = self._iteration == training.iterations
-                if _traj_writer is not None and _env_cfg is not None:
-                    try:
-                        _log_trainer_stage(
-                            f"Collecting eval trajectory for iteration {self._iteration}"
+                _checkpointed_for_best = False
+                try:
+                    _log_trainer_stage(
+                        f"Collecting {evaluation_episodes} deterministic evaluation "
+                        f"episodes for iteration {self._iteration}"
+                    )
+                    _append_trainer_stage_log(
+                        self._output_dir,
+                        f"Collecting deterministic evaluation batch for iteration "
+                        f"{self._iteration}",
+                    )
+                    evaluation_seed = self._iteration * evaluation_episodes
+                    if _is_multi:
+                        from theseo_anysearch.experiments.trajectory import (
+                            collect_multi_eval_episode,
                         )
-                        _append_trainer_stage_log(
-                            self._output_dir,
-                            f"Collecting eval trajectory for iteration {self._iteration}",
+
+                        episodes = [
+                            collect_multi_eval_episode(
+                                self._algo,
+                                _env_cfg,
+                                seed=evaluation_seed + episode_index,
+                            )
+                            for episode_index in range(evaluation_episodes)
+                        ]
+                        metrics = EpisodeRunMetrics.from_multi_voxel_episodes(episodes)
+                    else:
+                        from theseo_anysearch.experiments.trajectory import (
+                            collect_eval_episodes,
                         )
-                        if _is_multi:
-                            from theseo_anysearch.experiments.trajectory import collect_multi_eval_episode
-                            episode = collect_multi_eval_episode(
-                                self._algo, _env_cfg, seed=self._iteration
-                            )
-                        else:
-                            from theseo_anysearch.experiments.trajectory import collect_eval_episode
-                            episode = collect_eval_episode(
-                                self._algo, _env_cfg, seed=self._iteration
-                            )
-                        if _is_multi:
-                            metrics = _metrics_cls.from_multi_voxel_episode(episode)
-                        else:
-                            metrics = _metrics_cls.from_voxel_episode(episode)
-                        tb_writer.log_scalars(self._iteration, metrics.as_scalar_dict())
-                        _traj_writer.record(episode)
-                        _traj_writer.on_iteration_end(
+
+                        episodes = collect_eval_episodes(
+                            self._algo,
+                            _env_cfg,
+                            evaluation_episodes,
+                            seed=evaluation_seed,
+                        )
+                        metrics = EpisodeRunMetrics.from_voxel_episodes(episodes)
+
+                    evaluation_reward_mean = sum(
+                        episode.total_reward for episode in episodes
+                    ) / len(episodes)
+                    evaluation_len_mean = sum(
+                        len(episode.steps) for episode in episodes
+                    ) / len(episodes)
+                    result = result.model_copy(
+                        update={
+                            "evaluation_episodes": len(episodes),
+                            "evaluation_goals_reached": metrics.finish_count,
+                            "evaluation_success_rate": metrics.finish_rate,
+                            "extra": {
+                                **result.extra,
+                                "evaluation_reward_mean": evaluation_reward_mean,
+                                "evaluation_len_mean": evaluation_len_mean,
+                                **metrics.as_scalar_dict(),
+                            },
+                        }
+                    )
+                    scalar_metrics = {
+                        **metrics.as_scalar_dict(),
+                        "eval/reward_mean": evaluation_reward_mean,
+                        "eval/episode_len_mean": evaluation_len_mean,
+                    }
+                    tb_writer.log_scalars(self._iteration, scalar_metrics)
+                    _store.write_json(
+                        f"evaluation/iter_{self._iteration:06d}.json",
+                        {
+                            "iteration": self._iteration,
+                            "seed_start": evaluation_seed,
+                            "episode_count": len(episodes),
+                            "goals_reached": metrics.finish_count,
+                            "success_rate": metrics.finish_rate,
+                            "reward_mean": evaluation_reward_mean,
+                            "episode_len_mean": evaluation_len_mean,
+                            "metrics": scalar_metrics,
+                            "episodes": [
+                                {
+                                    "seed": evaluation_seed + episode_index,
+                                    "success": bool(episode.success),
+                                    "total_reward": float(episode.total_reward),
+                                    "steps": len(episode.steps),
+                                }
+                                for episode_index, episode in enumerate(episodes)
+                            ],
+                        },
+                    )
+
+                    if _traj_writer is not None:
+                        for episode in episodes:
+                            _traj_writer.record(episode)
+                        written = _traj_writer.on_iteration_end(
                             self._iteration,
-                            result.episode_reward_mean,
+                            evaluation_reward_mean,
                             _exp_name,
                             _run_id,
                             force=_is_last_iter,
                         )
-                        _log_trainer_stage(
-                            f"Recorded eval trajectory for iteration {self._iteration}"
-                        )
-                        _append_trainer_stage_log(
-                            self._output_dir,
-                            f"Recorded eval trajectory for iteration {self._iteration}",
-                        )
-                    except Exception as exc:
-                        warnings.warn(
-                            f"trajectory collection failed at iter {self._iteration}: {exc}",
-                            stacklevel=2,
-                        )
+                        if "trajectories/best.json" in written:
+                            self.checkpoint()
+                            _checkpointed_for_best = True
+                    _append_trainer_stage_log(
+                        self._output_dir,
+                        f"Evaluation batch completed for iteration {self._iteration}: "
+                        f"{metrics.finish_count} goals reached",
+                    )
+                except Exception as exc:
+                    warnings.warn(
+                        f"evaluation collection failed at iter {self._iteration}: {exc}",
+                        stacklevel=2,
+                    )
+
+                results.append(result)
+                tb_writer.log_iteration(result)
+                self.on_iteration_end(result)
+
+                if (
+                    self._iteration % training.checkpoint_interval == 0
+                    and not _checkpointed_for_best
+                ):
+                    self.checkpoint()
         finally:
             tb_writer.close()
 

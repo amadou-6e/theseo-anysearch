@@ -190,6 +190,69 @@ class TestExecution:
             range(1, trainer_settings.training.iterations + 1)
         )
 
+    def test_evaluation_result_replay_and_checkpoint_share_one_batch(
+        self,
+        trainer_settings: Any,
+    ):
+        trainer_settings.training.iterations = 1
+        trainer_settings.training.evaluation_episodes = 2
+        trainer_settings.training.trajectory_every = 1
+
+        def _episode(success: bool, reward: float, steps: int) -> VoxelEpisodeData:
+            return VoxelEpisodeData(
+                agent_count=1,
+                max_steps=10,
+                obs_mode="radial",
+                init_filled=[],
+                steps=[
+                    VoxelStepData(
+                        step=index,
+                        action=1,
+                        reward=reward / steps,
+                        done=index == steps - 1,
+                        cursor_x=1,
+                        cursor_y=1,
+                        cursor_z=index + 1,
+                        voxel_count=index + 1,
+                        placed=True,
+                    )
+                    for index in range(steps)
+                ],
+                total_reward=reward,
+                success=success,
+                start_pos=(1, 1, 1),
+                goal_pos=(1, 1, steps),
+            )
+
+        episodes = [
+            _episode(False, -1.0, 4),
+            _episode(True, 2.0, 2),
+        ]
+        with patch(
+            "theseo_anysearch.experiments.trajectory.collect_eval_episodes",
+            return_value=episodes,
+        ):
+            result = make_trainer(trainer_settings).train()[0]
+
+        output_dir = Path(trainer_settings.training.output_dir)
+        summary = json.loads(
+            output_dir.joinpath("evaluation", "iter_000001.json").read_text()
+        )
+        replay = json.loads(
+            output_dir.joinpath("trajectories", "iter_000001.json").read_text()
+        )
+        best_meta = json.loads(
+            output_dir.joinpath("trajectories", "best_meta.json").read_text()
+        )
+
+        assert result.evaluation_episodes == 2
+        assert result.evaluation_goals_reached == 1
+        assert result.evaluation_success_rate == pytest.approx(0.5)
+        assert summary["success_rate"] == pytest.approx(0.5)
+        assert [item["success"] for item in summary["episodes"]] == [False, True]
+        assert replay["episode"]["success"] is True
+        assert best_meta["iteration"] == 1
+        assert output_dir.joinpath("checkpoints", "iter_000001").is_dir()
     def test_episode_reward_mean_comes_from_algo(self, trainer_settings: Any):
         rewards = [10.0, 20.0, 30.0, 40.0]
         t = make_trainer(trainer_settings, rewards)

@@ -132,6 +132,35 @@ class EpisodeRunMetrics:
         )
 
     @classmethod
+    def from_voxel_episodes(
+        cls,
+        episodes: list[VoxelEpisodeData],
+    ) -> "EpisodeRunMetrics":
+        """Summarize one deterministic single-agent evaluation batch."""
+        if not episodes:
+            return cls(0, 0.0, 0, 0.0, 0.0, 0.0)
+        per_episode = [cls.from_voxel_episode(episode) for episode in episodes]
+        total_steps = sum(len(episode.steps) for episode in episodes)
+        collision_count = sum(metrics.collision_count for metrics in per_episode)
+        successful_steps = [
+            len(episode.steps) for episode in episodes if episode.success
+        ]
+        return cls(
+            collision_count=collision_count,
+            collision_rate=(collision_count / total_steps) if total_steps else 0.0,
+            finish_count=sum(metrics.finish_count for metrics in per_episode),
+            finish_rate=sum(metrics.finish_rate for metrics in per_episode) / len(per_episode),
+            mean_steps_on_success=(
+                sum(successful_steps) / len(successful_steps)
+                if successful_steps
+                else 0.0
+            ),
+            goal_progress_mean=sum(
+                metrics.goal_progress_mean for metrics in per_episode
+            ) / len(per_episode),
+        )
+
+    @classmethod
     def from_multi_voxel_episode(
         cls,
         episode: MultiVoxelEpisodeData,
@@ -167,6 +196,48 @@ class EpisodeRunMetrics:
             goal_progress_mean=(sum(goal_progress) / len(goal_progress)) if goal_progress else 0.0,
         )
 
+    @classmethod
+    def from_multi_voxel_episodes(
+        cls,
+        episodes: list[MultiVoxelEpisodeData],
+    ) -> "EpisodeRunMetrics":
+        """Summarize one deterministic multi-agent evaluation batch."""
+        if not episodes:
+            return cls(0, 0.0, 0, 0.0, 0.0, 0.0)
+        per_episode = [cls.from_multi_voxel_episode(episode) for episode in episodes]
+        agent_episodes = sum(episode.agent_count for episode in episodes)
+        action_count = sum(
+            len(episode.steps) * episode.agent_count for episode in episodes
+        )
+        finish_count = sum(metrics.finish_count for metrics in per_episode)
+        successful_steps = [
+            len(episode.steps)
+            for episode, metrics in zip(episodes, per_episode)
+            for _ in range(metrics.finish_count)
+        ]
+        return cls(
+            collision_count=sum(metrics.collision_count for metrics in per_episode),
+            collision_rate=(
+                sum(metrics.collision_count for metrics in per_episode) / action_count
+                if action_count
+                else 0.0
+            ),
+            finish_count=finish_count,
+            finish_rate=(finish_count / agent_episodes) if agent_episodes else 0.0,
+            mean_steps_on_success=(
+                sum(successful_steps) / len(successful_steps)
+                if successful_steps
+                else 0.0
+            ),
+            goal_progress_mean=(
+                sum(
+                    metrics.goal_progress_mean * episode.agent_count
+                    for metrics, episode in zip(per_episode, episodes)
+                ) / agent_episodes
+                if agent_episodes
+                else 0.0
+            ),
+        )
     def as_scalar_dict(self) -> dict[str, float]:
         """Return scalar TensorBoard tags and values."""
         return {
@@ -286,6 +357,26 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
         start_pos=start_pos,
         goal_pos=goal_pos,
     )
+
+
+def collect_eval_episodes(
+    algo: Any,
+    env_config: dict,
+    count: int,
+    *,
+    seed: int | None = None,
+) -> list[VoxelEpisodeData]:
+    """Collect a deterministic evaluation batch from fresh environments."""
+    if count < 1:
+        raise ValueError("evaluation episode count must be at least one")
+    return [
+        collect_eval_episode(
+            algo,
+            env_config,
+            seed=None if seed is None else seed + episode_index,
+        )
+        for episode_index in range(count)
+    ]
 
 
 def collect_heuristic_episode(

@@ -5,7 +5,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from theseo_anysearch.experiments.trajectory import collect_eval_episode
+from theseo_anysearch.experiments.trajectory import (
+    collect_eval_episode,
+    collect_eval_episodes,
+)
 
 
 def _observation() -> dict[str, np.ndarray]:
@@ -105,3 +108,27 @@ def test_collect_eval_episode_does_not_treat_truncation_as_success() -> None:
     )
 
     assert episode.success is False
+
+
+def test_collect_eval_episodes_uses_stable_sequential_seeds(monkeypatch) -> None:
+    seeds: list[int | None] = []
+    sentinel = object()
+
+    def _collect(algorithm, env_config, *, seed=None):
+        seeds.append(seed)
+        return sentinel
+
+    monkeypatch.setattr(
+        "theseo_anysearch.experiments.trajectory.collect_eval_episode",
+        _collect,
+    )
+
+    episodes = collect_eval_episodes(object(), {}, 3, seed=12)
+
+    assert episodes == [sentinel, sentinel, sentinel]
+    assert seeds == [12, 13, 14]
+
+
+def test_collect_eval_episodes_rejects_empty_batch() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        collect_eval_episodes(object(), {}, 0)
