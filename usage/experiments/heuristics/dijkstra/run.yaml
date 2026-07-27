@@ -1,0 +1,22 @@
+experiment:
+  name: dijkstra
+  output_dir: ../../../../runtime/experiments
+  seed: 42
+
+env:
+  stl_path: usage/geometries/cube.stl
+  scale: 40.0
+  agent_count: 1
+  max_steps: 50
+  trail_mode: true
+
+training:
+  algorithm: heuristic
+  runner: local
+
+heuristic:
+  enabled: true
+  type: dijkstra
+
+
+mlflow: {}
