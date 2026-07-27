@@ -14,7 +14,7 @@ pip-wheel-metadata/
 .claude*
 .anysearch
 spec*
-/AGENT.md
+Agent*
 context
 later
 experiments
