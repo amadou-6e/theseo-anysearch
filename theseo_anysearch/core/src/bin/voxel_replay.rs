@@ -449,8 +449,16 @@ fn draw_marker(
     painter.line_segment([corner(h, h, -h), corner(-h, h, h)], stroke);
 }
 
-fn draw_grid_bounds(painter: &egui::Painter, rect: Rect, cam: &Camera, b: &Bounds, grid_size: f32) {
-    let stroke = Stroke::new(1.25, Color32::from_rgba_premultiplied(60, 220, 110, 150));
+fn draw_grid_bounds_layer(
+    painter: &egui::Painter,
+    rect: Rect,
+    cam: &Camera,
+    b: &Bounds,
+    grid_size: f32,
+    draw_front: bool,
+) {
+    let shadow = Stroke::new(2.5, Color32::from_rgba_premultiplied(0, 0, 0, 180));
+    let stroke = Stroke::new(1.25, Color32::from_rgb(80, 255, 140));
     let lo = 0.5_f32;
     let hi = grid_size + 0.5;
     let corners = [
@@ -462,9 +470,34 @@ fn draw_grid_bounds(painter: &egui::Painter, rect: Rect, cam: &Camera, b: &Bound
         (4, 5), (5, 6), (6, 7), (7, 4),
         (0, 4), (1, 5), (2, 6), (3, 7),
     ];
-    let pts: Vec<Pos2> = corners.iter().map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b)).collect();
+    let near_x = if cam.yaw.sin() > 0.0 { hi } else { lo };
+    let near_y = if cam.pitch.sin() > 0.0 { hi } else { lo };
+    let near_z = if cam.yaw.cos() > 0.0 { hi } else { lo };
+    let pts: Vec<Pos2> = corners.iter()
+        .map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b))
+        .collect();
+    let mut visible_corners = [false; 8];
+
     for (a, bi) in edges {
+        let ca = corners[a];
+        let cb = corners[bi];
+        let is_front = (ca.0 == cb.0 && ca.0 == near_x)
+            || (ca.1 == cb.1 && ca.1 == near_y)
+            || (ca.2 == cb.2 && ca.2 == near_z);
+        if is_front != draw_front {
+            continue;
+        }
+        painter.line_segment([pts[a], pts[bi]], shadow);
         painter.line_segment([pts[a], pts[bi]], stroke);
+        visible_corners[a] = true;
+        visible_corners[bi] = true;
+    }
+    if draw_front {
+        for (index, point) in pts.iter().enumerate() {
+            if visible_corners[index] {
+                painter.circle_filled(*point, 1.75, Color32::from_rgb(130, 255, 175));
+            }
+        }
     }
 }
 
@@ -868,8 +901,8 @@ impl eframe::App for VoxelReplayApp {
 
             let cam = &self.camera;
             let b = cam.bounds(traj_grid_size);
-            draw_grid_bounds(&painter, rect, cam, &b, traj_grid_size);
-
+            // Rear edges render beneath voxels and are occluded by filled space.
+            draw_grid_bounds_layer(&painter, rect, cam, &b, traj_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
@@ -909,7 +942,11 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, cam))
                     .unwrap()
             });
-            for &(x, y, z) in &geo_sorted { draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false); }
+            if !self.occlude_agent {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
+                }
+            }
 
             if is_multi {
                 // ---- Multi-agent: per-agent colored trails and cursors ----
@@ -999,6 +1036,15 @@ impl eframe::App for VoxelReplayApp {
                     draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, rect, cam, &b);
                 }
             }
+
+            if self.occlude_agent {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
+                }
+            }
+
+            // Camera-facing and silhouette edges remain visible above the scene.
+            draw_grid_bounds_layer(&painter, rect, cam, &b, traj_grid_size, true);
 
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
