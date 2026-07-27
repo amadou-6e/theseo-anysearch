@@ -13,6 +13,12 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
+from theseo_anysearch.environments.task import (
+    TaskConfig,
+    goal_distance,
+    goal_voxels,
+    is_success,
+)
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +46,13 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        self._task = TaskConfig.model_validate(config.get("task") or {})
+        self._episode_steps = 0
+        self._episode_reward_breakdown: dict[str, float] = {}
+        self._initial_distance = 0.0
+        self._minimum_distance = 0.0
+        self._previous_task_distance = 0.0
+        self._initial_filled: set[tuple[int, int, int]] = set()
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
@@ -127,11 +140,18 @@ class VoxelEnv(RustGymnasiumEnv):
         )
 
         # Load fixed waypoints from file if specified.
+        wp = None
         waypoints_file = config.get("waypoints_file")
         if waypoints_file:
             wp = self._load_waypoints(waypoints_file)
             if wp:
                 env.set_waypoints(tuple(wp["start"]), tuple(wp["goal"]))
+
+        configured_targets = goal_voxels(self._task.goal, None)
+        if configured_targets:
+            if not wp:
+                raise ValueError("A configured task goal requires waypoints_file to provide the episode start")
+            env.set_waypoints(tuple(wp["start"]), configured_targets[0])
 
         return env
 
@@ -162,7 +182,7 @@ class VoxelEnv(RustGymnasiumEnv):
             cells = GeometryPool.grid_to_cells(grid)
             self._rust_env.set_geometry(cells)
             log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
-            return super().reset(seed=seed, options=options)
+            return self._reset_task_state(super().reset(seed=seed, options=options))
 
         scale_range = self._config.get("scale_range")
         stl_path = self._config.get("stl_path")
@@ -173,7 +193,97 @@ class VoxelEnv(RustGymnasiumEnv):
             cfg = dict(self._config)
             cfg["scale"] = new_scale
             self._rust_env = self._build_rust_env(cfg)
-        return super().reset(seed=seed, options=options)
+        return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _reset_task_state(self, reset_result):
+        """Initialize episode-level task metrics after a Rust reset."""
+
+        observation, _ = reset_result
+        cursor = tuple(self._rust_env.cursor_pos())
+        fallback = self._rust_env.goal_pos()
+        distance = goal_distance(self._task.goal, cursor, fallback)
+        self._episode_steps = 0
+        self._initial_distance = distance
+        self._minimum_distance = distance
+        self._previous_task_distance = distance
+        self._episode_reward_breakdown = {}
+        self._initial_filled = {tuple(coord) for coord in self._rust_env.filled_voxels()}
+        return observation, {
+            "task_version": self._task.version,
+            "initial_goal_distance": distance,
+        }
+
+    def step(self, action):
+        """Apply one action and expose task-owned reward and termination data."""
+
+        action_index = int(action)
+        invalid_action = not self.action_space.contains(action_index)
+        previous_cursor = tuple(self._rust_env.cursor_pos())
+        result = self._rust_env.step(action_index)
+        observation = self._obs_to_numpy(result.observation)
+        cursor = tuple(self._rust_env.cursor_pos())
+        fallback = self._rust_env.goal_pos()
+        current_distance = goal_distance(self._task.goal, cursor, fallback)
+        success = is_success(self._task.goal, cursor, fallback)
+        collision = not invalid_action and cursor == previous_cursor
+
+        if self._config.get("distance_reward_mode", "progress") == "progress":
+            step_cost = float(self._config.get("step_cost", -0.01))
+            distance_component = float(self._config.get("distance_shaping", 0.0)) * (
+                self._previous_task_distance - current_distance
+            )
+        else:
+            rust_goal_reward = float(self._config.get("goal_reward", 1.0)) if success else 0.0
+            rust_collision = float(self._config.get("collision_cost", 0.0)) if collision else 0.0
+            step_cost = 0.0
+            distance_component = float(result.reward) - rust_goal_reward - rust_collision
+
+        filled = {tuple(coord) for coord in self._rust_env.filled_voxels()} - self._initial_filled
+        construction_target = set(self._task.construction_target_voxels)
+        residual = len(construction_target - filled)
+        overshoot = len(filled - construction_target) if construction_target else 0
+        breakdown = {
+            "step_cost": step_cost,
+            "distance_progress": distance_component,
+            "success": float(self._config.get("goal_reward", 1.0)) if success else 0.0,
+            "invalid_action": float(self._config.get("invalid_action_cost", 0.0)) if invalid_action else 0.0,
+            "collision": float(self._config.get("collision_cost", 0.0)) if collision else 0.0,
+            "construction_residual": -float(
+                self._config.get("construction_residual_weight", 0.0)
+            ) * residual,
+            "construction_overshoot": -float(
+                self._config.get("construction_overshoot_weight", 0.0)
+            ) * overshoot,
+        }
+        reward = float(sum(breakdown.values()))
+        unshaped_reward = reward - breakdown["distance_progress"]
+        for name, value in breakdown.items():
+            self._episode_reward_breakdown[name] = (
+                self._episode_reward_breakdown.get(name, 0.0) + value
+            )
+
+        self._episode_steps += 1
+        self._minimum_distance = min(self._minimum_distance, current_distance)
+        self._previous_task_distance = current_distance
+        terminated = success and self._task.termination.terminate_on_success
+        truncated = self._episode_steps >= int(self._config.get("max_steps", 200)) and not terminated
+        reason = "success" if terminated else "step_limit" if truncated else "in_progress"
+        info = {
+            "task_version": self._task.version,
+            "goal_reached": success,
+            "termination_reason": reason,
+            "reward_breakdown": breakdown,
+            "episode_reward_breakdown": dict(self._episode_reward_breakdown),
+            "unshaped_reward": unshaped_reward,
+            "initial_goal_distance": self._initial_distance,
+            "final_goal_distance": current_distance,
+            "minimum_goal_distance": self._minimum_distance,
+            "invalid_action": invalid_action,
+            "collision": collision,
+            "construction_residual": residual,
+            "construction_overshoot": overshoot,
+        }
+        return observation, reward, terminated, truncated, info
 
     def _encode_action(self, action: Any) -> Any:
         return int(action)
