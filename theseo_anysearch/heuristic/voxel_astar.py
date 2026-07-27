@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Iterable
 
 import networkx as nx
+from pydantic import BaseModel, ConfigDict
+
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
 VoxelPosition = tuple[int, int, int]
 
 
-@dataclass(frozen=True)
-class VoxelOraclePlan:
+class VoxelOraclePlan(BaseModel):
     """A shortest collision-free path predicted from the reset state."""
+
+    model_config = ConfigDict(frozen=True)
 
     positions: tuple[VoxelPosition, ...]
     action_indices: tuple[int, ...]
@@ -25,9 +27,10 @@ class VoxelOraclePlan:
         return len(self.action_indices)
 
 
-@dataclass(frozen=True)
-class VoxelOracleReplay:
+class VoxelOracleReplay(BaseModel):
     """Result of executing an oracle plan in the real environment."""
+
+    model_config = ConfigDict(frozen=True)
 
     goal_reached: bool
     terminated: bool

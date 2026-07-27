@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 import torch
 import torch.nn as nn
+from pydantic import BaseModel, Field
 from torch.utils.data import DataLoader
 
 from theseo_anysearch.garden.data_config import GardenConfig, GardenTrainingConfig
@@ -16,8 +16,7 @@ from theseo_anysearch.garden.dataset import GardenDataset, MultiRadiusDataset, R
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class TrainResult:
+class TrainResult(BaseModel):
     """Summary of one completed garden training run.
 
     Parameters
@@ -32,7 +31,7 @@ class TrainResult:
         Whether training ended via early stopping.
     """
     epochs_trained: int
-    loss_curve: list[dict] = field(default_factory=list)
+    loss_curve: list[dict] = Field(default_factory=list)
     final_val_loss: float = float("inf")
     stopped_early: bool = False
 
