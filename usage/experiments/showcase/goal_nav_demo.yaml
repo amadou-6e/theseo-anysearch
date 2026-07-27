@@ -1,3 +1,6 @@
+description: >
+  Demonstrates a short PPO goal-navigation run around a wall using local box observations and distance shaping. It is intended as a quick end-to-end example of training, checkpointing, and trajectory capture.
+
 experiment:
   name: goal-nav-demo
   output_dir: ../../../runtime/experiments

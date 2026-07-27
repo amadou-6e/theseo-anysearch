@@ -1,3 +1,6 @@
+description: >
+  Demonstrates local PPO training with the default SQLite-backed MLflow tracking setup. It provides a small run for checking that parameters and metrics appear in MLflow.
+
 experiment:
   name: mlflow-demo
   output_dir: ../../../runtime/experiments

@@ -1,13 +1,14 @@
 description: >
-  Trains PPO on augmented geometry-pool maps using radial observations and always-negative zone distance rewards until the goal is reached. It evaluates generalization across map variations and distance zones.
+  Runs the long-duration version of the vector-action maps experiment for 1,000 iterations. It tests whether additional training resolves slow convergence under radial observations and zone rewards.
 
 experiment:
-  name: ppo-maps-zones
+  name: ppo-maps-vector-zones-long
   output_dir: ../../../runtime/experiments
   seed: 42
 
 env:
   obs_mode: radial
+  action_mode: vector_3
   agent_count: 1
   max_steps: 300
   trail_mode: true
@@ -31,9 +32,9 @@ env:
 training:
   algorithm: ppo
   runner: local
-  iterations: 100
-  checkpoint_interval: 25
-  trajectory_every: 10
+  iterations: 1000
+  checkpoint_interval: 100
+  trajectory_every: 5
   best_trajectory: true
 
 algorithm_config:

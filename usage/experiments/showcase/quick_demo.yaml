@@ -1,3 +1,6 @@
+description: >
+  Runs a minimal five-iteration PPO experiment on the cube geometry. It is the fastest general smoke test for the local training, checkpoint, trajectory, and MLflow pipeline.
+
 experiment:
   name: quick-demo
   output_dir: ../../../runtime/experiments

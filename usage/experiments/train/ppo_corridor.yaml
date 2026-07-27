@@ -1,3 +1,6 @@
+description: >
+  Trains PPO to route two agents through a simple L-shaped corridor. It uses a shallower encoder and serves as a focused benchmark for constrained navigation.
+
 experiment:
   name: ppo-corridor-routing
   output_dir: ../../../runtime/experiments

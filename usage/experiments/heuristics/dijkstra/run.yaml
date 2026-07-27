@@ -1,3 +1,6 @@
+description: >
+  Runs Dijkstra search as a standalone voxel-navigation baseline. It guarantees a shortest path when one exists and writes a replayable trajectory without training a neural policy.
+
 experiment:
   name: dijkstra
   output_dir: ../../../../runtime/experiments

@@ -1,3 +1,6 @@
+description: >
+  Trains the standard off-policy SAC baseline on the pipe-junction geometry. It provides a comparison against PPO using replay-buffer training and soft target updates.
+
 experiment:
   name: sac-baseline
   output_dir: ../../../runtime/experiments

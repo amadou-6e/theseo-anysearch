@@ -1,3 +1,6 @@
+description: >
+  Uses ASHA to tune shared-policy multi-agent PPO around a fixed obstacle. It searches policy and optimization settings while pruning weak trials early.
+
 experiment:
   name: multi_agent_ppo_asha
   output_dir: ../../../runtime/experiments

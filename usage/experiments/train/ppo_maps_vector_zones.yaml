@@ -1,13 +1,14 @@
 description: >
-  Trains PPO on augmented geometry-pool maps using radial observations and always-negative zone distance rewards until the goal is reached. It evaluates generalization across map variations and distance zones.
+  Trains PPO on augmented map crops using three-component vector actions, radial observations, and negative zone rewards. It compares the compact vector action representation with the discrete 26-action baseline.
 
 experiment:
-  name: ppo-maps-zones
+  name: ppo-maps-vector-zones
   output_dir: ../../../runtime/experiments
   seed: 42
 
 env:
   obs_mode: radial
+  action_mode: vector_3
   agent_count: 1
   max_steps: 300
   trail_mode: true

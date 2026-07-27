@@ -1,3 +1,6 @@
+description: >
+  Runs weighted A-star as a standalone voxel planner with weight 1.5. It favors faster planning over guaranteed path optimality and writes a replayable trajectory without policy training.
+
 experiment:
   name: weighted-astar
   output_dir: ../../../../runtime/experiments

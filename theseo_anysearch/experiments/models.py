@@ -298,6 +298,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     """
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    description: str = ""
     experiment: ExperimentMeta
     env: EnvConfig
     training: TrainingConfig
@@ -350,5 +351,6 @@ class SweepConfig(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
+    description: str = ""
     base: dict[str, Any]
     experiments: list[dict[str, Any]]

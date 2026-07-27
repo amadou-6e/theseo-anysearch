@@ -1,3 +1,6 @@
+description: >
+  Uses ASHA to tune PPO learning rate, batch size, and related optimization settings on stepped terrain. It provides an early-stopping hyperparameter baseline for PPO.
+
 experiment:
   name: ppo-lr-batchsize-asha
   output_dir: ../../../runtime/experiments

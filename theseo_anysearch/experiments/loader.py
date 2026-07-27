@@ -56,7 +56,9 @@ def load_experiment(path: Path) -> Union[ExperimentConfig, SweepConfig]:
     yaml_dir = path.resolve().parent
 
     if "sweep" in raw:
-        return SweepConfig(**raw["sweep"])
+        sweep_raw = dict(raw["sweep"])
+        sweep_raw["description"] = raw.get("description", "")
+        return SweepConfig(**sweep_raw)
 
     resolved = _resolve_typed_configs(raw)
     config = ExperimentConfig(**resolved)

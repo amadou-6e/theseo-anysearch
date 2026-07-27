@@ -1,3 +1,6 @@
+description: >
+  Uses ASHA to tune SAC learning rate, batch size, target-update rate, n-step returns, and encoder settings. It is the off-policy counterpart to the PPO ASHA searches.
+
 experiment:
   name: sac-offpolicy-asha
   output_dir: ../../../runtime/experiments

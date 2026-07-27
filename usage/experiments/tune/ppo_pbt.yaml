@@ -1,3 +1,6 @@
+description: >
+  Uses population-based training to evolve PPO optimization and encoder settings on the pipe-junction geometry. Trials periodically copy strong checkpoints and perturb their hyperparameters.
+
 experiment:
   name: ppo-pbt-evolution
   output_dir: ../../../runtime/experiments

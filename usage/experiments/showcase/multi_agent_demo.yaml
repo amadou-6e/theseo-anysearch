@@ -1,3 +1,6 @@
+description: >
+  Demonstrates shared-policy PPO with three agents navigating and laying trails around a central obstacle. It produces a checkpoint and multi-agent replay data in a single iteration.
+
 experiment:
   name: multi-agent-demo
 

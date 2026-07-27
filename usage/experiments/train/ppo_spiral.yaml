@@ -1,3 +1,6 @@
+description: >
+  Trains PPO on a vertically demanding spiral-ramp geometry with longer episodes and a deeper encoder. It targets learning on a more complex three-dimensional routing problem.
+
 experiment:
   name: ppo-spiral-ramp
   output_dir: ../../../runtime/experiments
