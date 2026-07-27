@@ -32,6 +32,16 @@ def _append_stage_log(output_dir: str, scope: str, message: str) -> None:
         fh.write(f"[{scope}] {ts} {message}\n")
 
 
+def _set_rllib_storage_path(output_dir: str) -> Path:
+    """Keep Ray Trainable temporary directories inside the writable run."""
+    from ray.tune.trainable import trainable as ray_trainable
+
+    storage_path = Path(output_dir, "rllib")
+    storage_path.mkdir(parents=True, exist_ok=True)
+    ray_trainable.DEFAULT_STORAGE_PATH = str(storage_path)
+    return storage_path
+
+
 def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
     import os as _os
     from pathlib import Path
@@ -40,6 +50,7 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    _set_rllib_storage_path(output_dir)
 
     if ray.is_initialized():
         _log_stage("Ray runtime already initialized")

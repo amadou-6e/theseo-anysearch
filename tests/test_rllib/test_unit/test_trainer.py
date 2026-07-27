@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch
 
 from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_num_gpus
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
 
 
@@ -50,6 +50,15 @@ class TestDetectNumGpus:
         with patch("torch.cuda.device_count", return_value=0):
             with pytest.raises(AssertionError, match="torch-gpu"):
                 _detect_num_gpus(require_gpu=True)
+
+
+def test_rllib_storage_path_uses_run_directory(tmp_path: Path):
+    from ray.tune.trainable import trainable as ray_trainable
+
+    storage_path = _set_rllib_storage_path(str(tmp_path))
+
+    assert storage_path == Path(tmp_path, "rllib")
+    assert ray_trainable.DEFAULT_STORAGE_PATH == str(storage_path)
 
 
 # ---------------------------------------------------------------------------
