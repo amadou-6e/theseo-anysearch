@@ -337,6 +337,36 @@ class ExperimentRunner:
             _append_run_stage(run_dir, "Calling trainer.train()")
             trainer.train()
             _append_run_stage(run_dir, "trainer.train() returned")
+
+            heuristic_cfg = self._config.heuristic
+            if heuristic_cfg.enabled:
+                from theseo_anysearch.experiments.trajectory import (
+                    collect_heuristic_episode,
+                    write_heuristic_trajectory,
+                )
+
+                _append_run_stage(run_dir, "Collecting heuristic reference trajectory")
+                heuristic_episode = collect_heuristic_episode(
+                    trainer._env_config_dict(),
+                    heuristic_cfg.type,
+                    weight=heuristic_cfg.weight,
+                    seed=self._config.experiment.seed,
+                )
+                heuristic_path = write_heuristic_trajectory(
+                    store,
+                    heuristic_episode,
+                    heuristic_type=heuristic_cfg.type,
+                    weight=heuristic_cfg.weight,
+                    iteration=self._config.training.iterations,
+                    experiment_name=self._config.experiment.name,
+                    run_id=run_id,
+                )
+                tracker.log_artifact(run_dir.joinpath(heuristic_path))
+                _append_run_stage(
+                    run_dir,
+                    f"Heuristic reference trajectory written: {heuristic_path}",
+                )
+
             tracker.end_run("FINISHED")
             _append_run_stage(run_dir, "MLflow run finished")
             return self._finalise(store, run_info, "COMPLETED")

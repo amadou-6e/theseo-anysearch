@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from theseo_anysearch.experiments.models import ExperimentConfig
+from theseo_anysearch.experiments.models import ExperimentConfig, HeuristicConfig
 from theseo_anysearch.experiments.runner import ExperimentRunner, RunInfo
 
 from ._support import patch_build
@@ -75,6 +76,44 @@ class TestExperimentRunnerRun:
 
         assert info.checkpoint_iterations == [1, 2, 3]
 
+    def test_run_collects_enabled_heuristic_reference(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        config = experiment_config.model_copy(
+            update={
+                "heuristic": HeuristicConfig(
+                    enabled=True,
+                    type="weighted_astar",
+                    weight=2.0,
+                )
+            }
+        )
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        episode = MagicMock(name="heuristic_episode")
+        try:
+            with (
+                patch(
+                    "theseo_anysearch.experiments.trajectory.collect_heuristic_episode",
+                    return_value=episode,
+                ) as collect,
+                patch(
+                    "theseo_anysearch.experiments.trajectory.write_heuristic_trajectory",
+                    return_value="trajectories/heuristic_weighted_astar.json",
+                ) as write,
+            ):
+                info = ExperimentRunner(config).run()
+        finally:
+            runner_mod._build_trainer = original
+
+        assert info.status == "COMPLETED"
+        collect.assert_called_once()
+        assert collect.call_args.args[1] == "weighted_astar"
+        assert collect.call_args.kwargs["weight"] == pytest.approx(2.0)
+        write.assert_called_once()
 
 class TestExperimentRunnerFailure:
     """Verify runner failure bookkeeping."""

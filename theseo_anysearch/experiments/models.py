@@ -251,6 +251,33 @@ class TuneConfig(BaseModel):
 # Full experiment config
 # ---------------------------------------------------------------------------
 
+class HeuristicConfig(BaseModel):
+    """Configuration for an independent heuristic reference trajectory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    type: Literal[
+        "astar",
+        "dijkstra",
+        "weighted_astar",
+        "replanning_astar",
+    ] = "astar"
+    weight: float | None = None
+
+    @model_validator(mode="after")
+    def validate_type_options(self) -> "HeuristicConfig":
+        if self.type == "weighted_astar":
+            if self.weight is None:
+                self.weight = 1.5
+            elif self.weight <= 0.0:
+                raise ValueError("heuristic.weight must be greater than zero")
+        elif self.weight is not None:
+            raise ValueError(
+                "heuristic.weight is only valid when type is 'weighted_astar'"
+            )
+        return self
+
 class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     """
     A single fully-specified experiment.  Extends the base Settings fields
@@ -278,9 +305,15 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     algorithm_config: AlgorithmConfig = Field(default_factory=AlgorithmConfig)
     model_cfg: ModelConfig = Field(alias="model_config", default_factory=ModelConfig)
     renders: RendersConfig = Field(default_factory=RendersConfig)
+    heuristic: HeuristicConfig = Field(default_factory=HeuristicConfig)
     mlflow: MLflowConfig | None = None    # None → tracking disabled
     tune_config: TuneConfig | None = None
 
+    @model_validator(mode="after")
+    def validate_heuristic_compatibility(self) -> "ExperimentConfig":
+        if self.heuristic.enabled and self.env.agent_count != 1:
+            raise ValueError("heuristic evaluation requires env.agent_count: 1")
+        return self
     @property
     def run_output_dir(self) -> Path:
         """Base directory under which run_id subdirectories are created."""

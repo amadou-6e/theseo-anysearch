@@ -7,6 +7,11 @@ from unittest.mock import patch
 import networkx as nx
 import pytest
 
+from theseo_anysearch.experiments.output import OutputStore
+from theseo_anysearch.experiments.trajectory import (
+    collect_heuristic_episode,
+    write_heuristic_trajectory,
+)
 from tests.test_environments.test_integration._voxel_validity_support import (
     make_radial_test_env,
 )
@@ -115,3 +120,55 @@ def test_replanning_astar_plans_before_every_step(tmp_path):
     assert replay.goal_reached is True
     assert replay.mismatch is None
     assert plan_spy.call_count == replay.steps_executed
+
+def test_yaml_style_config_collects_dijkstra_reference_episode(tmp_path):
+    env = make_radial_test_env(
+        tmp_path,
+        start=(4, 4, 4),
+        goal=(4, 4, 8),
+        geometry_boxes=[[4, 4, 6, 4, 4, 6]],
+    )
+    env_config = dict(env._config)
+
+    episode = collect_heuristic_episode(
+        env_config,
+        "dijkstra",
+        env=env,
+        seed=0,
+    )
+
+    assert episode.success is True
+    assert len(episode.steps) == 4
+    assert episode.goal_pos == (4, 4, 8)
+
+
+def test_heuristic_trajectory_is_replayer_compatible(tmp_path):
+    env = make_radial_test_env(
+        tmp_path.joinpath("env"),
+        start=(4, 4, 4),
+        goal=(5, 5, 5),
+    )
+    episode = collect_heuristic_episode(
+        dict(env._config),
+        "weighted_astar",
+        weight=2.0,
+        env=env,
+        seed=0,
+    )
+    store = OutputStore(tmp_path.joinpath("run"))
+
+    relative_path = write_heuristic_trajectory(
+        store,
+        episode,
+        heuristic_type="weighted_astar",
+        weight=2.0,
+        iteration=40,
+        experiment_name="heuristic-test",
+        run_id="run-1",
+    )
+    payload = store.read_json(relative_path)
+
+    assert relative_path == "trajectories/heuristic_weighted_astar.json"
+    assert payload["heuristic"] == {"type": "weighted_astar", "weight": 2.0}
+    assert payload["episode"]["success"] is True
+    assert payload["episode"]["steps_taken"] == 1

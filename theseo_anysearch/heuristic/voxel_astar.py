@@ -35,6 +35,7 @@ class VoxelOracleReplay:
     steps_executed: int
     positions: tuple[VoxelPosition, ...]
     rewards: tuple[float, ...]
+    action_indices: tuple[int, ...] = ()
     mismatch: str | None = None
 
 
@@ -106,6 +107,7 @@ class VoxelAStarOracle:
             )
 
         rewards: list[float] = []
+        action_indices: list[int] = []
         terminated = False
         truncated = False
         goal_reached = False
@@ -123,6 +125,7 @@ class VoxelAStarOracle:
                     steps_executed=step_index,
                     positions=tuple(actual_positions),
                     rewards=tuple(rewards),
+                    action_indices=plan.action_indices[:step_index],
                     mismatch=f"Step {step_index}: expected {expected}, got {actual}",
                 )
             goal_reached = bool(
@@ -141,6 +144,7 @@ class VoxelAStarOracle:
             steps_executed=len(rewards),
             positions=tuple(actual_positions),
             rewards=tuple(rewards),
+            action_indices=plan.action_indices[:len(rewards)],
             mismatch=mismatch,
         )
 
@@ -244,6 +248,7 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
         goal = self._position(raw_goal)
         actual_positions = [self._position(rust_env.cursor_pos())]
         rewards: list[float] = []
+        action_indices: list[int] = []
         terminated = False
         truncated = False
         goal_reached = actual_positions[0] == goal
@@ -253,6 +258,7 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
             if not current_plan.action_indices:
                 break
             action_index = current_plan.action_indices[0]
+            action_indices.append(action_index)
             _, reward, terminated, truncated, info = self.env.step(action_index)
             rewards.append(float(reward))
             actual = self._position(rust_env.cursor_pos())
@@ -266,6 +272,7 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
                     steps_executed=len(rewards),
                     positions=tuple(actual_positions),
                     rewards=tuple(rewards),
+                    action_indices=tuple(action_indices),
                     mismatch=(
                         f"Step {len(rewards)}: expected {expected}, got {actual}"
                     ),
@@ -282,5 +289,27 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
             steps_executed=len(rewards),
             positions=tuple(actual_positions),
             rewards=tuple(rewards),
+            action_indices=tuple(action_indices),
             mismatch=mismatch,
         )
+
+def build_voxel_heuristic(
+    env: VoxelEnv,
+    heuristic_type: str,
+    *,
+    weight: float | None = None,
+) -> VoxelAStarOracle:
+    """Build a configured voxel heuristic for reference evaluation."""
+
+    if heuristic_type == "astar":
+        return VoxelAStarOracle(env)
+    if heuristic_type == "dijkstra":
+        return VoxelDijkstraHeuristic(env)
+    if heuristic_type == "weighted_astar":
+        return VoxelWeightedAStarHeuristic(
+            env,
+            heuristic_weight=1.5 if weight is None else weight,
+        )
+    if heuristic_type == "replanning_astar":
+        return VoxelReplanningAStarHeuristic(env)
+    raise ValueError(f"Unknown voxel heuristic type: {heuristic_type!r}")
