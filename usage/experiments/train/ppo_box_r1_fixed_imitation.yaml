@@ -27,7 +27,7 @@ env:
 
 training:
   algorithm: ppo
-  model: voxel_encoder
+  model: fcnet
   runner: local
   iterations: 40
   checkpoint_interval: 40
