@@ -677,10 +677,19 @@ def _make_trainable(
         best_trajectory=best_trajectory,
         num_env_runners=num_env_runners,
     )
-    # Tell Ray to allocate GPU resources per trial so CUDA_VISIBLE_DEVICES is
-    # set before RLlib tries to claim GPU IDs from the Ray resource pool.
-    if num_gpus > 0:
-        trainable = tune.with_resources(trainable, resources={"gpu": num_gpus})
+    # Reserve a learner bundle plus one CPU bundle for every remote rollout
+    # worker. RLlib assigns workers to child placement-group bundles; a single
+    # GPU-only bundle makes every worker index invalid during algorithm setup.
+    if num_gpus > 0 or num_env_runners > 0:
+        learner_bundle: dict[str, float] = {"CPU": 1.0}
+        if num_gpus > 0:
+            learner_bundle["GPU"] = float(num_gpus)
+        resources = tune.PlacementGroupFactory(
+            [learner_bundle]
+            + [{"CPU": 1.0} for _ in range(num_env_runners)],
+            strategy="PACK",
+        )
+        trainable = tune.with_resources(trainable, resources=resources)
     return trainable
 
 

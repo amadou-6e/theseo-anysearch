@@ -749,18 +749,49 @@ class TestMakeTrainablePaths:
              patch("theseo_anysearch.cli.commands.tune.tune", mock_tune):
             from theseo_anysearch.cli.commands.tune import _make_trainable
             _make_trainable(
-                stl=tmp_path / "geo.stl",
+                stl=tmp_path.joinpath("geo.stl"),
                 agents=1,
                 max_steps=50,
                 seed=0,
                 max_iterations=1,
-                output_dir=tmp_path / "out",
+                output_dir=tmp_path.joinpath("out"),
                 metric="episode_reward_mean",
                 num_gpus=0.25,
             )
 
         mock_tune.with_resources.assert_called_once_with(
             parameterized, resources={"gpu": 0.25}
+        )
+
+    def test_rollout_workers_receive_placement_group_bundles(self, tmp_path):
+        mock_tune = MagicMock()
+        mock_tune.with_parameters.return_value = "trainable"
+        placement_group = object()
+        mock_tune.PlacementGroupFactory.return_value = placement_group
+
+        with patch("ray.tune", mock_tune), \
+             patch("theseo_anysearch.cli.commands.tune.tune", mock_tune):
+            from theseo_anysearch.cli.commands.tune import _make_trainable
+            _make_trainable(
+                stl=tmp_path.joinpath("geo.stl"),
+                agents=1,
+                max_steps=100,
+                seed=0,
+                max_iterations=5,
+                output_dir=tmp_path.joinpath("out"),
+                metric="episode_reward_mean",
+                num_gpus=1,
+                num_env_runners=8,
+            )
+
+        bundles = mock_tune.PlacementGroupFactory.call_args.args[0]
+        assert bundles == [
+            {"CPU": 1.0, "GPU": 1.0},
+            *[{"CPU": 1.0} for _ in range(8)],
+        ]
+        mock_tune.with_resources.assert_called_once_with(
+            "trainable",
+            resources=placement_group,
         )
 
 
