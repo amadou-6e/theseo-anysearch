@@ -226,10 +226,15 @@ def run_imitation_pretraining(
     if not imitation.enabled:
         return None
     imitation_dir = run_dir.joinpath("imitation")
+    dataset_dir = (
+        Path(imitation.collection.dataset_dir).resolve()
+        if imitation.collection.dataset_dir
+        else imitation_dir.joinpath("dataset")
+    )
     dataset = _dataset_for_run(
         env_config,
         imitation,
-        imitation_dir.joinpath("dataset"),
+        dataset_dir,
     )
     result = behavior_clone_policy(
         algorithm.get_policy(),

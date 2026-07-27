@@ -22,8 +22,11 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
 - `collection.max_attempts` bounds failed or unsolved collection attempts.
 - `collection.require_success` discards episodes that do not reach the goal.
 - `collection.validation_fraction` reserves complete episodes for validation.
-- `collection.reuse_dataset` reuses run-local data only when its fingerprint
+- `collection.reuse_dataset` reuses existing data only when its fingerprint
   matches every environment, task, observation, action, and teacher setting.
+- `collection.dataset_dir` optionally points multiple runs or Tune trials to
+  one shared compatible dataset. Generate it before concurrent trials start;
+  incompatible environment or teacher settings are rejected by fingerprint.
 - `pretraining.epochs` is the maximum number of behavior-cloning passes.
 - `pretraining.batch_size` is the supervised optimizer batch size.
 - `pretraining.learning_rate` applies only to behavior cloning.

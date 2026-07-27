@@ -89,6 +89,18 @@ def test_collection_attempt_budget_must_cover_requested_episodes():
         ImitationConfig(collection={"episodes": 5, "max_attempts": 4})
 
 
+def test_collection_accepts_shared_dataset_directory():
+    config = ImitationConfig(
+        collection={
+            "episodes": 2,
+            "max_attempts": 2,
+            "dataset_dir": "runtime/shared-demonstrations",
+        }
+    )
+
+    assert config.collection.dataset_dir == "runtime/shared-demonstrations"
+
+
 def test_behavior_cloning_learns_actions_and_preserves_value_head(tmp_path):
     torch.manual_seed(4)
     policy = TinyPolicy()

@@ -40,6 +40,7 @@ class DemonstrationCollectionConfig(BaseModel):
     require_success: bool = True
     validation_fraction: float = Field(default=0.1, gt=0.0, lt=1.0)
     reuse_dataset: bool = True
+    dataset_dir: str | None = None
 
     @model_validator(mode="after")
     def validate_attempt_budget(self) -> "DemonstrationCollectionConfig":

@@ -39,7 +39,7 @@ imitation:
   enabled: true
   strategy: pretrain_then_rl
   teacher:
-    type: replanning_astar
+    type: astar
     weight: null
   collection:
     episodes: 64
@@ -48,6 +48,7 @@ imitation:
     require_success: true
     validation_fraction: 0.1
     reuse_dataset: true
+    dataset_dir: runtime/tune/datasets/box_r1_astar_64
   pretraining:
     epochs: 20
     batch_size: 128
@@ -64,7 +65,7 @@ tune_config:
   num_samples: 4
   metric: episode_reward_mean
   mode: max
-  max_concurrent: 2
+  max_concurrent: 1
   search_space:
     algorithm_config:
       lr:               {loguniform: [1.0e-5, 1.0e-2]}
