@@ -242,7 +242,30 @@ class TrainResult(BaseModel):
     evaluation_episodes: int = 0
     evaluation_goals_reached: int = 0
     evaluation_success_rate: float = 0.0
+    evaluation_status: str = "not_evaluated"
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    def standard_metrics(self) -> dict[str, float]:
+        """Return the shared numeric metric contract for every reporter."""
+        metrics = {
+            "episode_reward_mean": self.episode_reward_mean,
+            "episode_len_mean": self.episode_len_mean,
+            "episodes_total": float(self.episodes_total),
+            "episodes_this_iter": float(self.episodes_this_iter),
+            "goals_reached_this_iter": float(self.goals_reached_this_iter),
+            "goals_reached_total": float(self.goals_reached_total),
+            "training_success_rate": self.training_success_rate,
+            "evaluation_episodes": float(self.evaluation_episodes),
+            "evaluation_goals_reached": float(self.evaluation_goals_reached),
+            "evaluation_success_rate": self.evaluation_success_rate,
+            "elapsed_s": self.elapsed_s,
+        }
+        metrics.update({
+            key: float(value)
+            for key, value in self.extra.items()
+            if key.startswith("evaluation_") and isinstance(value, (int, float))
+        })
+        return metrics
 
     @classmethod
     def from_rllib(
@@ -387,6 +410,7 @@ class Trainer(ABC):
 
         from theseo_anysearch.experiments.output import OutputStore
         from theseo_anysearch.experiments.trajectory import EpisodeRunMetrics
+        from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
 
         _store = OutputStore(self._output_dir)
         if traj_every or best_traj:
@@ -443,7 +467,7 @@ class Trainer(ABC):
                         f"Collecting deterministic evaluation batch for iteration "
                         f"{self._iteration}",
                     )
-                    evaluation_seed = self._iteration * evaluation_episodes
+                    evaluation_seed = training.evaluation_seed
                     if _is_multi:
                         from theseo_anysearch.experiments.trajectory import (
                             collect_multi_eval_episode,
@@ -477,21 +501,37 @@ class Trainer(ABC):
                     evaluation_len_mean = sum(
                         len(episode.steps) for episode in episodes
                     ) / len(episodes)
+                    evaluation_factory = (
+                        EvaluationMetrics.from_multi_voxel_episodes
+                        if _is_multi
+                        else EvaluationMetrics.from_voxel_episodes
+                    )
+                    success_metrics = evaluation_factory(
+                        episodes,
+                        _env_cfg,
+                        min_success_rate=training.evaluation_min_success_rate,
+                    )
+                    standardized = success_metrics.scalar_metrics()
                     result = result.model_copy(
                         update={
                             "evaluation_episodes": len(episodes),
                             "evaluation_goals_reached": metrics.finish_count,
                             "evaluation_success_rate": metrics.finish_rate,
+                            "evaluation_status": success_metrics.status,
+
                             "extra": {
                                 **result.extra,
                                 "evaluation_reward_mean": evaluation_reward_mean,
                                 "evaluation_len_mean": evaluation_len_mean,
+                                **standardized,
                                 **metrics.as_scalar_dict(),
                             },
                         }
                     )
                     scalar_metrics = {
                         **metrics.as_scalar_dict(),
+                        **success_metrics.tensorboard_metrics(),
+
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
                     }
@@ -506,6 +546,10 @@ class Trainer(ABC):
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,
                             "episode_len_mean": evaluation_len_mean,
+                            "status": result.evaluation_status,
+                            "minimum_success_rate": training.evaluation_min_success_rate,
+                            "summary": success_metrics.model_dump(),
+
                             "metrics": scalar_metrics,
                             "episodes": [
                                 {

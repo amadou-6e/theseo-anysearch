@@ -371,15 +371,7 @@ class ExperimentRunner:
                 def _combined_hook(result: TrainResult) -> None:
                     _orig_hook(result)
                     tracker.log_metrics(
-                        {
-                            "episode_reward_mean": result.episode_reward_mean,
-                            "episode_len_mean": result.episode_len_mean,
-                            "episodes_total": float(result.episodes_total),
-                            "elapsed_s": result.elapsed_s,
-                            "evaluation_episodes": float(result.evaluation_episodes),
-                            "evaluation_goals_reached": float(result.evaluation_goals_reached),
-                            "evaluation_success_rate": result.evaluation_success_rate,
-                        },
+                        result.standard_metrics(),
                         step=result.iteration,
                     )
 
