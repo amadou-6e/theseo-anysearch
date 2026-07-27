@@ -297,7 +297,7 @@ class _FakeAlgo:
     def __init__(self, actions: list[int]) -> None:
         self._actions = list(actions)
 
-    def compute_single_action(self, obs, policy_id="default_policy"):  # noqa: ARG002
+    def compute_single_action(self, obs, policy_id="default_policy", explore=False):  # noqa: ARG002
         return self._actions.pop(0)
 
 

@@ -9,7 +9,7 @@ use crate::{
     environments::{Environment, VoxelAction, VoxelEnv, SurfaceAction, SurfaceEnv},
     world::{
         ingest::{parse_ascii_stl, voxelize_mesh, voxelize_mesh_f32},
-        Block, BlockUpdate, Coord, World, WorldState,
+        Block, BlockUpdate, Coord, World, WorldState, BLOCK_KIND_BOUNDARY,
     },
 };
 use image::{
@@ -1006,7 +1006,7 @@ impl PyVoxelEnv {
 
     /// Returns a flattened (2*radius+1)³ binary array centred on the cursor.
     /// Each element is 1.0 if the world cell at (cursor + offset) is filled, else 0.0.
-    /// Cells outside world bounds [0, 999] are 0.0.
+    /// Cells outside the configured grid are reported as filled.
     /// Elements are ordered x-outer, y-mid, z-inner (x changes slowest).
     pub fn box_obs(&self, radius: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.cursor();
@@ -1019,12 +1019,13 @@ impl PyVoxelEnv {
                     let x = cx as i32 + dx;
                     let y = cy as i32 + dy;
                     let z = cz as i32 + dz;
-                    let filled = if x >= 0 && y >= 0 && z >= 0
-                        && x < 1000 && y < 1000 && z < 1000
+                    let g = i32::from(self.inner.grid_size);
+                    let filled = if x >= 1 && y >= 1 && z >= 1
+                        && x <= g && y <= g && z <= g
                     {
                         self.inner.world().is_filled((x as u16, y as u16, z as u16)) as u8 as f32
                     } else {
-                        0.0
+                        1.0
                     };
                     result.push(filled);
                 }
@@ -1044,6 +1045,7 @@ impl PyVoxelEnv {
     /// Lower value = no detection; higher = closer hit.
     pub fn radial_obs(&self, max_len: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.cursor();
+        let g = i32::from(self.inner.grid_size);
         let mut result = Vec::with_capacity(26);
         for dx in -1i32..=1 {
             for dy in -1i32..=1 {
@@ -1056,9 +1058,10 @@ impl PyVoxelEnv {
                         let nx = cx as i32 + dx * step as i32;
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
-                        if nx < 0 || ny < 0 || nz < 0
-                            || nx >= 1000 || ny >= 1000 || nz >= 1000
+                        if nx < 1 || ny < 1 || nz < 1
+                            || nx > g || ny > g || nz > g
                         {
+                            proximity = 1.0 - (step - 1) as f32 / max_len as f32;
                             break;
                         }
                         if self.inner.world().is_filled((nx as u16, ny as u16, nz as u16)) {
@@ -1078,6 +1081,7 @@ impl PyVoxelEnv {
     /// direction, or 0.0 when no hit is detected within ``max_len``.
     pub fn radial_obs_types(&self, max_len: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.cursor();
+        let g = i32::from(self.inner.grid_size);
         let mut result = Vec::with_capacity(26);
         for dx in -1i32..=1 {
             for dy in -1i32..=1 {
@@ -1090,9 +1094,10 @@ impl PyVoxelEnv {
                         let nx = cx as i32 + dx * step as i32;
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
-                        if nx < 0 || ny < 0 || nz < 0
-                            || nx >= 1000 || ny >= 1000 || nz >= 1000
+                        if nx < 1 || ny < 1 || nz < 1
+                            || nx > g || ny > g || nz > g
                         {
+                            kind = f32::from(BLOCK_KIND_BOUNDARY);
                             break;
                         }
                         if let Some(block) = self.inner.world().get_block((nx as u16, ny as u16, nz as u16)) {
@@ -1272,9 +1277,10 @@ impl PyMultiVoxelEnv {
     }
 
     /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
-    /// 1.0 = that neighbor cell is filled, 0.0 = empty or out of bounds.
+    /// 1.0 = that neighbor cell is filled or outside the configured grid.
     pub fn face_neighbors(&self, agent_idx: usize) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
         let dirs: [(i32, i32, i32); 6] = [
             (1, 0, 0), (-1, 0, 0),
             (0, 1, 0), (0, -1, 0),
@@ -1284,18 +1290,19 @@ impl PyMultiVoxelEnv {
             let x = cx as i32 + dx;
             let y = cy as i32 + dy;
             let z = cz as i32 + dz;
-            if x > 0 && y > 0 && z > 0 && x < 1000 && y < 1000 && z < 1000 {
+            if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
                 self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
             } else {
-                0.0
+                1.0
             }
         }).collect()
     }
 
     /// Flattened (2*radius+1)³ binary box observation centred on agent `agent_idx`'s cursor.
-    /// 1.0 = filled, 0.0 = empty or out of bounds. Ordered x-outer, y-mid, z-inner.
+    /// 1.0 = filled or outside the configured grid. Ordered x-outer, y-mid, z-inner.
     pub fn box_obs(&self, agent_idx: usize, radius: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
         let r = radius as i32;
         let side = (2 * r + 1) as usize;
         let mut result = Vec::with_capacity(side * side * side);
@@ -1305,10 +1312,10 @@ impl PyMultiVoxelEnv {
                     let x = cx as i32 + dx;
                     let y = cy as i32 + dy;
                     let z = cz as i32 + dz;
-                    let filled = if x > 0 && y > 0 && z > 0 && x < 1000 && y < 1000 && z < 1000 {
+                    let filled = if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
                         self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
                     } else {
-                        0.0
+                        1.0
                     };
                     result.push(filled);
                 }
@@ -1326,6 +1333,7 @@ impl PyMultiVoxelEnv {
     ///   1.0                        — no hit within max_len, or self empty for (0,0,0)
     pub fn ray_cast(&self, agent_idx: usize, max_len: u32) -> Vec<f32> {
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
         let mut result = Vec::with_capacity(27);
         for dx in -1i32..=1 {
             for dy in -1i32..=1 {
@@ -1339,7 +1347,8 @@ impl PyMultiVoxelEnv {
                             let nx = cx as i32 + dx * step as i32;
                             let ny = cy as i32 + dy * step as i32;
                             let nz = cz as i32 + dz * step as i32;
-                            if nx <= 0 || ny <= 0 || nz <= 0 || nx >= 1000 || ny >= 1000 || nz >= 1000 {
+                            if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
+                                value = (step - 1) as f32 / max_len as f32;
                                 break;
                             }
                             if self.inner.world.is_filled((nx as u16, ny as u16, nz as u16)) {
@@ -1743,7 +1752,7 @@ mod tests {
 
     #[test]
     fn box_obs_empty_world_all_zeros() {
-        let env = env_at_cursor((1, 1, 1)); // cursor at (1,1,1)
+        let env = env_at_cursor((16, 16, 16));
         let obs = env.box_obs(2);
         assert_eq!(obs.len(), 125);
         assert!(obs.iter().all(|&v| v == 0.0));
@@ -1760,7 +1769,7 @@ mod tests {
     #[test]
     fn box_obs_single_filled_at_cursor() {
         // cursor at (1,1,1)
-        let env = env_with_block((1, 1, 1), (1, 1, 1));
+        let env = env_with_block((5, 5, 5), (5, 5, 5));
         let obs = env.box_obs(2); // 5³ = 125 cells
         // centre element: dx=0,dy=0,dz=0 → flat index = 2*25 + 2*5 + 2 = 62
         assert_eq!(obs[62], 1.0);
@@ -1772,13 +1781,13 @@ mod tests {
     }
 
     #[test]
-    fn box_obs_out_of_bounds_is_zero() {
+    fn box_obs_out_of_grid_is_blocked() {
         // cursor at (1,1,1); radius 2 → cells at coord 0 and -1 are OOB or edge
         // cell at (1-2, 1, 1) = (-1, 1, 1) — out of bounds (negative i32)
         let env = env_at_cursor((1, 1, 1)); // (1,1,1)
         let obs = env.box_obs(2);
         // first element: dx=-2,dy=-2,dz=-2 → (1-2,1-2,1-2) = (-1,-1,-1) → 0.0
-        assert_eq!(obs[0], 0.0);
+        assert_eq!(obs[0], 1.0);
     }
 
     #[test]
@@ -1800,8 +1809,8 @@ mod tests {
 
     #[test]
     fn radial_obs_empty_world_all_zeros() {
-        let env = env_at_cursor((1, 1, 1));
-        let obs = env.radial_obs(16);
+        let env = env_at_cursor((16, 16, 16));
+        let obs = env.radial_obs(4);
         assert!(obs.iter().all(|&v| v == 0.0));
     }
 
@@ -1840,7 +1849,16 @@ mod tests {
     fn radial_obs_no_hit_is_zero() {
         // empty world, direction (+1,0,0) should be 0.0
         let env = env_at_cursor((5, 5, 5));
-        let obs = env.radial_obs(16);
+        let obs = env.radial_obs(4);
         assert_eq!(obs[21], 0.0);
+    }
+
+    #[test]
+    fn radial_obs_grid_boundary_is_blocked() {
+        let env = env_at_cursor((1, 5, 5));
+        let obs = env.radial_obs(16);
+        let types = env.radial_obs_types(16);
+        assert_eq!(obs[4], 1.0);
+        assert_eq!(types[4], f32::from(BLOCK_KIND_BOUNDARY));
     }
 }

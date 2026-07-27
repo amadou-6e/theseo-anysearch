@@ -449,6 +449,25 @@ fn draw_marker(
     painter.line_segment([corner(h, h, -h), corner(-h, h, h)], stroke);
 }
 
+fn draw_grid_bounds(painter: &egui::Painter, rect: Rect, cam: &Camera, b: &Bounds, grid_size: f32) {
+    let stroke = Stroke::new(1.25, Color32::from_rgba_premultiplied(60, 220, 110, 150));
+    let lo = 0.5_f32;
+    let hi = grid_size + 0.5;
+    let corners = [
+        (lo, lo, lo), (hi, lo, lo), (hi, hi, lo), (lo, hi, lo),
+        (lo, lo, hi), (hi, lo, hi), (hi, hi, hi), (lo, hi, hi),
+    ];
+    let edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ];
+    let pts: Vec<Pos2> = corners.iter().map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b)).collect();
+    for (a, bi) in edges {
+        painter.line_segment([pts[a], pts[bi]], stroke);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Application — two-level navigation: iterations + steps
 // ---------------------------------------------------------------------------
@@ -849,6 +868,7 @@ impl eframe::App for VoxelReplayApp {
 
             let cam = &self.camera;
             let b = cam.bounds(traj_grid_size);
+            draw_grid_bounds(&painter, rect, cam, &b, traj_grid_size);
 
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();

@@ -61,10 +61,10 @@ class TestVoxelEnvObsModesIntegration:
         obs, _ = env.reset()
         assert obs["ray_hits"].dtype == np.float32
 
-    def test_radial_empty_world_all_zeros(self):
+    def test_radial_empty_world_shows_grid_boundary(self):
         env = self.make(obs_mode="radial")
         obs, _ = env.reset()
-        assert np.array_equal(obs["ray_hits"], np.zeros(26, dtype=np.float32))
+        assert np.any(obs["ray_hits"] > 0.0)
 
     def test_radial_shape_after_step(self):
         env = self.make(obs_mode="radial")
@@ -108,15 +108,20 @@ class TestVoxelEnvObsModesIntegration:
         rust_env = theseo_core.PyVoxelEnv(max_steps=20)
         rust_env.reset(seed=0)
         obs = np.array(rust_env.box_obs(2), dtype=np.float32)
-        expected = np.zeros(125, dtype=np.float32)
+        expected = []
+        for dx in range(-2, 3):
+            for dy in range(-2, 3):
+                for dz in range(-2, 3):
+                    x, y, z = 1 + dx, 1 + dy, 1 + dz
+                    expected.append(1.0 if x < 1 or y < 1 or z < 1 else 0.0)
+        expected = np.array(expected, dtype=np.float32)
         expected[62] = 1.0
         assert len(obs) == 125
         assert np.array_equal(obs, expected)
 
-    def test_direct_radial_obs_empty_world(self):
+    def test_direct_radial_obs_empty_world_shows_grid_boundary(self):
         rust_env = theseo_core.PyVoxelEnv(max_steps=20)
         rust_env.reset(seed=0)
         obs = np.array(rust_env.radial_obs(16), dtype=np.float32)
-        expected = np.zeros(26, dtype=np.float32)
         assert len(obs) == 26
-        assert np.array_equal(obs, expected)
+        assert obs[4] == pytest.approx(1.0)

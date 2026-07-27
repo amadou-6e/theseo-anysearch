@@ -27,7 +27,7 @@ def _require_filled_voxels():
 
 class _ActionZeroAlgo:
     """Minimal duck-type algo that always places (action 0)."""
-    def compute_single_action(self, obs, policy_id="default_policy"):
+    def compute_single_action(self, obs, policy_id="default_policy", explore=False):
         return 0
 
 
@@ -111,17 +111,15 @@ class TestCollectEvalEpisode:
         for s in ep.steps:
             assert s.voxel_count >= 0
 
-    def test_fallback_algo_no_compute_action(self, minimal_env_config):
-        """collect_eval_episode must not raise when algo lacks compute_single_action."""
+    def test_missing_policy_inference_method_raises(self, minimal_env_config):
+        """Invalid algorithms must not produce action-zero fallback replays."""
         from theseo_anysearch.experiments.trajectory import collect_eval_episode
 
         class NoMethodAlgo:
             pass
 
-        ep = collect_eval_episode(NoMethodAlgo(), minimal_env_config)
-        assert len(ep.steps) > 0
-        # fallback: always action=0
-        assert all(s.action == 0 for s in ep.steps)
+        with pytest.raises(AttributeError, match="compute_single_action"):
+            collect_eval_episode(NoMethodAlgo(), minimal_env_config)
 
 
 # ---------------------------------------------------------------------------

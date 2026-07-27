@@ -6,16 +6,24 @@ import numpy as np
 import pytest
 
 from ._voxel_validity_support import (
+    ACTION_MINUS_X,
+    ACTION_MINUS_Y,
     ACTION_MINUS_Z,
+    BLOCK_KIND_BOUNDARY,
     BLOCK_KIND_FILLED,
     BLOCK_KIND_GOAL,
+    BLOCK_KIND_OCCUPIED,
+    COLLISION_COST,
     ACTION_PLUS_Y,
     ACTION_PLUS_Z,
     GOAL,
     MAX_STEPS,
+    RAY_INDEX_MINUS_X,
     RAY_INDEX_PLUS_X,
     RAY_TYPE_INDEX_PLUS_Z,
     START,
+    ACTION_PLUS_X,
+    GRID_SIZE,
     make_radial_test_env,
     normalized_cursor,
     normalized_goal_distance,
@@ -120,7 +128,7 @@ class TestVoxelEnvObservationsRadial:
         assert obs0["ray_hits"][RAY_INDEX_PLUS_X] == pytest.approx(1.0)
         assert np.all((obs1["ray_hits"] >= 0.0) & (obs1["ray_hits"] <= 1.0))
 
-    def test_ray_hit_types_encode_goal_and_generic_filled_voxels(self, tmp_path):
+    def test_ray_hit_types_encode_goal_and_static_occupied_voxels(self, tmp_path):
         env = make_radial_test_env(tmp_path)
         obs0, _ = env.reset(seed=0)
         obs1, *_ = env.step(ACTION_PLUS_Z)
@@ -134,4 +142,111 @@ class TestVoxelEnvObservationsRadial:
             geometry_boxes=[[5, 4, 4, 5, 4, 4]],
         )
         geometry_obs, _ = geometry_env.reset(seed=0)
-        assert geometry_obs["ray_hit_types"][RAY_INDEX_PLUS_X] == pytest.approx(BLOCK_KIND_FILLED)
+        assert geometry_obs["ray_hit_types"][RAY_INDEX_PLUS_X] == pytest.approx(BLOCK_KIND_OCCUPIED)
+
+    def test_ray_hit_types_encode_agent_filled_trail_voxels(self, tmp_path):
+        env = make_radial_test_env(tmp_path, start=(4, 4, 4), goal=(4, 4, 7))
+        env.reset(seed=0)
+        env.step(ACTION_PLUS_Z)
+        obs, *_ = env.step(ACTION_PLUS_Z)
+
+        assert obs["ray_hit_types"][ACTION_MINUS_Z] == pytest.approx(BLOCK_KIND_FILLED)
+
+    def test_ray_hits_show_grid_boundary_as_blocked_space(self, tmp_path):
+        env = make_radial_test_env(tmp_path, start=(1, 4, 4), goal=GOAL)
+        obs, _ = env.reset(seed=0)
+
+        assert obs["ray_hits"][RAY_INDEX_MINUS_X] == pytest.approx(1.0)
+        assert obs["ray_hit_types"][RAY_INDEX_MINUS_X] == pytest.approx(BLOCK_KIND_BOUNDARY)
+
+    def test_collision_actions_are_visible_in_previous_observation(self, tmp_path):
+        env = make_radial_test_env(
+            tmp_path,
+            start=(2, 4, 4),
+            goal=(2, 4, 8),
+            geometry_boxes=[[3, 4, 4, 3, 4, 4]],
+        )
+        obs, _ = env.reset(seed=0)
+
+        collision_checks = [
+            (ACTION_PLUS_X, BLOCK_KIND_OCCUPIED, "static geometry"),
+            (ACTION_MINUS_X, BLOCK_KIND_BOUNDARY, "grid boundary"),
+            (ACTION_MINUS_Y, BLOCK_KIND_FILLED, "agent-filled trail"),
+        ]
+
+        observed_collisions = []
+        steps_taken = 0
+
+        for action, expected_type, label in collision_checks:
+            if label == "grid boundary":
+                obs, *_ = env.step(ACTION_MINUS_X)
+                steps_taken += 1
+            elif label == "agent-filled trail":
+                obs, *_ = env.step(ACTION_PLUS_Y)
+                steps_taken += 1
+
+            cursor_before = obs["cursor_pos"].copy()
+            ray_hit_before = obs["ray_hits"][action]
+            ray_type_before = obs["ray_hit_types"][action]
+
+            obs, *_ = env.step(action)
+            steps_taken += 1
+            cursor_after = obs["cursor_pos"].copy()
+
+            if np.array_equal(cursor_before, cursor_after):
+                observed_collisions.append(label)
+                assert ray_hit_before == pytest.approx(1.0), label
+                assert ray_type_before == pytest.approx(expected_type), label
+                assert 0.0 <= ray_type_before <= 1.0, label
+
+        assert observed_collisions == [
+            "static geometry",
+            "grid boundary",
+            "agent-filled trail",
+        ]
+        assert steps_taken == 5
+        assert obs["steps_remaining"][0] == pytest.approx((MAX_STEPS - steps_taken) / MAX_STEPS)
+
+    def test_random_collision_actions_are_visible_for_100_steps(self, tmp_path):
+        env = make_radial_test_env(
+            tmp_path,
+            start=(2, 2, 2),
+            goal=(GRID_SIZE, GRID_SIZE, GRID_SIZE),
+            geometry_boxes=[
+                [3, 2, 2, 3, 2, 2],
+                [2, 4, 2, 2, 4, 2],
+                [2, 2, 5, 2, 2, 5],
+                [5, 5, 5, 7, 5, 5],
+            ],
+        )
+        rng = np.random.default_rng(20260413)
+        obs, _ = env.reset(seed=0)
+
+        collisions = 0
+
+        for step_index in range(100):
+            action = int(rng.integers(0, 26))
+            cursor_before = obs["cursor_pos"].copy()
+            ray_hit_before = float(obs["ray_hits"][action])
+            ray_type_before = float(obs["ray_hit_types"][action])
+            obs, reward, terminated, truncated, _ = env.step(action)
+            cursor_after = obs["cursor_pos"].copy()
+
+            if np.array_equal(cursor_before, cursor_after):
+                collisions += 1
+                assert ray_hit_before > 0.0, step_index
+                assert ray_type_before == pytest.approx(
+                    BLOCK_KIND_OCCUPIED
+                ) or ray_type_before == pytest.approx(
+                    BLOCK_KIND_BOUNDARY
+                ) or ray_type_before == pytest.approx(
+                    BLOCK_KIND_FILLED
+                ), step_index
+                assert reward <= COLLISION_COST, step_index
+
+            if step_index < 99:
+                assert not terminated
+                assert not truncated
+
+        assert collisions > 0
+        assert obs["steps_remaining"][0] == pytest.approx(0.0)
