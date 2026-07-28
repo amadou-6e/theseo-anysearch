@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -104,11 +104,30 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 
-class EnvConfig(BaseModel):
+class NestedFieldAccessMixin:
+    """Expose Pydantic fields as ``<container>__<field>`` attributes."""
+
+    exposed_nested_fields: ClassVar[tuple[str, ...]] = ()
+
+    def __getattr__(self, name: str) -> Any:
+        container_name, separator, nested_name = name.partition("__")
+        if separator and container_name in self.exposed_nested_fields:
+            container = getattr(self, container_name)
+            if nested_name in type(container).model_fields:
+                return getattr(container, nested_name)
+        return super().__getattr__(name)
+
+
+class EnvConfig(NestedFieldAccessMixin, BaseModel):
     """Environment settings grouped by geometry, observation, action, and rewards."""
 
     model_config = ConfigDict(extra="forbid")
-
+    exposed_nested_fields: ClassVar[tuple[str, ...]] = (
+        "geometry",
+        "observation",
+        "action",
+        "rewards",
+    )
     agent_count: int = Field(default=4, ge=1)
     max_steps: int = Field(default=200, ge=1)
     seed: int = 42
@@ -146,130 +165,45 @@ class EnvConfig(BaseModel):
             data[block] = nested
         return data
 
-    @property
-    def stl_path(self):
-        return self.geometry.stl_path
-    @property
-    def stl_paths(self):
-        return self.geometry.stl_paths
-    @property
-    def scale(self):
-        return self.geometry.scale
-    @property
-    def scale_range(self):
-        return self.geometry.scale_range
-    @property
-    def grid_size(self):
-        return self.geometry.grid_size
-    @property
-    def geometry_boxes(self):
-        return self.geometry.boxes
-    @property
-    def geometry_pool_size(self):
-        return self.geometry.pool_size
-    @property
-    def scale_variants_per_map(self):
-        return self.geometry.scale_variants_per_map
-    @property
-    def geometry_padding(self):
-        return self.geometry.padding
-    @property
-    def geometry_pool(self):
-        return self.geometry.pool
-    @property
-    def obs_mode(self):
-        return self.observation.mode
-    @property
-    def box_radius(self):
-        return self.observation.box_radius
-    @property
-    def box_radii(self):
-        return self.observation.box_radii
-    @property
-    def ray_max_len(self):
-        return self.observation.ray_max_len
-    @property
-    def include_voxel_count(self):
-        return self.observation.include_voxel_count
-    @property
-    def action_mode(self):
-        return self.action.mode
-    @property
-    def step_cost(self):
-        return self.rewards.step_cost
-    @property
-    def collision_cost(self):
-        return self.rewards.collision_cost
-    @property
-    def goal_reward(self):
-        return self.rewards.goal_reward
-    @property
-    def distance_shaping(self):
-        return self.rewards.distance_shaping
-    @property
-    def distance_reward_mode(self):
-        return self.rewards.distance_reward_mode
-    @property
-    def zone_reward_min(self):
-        return self.rewards.zone_reward_min
-    @property
-    def zone_reward_max(self):
-        return self.rewards.zone_reward_max
-    @property
-    def zone_reward_curve(self):
-        return self.rewards.zone_reward_curve
-    @property
-    def distance_metric(self):
-        return self.rewards.distance_metric
-    @property
-    def invalid_action_cost(self):
-        return self.rewards.invalid_action_cost
-    @property
-    def construction_residual_weight(self):
-        return self.rewards.construction_residual_weight
-    @property
-    def construction_overshoot_weight(self):
-        return self.rewards.construction_overshoot_weight
-
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
         return {
-            "stl_path": str(self.stl_path) if self.stl_path else None,
+            "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
-                [str(path) for path in self.stl_paths] if self.stl_paths else None
+                [str(path) for path in self.geometry__stl_paths] if self.geometry__stl_paths else None
             ),
-            "scale": self.scale,
-            "scale_range": self.scale_range,
-            "grid_size": self.grid_size,
-            "geometry_boxes": self.geometry_boxes,
-            "geometry_pool_size": self.geometry_pool_size,
-            "scale_variants_per_map": self.scale_variants_per_map,
-            "geometry_padding": self.geometry_padding,
-            "geometry_pool": self.geometry_pool,
-            "obs_mode": self.obs_mode,
-            "box_radius": self.box_radius,
-            "box_radii": self.box_radii,
-            "ray_max_len": self.ray_max_len,
-            "include_voxel_count": self.include_voxel_count,
-            "action_mode": self.action_mode,
+            "scale": self.geometry__scale,
+            "scale_range": self.geometry__scale_range,
+            "grid_size": self.geometry__grid_size,
+            "geometry_boxes": self.geometry__boxes,
+            "geometry_pool_size": self.geometry__pool_size,
+            "scale_variants_per_map": self.geometry__scale_variants_per_map,
+            "geometry_padding": self.geometry__padding,
+            "geometry_pool": self.geometry__pool,
+            "obs_mode": self.observation__mode,
+            "box_radius": self.observation__box_radius,
+            "box_radii": self.observation__box_radii,
+            "ray_max_len": self.observation__ray_max_len,
+            "include_voxel_count": self.observation__include_voxel_count,
+            "action_mode": self.action__mode,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,
             "trail_mode": self.trail_mode,
             "target_fill": self.target_fill,
             "waypoints_file": self.waypoints_file,
-            "step_cost": self.step_cost,
-            "collision_cost": self.collision_cost,
-            "goal_reward": self.goal_reward,
-            "distance_shaping": self.distance_shaping,
-            "distance_reward_mode": self.distance_reward_mode,
-            "zone_reward_min": self.zone_reward_min,
-            "zone_reward_max": self.zone_reward_max,
-            "zone_reward_curve": self.zone_reward_curve,
-            "distance_metric": self.distance_metric,
-            "invalid_action_cost": self.invalid_action_cost,
-            "construction_residual_weight": self.construction_residual_weight,
-            "construction_overshoot_weight": self.construction_overshoot_weight,
+            "step_cost": self.rewards__step_cost,
+            "collision_cost": self.rewards__collision_cost,
+            "goal_reward": self.rewards__goal_reward,
+            "distance_shaping": self.rewards__distance_shaping,
+            "distance_reward_mode": self.rewards__distance_reward_mode,
+            "zone_reward_min": self.rewards__zone_reward_min,
+            "zone_reward_max": self.rewards__zone_reward_max,
+            "zone_reward_curve": self.rewards__zone_reward_curve,
+            "distance_metric": self.rewards__distance_metric,
+            "invalid_action_cost": self.rewards__invalid_action_cost,
+            "construction_residual_weight": self.rewards__construction_residual_weight,
+            "construction_overshoot_weight": self.rewards__construction_overshoot_weight,
             "task": self.task.model_dump(mode="json"),
         }
 

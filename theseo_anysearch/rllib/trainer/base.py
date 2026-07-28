@@ -361,7 +361,7 @@ class Trainer(ABC):
         """Build the env config dict passed to VoxelEnv / MultiVoxelEnv."""
         env = self._config.env
         runtime = env.to_runtime_dict()
-        runtime["geometry_pool"] = _resolve_pool_dir(env.geometry_pool)
+        runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         return runtime
 
     # ------------------------------------------------------------------

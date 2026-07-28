@@ -191,7 +191,7 @@ def _print_dry_run(data_cfg) -> None:
         if isinstance(src, PositionSampleSourceConfig):
             geo = src.geometry
             if geo.env:
-                desc = f"env ({geo.env.stl_path or 'geometry_boxes'})"
+                desc = f"env ({geo.env.geometry__stl_path or 'geometry_boxes'})"
                 n = src.num_samples or 10000
             elif geo.sampler:
                 desc = f"{geo.sampler.type}"

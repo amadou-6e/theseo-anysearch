@@ -38,7 +38,7 @@ class SACTrainer(Trainer):
             algo_cfg = SACConfig(**algo_cfg.model_dump())
 
         env_config = env.to_runtime_dict()
-        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry_pool)
+        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
         from theseo_anysearch.rllib.models import build_rllib_model_dict
