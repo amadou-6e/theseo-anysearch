@@ -16,3 +16,10 @@ the same scalar metric map. It includes success count and rate, steps-to-goal
 minimum/mean/maximum, final and minimum Euclidean goal distance,
 terminated/truncated counts, shaped return, and reconstructed unshaped task
 return.
+
+## Evaluation-driven early stopping
+
+`training.early_stop` consumes these deterministic evaluation batches. Reward
+and goal-finish conditions use the batch mean reward and completed-goal count.
+Heuristic accuracy compares the policy and configured heuristic on the same
+seed sequence. Training data and exploratory rollouts never trigger a stop.

@@ -208,6 +208,48 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
         }
 
 
+class TrainingEarlyStopConfig(BaseModel):
+    """Evaluation condition that can finish a standard training run early."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    mode: Literal["reward", "heuristic_accuracy", "heuristic_distance", "goal_finishes"] | None = None
+    min_iterations: int = Field(default=1, ge=1)
+    min_consecutive_evaluation: int = Field(default=1, ge=1)
+    min_reward: float | None = None
+    min_heuristic_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_heuristic_distance: float | None = Field(default=None, ge=0.0)
+    min_goal_finishes: int | None = Field(default=None, ge=1)
+    heuristic_distance_metric: Literal["l1", "l2"] = "l1"
+    heuristic_type: Literal[
+        "astar", "dijkstra", "weighted_astar", "replanning_astar"
+    ] = "astar"
+    heuristic_weight: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_selected_threshold(self) -> "TrainingEarlyStopConfig":
+        thresholds = {
+            "reward": self.min_reward,
+            "heuristic_accuracy": self.min_heuristic_accuracy,
+            "heuristic_distance": self.max_heuristic_distance,
+            "goal_finishes": self.min_goal_finishes,
+        }
+        configured = [name for name, value in thresholds.items() if value is not None]
+        if not self.enabled:
+            if self.mode is not None or configured:
+                raise ValueError("disabled training.early_stop cannot configure a mode or threshold")
+            return self
+        if self.mode is None:
+            raise ValueError("enabled training.early_stop requires mode")
+        if configured != [self.mode]:
+            raise ValueError(
+                f"training.early_stop mode '{self.mode}' requires exactly its matching threshold"
+            )
+        if self.heuristic_weight is not None and self.heuristic_type != "weighted_astar":
+            raise ValueError("heuristic_weight is only valid for weighted_astar")
+        return self
+
 class TrainingConfig(BaseModel):
     """Training configuration for RLlib runs.
 
@@ -255,6 +297,16 @@ class TrainingConfig(BaseModel):
     evaluation_episodes: int = Field(default=1, ge=1)
     evaluation_seed: int = 42
     evaluation_min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
+    early_stop: TrainingEarlyStopConfig = Field(default_factory=TrainingEarlyStopConfig)
+
+    @model_validator(mode="after")
+    def validate_early_stop_goal_count(self) -> "TrainingConfig":
+        threshold = self.early_stop.min_goal_finishes
+        if threshold is not None and threshold > self.evaluation_episodes:
+            raise ValueError(
+                "min_goal_finishes cannot exceed training.evaluation_episodes"
+            )
+        return self
 
 
 class AnyscaleConfig(BaseModel):
@@ -325,6 +377,14 @@ class AlgorithmEnvCompatibilityMixin:
         """Reject unsupported algorithm and agent-count combinations."""
         single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
+        if (
+            self.training.early_stop.enabled
+            and self.training.early_stop.mode in {"heuristic_accuracy", "heuristic_distance"}
+            and self.env.agent_count != 1
+        ):
+            raise ValueError(
+                "heuristic comparison early stopping requires env.agent_count: 1"
+            )
         if algorithm in single_agent_algorithms and self.env.agent_count != 1:
             raise ValueError(
                 f"training.algorithm='{self.training.algorithm}' only supports single-agent "

@@ -399,7 +399,22 @@ class Trainer(ABC):
         from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
 
         _store = OutputStore(self._output_dir)
-        if traj_every or best_traj:
+        from theseo_anysearch.rllib.trainer.early_stop import (
+            EarlyStopState,
+            TrainingEarlyStopController,
+            heuristic_action_accuracy,
+            heuristic_action_distance,
+        )
+        early_stop_config = training.early_stop
+        early_stop_state = (
+            EarlyStopState.model_validate(_store.read_json("early_stop_state.json"))
+            if early_stop_config.enabled and _store.exists("early_stop_state.json")
+            else EarlyStopState()
+        )
+        early_stop_controller = TrainingEarlyStopController(
+            early_stop_config, early_stop_state
+        )
+        if traj_every or best_traj or early_stop_config.enabled:
             from theseo_anysearch.experiments.trajectory import (
                 MultiTrajectoryWriter,
                 TrajectoryWriter,
@@ -443,6 +458,8 @@ class Trainer(ABC):
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
+                early_stop_triggered = False
+                early_stop_decision = None
                 try:
                     _log_trainer_stage(
                         f"Collecting {evaluation_episodes} deterministic evaluation "
@@ -498,6 +515,46 @@ class Trainer(ABC):
                         min_success_rate=training.evaluation_min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
+                    heuristic_accuracy = None
+                    heuristic_distance = None
+                    heuristic_compared_states = 0
+                    if early_stop_config.enabled and early_stop_config.mode in {
+                        "heuristic_accuracy", "heuristic_distance"
+                    }:
+                        from theseo_anysearch.experiments.trajectory import collect_heuristic_episode
+
+                        heuristic_episodes = [
+                            collect_heuristic_episode(
+                                _env_cfg,
+                                early_stop_config.heuristic_type,
+                                weight=early_stop_config.heuristic_weight,
+                                seed=evaluation_seed + episode_index,
+                            )
+                            for episode_index in range(evaluation_episodes)
+                        ]
+                        if early_stop_config.mode == "heuristic_accuracy":
+                            heuristic_accuracy, heuristic_compared_states = heuristic_action_accuracy(
+                                episodes, heuristic_episodes
+                            )
+                        else:
+                            heuristic_distance, heuristic_compared_states = heuristic_action_distance(
+                                episodes,
+                                heuristic_episodes,
+                                metric=early_stop_config.heuristic_distance_metric,
+                            )
+                    early_stop_decision = early_stop_controller.evaluate(
+                        self._iteration,
+                        reward_mean=evaluation_reward_mean,
+                        goal_finishes=metrics.finish_count,
+                        heuristic_accuracy=heuristic_accuracy,
+                        heuristic_distance=heuristic_distance,
+                    )
+                    early_stop_triggered = early_stop_decision.triggered
+                    if early_stop_config.enabled:
+                        _store.write_json(
+                            "early_stop_state.json",
+                            early_stop_controller.state.model_dump(),
+                        )
                     result = result.model_copy(
                         update={
                             "evaluation_episodes": len(episodes),
@@ -511,6 +568,11 @@ class Trainer(ABC):
                                 "evaluation_len_mean": evaluation_len_mean,
                                 **standardized,
                                 **metrics.as_scalar_dict(),
+                                "evaluation_heuristic_accuracy": heuristic_accuracy,
+                                "evaluation_heuristic_distance": heuristic_distance,
+                                "evaluation_heuristic_compared_states": heuristic_compared_states,
+                                "early_stop_consecutive_matches": early_stop_decision.consecutive_matches,
+                                "early_stop_triggered": early_stop_triggered,
                             },
                         }
                     )
@@ -537,6 +599,11 @@ class Trainer(ABC):
                             "summary": success_metrics.model_dump(),
 
                             "metrics": scalar_metrics,
+                            "early_stop": (
+                                early_stop_decision.model_dump()
+                                if early_stop_config.enabled
+                                else None
+                            ),
                             "episodes": [
                                 {
                                     "seed": evaluation_seed + episode_index,
@@ -557,7 +624,7 @@ class Trainer(ABC):
                             evaluation_reward_mean,
                             _exp_name,
                             _run_id,
-                            force=_is_last_iter,
+                            force=_is_last_iter or early_stop_triggered,
                         )
                         if "trajectories/best.json" in written:
                             self.checkpoint()
@@ -582,6 +649,18 @@ class Trainer(ABC):
                     and not _checkpointed_for_best
                 ):
                     self.checkpoint()
+                    _checkpointed_for_best = True
+                if early_stop_triggered and early_stop_decision is not None:
+                    if not _checkpointed_for_best:
+                        self.checkpoint()
+                    _store.write_json("early_stop.json", early_stop_decision.model_dump())
+                    _append_trainer_stage_log(
+                        self._output_dir,
+                        f"Early stopping at iteration {self._iteration}: "
+                        f"{early_stop_decision.mode}={early_stop_decision.value} "
+                        f">= {early_stop_decision.threshold}",
+                    )
+                    break
         finally:
             tb_writer.close()
 
