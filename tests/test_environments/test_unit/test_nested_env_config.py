@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
-from theseo_anysearch.models import EnvConfig
+from theseo_anysearch.models import EnvConfig, GeometryConfig, NestedFieldAccessMixin
 
 
 def test_nested_blocks_resolve_to_runtime_environment() -> None:
@@ -47,3 +47,16 @@ def test_mixed_legacy_and_nested_geometry_is_rejected() -> None:
 def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
     with pytest.raises(ValidationError, match="cannot be mixed.*rewards"):
         EnvConfig(goal_reward=2.0, rewards={"goal_reward": 3.0})
+
+def test_nested_field_access_mixin_is_reusable() -> None:
+    class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
+        exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = (
+            ("resolution", "geometry", "grid_size"),
+        )
+        geometry: GeometryConfig
+
+    wrapped = GeometryWrapper(geometry=GeometryConfig(grid_size=64))
+    assert wrapped.resolution == 64
+    assert "resolution" not in wrapped.model_dump()
+    with pytest.raises(AttributeError):
+        _ = wrapped.unknown_attribute

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -104,10 +104,53 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 
-class EnvConfig(BaseModel):
+class NestedFieldAccessMixin:
+    """Expose selected attributes from nested models through the parent model."""
+
+    exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = ()
+
+    def __getattr__(self, name: str) -> Any:
+        for public_name, container_name, nested_name in self.exposed_nested_fields:
+            if name == public_name:
+                container = getattr(self, container_name)
+                return getattr(container, nested_name)
+        return super().__getattr__(name)
+
+
+class EnvConfig(NestedFieldAccessMixin, BaseModel):
     """Environment settings grouped by geometry, observation, action, and rewards."""
 
     model_config = ConfigDict(extra="forbid")
+    exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("stl_path", "geometry", "stl_path"),
+        ("stl_paths", "geometry", "stl_paths"),
+        ("scale", "geometry", "scale"),
+        ("scale_range", "geometry", "scale_range"),
+        ("grid_size", "geometry", "grid_size"),
+        ("geometry_boxes", "geometry", "boxes"),
+        ("geometry_pool_size", "geometry", "pool_size"),
+        ("scale_variants_per_map", "geometry", "scale_variants_per_map"),
+        ("geometry_padding", "geometry", "padding"),
+        ("geometry_pool", "geometry", "pool"),
+        ("obs_mode", "observation", "mode"),
+        ("box_radius", "observation", "box_radius"),
+        ("box_radii", "observation", "box_radii"),
+        ("ray_max_len", "observation", "ray_max_len"),
+        ("include_voxel_count", "observation", "include_voxel_count"),
+        ("action_mode", "action", "mode"),
+        ("step_cost", "rewards", "step_cost"),
+        ("collision_cost", "rewards", "collision_cost"),
+        ("goal_reward", "rewards", "goal_reward"),
+        ("distance_shaping", "rewards", "distance_shaping"),
+        ("distance_reward_mode", "rewards", "distance_reward_mode"),
+        ("zone_reward_min", "rewards", "zone_reward_min"),
+        ("zone_reward_max", "rewards", "zone_reward_max"),
+        ("zone_reward_curve", "rewards", "zone_reward_curve"),
+        ("distance_metric", "rewards", "distance_metric"),
+        ("invalid_action_cost", "rewards", "invalid_action_cost"),
+        ("construction_residual_weight", "rewards", "construction_residual_weight"),
+        ("construction_overshoot_weight", "rewards", "construction_overshoot_weight"),
+    )
 
     agent_count: int = Field(default=4, ge=1)
     max_steps: int = Field(default=200, ge=1)
@@ -145,91 +188,6 @@ class EnvConfig(BaseModel):
                 nested[nested_name] = data.pop(legacy)
             data[block] = nested
         return data
-
-    @property
-    def stl_path(self):
-        return self.geometry.stl_path
-    @property
-    def stl_paths(self):
-        return self.geometry.stl_paths
-    @property
-    def scale(self):
-        return self.geometry.scale
-    @property
-    def scale_range(self):
-        return self.geometry.scale_range
-    @property
-    def grid_size(self):
-        return self.geometry.grid_size
-    @property
-    def geometry_boxes(self):
-        return self.geometry.boxes
-    @property
-    def geometry_pool_size(self):
-        return self.geometry.pool_size
-    @property
-    def scale_variants_per_map(self):
-        return self.geometry.scale_variants_per_map
-    @property
-    def geometry_padding(self):
-        return self.geometry.padding
-    @property
-    def geometry_pool(self):
-        return self.geometry.pool
-    @property
-    def obs_mode(self):
-        return self.observation.mode
-    @property
-    def box_radius(self):
-        return self.observation.box_radius
-    @property
-    def box_radii(self):
-        return self.observation.box_radii
-    @property
-    def ray_max_len(self):
-        return self.observation.ray_max_len
-    @property
-    def include_voxel_count(self):
-        return self.observation.include_voxel_count
-    @property
-    def action_mode(self):
-        return self.action.mode
-    @property
-    def step_cost(self):
-        return self.rewards.step_cost
-    @property
-    def collision_cost(self):
-        return self.rewards.collision_cost
-    @property
-    def goal_reward(self):
-        return self.rewards.goal_reward
-    @property
-    def distance_shaping(self):
-        return self.rewards.distance_shaping
-    @property
-    def distance_reward_mode(self):
-        return self.rewards.distance_reward_mode
-    @property
-    def zone_reward_min(self):
-        return self.rewards.zone_reward_min
-    @property
-    def zone_reward_max(self):
-        return self.rewards.zone_reward_max
-    @property
-    def zone_reward_curve(self):
-        return self.rewards.zone_reward_curve
-    @property
-    def distance_metric(self):
-        return self.rewards.distance_metric
-    @property
-    def invalid_action_cost(self):
-        return self.rewards.invalid_action_cost
-    @property
-    def construction_residual_weight(self):
-        return self.rewards.construction_residual_weight
-    @property
-    def construction_overshoot_weight(self):
-        return self.rewards.construction_overshoot_weight
 
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
