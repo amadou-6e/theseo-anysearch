@@ -10,6 +10,7 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 
 
 # TODO! instead of private functions, create ustils file
@@ -155,7 +156,11 @@ class PPOTrainer(Trainer):
             "ppo",
             "Starting PPO algorithm build",
         )
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
 
         env = config.env
         algo_cfg = config.algorithm_config
@@ -231,6 +236,10 @@ class PPOTrainer(Trainer):
         ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus)).framework("torch"))
 
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
 
         _log_stage("Calling RLlib build_algo()")
         _append_stage_log(

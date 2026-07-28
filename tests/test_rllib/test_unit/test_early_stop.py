@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from theseo_anysearch.models import TrainingConfig, TrainingEarlyStopConfig
+from theseo_anysearch.models import (
+    AlgorithmConfig,
+    AnyscaleConfig,
+    EnvConfig,
+    EvaluationConfig,
+    ModelConfig,
+    Settings,
+    TrainingConfig,
+    TrainingEarlyStopConfig,
+)
 from theseo_anysearch.rllib.trainer.early_stop import (
     EarlyStopState,
     TrainingEarlyStopController,
@@ -87,14 +96,20 @@ def test_configuration_requires_only_matching_threshold() -> None:
 
 def test_goal_threshold_cannot_exceed_evaluation_batch() -> None:
     with pytest.raises(ValidationError, match="cannot exceed"):
-        TrainingConfig(
-            algorithm="ppo",
-            evaluation_episodes=2,
-            early_stop={
-                "enabled": True,
-                "mode": "goal_finishes",
-                "min_goal_finishes": 3,
-            },
+        Settings(
+            env=EnvConfig(agent_count=1),
+            training=TrainingConfig(
+                algorithm="ppo",
+                early_stop={
+                    "enabled": True,
+                    "mode": "goal_finishes",
+                    "min_goal_finishes": 3,
+                },
+            ),
+            evaluation=EvaluationConfig(episodes=2),
+            anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
+            algorithm_config=AlgorithmConfig(),
+            model_config=ModelConfig(),
         )
 
 

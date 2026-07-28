@@ -7,6 +7,7 @@ from typing import Any
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 from theseo_anysearch.rllib.trainer.ppo import VoxelEnvPathHelper, _ensure_ray_runtime
 
 
@@ -29,7 +30,11 @@ class MultiAgentVoxelPPOTrainer(Trainer):
 
         from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
 
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
 
         env_cfg = config.env
         algo_cfg = config.algorithm_config
@@ -81,6 +86,10 @@ class MultiAgentVoxelPPOTrainer(Trainer):
             .framework("torch")
         )
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
 
         return rllib_config.build_algo()
 

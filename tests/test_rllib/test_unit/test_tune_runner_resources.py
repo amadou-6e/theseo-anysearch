@@ -188,6 +188,39 @@ class TestPlacementGroupFactoryCreation:
         assert len(pgf.bundles) == 1 + num_runners
 
 
+    def test_tunerunner_reserves_evaluation_worker_bundles(self, tmp_path: Path):
+        from ray.tune import PlacementGroupFactory
+        from theseo_anysearch.experiments.tune_runner import TuneRunner
+
+        captured = []
+
+        def fake_with_resources(fn, resources):
+            captured.append(resources)
+            return MagicMock()
+
+        cfg = make_experiment_config(
+            require_gpu=False,
+            num_env_runners=2,
+            evaluation_num_env_runners=3,
+            max_concurrent=1,
+            output_dir=str(tmp_path),
+        )
+
+        patches = patch_ray_tune(fake_with_resources=fake_with_resources)
+        with ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            try:
+                TuneRunner(cfg, config_path=None).run()
+            except Exception:
+                pass
+
+        assert captured
+        pgf = captured[0]
+        assert isinstance(pgf, PlacementGroupFactory)
+        assert len(pgf.bundles) == 1 + 2 + 3
+
+
 class TestWithResourcesOrderingRegression:
     """Verify placement resources wrap the trainable before parameters."""
 

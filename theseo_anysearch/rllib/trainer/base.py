@@ -383,13 +383,14 @@ class Trainer(ABC):
             _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
 
         training = self._config.training
+        evaluation = self._config.evaluation
         results: list[TrainResult] = []
         tb_writer = _TensorBoardRunWriter(self._output_dir)
 
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
-        evaluation_episodes = training.evaluation_episodes
+        evaluation_episodes = evaluation.episodes
         _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
         _env_cfg = self._env_config_dict()
@@ -470,33 +471,24 @@ class Trainer(ABC):
                         f"Collecting deterministic evaluation batch for iteration "
                         f"{self._iteration}",
                     )
-                    evaluation_seed = training.evaluation_seed
-                    if _is_multi:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_multi_eval_episode,
-                        )
+                    evaluation_seed = evaluation.seed
+                    from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+                        collect_rllib_evaluation_episodes,
+                    )
 
-                        episodes = [
-                            collect_multi_eval_episode(
-                                self._algo,
-                                _env_cfg,
-                                seed=evaluation_seed + episode_index,
-                            )
-                            for episode_index in range(evaluation_episodes)
-                        ]
-                        metrics = EpisodeRunMetrics.from_multi_voxel_episodes(episodes)
-                    else:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_eval_episodes,
-                        )
-
-                        episodes = collect_eval_episodes(
-                            self._algo,
-                            _env_cfg,
-                            evaluation_episodes,
-                            seed=evaluation_seed,
-                        )
-                        metrics = EpisodeRunMetrics.from_voxel_episodes(episodes)
+                    episodes = collect_rllib_evaluation_episodes(
+                        self._algo,
+                        _env_cfg,
+                        evaluation_episodes,
+                        seed=evaluation_seed,
+                        multi_agent=_is_multi,
+                    )
+                    metrics_factory = (
+                        EpisodeRunMetrics.from_multi_voxel_episodes
+                        if _is_multi
+                        else EpisodeRunMetrics.from_voxel_episodes
+                    )
+                    metrics = metrics_factory(episodes)
 
                     evaluation_reward_mean = sum(
                         episode.total_reward for episode in episodes
@@ -512,7 +504,7 @@ class Trainer(ABC):
                     success_metrics = evaluation_factory(
                         episodes,
                         _env_cfg,
-                        min_success_rate=training.evaluation_min_success_rate,
+                        min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
                     heuristic_accuracy = None
@@ -590,12 +582,13 @@ class Trainer(ABC):
                             "iteration": self._iteration,
                             "seed_start": evaluation_seed,
                             "episode_count": len(episodes),
+                            "num_env_runners": evaluation.num_env_runners,
                             "goals_reached": metrics.finish_count,
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,
                             "episode_len_mean": evaluation_len_mean,
                             "status": result.evaluation_status,
-                            "minimum_success_rate": training.evaluation_min_success_rate,
+                            "minimum_success_rate": evaluation.min_success_rate,
                             "summary": success_metrics.model_dump(),
 
                             "metrics": scalar_metrics,
