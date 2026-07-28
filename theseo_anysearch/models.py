@@ -107,13 +107,19 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
 class NestedFieldAccessMixin:
     """Expose selected attributes from nested models through the parent model."""
 
-    exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = ()
+    exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {}
+    exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {}
 
     def __getattr__(self, name: str) -> Any:
-        for public_name, container_name, nested_name in self.exposed_nested_fields:
-            if name == public_name:
+        for container_name, field_names in self.exposed_nested_fields.items():
+            if name in field_names:
                 container = getattr(self, container_name)
-                return getattr(container, nested_name)
+                return getattr(container, name)
+        alias = self.exposed_nested_aliases.get(name)
+        if alias is not None:
+            container_name, nested_name = alias
+            container = getattr(self, container_name)
+            return getattr(container, nested_name)
         return super().__getattr__(name)
 
 
@@ -121,37 +127,44 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     """Environment settings grouped by geometry, observation, action, and rewards."""
 
     model_config = ConfigDict(extra="forbid")
-    exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = (
-        ("stl_path", "geometry", "stl_path"),
-        ("stl_paths", "geometry", "stl_paths"),
-        ("scale", "geometry", "scale"),
-        ("scale_range", "geometry", "scale_range"),
-        ("grid_size", "geometry", "grid_size"),
-        ("geometry_boxes", "geometry", "boxes"),
-        ("geometry_pool_size", "geometry", "pool_size"),
-        ("scale_variants_per_map", "geometry", "scale_variants_per_map"),
-        ("geometry_padding", "geometry", "padding"),
-        ("geometry_pool", "geometry", "pool"),
-        ("obs_mode", "observation", "mode"),
-        ("box_radius", "observation", "box_radius"),
-        ("box_radii", "observation", "box_radii"),
-        ("ray_max_len", "observation", "ray_max_len"),
-        ("include_voxel_count", "observation", "include_voxel_count"),
-        ("action_mode", "action", "mode"),
-        ("step_cost", "rewards", "step_cost"),
-        ("collision_cost", "rewards", "collision_cost"),
-        ("goal_reward", "rewards", "goal_reward"),
-        ("distance_shaping", "rewards", "distance_shaping"),
-        ("distance_reward_mode", "rewards", "distance_reward_mode"),
-        ("zone_reward_min", "rewards", "zone_reward_min"),
-        ("zone_reward_max", "rewards", "zone_reward_max"),
-        ("zone_reward_curve", "rewards", "zone_reward_curve"),
-        ("distance_metric", "rewards", "distance_metric"),
-        ("invalid_action_cost", "rewards", "invalid_action_cost"),
-        ("construction_residual_weight", "rewards", "construction_residual_weight"),
-        ("construction_overshoot_weight", "rewards", "construction_overshoot_weight"),
-    )
-
+    exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {
+        "geometry": (
+            "stl_path",
+            "stl_paths",
+            "scale",
+            "scale_range",
+            "grid_size",
+            "scale_variants_per_map",
+        ),
+        "observation": (
+            "box_radius",
+            "box_radii",
+            "ray_max_len",
+            "include_voxel_count",
+        ),
+        "rewards": (
+            "step_cost",
+            "collision_cost",
+            "goal_reward",
+            "distance_shaping",
+            "distance_reward_mode",
+            "zone_reward_min",
+            "zone_reward_max",
+            "zone_reward_curve",
+            "distance_metric",
+            "invalid_action_cost",
+            "construction_residual_weight",
+            "construction_overshoot_weight",
+        ),
+    }
+    exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {
+        "geometry_boxes": ("geometry", "boxes"),
+        "geometry_pool_size": ("geometry", "pool_size"),
+        "geometry_padding": ("geometry", "padding"),
+        "geometry_pool": ("geometry", "pool"),
+        "obs_mode": ("observation", "mode"),
+        "action_mode": ("action", "mode"),
+    }
     agent_count: int = Field(default=4, ge=1)
     max_steps: int = Field(default=200, ge=1)
     seed: int = 42

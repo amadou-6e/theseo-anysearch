@@ -50,9 +50,12 @@ def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
 
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
-        exposed_nested_fields: ClassVar[tuple[tuple[str, str, str], ...]] = (
-            ("resolution", "geometry", "grid_size"),
-        )
+        exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {
+            "geometry": ("grid_size",),
+        }
+        exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {
+            "resolution": ("geometry", "grid_size"),
+        }
         geometry: GeometryConfig
 
     wrapped = GeometryWrapper(geometry=GeometryConfig(grid_size=64))
