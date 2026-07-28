@@ -34,9 +34,8 @@ action representation affect convergence?
 | Goal reward | 2.0 |
 | Distance shaping | 0.25, progress mode |
 
-The source configuration is
-[`ppo_tiny_overfit.yaml`](../../usage/experiments/train/ppo_tiny_overfit.yaml).
-Future runs use four evaluation EnvRunners. The `discrete_26` result below used
+The table above records the resolved run configuration. Future runs use four
+evaluation EnvRunners. The `discrete_26` result below used
 eight because it was launched before that default was reduced; `vector_3` used
 four.
 
