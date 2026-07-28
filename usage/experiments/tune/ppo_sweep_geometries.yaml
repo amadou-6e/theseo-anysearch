@@ -26,9 +26,12 @@ sweep:
       use_position_encoding: true
       encoder_depth: 3
     env:
-      scale: 40.0
       agent_count: 4
       max_steps: 200
+
+      geometry:
+        scale: 40.0
+
     renders:
       camera_positions:
         - name: top
@@ -40,20 +43,24 @@ sweep:
   experiments:
     - name: ppo-stepped-terrain
       env:
-        stl_path: usage/geometries/stepped_terrain.stl
+        geometry:
+          stl_path: usage/geometries/stepped_terrain.stl
 
     - name: ppo-corridor-l
       env:
-        stl_path: usage/geometries/corridor_l.stl
         agent_count: 2
-        scale: 30.0
+        geometry:
+          stl_path: usage/geometries/corridor_l.stl
+          scale: 30.0
 
     - name: ppo-pipe-junction
       env:
-        stl_path: usage/geometries/pipe_junction.stl
+        geometry:
+          stl_path: usage/geometries/pipe_junction.stl
 
     - name: ppo-ramp-spiral
       env:
-        stl_path: usage/geometries/ramp_spiral.stl
         max_steps: 400
-        scale: 25.0
+        geometry:
+          stl_path: usage/geometries/ramp_spiral.stl
+          scale: 25.0

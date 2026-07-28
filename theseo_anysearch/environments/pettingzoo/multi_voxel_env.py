@@ -10,6 +10,8 @@ import numpy as np
 import gymnasium
 from gymnasium import spaces
 
+from theseo_anysearch.environments.action_spaces import build_action_space, encode_action
+
 from theseo_anysearch.environments.pettingzoo.base import RustParallelEnv
 
 log = logging.getLogger(__name__)
@@ -206,7 +208,7 @@ class MultiVoxelEnv(RustParallelEnv):
         return spaces.Dict(base)
 
     def _action_space(self, agent: str) -> gymnasium.Space:
-        return spaces.Discrete(26)
+        return build_action_space(self._config.get("action_mode", "discrete_26"))
 
     def _fanout_obs(self, rust_obs: Any) -> dict:
         grid_size = self._config.get("grid_size", 32)
@@ -257,7 +259,8 @@ class MultiVoxelEnv(RustParallelEnv):
         return result
 
     def _encode_actions(self, actions: dict) -> list[int]:
-        return [int(actions.get(agent, 0)) for agent in self.possible_agents]
+        mode = self._config.get("action_mode", "discrete_26")
+        return [encode_action(actions.get(agent, 0), mode) for agent in self.possible_agents]
 
     def _fanout_rewards(self, result: Any) -> dict:
         return {

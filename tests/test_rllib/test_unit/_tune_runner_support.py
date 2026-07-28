@@ -11,6 +11,7 @@ def make_experiment_config(
     *,
     require_gpu: bool = False,
     num_env_runners: int = 4,
+    evaluation_num_env_runners: int = 0,
     max_concurrent: int = 1,
     iterations: int = 10,
     output_dir: str = "/tmp/exp",
@@ -23,6 +24,8 @@ def make_experiment_config(
         Whether the training config should request GPU resources.
     num_env_runners : int, default=4
         Number of Ray env runners for the training config.
+    evaluation_num_env_runners : int, default=0
+        Number of dedicated Ray evaluation env runners.
     max_concurrent : int, default=1
         Maximum concurrently scheduled tune trials.
     iterations : int, default=10
@@ -41,6 +44,7 @@ def make_experiment_config(
         AlgorithmConfig,
         AnyscaleConfig,
         EnvConfig,
+        EvaluationConfig,
         ModelConfig,
         TrainingConfig,
     )
@@ -54,6 +58,9 @@ def make_experiment_config(
             require_gpu=require_gpu,
             num_env_runners=num_env_runners,
             output_dir=output_dir,
+        ),
+        evaluation=EvaluationConfig(
+            num_env_runners=evaluation_num_env_runners
         ),
         anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
         algorithm_config=AlgorithmConfig(lr=3e-4, gamma=0.99, train_batch_size=512),

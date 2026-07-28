@@ -328,13 +328,15 @@ class Trainer(ABC):
         self._output_dir: Path = Path(config.training.output_dir)
         self._waypoint_curriculum: Any = None
         if config.env.waypoint_curriculum.enabled:
-            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
-                WaypointCurriculum,
-            )
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
 
-            self._waypoint_curriculum = WaypointCurriculum(
-                config.env.waypoint_curriculum
-            )
+            curriculum_config = config.env.waypoint_curriculum
+            evaluation_advance = config.evaluation.waypoint_curriculum.advance
+            if evaluation_advance is not None:
+                curriculum_config = curriculum_config.model_copy(
+                    update={"advance": evaluation_advance}
+                )
+            self._waypoint_curriculum = WaypointCurriculum(curriculum_config)
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -369,38 +371,9 @@ class Trainer(ABC):
     def _env_config_dict(self) -> dict:
         """Build the env config dict passed to VoxelEnv / MultiVoxelEnv."""
         env = self._config.env
-        return {
-            "stl_path": str(env.stl_path) if env.stl_path else None,
-            "scale": env.scale,
-            "scale_range": env.scale_range,
-            "agent_count": env.agent_count,
-            "max_steps": env.max_steps,
-            "seed": env.seed,
-            "obs_mode": env.obs_mode,
-            "box_radius": env.box_radius,
-            "box_radii": env.box_radii,
-            "ray_max_len": env.ray_max_len,
-            "include_voxel_count": env.include_voxel_count,
-            "grid_size": env.grid_size,
-            "trail_mode": env.trail_mode,
-            "geometry_boxes": env.geometry_boxes,
-            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
-            "geometry_padding": env.geometry_padding,
-            "waypoints_file": env.waypoints_file,
-            "waypoint_curriculum": env.waypoint_curriculum.model_dump(mode="json"),
-            "step_cost": env.step_cost,
-            "collision_cost": env.collision_cost,
-            "goal_reward": env.goal_reward,
-            "distance_shaping": env.distance_shaping,
-            "distance_reward_mode": env.distance_reward_mode,
-            "zone_reward_min": env.zone_reward_min,
-            "zone_reward_max": env.zone_reward_max,
-            "zone_reward_curve": env.zone_reward_curve,
-            "invalid_action_cost": env.invalid_action_cost,
-            "construction_residual_weight": env.construction_residual_weight,
-            "construction_overshoot_weight": env.construction_overshoot_weight,
-            "task": env.task.model_dump(mode="json"),
-        }
+        runtime = env.to_runtime_dict()
+        runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        return runtime
 
     # ------------------------------------------------------------------
     # Public API
@@ -421,13 +394,14 @@ class Trainer(ABC):
             _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
 
         training = self._config.training
+        evaluation = self._config.evaluation
         results: list[TrainResult] = []
         tb_writer = _TensorBoardRunWriter(self._output_dir)
 
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
-        evaluation_episodes = training.evaluation_episodes
+        evaluation_episodes = evaluation.episodes
         _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
         _env_cfg = self._env_config_dict()
@@ -440,7 +414,7 @@ class Trainer(ABC):
         if self._waypoint_curriculum is not None:
             from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
                 WaypointCurriculumState,
-                broadcast_waypoints,
+                broadcast_waypoint_curriculum,
             )
 
             if _store.exists("curriculum/state.json"):
@@ -452,13 +426,27 @@ class Trainer(ABC):
                 "start": curriculum_state.start,
                 "goal": curriculum_state.goal,
             }
-            broadcast_waypoints(
-                self._algo, curriculum_state.start, curriculum_state.goal
-            )
+            broadcast_waypoint_curriculum(self._algo, self._waypoint_curriculum)
             _store.write_json(
-                "curriculum/state.json", curriculum_state.model_dump(mode="json")
+                "curriculum/state.json",
+                curriculum_state.model_dump(mode="json"),
             )
-        if traj_every or best_traj:
+        from theseo_anysearch.rllib.trainer.early_stop import (
+            EarlyStopState,
+            TrainingEarlyStopController,
+            heuristic_action_accuracy,
+            heuristic_action_distance,
+        )
+        early_stop_config = training.early_stop
+        early_stop_state = (
+            EarlyStopState.model_validate(_store.read_json("early_stop_state.json"))
+            if early_stop_config.enabled and _store.exists("early_stop_state.json")
+            else EarlyStopState()
+        )
+        early_stop_controller = TrainingEarlyStopController(
+            early_stop_config, early_stop_state
+        )
+        if traj_every or best_traj or early_stop_config.enabled:
             from theseo_anysearch.experiments.trajectory import (
                 MultiTrajectoryWriter,
                 TrajectoryWriter,
@@ -502,6 +490,8 @@ class Trainer(ABC):
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
+                early_stop_triggered = False
+                early_stop_decision = None
                 try:
                     _log_trainer_stage(
                         f"Collecting {evaluation_episodes} deterministic evaluation "
@@ -512,33 +502,24 @@ class Trainer(ABC):
                         f"Collecting deterministic evaluation batch for iteration "
                         f"{self._iteration}",
                     )
-                    evaluation_seed = training.evaluation_seed
-                    if _is_multi:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_multi_eval_episode,
-                        )
+                    evaluation_seed = evaluation.seed
+                    from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+                        collect_rllib_evaluation_episodes,
+                    )
 
-                        episodes = [
-                            collect_multi_eval_episode(
-                                self._algo,
-                                _env_cfg,
-                                seed=evaluation_seed + episode_index,
-                            )
-                            for episode_index in range(evaluation_episodes)
-                        ]
-                        metrics = EpisodeRunMetrics.from_multi_voxel_episodes(episodes)
-                    else:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_eval_episodes,
-                        )
-
-                        episodes = collect_eval_episodes(
-                            self._algo,
-                            _env_cfg,
-                            evaluation_episodes,
-                            seed=evaluation_seed,
-                        )
-                        metrics = EpisodeRunMetrics.from_voxel_episodes(episodes)
+                    episodes = collect_rllib_evaluation_episodes(
+                        self._algo,
+                        _env_cfg,
+                        evaluation_episodes,
+                        seed=evaluation_seed,
+                        multi_agent=_is_multi,
+                    )
+                    metrics_factory = (
+                        EpisodeRunMetrics.from_multi_voxel_episodes
+                        if _is_multi
+                        else EpisodeRunMetrics.from_voxel_episodes
+                    )
+                    metrics = metrics_factory(episodes)
 
                     evaluation_reward_mean = sum(
                         episode.total_reward for episode in episodes
@@ -554,9 +535,49 @@ class Trainer(ABC):
                     success_metrics = evaluation_factory(
                         episodes,
                         _env_cfg,
-                        min_success_rate=training.evaluation_min_success_rate,
+                        min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
+                    heuristic_accuracy = None
+                    heuristic_distance = None
+                    heuristic_compared_states = 0
+                    if early_stop_config.enabled and early_stop_config.mode in {
+                        "heuristic_accuracy", "heuristic_distance"
+                    }:
+                        from theseo_anysearch.experiments.trajectory import collect_heuristic_episode
+
+                        heuristic_episodes = [
+                            collect_heuristic_episode(
+                                _env_cfg,
+                                early_stop_config.heuristic_type,
+                                weight=early_stop_config.heuristic_weight,
+                                seed=evaluation_seed + episode_index,
+                            )
+                            for episode_index in range(evaluation_episodes)
+                        ]
+                        if early_stop_config.mode == "heuristic_accuracy":
+                            heuristic_accuracy, heuristic_compared_states = heuristic_action_accuracy(
+                                episodes, heuristic_episodes
+                            )
+                        else:
+                            heuristic_distance, heuristic_compared_states = heuristic_action_distance(
+                                episodes,
+                                heuristic_episodes,
+                                metric=early_stop_config.heuristic_distance_metric,
+                            )
+                    early_stop_decision = early_stop_controller.evaluate(
+                        self._iteration,
+                        reward_mean=evaluation_reward_mean,
+                        goal_finishes=metrics.finish_count,
+                        heuristic_accuracy=heuristic_accuracy,
+                        heuristic_distance=heuristic_distance,
+                    )
+                    early_stop_triggered = early_stop_decision.triggered
+                    if early_stop_config.enabled:
+                        _store.write_json(
+                            "early_stop_state.json",
+                            early_stop_controller.state.model_dump(),
+                        )
                     result = result.model_copy(
                         update={
                             "evaluation_episodes": len(episodes),
@@ -570,48 +591,103 @@ class Trainer(ABC):
                                 "evaluation_len_mean": evaluation_len_mean,
                                 **standardized,
                                 **metrics.as_scalar_dict(),
+                                "evaluation_heuristic_accuracy": heuristic_accuracy,
+                                "evaluation_heuristic_distance": heuristic_distance,
+                                "evaluation_heuristic_compared_states": heuristic_compared_states,
+                                "early_stop_consecutive_matches": early_stop_decision.consecutive_matches,
+                                "early_stop_triggered": early_stop_triggered,
                             },
                         }
                     )
+                    curriculum_metrics: dict[str, float] = {}
+                    if self._waypoint_curriculum is not None:
+                        retention = evaluation.waypoint_curriculum
+                        retention_due = (
+                            retention.enabled
+                            and self._iteration % retention.frequency == 0
+                        )
+                        transitioned = False
+                        if retention_due:
+                            stage_results: list[dict[str, Any]] = []
+                            total_finishes = 0
+                            total_episodes = 0
+                            for stage_index, (start, goal) in enumerate(
+                                self._waypoint_curriculum.stages()
+                            ):
+                                stage_env_cfg = dict(_env_cfg)
+                                stage_env_cfg["waypoints"] = {
+                                    "start": start,
+                                    "goal": goal,
+                                }
+                                stage_env_cfg["waypoint_curriculum"] = {"enabled": False}
+                                stage_episodes = collect_rllib_evaluation_episodes(
+                                    self._algo,
+                                    stage_env_cfg,
+                                    retention.episodes,
+                                    seed=evaluation_seed + stage_index * retention.episodes,
+                                    multi_agent=False,
+                                )
+                                stage_metrics = EpisodeRunMetrics.from_voxel_episodes(
+                                    stage_episodes
+                                )
+                                total_finishes += stage_metrics.finish_count
+                                total_episodes += len(stage_episodes)
+                                stage_results.append(
+                                    {
+                                        "stage": stage_index,
+                                        "start": start,
+                                        "goal": goal,
+                                        "episodes": len(stage_episodes),
+                                        "goals_reached": stage_metrics.finish_count,
+                                        "success_rate": stage_metrics.finish_rate,
+                                    }
+                                )
+                            overall_rate = total_finishes / total_episodes
+                            per_stage_pass = all(
+                                stage["success_rate"] >= retention.min_per_stage_success_rate
+                                for stage in stage_results
+                            )
+                            retention_pass = (
+                                overall_rate >= retention.min_success_rate and per_stage_pass
+                            )
+                            current_finishes = stage_results[-1]["goals_reached"]
+                            if retention_pass:
+                                transitioned = self._waypoint_curriculum.observe(
+                                    self._iteration, current_finishes
+                                )
+                            if transitioned:
+                                start, goal = self._waypoint_curriculum.sample(_env_cfg)
+                                self._waypoint_curriculum.advance(self._iteration, start, goal)
+                                _env_cfg["waypoints"] = {"start": start, "goal": goal}
+                                from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                                    broadcast_waypoint_curriculum,
+                                )
+                                broadcast_waypoint_curriculum(
+                                    self._algo, self._waypoint_curriculum
+                                )
+                            curriculum_state = self._waypoint_curriculum.state
+                            curriculum_metrics = {
+                                "curriculum/stage": float(curriculum_state.stage),
+                                "curriculum/transition": float(transitioned),
+                                "curriculum/retention_success_rate": overall_rate,
+                                "curriculum/retention_pass": float(retention_pass),
+                            }
+                            _store.write_json(
+                                f"evaluation/curriculum_iter_{self._iteration:06d}.json",
+                                {"stages": stage_results, "passed": retention_pass},
+                            )
+                            _store.write_json(
+                                "curriculum/state.json",
+                                curriculum_state.model_dump(mode="json"),
+                            )
                     scalar_metrics = {
                         **metrics.as_scalar_dict(),
                         **success_metrics.tensorboard_metrics(),
 
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
+                        **curriculum_metrics,
                     }
-                    if self._waypoint_curriculum is not None:
-                        from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
-                            broadcast_waypoints,
-                        )
-
-                        transitioned = self._waypoint_curriculum.observe(
-                            self._iteration, metrics.finish_count
-                        )
-                        if transitioned:
-                            start, goal = self._waypoint_curriculum.sample(_env_cfg)
-                            self._waypoint_curriculum.advance(
-                                self._iteration, start, goal
-                            )
-                            _env_cfg["waypoints"] = {
-                                "start": start,
-                                "goal": goal,
-                            }
-                            broadcast_waypoints(self._algo, start, goal)
-                        curriculum_state = self._waypoint_curriculum.state
-                        scalar_metrics.update(
-                            {
-                                "curriculum/stage": float(curriculum_state.stage),
-                                "curriculum/transition": float(transitioned),
-                                "curriculum/successes_in_stage": float(
-                                    curriculum_state.successes_in_stage
-                                ),
-                            }
-                        )
-                        _store.write_json(
-                            "curriculum/state.json",
-                            curriculum_state.model_dump(mode="json"),
-                        )
                     tb_writer.log_scalars(self._iteration, scalar_metrics)
                     _store.write_json(
                         f"evaluation/iter_{self._iteration:06d}.json",
@@ -619,15 +695,21 @@ class Trainer(ABC):
                             "iteration": self._iteration,
                             "seed_start": evaluation_seed,
                             "episode_count": len(episodes),
+                            "num_env_runners": evaluation.num_env_runners,
                             "goals_reached": metrics.finish_count,
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,
                             "episode_len_mean": evaluation_len_mean,
                             "status": result.evaluation_status,
-                            "minimum_success_rate": training.evaluation_min_success_rate,
+                            "minimum_success_rate": evaluation.min_success_rate,
                             "summary": success_metrics.model_dump(),
 
                             "metrics": scalar_metrics,
+                            "early_stop": (
+                                early_stop_decision.model_dump()
+                                if early_stop_config.enabled
+                                else None
+                            ),
                             "episodes": [
                                 {
                                     "seed": evaluation_seed + episode_index,
@@ -648,7 +730,7 @@ class Trainer(ABC):
                             evaluation_reward_mean,
                             _exp_name,
                             _run_id,
-                            force=_is_last_iter,
+                            force=_is_last_iter or early_stop_triggered,
                         )
                         if "trajectories/best.json" in written:
                             self.checkpoint()
@@ -673,6 +755,18 @@ class Trainer(ABC):
                     and not _checkpointed_for_best
                 ):
                     self.checkpoint()
+                    _checkpointed_for_best = True
+                if early_stop_triggered and early_stop_decision is not None:
+                    if not _checkpointed_for_best:
+                        self.checkpoint()
+                    _store.write_json("early_stop.json", early_stop_decision.model_dump())
+                    _append_trainer_stage_log(
+                        self._output_dir,
+                        f"Early stopping at iteration {self._iteration}: "
+                        f"{early_stop_decision.mode}={early_stop_decision.value} "
+                        f">= {early_stop_decision.threshold}",
+                    )
+                    break
         finally:
             tb_writer.close()
 

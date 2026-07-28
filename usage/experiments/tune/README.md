@@ -6,6 +6,7 @@ These files launch multi-trial searches or repeat one configuration across multi
 
 - [`ppo_asha.yaml`](ppo_asha.yaml) tunes core PPO optimization parameters and prunes weak trials with ASHA.
 - [`ppo_arch_search.yaml`](ppo_arch_search.yaml) jointly searches PPO settings and fully connected network depth and width.
+- [`ppo_box_r1_waypoint_curriculum.yaml`](ppo_box_r1_waypoint_curriculum.yaml) tunes discrete-18 radius-1 PPO with 25% retained-stage training and evaluation-driven waypoint promotion.
 - [`ppo_maps_asha.yaml`](ppo_maps_asha.yaml) tunes radial-observation PPO on augmented industrial map crops.
 - [`ppo_diverse_asha.yaml`](ppo_diverse_asha.yaml) tunes PPO across augmented high-resolution geometry-pool samples.
 - [`multi_agent_ppo_asha.yaml`](multi_agent_ppo_asha.yaml) applies ASHA to shared-policy multi-agent PPO.
@@ -19,4 +20,4 @@ These files launch multi-trial searches or repeat one configuration across multi
 
 ASHA is appropriate for independent trials with early stopping. PBT is appropriate when strong trials should transfer weights and mutate their settings during training. The geometry sweep isolates environment difficulty rather than hyperparameter quality.
 
-Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop budgets are documented in [Tune lifecycle and trial budgets](../../../docs/tune-lifecycle.md).
+Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop budgets are documented in [Tune lifecycle and trial budgets](../../../docs/tuning/lifecycle.md).

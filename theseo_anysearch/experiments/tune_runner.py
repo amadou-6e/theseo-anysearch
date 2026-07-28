@@ -80,6 +80,9 @@ def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
         "resource/hidden_layer_count": float(len(hidden_sizes)),
         "resource/hidden_layer_width": float(max(hidden_sizes, default=0)),
         "resource/num_env_runners": float(settings.training.num_env_runners),
+        "resource/evaluation_num_env_runners": float(
+            getattr(getattr(settings, "evaluation", None), "num_env_runners", 0)
+        ),
         "resource/num_gpus": float(settings.training.num_gpus or 0.0),
     }
 
@@ -959,7 +962,10 @@ class TuneRunner:
         # ------------------------------------------------------------------ #
         from ray.tune import PlacementGroupFactory
 
-        num_env_runners = self._config.training.num_env_runners
+        num_env_runners = (
+            self._config.training.num_env_runners
+            + self._config.evaluation.num_env_runners
+        )
 
         driver_bundle: dict[str, float] = {"CPU": 1.0}
         if gpu_fraction > 0:

@@ -7,24 +7,30 @@ experiment:
   seed: 42
 
 env:
-  obs_mode: radial
   agent_count: 1
   max_steps: 300
   trail_mode: true
-  step_cost: -0.05       # base cost per step (always applied)
-  goal_reward: 10.0      # large terminal reward so it dominates total episode return
-  distance_shaping: 0.02 # max per-step shaping = 0.02 * sqrt(3) ≈ 0.035 < 0.05 → always negative
-  collision_cost: -0.5   # very negative — strongly discourages blocked moves
-  grid_size: 32
 
-  geometry_pool:
-    pool_dir: ../../../runtime/geometry_pools/preview   # 98 crops from industrial plant maps
-    augmentation:
-      paste_boxes:
-        num_boxes: [1, 4]
-        box_min_size: [1, 1, 1]
-        box_max_size: [5, 5, 5]
-        prob: 0.5
+  geometry:
+    grid_size: 32
+
+    pool:
+      pool_dir: ../../../runtime/geometry_pools/preview   # 98 crops from industrial plant maps
+      augmentation:
+        paste_boxes:
+          num_boxes: [1, 4]
+          box_min_size: [1, 1, 1]
+          box_max_size: [5, 5, 5]
+          prob: 0.5
+
+  observation:
+    mode: radial
+
+  rewards:
+    step_cost: -0.05       # base cost per step (always applied)
+    goal_reward: 10.0      # large terminal reward so it dominates total episode return
+    distance_shaping: 0.02 # max per-step shaping = 0.02 * sqrt(3) ≈ 0.035 < 0.05 → always negative
+    collision_cost: -0.5   # very negative — strongly discourages blocked moves
 
 training:
   algorithm: ppo

@@ -7,6 +7,7 @@ from typing import Any
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 from theseo_anysearch.rllib.trainer.ppo import VoxelEnvPathHelper, _ensure_ray_runtime
 
 
@@ -29,31 +30,18 @@ class MultiAgentVoxelPPOTrainer(Trainer):
 
         from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
 
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
 
         env_cfg = config.env
         algo_cfg = config.algorithm_config
         if not isinstance(algo_cfg, PPOConfig):
             algo_cfg = PPOConfig(**algo_cfg.model_dump())
 
-        env_config = {
-            "agent_count":      env_cfg.agent_count,
-            "max_steps":        env_cfg.max_steps,
-            "seed":             env_cfg.seed,
-            "trail_mode":       env_cfg.trail_mode,
-            "geometry_boxes":   env_cfg.geometry_boxes,
-            "step_cost":        env_cfg.step_cost,
-            "goal_reward":      env_cfg.goal_reward,
-            "distance_shaping": env_cfg.distance_shaping,
-            "collision_cost":   env_cfg.collision_cost,
-            "distance_reward_mode": env_cfg.distance_reward_mode,
-            "zone_reward_min":   env_cfg.zone_reward_min,
-            "zone_reward_max":   env_cfg.zone_reward_max,
-            "zone_reward_curve": env_cfg.zone_reward_curve,
-            "box_radius":       getattr(env_cfg, "box_radius", 2),
-            "ray_max_len":      getattr(env_cfg, "ray_max_len", 16),
-            "distance_metric":  getattr(env_cfg, "distance_metric", "euclidean"),
-        }
+        env_config = env_cfg.to_runtime_dict()
 
         env_id = "multi_voxel_ppo_env"
         register_env(
@@ -98,6 +86,10 @@ class MultiAgentVoxelPPOTrainer(Trainer):
             .framework("torch")
         )
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
 
         return rllib_config.build_algo()
 

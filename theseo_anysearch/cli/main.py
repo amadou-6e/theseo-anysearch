@@ -59,10 +59,10 @@ def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
     # Env
     env = experiment.env
     table.add_row("", "")
-    if getattr(env, "stl_path", None):
-        table.add_row("stl", str(env.stl_path))
-        scale = getattr(env, "scale", None)
-        scale_range = getattr(env, "scale_range", None)
+    if env.geometry__stl_path:
+        table.add_row("stl", str(env.geometry__stl_path))
+        scale = env.geometry__scale
+        scale_range = env.geometry__scale_range
         if scale_range:
             table.add_row("scale range", f"{scale_range[0]} – {scale_range[1]}")
         elif scale is not None:

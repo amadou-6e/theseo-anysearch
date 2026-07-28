@@ -10,14 +10,20 @@ env:
   agent_count: 3
   max_steps: 200
   trail_mode: true
-  geometry_boxes:
-    - [18, 18, 18, 28, 28, 28]
-  step_cost: -0.01
-  goal_reward: 1.0
-  distance_shaping: 0.1
-  collision_cost: 0.0
-  box_radius: 2                  # must match the garden encoder's box_radius
-  obs_mode: box                  # local_grid observation required by the pretrained encoder
+
+  geometry:
+    boxes:
+      - [18, 18, 18, 28, 28, 28]
+
+  observation:
+    box_radius: 2                  # must match the garden encoder's box_radius
+    mode: box                  # local_grid observation required by the pretrained encoder
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
+    collision_cost: 0.0
 
 training:
   algorithm: multi_agent_voxel_ppo

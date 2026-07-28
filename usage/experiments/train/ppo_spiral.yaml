@@ -7,10 +7,12 @@ experiment:
   seed: 7
 
 env:
-  stl_path: usage/geometries/ramp_spiral.stl
-  scale: 25.0
   agent_count: 2
   max_steps: 400             # longer episodes — vertical routing takes more steps
+
+  geometry:
+    stl_path: usage/geometries/ramp_spiral.stl
+    scale: 25.0
 
 training:
   algorithm: ppo

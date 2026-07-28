@@ -10,6 +10,7 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 
 
 # TODO! instead of private functions, create ustils file
@@ -32,6 +33,16 @@ def _append_stage_log(output_dir: str, scope: str, message: str) -> None:
         fh.write(f"[{scope}] {ts} {message}\n")
 
 
+def _set_rllib_storage_path(output_dir: str) -> Path:
+    """Keep Ray Trainable temporary directories inside the writable run."""
+    from ray.tune.trainable import trainable as ray_trainable
+
+    storage_path = Path(output_dir, "rllib")
+    storage_path.mkdir(parents=True, exist_ok=True)
+    ray_trainable.DEFAULT_STORAGE_PATH = str(storage_path)
+    return storage_path
+
+
 def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
     import os as _os
     from pathlib import Path
@@ -40,6 +51,7 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    _set_rllib_storage_path(output_dir)
 
     if ray.is_initialized():
         _log_stage("Ray runtime already initialized")
@@ -144,51 +156,31 @@ class PPOTrainer(Trainer):
             "ppo",
             "Starting PPO algorithm build",
         )
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
 
         env = config.env
         algo_cfg = config.algorithm_config
         if not isinstance(algo_cfg, PPOConfig):
             algo_cfg = PPOConfig(**algo_cfg.model_dump())
 
-        env_config = {
-            "stl_path": str(env.stl_path) if env.stl_path else None,
-            "scale": env.scale,
-            "scale_range": env.scale_range,
-            "agent_count": env.agent_count,
-            "max_steps": env.max_steps,
-            "seed": env.seed,
-            "obs_mode": env.obs_mode,
-            "box_radius": env.box_radius,
-            "box_radii": env.box_radii,
-            "ray_max_len": env.ray_max_len,
-            "include_voxel_count": env.include_voxel_count,
-            "grid_size": env.grid_size,
-            "trail_mode": env.trail_mode,
-            "geometry_boxes": env.geometry_boxes,
-            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
-            "geometry_padding": env.geometry_padding,
-            "waypoints_file": env.waypoints_file,
-            "waypoint_curriculum": env.waypoint_curriculum.model_dump(mode="json"),
-            "step_cost": env.step_cost,
-            "collision_cost": env.collision_cost,
-            "goal_reward": env.goal_reward,
-            "distance_shaping": env.distance_shaping,
-            "distance_reward_mode": env.distance_reward_mode,
-            "zone_reward_min": env.zone_reward_min,
-            "zone_reward_max": env.zone_reward_max,
-            "zone_reward_curve": env.zone_reward_curve,
-            "debug_log_path": str(Path(config.training.output_dir, "env_debug.log")),
-        }
+        env_config = env.to_runtime_dict()
+        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        env_config["debug_log_path"] = str(
+            Path(config.training.output_dir, "env_debug.log")
+        )
         _log_stage(
-            f"Registering VoxelEnv with obs_mode={env.obs_mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+            f"Registering VoxelEnv with obs_mode={env.observation.mode} grid_size={env.geometry__grid_size} max_steps={env.max_steps}"
         )
         _append_stage_log(
             str(config.training.output_dir),
             "ppo",
             (
                 "Registering VoxelEnv with "
-                f"obs_mode={env.obs_mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+                f"obs_mode={env.observation.mode} grid_size={env.geometry__grid_size} max_steps={env.max_steps}"
             ),
         )
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
@@ -244,6 +236,10 @@ class PPOTrainer(Trainer):
         ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus)).framework("torch"))
 
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
 
         _log_stage("Calling RLlib build_algo()")
         _append_stage_log(

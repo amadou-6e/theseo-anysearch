@@ -46,6 +46,14 @@ class WaypointCurriculum:
             goal=config.initial_goal,
         )
 
+    def stages(self) -> list[tuple[Waypoint, Waypoint]]:
+        """Return the initial stage followed by every visited stage."""
+        initial = (self.config.initial_start, self.config.initial_goal)
+        assert initial[0] is not None and initial[1] is not None
+        return [(initial[0], initial[1])] + [
+            (transition.start, transition.goal) for transition in self.state.transitions
+        ]
+
     def observe(self, iteration: int, successes: int) -> bool:
         """Record evaluation successes and return whether the stage advances."""
         self.state.successes_in_stage += max(int(successes), 0)
@@ -108,3 +116,19 @@ def broadcast_waypoints(algo: Any, start: Waypoint, goal: Waypoint) -> None:
     if env_runner_group is None:
         raise RuntimeError("RLlib algorithm has no environment runner group")
     env_runner_group.foreach_env(lambda env: env.queue_waypoints(start, goal))
+
+
+def broadcast_waypoint_curriculum(algo: Any, curriculum: WaypointCurriculum) -> None:
+    """Broadcast the current and retained training stages to every environment."""
+    env_runner_group = getattr(algo, "env_runner_group", None)
+    if env_runner_group is None:
+        raise RuntimeError("RLlib algorithm has no environment runner group")
+    sampling = curriculum.config.training_sampling
+    stages = curriculum.stages()
+    env_runner_group.foreach_env(
+        lambda env: env.set_waypoint_curriculum(
+            stages,
+            sampling.current_stage_probability,
+            sampling.retained_stage_probability,
+        )
+    )

@@ -19,8 +19,8 @@ class TestRewardZoneConfig:
             zone_reward_curve="exponential",
         )
 
-        assert cfg.distance_reward_mode == "zone"
-        assert cfg.zone_reward_curve == "exponential"
+        assert cfg.rewards__distance_reward_mode == "zone"
+        assert cfg.rewards__zone_reward_curve == "exponential"
 
     def test_rejects_non_negative_zone_max(self):
         with pytest.raises(ValidationError, match="zone_reward_max must stay negative"):

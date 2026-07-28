@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch
 
 from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_num_gpus
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
 
 
@@ -50,6 +50,15 @@ class TestDetectNumGpus:
         with patch("torch.cuda.device_count", return_value=0):
             with pytest.raises(AssertionError, match="torch-gpu"):
                 _detect_num_gpus(require_gpu=True)
+
+
+def test_rllib_storage_path_uses_run_directory(tmp_path: Path):
+    from ray.tune.trainable import trainable as ray_trainable
+
+    storage_path = _set_rllib_storage_path(str(tmp_path))
+
+    assert storage_path == Path(tmp_path, "rllib")
+    assert ray_trainable.DEFAULT_STORAGE_PATH == str(storage_path)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +204,7 @@ class TestExecution:
         trainer_settings: Any,
     ):
         trainer_settings.training.iterations = 1
-        trainer_settings.training.evaluation_episodes = 2
+        trainer_settings.evaluation.episodes = 2
         trainer_settings.training.trajectory_every = 1
 
         def _episode(success: bool, reward: float, steps: int) -> VoxelEpisodeData:
@@ -572,3 +581,77 @@ class TestTrainerRegistry:
         trainer = DDPGTrainer(trainer_settings)
         with pytest.raises(NotImplementedError, match="Box"):
             trainer._build_algorithm()
+
+class TestTrainingEarlyStop:
+    """Standard training stops on deterministic evaluation conditions."""
+
+    def test_goal_finish_condition_saves_final_artifacts(
+        self,
+        trainer_settings: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from theseo_anysearch.models import TrainingEarlyStopConfig
+        from theseo_anysearch.experiments import trajectory
+
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=5,
+            obs_mode="scalar",
+            grid_size=8,
+            init_filled=[],
+            steps=[
+                VoxelStepData(
+                    step=0,
+                    action=13,
+                    reward=2.0,
+                    done=True,
+                    cursor_x=1,
+                    cursor_y=1,
+                    cursor_z=2,
+                    voxel_count=0,
+                    placed=False,
+                )
+            ],
+            total_reward=2.0,
+            success=True,
+            start_pos=(1, 1, 1),
+            goal_pos=(1, 1, 2),
+        )
+        monkeypatch.setattr(
+            trajectory,
+            "collect_eval_episodes",
+            lambda algo, env_config, count, seed=None: [episode] * count,
+        )
+        trainer_settings.training = trainer_settings.training.model_copy(
+            update={
+                "iterations": 10,
+                "trajectory_every": 0,
+                "best_trajectory": False,
+                "early_stop": TrainingEarlyStopConfig(
+                    enabled=True,
+                    mode="goal_finishes",
+                    min_goal_finishes=2,
+                    min_consecutive_evaluation=2,
+                ),
+            }
+        )
+        trainer_settings.evaluation = trainer_settings.evaluation.model_copy(
+            update={"episodes": 2}
+        )
+        trainer = make_trainer(trainer_settings)
+
+        results = trainer.train()
+
+        assert len(results) == 2
+        assert trainer._iteration == 2
+        assert trainer._output_dir.joinpath("early_stop.json").exists()
+        assert trainer._output_dir.joinpath("checkpoints", "iter_000002").exists()
+        assert trainer._output_dir.joinpath(
+            "trajectories", "iter_000002.json"
+        ).exists()
+        payload = json.loads(
+            trainer._output_dir.joinpath("early_stop.json").read_text()
+        )
+        assert payload["mode"] == "goal_finishes"
+        assert payload["value"] == 2.0
+        assert payload["iteration"] == 2

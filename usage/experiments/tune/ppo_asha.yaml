@@ -7,15 +7,19 @@ experiment:
   seed: 42
 
 env:
-  stl_path: usage/geometries/stepped_terrain.stl
-  scale: 40.0
   agent_count: 1
   max_steps: 200
-  goal_reward: 1.0
-  step_cost: -0.01
-  collision_cost: 0.1          # small penalty for hitting walls
-  geometry_boxes:              # goal region: upper-right quadrant of the grid
-    - [18, 18, 18, 28, 28, 28]
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    boxes:              # goal region: upper-right quadrant of the grid
+      - [18, 18, 18, 28, 28, 28]
+
+  rewards:
+    goal_reward: 1.0
+    step_cost: -0.01
+    collision_cost: 0.1          # small penalty for hitting walls
 
 training:
   algorithm: ppo
@@ -25,8 +29,10 @@ training:
   trajectory_every: 20
   video_every: 100
   require_gpu: false         # set true to assert a GPU is available before training
-  evaluation_episodes: 8
-  evaluation_min_success_rate: 0.75
+
+evaluation:
+  episodes: 8
+  min_success_rate: 0.75
 
 algorithm_config:            # defaults; overridden per trial by search_space below
   clip_param: 0.2

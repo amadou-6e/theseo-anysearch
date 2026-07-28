@@ -7,8 +7,6 @@ experiment:
   seed: 42
 
 env:
-  stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
-  scale: 40.0
   agent_count: 1
   max_steps: 300
   seed: 42
@@ -20,17 +18,25 @@ env:
 
   # Geometry: a solid wall (3 voxels thick) at x=14..16, spanning y=1..10, z=1..32.
   # Appears gray in the replay viewer. Collisions give negative reward.
-  geometry_boxes:
-    - [14, 1, 1, 16, 10, 32]
 
-  # Navigation reward (computed in Rust, configured here).
-  step_cost: -0.01
-  goal_reward: 1.0
-  distance_shaping: 0.1
+  geometry:
+    stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
+    scale: 40.0
+    boxes:
+      - [14, 1, 1, 16, 10, 32]
 
-  # Box observations so the agent can see nearby cells.
-  obs_mode: box
-  box_radius: 2
+    # Navigation reward (computed in Rust, configured here).
+
+  observation:
+    mode: box
+    box_radius: 2
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
+
+    # Box observations so the agent can see nearby cells.
 
 training:
   algorithm: ppo

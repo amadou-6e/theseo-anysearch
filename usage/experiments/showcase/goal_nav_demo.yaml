@@ -7,8 +7,6 @@ experiment:
   seed: 42
 
 env:
-  stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
-  scale: 40.0
   agent_count: 1
   max_steps: 200
   seed: 42
@@ -21,20 +19,28 @@ env:
 
   # Geometry: a solid wall at x=14..16, spanning y=1..10, z=1..32.
   # Surface cells on either side of the wall become the start/goal candidates.
-  geometry_boxes:
-    - [14, 1, 1, 16, 10, 32]
 
-  # Reward shaping: reach the goal for +5.
-  # Flat step penalty provides time pressure.
-  step_cost: -0.05
-  collision_cost: 0.02
-  goal_reward: 5.0
-  distance_shaping: 0.2
+  geometry:
+    stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
+    scale: 40.0
+    boxes:
+      - [14, 1, 1, 16, 10, 32]
 
-  # Box observations so the agent sees its local surroundings (5×5×5 window)
-  # plus a normalised goal_distance scalar.
-  obs_mode: box
-  box_radius: 2
+    # Reward shaping: reach the goal for +5.
+    # Flat step penalty provides time pressure.
+
+  observation:
+    mode: box
+    box_radius: 2
+
+  rewards:
+    step_cost: -0.05
+    collision_cost: 0.02
+    goal_reward: 5.0
+    distance_shaping: 0.2
+
+    # Box observations so the agent sees its local surroundings (5×5×5 window)
+    # plus a normalised goal_distance scalar.
 
 training:
   algorithm: ppo

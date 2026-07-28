@@ -951,7 +951,9 @@ impl PyVoxelEnv {
             (x, y, z) // unknown action → treat as boundary collision
         };
 
-        let rust_action = if dest == (x, y, z) {
+        let rust_action = if action == 26 {
+            VoxelAction::Noop
+        } else if dest == (x, y, z) {
             // Hit grid boundary or unknown action — blocked.
             VoxelAction::Collision
         } else if self.inner.world().is_blocking(dest) {
@@ -1748,6 +1750,22 @@ mod tests {
         PyVoxelEnv { inner }
     }
 
+    #[test]
+    fn action_26_is_noop_not_collision() {
+        let reward_config = crate::environments::voxel_env::RewardConfig {
+            collision_cost: -1.0,
+            ..Default::default()
+        };
+        let mut inner = VoxelEnv::new(WorldState::new(), 10)
+            .with_reward_config(reward_config);
+        inner.set_cursor((5, 5, 5));
+        let mut env = PyVoxelEnv { inner };
+
+        let result = env.step(26);
+
+        assert_eq!(env.cursor_pos(), (5, 5, 5));
+        assert!((result.reward + 0.01).abs() < f32::EPSILON);
+    }
     // ----- box_obs -----
 
     #[test]

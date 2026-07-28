@@ -8,6 +8,7 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import DQNConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 from theseo_anysearch.rllib.trainer.ppo import _ensure_ray_runtime
 
 
@@ -30,40 +31,19 @@ class DQNTrainer(Trainer):
     def build_algorithm_from_settings(config: Settings) -> Any:
         from ray.rllib.algorithms.dqn import DQNConfig as RllibDQNConfig
 
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
 
         env = config.env
         algo_cfg = config.algorithm_config
         if not isinstance(algo_cfg, DQNConfig):
             algo_cfg = DQNConfig(**algo_cfg.model_dump())
 
-        env_config = {
-            "stl_path": str(env.stl_path) if env.stl_path else None,
-            "scale": env.scale,
-            "scale_range": env.scale_range,
-            "agent_count": env.agent_count,
-            "max_steps": env.max_steps,
-            "seed": env.seed,
-            "obs_mode": env.obs_mode,
-            "box_radius": env.box_radius,
-            "box_radii": env.box_radii,
-            "ray_max_len": env.ray_max_len,
-            "include_voxel_count": env.include_voxel_count,
-            "grid_size": env.grid_size,
-            "trail_mode": env.trail_mode,
-            "geometry_boxes": env.geometry_boxes,
-            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
-            "geometry_padding": env.geometry_padding,
-            "waypoints_file": env.waypoints_file,
-            "step_cost": env.step_cost,
-            "collision_cost": env.collision_cost,
-            "goal_reward": env.goal_reward,
-            "distance_shaping": env.distance_shaping,
-            "distance_reward_mode": env.distance_reward_mode,
-            "zone_reward_min": env.zone_reward_min,
-            "zone_reward_max": env.zone_reward_max,
-            "zone_reward_curve": env.zone_reward_curve,
-        }
+        env_config = env.to_runtime_dict()
+        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
         from theseo_anysearch.rllib.models import build_rllib_model_dict
@@ -98,6 +78,10 @@ class DQNTrainer(Trainer):
         )
 
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
         return rllib_config.build_algo()
 
     def _build_algorithm(self) -> Any:

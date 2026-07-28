@@ -7,10 +7,12 @@ experiment:
   seed: 1337
 
 env:
-  stl_path: usage/geometries/corridor_l.stl
-  scale: 30.0
   agent_count: 2
   max_steps: 300
+
+  geometry:
+    stl_path: usage/geometries/corridor_l.stl
+    scale: 30.0
 
 training:
   algorithm: ppo

@@ -7,26 +7,31 @@ experiment:
   seed: 42
 
 env:
-  obs_mode: radial
   agent_count: 1
   max_steps: 300
   trail_mode: true
-  goal_reward: 10.0
-  collision_cost: -0.5
-  grid_size: 32
-  distance_reward_mode: zone
-  zone_reward_min: -1.0
-  zone_reward_max: -0.01
-  zone_reward_curve: linear
 
-  geometry_pool:
-    pool_dir: ../../../runtime/geometry_pools/preview
-    augmentation:
-      paste_boxes:
-        num_boxes: [1, 4]
-        box_min_size: [1, 1, 1]
-        box_max_size: [5, 5, 5]
-        prob: 0.5
+  geometry:
+    grid_size: 32
+    pool:
+      pool_dir: ../../../runtime/geometry_pools/preview
+      augmentation:
+        paste_boxes:
+          num_boxes: [1, 4]
+          box_min_size: [1, 1, 1]
+          box_max_size: [5, 5, 5]
+          prob: 0.5
+
+  observation:
+    mode: radial
+
+  rewards:
+    goal_reward: 10.0
+    collision_cost: -0.5
+    distance_reward_mode: zone
+    zone_reward_min: -1.0
+    zone_reward_max: -0.01
+    zone_reward_curve: linear
 
 training:
   algorithm: ppo
