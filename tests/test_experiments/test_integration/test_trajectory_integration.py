@@ -25,6 +25,12 @@ def _require_filled_voxels():
 # collect_eval_episode with a trivial algo (always action=0)
 # ---------------------------------------------------------------------------
 
+class _VectorNoopAlgo:
+    """Minimal algorithm returning the vector_3 center no-op."""
+
+    def compute_single_action(self, obs, policy_id="default_policy", explore=False):
+        return [1, 1, 1]
+
 class _ActionZeroAlgo:
     """Minimal duck-type algo that always places (action 0)."""
     def compute_single_action(self, obs, policy_id="default_policy", explore=False):
@@ -75,6 +81,12 @@ class TestCollectEvalEpisode:
         assert isinstance(s.done, bool)
         assert s.cursor_x >= 1 and s.cursor_y >= 1 and s.cursor_z >= 1
 
+    def test_vector_3_action_is_recorded_as_canonical_noop(self, minimal_env_config):
+        from theseo_anysearch.experiments.trajectory import collect_eval_episode
+
+        config = {**minimal_env_config, "action_mode": "vector_3", "max_steps": 1}
+        episode = collect_eval_episode(_VectorNoopAlgo(), config)
+        assert episode.steps[0].action == 26
     def test_total_reward_matches_sum(self, minimal_env_config):
         from theseo_anysearch.experiments.trajectory import collect_eval_episode
         ep = collect_eval_episode(_ActionZeroAlgo(), minimal_env_config)

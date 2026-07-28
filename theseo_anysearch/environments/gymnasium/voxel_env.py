@@ -12,6 +12,12 @@ import numpy as np
 import gymnasium
 from gymnasium import spaces
 
+from theseo_anysearch.environments.action_spaces import (
+    NOOP_ACTION_INDEX,
+    build_action_space,
+    encode_action,
+)
+
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
 from theseo_anysearch.environments.task import (
     TaskConfig,
@@ -216,8 +222,8 @@ class VoxelEnv(RustGymnasiumEnv):
     def step(self, action):
         """Apply one action and expose task-owned reward and termination data."""
 
-        action_index = int(action)
-        invalid_action = not self.action_space.contains(action_index)
+        invalid_action = not self.action_space.contains(action)
+        action_index = self._encode_action(action)
         previous_cursor = tuple(self._rust_env.cursor_pos())
         result = self._rust_env.step(action_index)
         observation = self._obs_to_numpy(result.observation)
@@ -225,7 +231,11 @@ class VoxelEnv(RustGymnasiumEnv):
         fallback = self._rust_env.goal_pos()
         current_distance = goal_distance(self._task.goal, cursor, fallback)
         success = is_success(self._task.goal, cursor, fallback)
-        collision = not invalid_action and cursor == previous_cursor
+        collision = (
+            not invalid_action
+            and action_index != NOOP_ACTION_INDEX
+            and cursor == previous_cursor
+        )
 
         if self._config.get("distance_reward_mode", "progress") == "progress":
             step_cost = float(self._config.get("step_cost", -0.01))
@@ -286,7 +296,7 @@ class VoxelEnv(RustGymnasiumEnv):
         return observation, reward, terminated, truncated, info
 
     def _encode_action(self, action: Any) -> Any:
-        return int(action)
+        return encode_action(action, self._config.get("action_mode", "discrete_26"))
 
     def _has_goal(self) -> bool:
         """True when geometry is configured so a goal can be selected."""
@@ -354,7 +364,7 @@ class VoxelEnv(RustGymnasiumEnv):
         )
 
     def _action_space(self) -> gymnasium.Space:
-        return spaces.Discrete(26)  # all 26 neighbors in {-1,0,1}³ \ {origin}
+        return build_action_space(self._config.get("action_mode", "discrete_26"))
 
     def _obs_to_numpy(self, rust_obs: Any) -> dict:
         self._obs_log_count += 1
