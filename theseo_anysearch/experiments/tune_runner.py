@@ -818,10 +818,28 @@ class TuneRunner:
         # write to the correct location.                                       #
         # Inject gpu_fraction so RLlib uses the same fractional value.        #
         # ------------------------------------------------------------------ #
+        geometry = self._config.env.geometry
+        absolute_geometry = geometry.model_copy(update={
+            "stl_path": geometry.stl_path.resolve() if geometry.stl_path else None,
+            "stl_paths": (
+                [path.resolve() for path in geometry.stl_paths]
+                if geometry.stl_paths
+                else None
+            ),
+        })
+        absolute_env = self._config.env.model_copy(update={
+            "geometry": absolute_geometry,
+            "waypoints_file": (
+                str(Path(self._config.env.waypoints_file).resolve())
+                if self._config.env.waypoints_file
+                else None
+            ),
+        })
         abs_config = self._config.model_copy(update={
             "experiment": self._config.experiment.model_copy(update={
                 "output_dir": self._config.experiment.output_dir.resolve(),
             }),
+            "env": absolute_env,
             "training": self._config.training.model_copy(update={
                 "num_gpus": gpu_fraction,
             }),
