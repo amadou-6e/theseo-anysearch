@@ -447,7 +447,7 @@ class AlgorithmEnvCompatibilityMixin:
             raise ValueError("waypoints_file and enabled waypoint_curriculum are mutually exclusive")
         if curriculum.enabled and self.training.algorithm.lower() != "ppo":
             raise ValueError("waypoint_curriculum currently requires training.algorithm='ppo'")
-        training_advance = "advance" in curriculum.model_fields_set
+        training_advance = curriculum.advance.mode != "fixed"
         evaluation_advance = evaluation_curriculum.advance is not None
         if training_advance and evaluation_advance:
             raise ValueError(
