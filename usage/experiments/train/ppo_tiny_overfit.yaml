@@ -39,6 +39,12 @@ training:
   require_gpu: false
   num_env_runners: 0
   evaluation_episodes: 20
+  early_stop:
+    enabled: true
+    mode: goal_finishes
+    min_goal_finishes: 20
+    min_iterations: 1
+    min_consecutive_evaluation: 1
   trajectory_every: 1
   best_trajectory: true
   video_every: 0
