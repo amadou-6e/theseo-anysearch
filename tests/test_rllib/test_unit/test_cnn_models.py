@@ -526,4 +526,4 @@ class TestVoxelEnvHierarchicalBoxObsMode:
             box_radii=[1, 4],
         )
         assert cfg.box_radii == [1, 4]
-        assert cfg.obs_mode == "hierarchical_box"
+        assert cfg.observation.mode == "hierarchical_box"

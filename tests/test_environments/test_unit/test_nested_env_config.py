@@ -53,13 +53,10 @@ def test_nested_field_access_mixin_is_reusable() -> None:
         exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {
             "geometry": ("grid_size",),
         }
-        exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {
-            "resolution": ("geometry", "grid_size"),
-        }
         geometry: GeometryConfig
 
     wrapped = GeometryWrapper(geometry=GeometryConfig(grid_size=64))
-    assert wrapped.resolution == 64
-    assert "resolution" not in wrapped.model_dump()
+    assert wrapped.grid_size == 64
+    assert "grid_size" not in wrapped.model_dump()
     with pytest.raises(AttributeError):
         _ = wrapped.unknown_attribute

@@ -108,18 +108,13 @@ class NestedFieldAccessMixin:
     """Expose selected attributes from nested models through the parent model."""
 
     exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {}
-    exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {}
 
     def __getattr__(self, name: str) -> Any:
         for container_name, field_names in self.exposed_nested_fields.items():
             if name in field_names:
                 container = getattr(self, container_name)
                 return getattr(container, name)
-        alias = self.exposed_nested_aliases.get(name)
-        if alias is not None:
-            container_name, nested_name = alias
-            container = getattr(self, container_name)
-            return getattr(container, nested_name)
+
         return super().__getattr__(name)
 
 
@@ -156,14 +151,6 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "construction_residual_weight",
             "construction_overshoot_weight",
         ),
-    }
-    exposed_nested_aliases: ClassVar[dict[str, tuple[str, str]]] = {
-        "geometry_boxes": ("geometry", "boxes"),
-        "geometry_pool_size": ("geometry", "pool_size"),
-        "geometry_padding": ("geometry", "padding"),
-        "geometry_pool": ("geometry", "pool"),
-        "obs_mode": ("observation", "mode"),
-        "action_mode": ("action", "mode"),
     }
     agent_count: int = Field(default=4, ge=1)
     max_steps: int = Field(default=200, ge=1)
@@ -212,17 +199,17 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale": self.scale,
             "scale_range": self.scale_range,
             "grid_size": self.grid_size,
-            "geometry_boxes": self.geometry_boxes,
-            "geometry_pool_size": self.geometry_pool_size,
+            "geometry_boxes": self.geometry.boxes,
+            "geometry_pool_size": self.geometry.pool_size,
             "scale_variants_per_map": self.scale_variants_per_map,
-            "geometry_padding": self.geometry_padding,
-            "geometry_pool": self.geometry_pool,
-            "obs_mode": self.obs_mode,
+            "geometry_padding": self.geometry.padding,
+            "geometry_pool": self.geometry.pool,
+            "obs_mode": self.observation.mode,
             "box_radius": self.box_radius,
             "box_radii": self.box_radii,
             "ray_max_len": self.ray_max_len,
             "include_voxel_count": self.include_voxel_count,
-            "action_mode": self.action_mode,
+            "action_mode": self.action.mode,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,
