@@ -47,7 +47,7 @@ training:
   algorithm: ppo
   model: fcnet
   runner: local
-  iterations: 40
+  iterations: 100
   checkpoint_interval: 10
   require_gpu: true
   num_gpus: 1.0
@@ -88,13 +88,13 @@ model_config:
 
 tune_config:
   scheduler: asha
-  num_samples: 4
+  num_samples: 10
   metric: evaluation_success_rate
   mode: max
   max_concurrent: 1
   checkpoint_frequency: 1
   asha_config:
-    max_t: 40
+    max_t: 100
     grace_period: 10
     reduction_factor: 2
   search_space:
