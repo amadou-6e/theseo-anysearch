@@ -31,14 +31,14 @@ def test_reduced_action_encodes_to_canonical_direction() -> None:
             assert ACTION_OFFSETS_26[encode_action(index, mode)] == offset
 
 
-def test_multi_discrete_space_and_encoding() -> None:
-    action_space = build_action_space("multi_discrete")
+def test_vector_3_space_and_encoding() -> None:
+    action_space = build_action_space("vector_3")
     assert isinstance(action_space, spaces.MultiDiscrete)
     assert np.array_equal(action_space.nvec, [3, 3, 3])
-    assert ACTION_OFFSETS_26[encode_action([2, 1, 0], "multi_discrete")] == (1, 0, -1)
-    assert encode_action([1, 1, 1], "multi_discrete") == NOOP_ACTION_INDEX
+    assert ACTION_OFFSETS_26[encode_action([2, 1, 0], "vector_3")] == (1, 0, -1)
+    assert encode_action([1, 1, 1], "vector_3") == NOOP_ACTION_INDEX
 
 
-@pytest.mark.parametrize("mode", ["discrete_6", "discrete_18", "multi_discrete"])
+@pytest.mark.parametrize("mode", ["discrete_6", "discrete_18", "vector_3"])
 def test_action_modes_validate_from_yaml_schema(mode: str) -> None:
     assert ActionConfig(mode=mode).mode == mode

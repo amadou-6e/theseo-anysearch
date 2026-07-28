@@ -19,7 +19,7 @@ def offsets_for_mode(mode: str) -> tuple[tuple[int, int, int], ...]:
 
 def build_action_space(mode: str) -> spaces.Space:
     """Build the Gymnasium action space configured by ``mode``."""
-    if mode == "multi_discrete":
+    if mode == "vector_3":
         return spaces.MultiDiscrete([3, 3, 3])
     if mode in {"discrete_6", "discrete_18", "discrete_26", "vector_3"}:
         return spaces.Discrete(len(offsets_for_mode(mode)))
@@ -27,7 +27,7 @@ def build_action_space(mode: str) -> spaces.Space:
 
 def encode_action(action: Any, mode: str) -> int:
     """Encode a configured action as a canonical Rust movement index."""
-    if mode == "multi_discrete":
+    if mode == "vector_3":
         values = np.asarray(action, dtype=np.int64)
         if values.shape != (3,) or np.any(values < 0) or np.any(values > 2):
             return NOOP_ACTION_INDEX + 1

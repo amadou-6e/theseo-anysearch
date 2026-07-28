@@ -41,7 +41,7 @@ class ActionConfig(BaseModel):
     """Policy action-space representation."""
 
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["discrete_6", "discrete_18", "discrete_26", "multi_discrete", "vector_3"] = "discrete_26"
+    mode: Literal["discrete_6", "discrete_18", "discrete_26", "vector_3"] = "discrete_26"
 
 
 class RewardConfig(BaseModel):
