@@ -312,7 +312,7 @@ def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: 
             and isinstance(raw_action[2], dict)
         ):
             raw_action = raw_action[0]
-        action = int(raw_action)
+        action = int(env._encode_action(raw_action))
 
         obs_next, reward, terminated, truncated, final_info = env.step(raw_action)
         done = terminated or truncated
