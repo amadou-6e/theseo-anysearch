@@ -7,15 +7,19 @@ experiment:
   seed: 42
 
 env:
-  stl_path: usage/geometries/stepped_terrain.stl
-  scale: 40.0
   agent_count: 1
   max_steps: 200
-  goal_reward: 1.0
-  step_cost: -0.01
-  collision_cost: 0.1          # small penalty for hitting walls
-  geometry_boxes:              # goal region: upper-right quadrant of the grid
-    - [18, 18, 18, 28, 28, 28]
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    boxes:              # goal region: upper-right quadrant of the grid
+      - [18, 18, 18, 28, 28, 28]
+
+  rewards:
+    goal_reward: 1.0
+    step_cost: -0.01
+    collision_cost: 0.1          # small penalty for hitting walls
 
 training:
   algorithm: ppo

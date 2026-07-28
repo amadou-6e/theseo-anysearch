@@ -384,7 +384,7 @@ class ExperimentRunner:
                     run_dir,
                     run_id,
                     tracker,
-                    self._config.env.model_dump(mode="python"),
+                    self._config.env.to_runtime_dict(),
                     iteration=0,
                 )
             else:

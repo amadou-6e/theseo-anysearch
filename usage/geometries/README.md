@@ -1,7 +1,7 @@
 # Sample Geometries
 
 ASCII STL files for use with `anysearch experiment run --config <yaml>`.
-All units are arbitrary (the voxelizer is scale-invariant via `env.scale`).
+All units are arbitrary (the voxelizer is scale-invariant via `env.geometry.scale`).
 
 | File | Triangles | Description | Recommended use |
 |---|---|---|---|
@@ -15,10 +15,11 @@ All units are arbitrary (the voxelizer is scale-invariant via `env.scale`).
 
 ```yaml
 env:
-  stl_path: usage/geometries/stepped_terrain.stl
-  scale: 40.0        # voxelization resolution — higher = finer grid, slower
-  agent_count: 4
+  agent_count: 1
   max_steps: 200
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0        # voxelization resolution — higher = finer grid, slower
 ```
 
 `scale` controls how many voxels per unit length. A 50-unit cube at `scale: 40` produces

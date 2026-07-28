@@ -36,28 +36,8 @@ class RainbowTrainer(Trainer):
         if not isinstance(algo_cfg, RainbowConfig):
             algo_cfg = RainbowConfig(**algo_cfg.model_dump())
 
-        env_config = {
-            "stl_path": str(env.stl_path),
-            "scale": env.scale,
-            "agent_count": env.agent_count,
-            "max_steps": env.max_steps,
-            "seed": env.seed,
-            "obs_mode": env.obs_mode,
-            "box_radius": env.box_radius,
-            "box_radii": env.box_radii,
-            "ray_max_len": env.ray_max_len,
-            "include_voxel_count": env.include_voxel_count,
-            "trail_mode": env.trail_mode,
-            "geometry_boxes": env.geometry_boxes,
-            "waypoints_file": env.waypoints_file,
-            "step_cost": env.step_cost,
-            "goal_reward": env.goal_reward,
-            "distance_shaping": env.distance_shaping,
-            "distance_reward_mode": env.distance_reward_mode,
-            "zone_reward_min": env.zone_reward_min,
-            "zone_reward_max": env.zone_reward_max,
-            "zone_reward_curve": env.zone_reward_curve,
-        }
+        env_config = env.to_runtime_dict()
+        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry_pool)
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
         from theseo_anysearch.rllib.models import build_rllib_model_dict
