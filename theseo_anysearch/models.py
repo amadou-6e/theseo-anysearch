@@ -290,6 +290,7 @@ class TrainingConfig(BaseModel):
     require_gpu: bool = False
     num_gpus: float | None = None  # override _detect_num_gpus (e.g. 0.5 for two concurrent Tune trials)
     num_env_runners: int = 0       # CPU rollout workers (0 = inline; >0 = parallel actors)
+    evaluation_num_env_runners: int = Field(default=0, ge=0)
     trajectory_every: int = 10
     best_trajectory: bool = True
     output_dir: Path = Path("runtime/")

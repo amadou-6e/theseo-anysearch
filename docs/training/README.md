@@ -27,7 +27,8 @@ training:
 | `checkpoint_interval` | `10` | Iteration interval for policy checkpoints. |
 | `require_gpu` | `false` | Fails startup when a GPU is required but unavailable. |
 | `num_gpus` | automatic | Explicit RLlib GPU allocation override. |
-| `num_env_runners` | `0` | Parallel rollout workers; zero samples in the local trainer process. |
+| `num_env_runners` | `0` | Parallel training rollout workers; zero samples in the local trainer process. |
+| `evaluation_num_env_runners` | `0` | Dedicated RLlib workers for deterministic evaluation; zero retains serial driver evaluation. |
 | `trajectory_every` | `10` | Iteration interval for replayable evaluation trajectories. |
 | `best_trajectory` | `true` | Retains the best evaluation trajectory observed so far. |
 | `video_every` | `10` | Iteration interval for rendered video artifacts. |

@@ -38,6 +38,7 @@ training:
   checkpoint_interval: 50
   require_gpu: false
   num_env_runners: 8
+  evaluation_num_env_runners: 8
   evaluation_episodes: 20
   early_stop:
     enabled: true

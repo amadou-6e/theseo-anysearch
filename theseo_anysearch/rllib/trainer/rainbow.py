@@ -8,6 +8,7 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import RainbowConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus
+from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
 from theseo_anysearch.rllib.trainer.ppo import _ensure_ray_runtime
 
 
@@ -29,7 +30,11 @@ class RainbowTrainer(Trainer):
     def build_algorithm_from_settings(config: Settings) -> Any:
         from ray.rllib.algorithms.dqn import DQNConfig as RllibDQNConfig
 
-        _ensure_ray_runtime(str(config.training.output_dir), config.training.num_env_runners)
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.training.evaluation_num_env_runners,
+        )
 
         env = config.env
         algo_cfg = config.algorithm_config
@@ -76,6 +81,10 @@ class RainbowTrainer(Trainer):
         )
 
         rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.training.evaluation_num_env_runners,
+        )
         return rllib_config.build_algo()
 
     def _build_algorithm(self) -> Any:

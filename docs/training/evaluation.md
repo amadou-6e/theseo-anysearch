@@ -23,3 +23,26 @@ return.
 and goal-finish conditions use the batch mean reward and completed-goal count.
 Heuristic accuracy compares the policy and configured heuristic on the same
 seed sequence. Training data and exploratory rollouts never trigger a stop.
+
+## Parallel evaluation
+
+Evaluation uses a dedicated RLlib EnvRunner pool when configured:
+
+```yaml
+training:
+  num_env_runners: 8
+  evaluation_num_env_runners: 8
+  evaluation_episodes: 20
+  evaluation_seed: 42
+```
+
+`num_env_runners` controls training sampling. `evaluation_num_env_runners`
+controls deterministic evaluation separately. Evaluation episodes are assigned
+round-robin to the dedicated workers, which receive synchronized policy weights
+before every batch. Returned trajectories are sorted by seed before metrics,
+early stopping, and replay artifacts are produced, so worker completion order
+does not affect results.
+
+A value of `0` preserves inline serial evaluation for constrained machines and
+tests. Tune placement groups and local Ray CPU allocation reserve resources for
+both training and evaluation workers. Evaluation does not overlap training.

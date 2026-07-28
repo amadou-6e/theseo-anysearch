@@ -471,32 +471,23 @@ class Trainer(ABC):
                         f"{self._iteration}",
                     )
                     evaluation_seed = training.evaluation_seed
-                    if _is_multi:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_multi_eval_episode,
-                        )
+                    from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+                        collect_rllib_evaluation_episodes,
+                    )
 
-                        episodes = [
-                            collect_multi_eval_episode(
-                                self._algo,
-                                _env_cfg,
-                                seed=evaluation_seed + episode_index,
-                            )
-                            for episode_index in range(evaluation_episodes)
-                        ]
-                        metrics = EpisodeRunMetrics.from_multi_voxel_episodes(episodes)
-                    else:
-                        from theseo_anysearch.experiments.trajectory import (
-                            collect_eval_episodes,
-                        )
-
-                        episodes = collect_eval_episodes(
-                            self._algo,
-                            _env_cfg,
-                            evaluation_episodes,
-                            seed=evaluation_seed,
-                        )
-                        metrics = EpisodeRunMetrics.from_voxel_episodes(episodes)
+                    episodes = collect_rllib_evaluation_episodes(
+                        self._algo,
+                        _env_cfg,
+                        evaluation_episodes,
+                        seed=evaluation_seed,
+                        multi_agent=_is_multi,
+                    )
+                    metrics_factory = (
+                        EpisodeRunMetrics.from_multi_voxel_episodes
+                        if _is_multi
+                        else EpisodeRunMetrics.from_voxel_episodes
+                    )
+                    metrics = metrics_factory(episodes)
 
                     evaluation_reward_mean = sum(
                         episode.total_reward for episode in episodes
@@ -590,6 +581,7 @@ class Trainer(ABC):
                             "iteration": self._iteration,
                             "seed_start": evaluation_seed,
                             "episode_count": len(episodes),
+                            "num_env_runners": training.evaluation_num_env_runners,
                             "goals_reached": metrics.finish_count,
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,
