@@ -284,7 +284,8 @@ impl MultiAgentVoxelEnv {
                 (x, y, z)
             };
 
-            let moved = dest != (x, y, z) && !self.world.is_filled(dest);
+            let is_noop = action == 26;
+            let moved = !is_noop && dest != (x, y, z) && !self.world.is_filled(dest);
             let mut step_reward = 0.0f32;
 
             if moved {
@@ -292,7 +293,7 @@ impl MultiAgentVoxelEnv {
                 if self.trail_mode {
                     self.world.set(dest, true);
                 }
-            } else if dest == (x, y, z) {
+            } else if !is_noop && dest == (x, y, z) {
                 // Boundary hit — collision_cost is negative, so add it as a penalty.
                 step_reward += self.reward_config.collision_cost;
             }
