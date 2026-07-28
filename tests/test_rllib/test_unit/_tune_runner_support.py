@@ -44,6 +44,7 @@ def make_experiment_config(
         AlgorithmConfig,
         AnyscaleConfig,
         EnvConfig,
+        EvaluationConfig,
         ModelConfig,
         TrainingConfig,
     )
@@ -56,8 +57,10 @@ def make_experiment_config(
             iterations=iterations,
             require_gpu=require_gpu,
             num_env_runners=num_env_runners,
-            evaluation_num_env_runners=evaluation_num_env_runners,
             output_dir=output_dir,
+        ),
+        evaluation=EvaluationConfig(
+            num_env_runners=evaluation_num_env_runners
         ),
         anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
         algorithm_config=AlgorithmConfig(lr=3e-4, gamma=0.99, train_batch_size=512),

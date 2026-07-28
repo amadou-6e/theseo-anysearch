@@ -204,7 +204,7 @@ class TestExecution:
         trainer_settings: Any,
     ):
         trainer_settings.training.iterations = 1
-        trainer_settings.training.evaluation_episodes = 2
+        trainer_settings.evaluation.episodes = 2
         trainer_settings.training.trajectory_every = 1
 
         def _episode(success: bool, reward: float, steps: int) -> VoxelEpisodeData:
@@ -625,7 +625,6 @@ class TestTrainingEarlyStop:
         trainer_settings.training = trainer_settings.training.model_copy(
             update={
                 "iterations": 10,
-                "evaluation_episodes": 2,
                 "trajectory_every": 0,
                 "best_trajectory": False,
                 "early_stop": TrainingEarlyStopConfig(
@@ -635,6 +634,9 @@ class TestTrainingEarlyStop:
                     min_consecutive_evaluation=2,
                 ),
             }
+        )
+        trainer_settings.evaluation = trainer_settings.evaluation.model_copy(
+            update={"episodes": 2}
         )
         trainer = make_trainer(trainer_settings)
 

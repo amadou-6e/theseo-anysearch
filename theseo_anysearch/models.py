@@ -290,24 +290,22 @@ class TrainingConfig(BaseModel):
     require_gpu: bool = False
     num_gpus: float | None = None  # override _detect_num_gpus (e.g. 0.5 for two concurrent Tune trials)
     num_env_runners: int = 0       # CPU rollout workers (0 = inline; >0 = parallel actors)
-    evaluation_num_env_runners: int = Field(default=0, ge=0)
     trajectory_every: int = 10
     best_trajectory: bool = True
     output_dir: Path = Path("runtime/")
     video_every: int = 10
-    evaluation_episodes: int = Field(default=1, ge=1)
-    evaluation_seed: int = 42
-    evaluation_min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
     early_stop: TrainingEarlyStopConfig = Field(default_factory=TrainingEarlyStopConfig)
 
-    @model_validator(mode="after")
-    def validate_early_stop_goal_count(self) -> "TrainingConfig":
-        threshold = self.early_stop.min_goal_finishes
-        if threshold is not None and threshold > self.evaluation_episodes:
-            raise ValueError(
-                "min_goal_finishes cannot exceed training.evaluation_episodes"
-            )
-        return self
+
+class EvaluationConfig(BaseModel):
+    """Deterministic policy evaluation and RLlib evaluation-worker settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    episodes: int = Field(default=1, ge=1)
+    seed: int = 42
+    min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
+    num_env_runners: int = Field(default=0, ge=0)
 
 
 class AnyscaleConfig(BaseModel):
@@ -376,6 +374,11 @@ class AlgorithmEnvCompatibilityMixin:
     @model_validator(mode="after")
     def _validate_algorithm_env_compatibility(self):
         """Reject unsupported algorithm and agent-count combinations."""
+        threshold = self.training.early_stop.min_goal_finishes
+        if threshold is not None and threshold > self.evaluation.episodes:
+            raise ValueError(
+                "training.early_stop.min_goal_finishes cannot exceed evaluation.episodes"
+            )
         single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
         if (
@@ -417,6 +420,7 @@ class Settings(AlgorithmEnvCompatibilityMixin, BaseModel):
 
     env: EnvConfig
     training: TrainingConfig
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     anyscale: AnyscaleConfig
     algorithm_config: AlgorithmConfig
     model_cfg: ModelConfig = Field(alias="model_config")

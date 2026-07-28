@@ -38,8 +38,6 @@ training:
   checkpoint_interval: 50
   require_gpu: false
   num_env_runners: 8
-  evaluation_num_env_runners: 8
-  evaluation_episodes: 20
   early_stop:
     enabled: true
     mode: goal_finishes
@@ -49,6 +47,12 @@ training:
   trajectory_every: 1
   best_trajectory: true
   video_every: 0
+
+evaluation:
+  episodes: 20
+  seed: 42
+  min_success_rate: 0.5
+  num_env_runners: 8
 
 algorithm_config:
   lr: 0.001

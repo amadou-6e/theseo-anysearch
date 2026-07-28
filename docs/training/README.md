@@ -28,13 +28,9 @@ training:
 | `require_gpu` | `false` | Fails startup when a GPU is required but unavailable. |
 | `num_gpus` | automatic | Explicit RLlib GPU allocation override. |
 | `num_env_runners` | `0` | Parallel training rollout workers; zero samples in the local trainer process. |
-| `evaluation_num_env_runners` | `0` | Dedicated RLlib workers for deterministic evaluation; zero retains serial driver evaluation. |
 | `trajectory_every` | `10` | Iteration interval for replayable evaluation trajectories. |
 | `best_trajectory` | `true` | Retains the best evaluation trajectory observed so far. |
 | `video_every` | `10` | Iteration interval for rendered video artifacts. |
-| `evaluation_episodes` | `1` | Deterministic evaluation episodes collected per iteration. |
-| `evaluation_seed` | `42` | First deterministic evaluation seed. |
-| `evaluation_min_success_rate` | `0.5` | Success-rate threshold used to classify an evaluation as solved. |
 | `early_stop` | disabled | Optional deterministic-evaluation condition for ending training before `iterations`. |
 
 ## Related blocks
@@ -59,14 +55,15 @@ evaluation repeatedly reaches a target:
 ```yaml
 training:
   iterations: 100
-  evaluation_episodes: 20
-
   early_stop:
     enabled: true
     mode: goal_finishes
     min_iterations: 5
     min_consecutive_evaluation: 3
     min_goal_finishes: 20
+
+evaluation:
+  episodes: 20
 ```
 
 The available modes and their matching thresholds are:

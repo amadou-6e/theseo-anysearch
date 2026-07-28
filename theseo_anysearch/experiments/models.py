@@ -12,6 +12,7 @@ from theseo_anysearch.models import (
     AlgorithmConfig,
     AnyscaleConfig,
     EnvConfig,
+    EvaluationConfig,
     ModelConfig,
     Settings,
     TrainingConfig,
@@ -307,6 +308,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     experiment: ExperimentMeta
     env: EnvConfig
     training: TrainingConfig
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     anyscale: AnyscaleConfig = Field(default_factory=_default_anyscale_config)
     algorithm_config: AlgorithmConfig = Field(default_factory=AlgorithmConfig)
     model_cfg: ModelConfig = Field(alias="model_config", default_factory=ModelConfig)
@@ -339,6 +341,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
         return Settings(
             env=self.env,
             training=self.training,
+            evaluation=self.evaluation,
             anyscale=self.anyscale,
             algorithm_config=self.algorithm_config,
             model_config=self.model_cfg,

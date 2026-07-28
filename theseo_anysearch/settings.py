@@ -10,6 +10,7 @@ from theseo_anysearch.models import (
     AlgorithmConfig,
     AnyscaleConfig,
     EnvConfig,
+    EvaluationConfig,
     ModelConfig,
     Settings,
     TrainingConfig,
@@ -66,6 +67,7 @@ def load_settings(path: Path, overrides: dict | None = None) -> Settings:
     return Settings(
         env=EnvConfig(**raw["env"]),
         training=TrainingConfig(**training_raw),
+        evaluation=EvaluationConfig(**raw.get("evaluation", {})),
         anyscale=AnyscaleConfig(**anyscale_raw),
         algorithm_config=algo_cls(**raw.get("algorithm_config", {})),
         model_config=model_cls(**raw.get("model_config", {})),

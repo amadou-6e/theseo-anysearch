@@ -29,8 +29,10 @@ training:
   trajectory_every: 20
   video_every: 100
   require_gpu: false         # set true to assert a GPU is available before training
-  evaluation_episodes: 8
-  evaluation_min_success_rate: 0.75
+
+evaluation:
+  episodes: 8
+  min_success_rate: 0.75
 
 algorithm_config:            # defaults; overridden per trial by search_space below
   clip_param: 0.2

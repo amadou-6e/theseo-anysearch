@@ -383,13 +383,14 @@ class Trainer(ABC):
             _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
 
         training = self._config.training
+        evaluation = self._config.evaluation
         results: list[TrainResult] = []
         tb_writer = _TensorBoardRunWriter(self._output_dir)
 
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
-        evaluation_episodes = training.evaluation_episodes
+        evaluation_episodes = evaluation.episodes
         _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
         _env_cfg = self._env_config_dict()
@@ -470,7 +471,7 @@ class Trainer(ABC):
                         f"Collecting deterministic evaluation batch for iteration "
                         f"{self._iteration}",
                     )
-                    evaluation_seed = training.evaluation_seed
+                    evaluation_seed = evaluation.seed
                     from theseo_anysearch.rllib.trainer.parallel_evaluation import (
                         collect_rllib_evaluation_episodes,
                     )
@@ -503,7 +504,7 @@ class Trainer(ABC):
                     success_metrics = evaluation_factory(
                         episodes,
                         _env_cfg,
-                        min_success_rate=training.evaluation_min_success_rate,
+                        min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
                     heuristic_accuracy = None
@@ -581,13 +582,13 @@ class Trainer(ABC):
                             "iteration": self._iteration,
                             "seed_start": evaluation_seed,
                             "episode_count": len(episodes),
-                            "num_env_runners": training.evaluation_num_env_runners,
+                            "num_env_runners": evaluation.num_env_runners,
                             "goals_reached": metrics.finish_count,
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,
                             "episode_len_mean": evaluation_len_mean,
                             "status": result.evaluation_status,
-                            "minimum_success_rate": training.evaluation_min_success_rate,
+                            "minimum_success_rate": evaluation.min_success_rate,
                             "summary": success_metrics.model_dump(),
 
                             "metrics": scalar_metrics,

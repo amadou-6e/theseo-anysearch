@@ -34,7 +34,7 @@ class DQNTrainer(Trainer):
         _ensure_ray_runtime(
             str(config.training.output_dir),
             config.training.num_env_runners
-            + config.training.evaluation_num_env_runners,
+            + config.evaluation.num_env_runners,
         )
 
         env = config.env
@@ -80,7 +80,7 @@ class DQNTrainer(Trainer):
         rllib_config.num_env_runners = config.training.num_env_runners
         rllib_config = configure_rllib_evaluation(
             rllib_config,
-            num_env_runners=config.training.evaluation_num_env_runners,
+            num_env_runners=config.evaluation.num_env_runners,
         )
         return rllib_config.build_algo()
 
