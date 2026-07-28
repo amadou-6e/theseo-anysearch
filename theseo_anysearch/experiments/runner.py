@@ -90,6 +90,10 @@ class RunInfo(BaseModel):
     trajectory_iterations: list[int] = Field(default_factory=list)
     render_files: list[str] = Field(default_factory=list)
     mlflow_run_url: str | None = None
+    early_stop_reason: str | None = None
+    early_stop_iteration: int | None = None
+    early_stop_value: float | None = None
+    early_stop_threshold: float | None = None
 
 
 class InspectResult(BaseModel):
@@ -562,12 +566,17 @@ class ExperimentRunner:
             for path in store.list("trajectories")
             if path.endswith(".json") and "iter_" in path
         )
+        early_stop = store.read_json("early_stop.json") if store.exists("early_stop.json") else {}
         final_info = run_info.model_copy(
             update={
                 "status": status,
                 "end_time": _now_iso(),
                 "checkpoint_iterations": checkpoint_iterations,
                 "trajectory_iterations": trajectory_iterations,
+                "early_stop_reason": early_stop.get("mode"),
+                "early_stop_iteration": early_stop.get("iteration"),
+                "early_stop_value": early_stop.get("value"),
+                "early_stop_threshold": early_stop.get("threshold"),
             }
         )
         store.write_json("run.json", final_info.model_dump())
