@@ -7,13 +7,14 @@ that omit it retain exact point-goal navigation.
 env:
   max_steps: 200
   waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
-  step_cost: -0.01
-  distance_shaping: 0.2
-  goal_reward: 1.0
-  collision_cost: -0.1
-  invalid_action_cost: -0.1
-  construction_residual_weight: 0.0
-  construction_overshoot_weight: 0.0
+  rewards:
+    step_cost: -0.01
+    distance_shaping: 0.2
+    goal_reward: 1.0
+    collision_cost: -0.1
+    invalid_action_cost: -0.1
+    construction_residual_weight: 0.0
+    construction_overshoot_weight: 0.0
   task:
     version: 1
     goal:

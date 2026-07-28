@@ -7,23 +7,29 @@ experiment:
   seed: 42
 
 env:
-  obs_mode: box
-  box_radius: 2
   agent_count: 4
   max_steps: 200
-  step_cost: -0.01
-  goal_reward: 1.0
-  distance_shaping: 0.1
-  grid_size: 64
 
-  geometry_pool:
-    pool_dir: runtime/geometry_pools/highres   # built with: anysearch extract usage/extract/highres.yaml
-    augmentation:
-      paste_boxes:
-        num_boxes: [2, 12]
-        box_min_size: [2, 2, 2]
-        box_max_size: [20, 20, 20]
-        prob: 1.0
+  geometry:
+    grid_size: 64
+
+    pool:
+      pool_dir: runtime/geometry_pools/highres   # built with: anysearch extract usage/extract/highres.yaml
+      augmentation:
+        paste_boxes:
+          num_boxes: [2, 12]
+          box_min_size: [2, 2, 2]
+          box_max_size: [20, 20, 20]
+          prob: 1.0
+
+  observation:
+    mode: box
+    box_radius: 2
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
 
 training:
   algorithm: ppo

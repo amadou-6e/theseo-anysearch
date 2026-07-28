@@ -10,118 +10,59 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from theseo_anysearch.environments.task import TaskConfig
 
 
-class EnvConfig(BaseModel):
-    """Environment configuration shared by training and experiment loading.
+class GeometryConfig(BaseModel):
+    """Geometry source and voxelization settings."""
 
-    Parameters
-    ----------
-    stl_path : Path | None
-        Optional STL file to voxelize into the environment geometry.
-    scale : float
-        Fixed STL voxelization scale when ``scale_range`` is not used.
-    agent_count : int
-        Number of agents requested by the environment configuration.
-    max_steps : int
-        Maximum number of environment steps per episode.
-    seed : int
-        Base random seed for resets and procedural choices.
-    obs_mode : {"scalar", "box", "radial", "hierarchical_box"}
-        Observation encoding exposed to the policy.
-    box_radius : int
-        Radius used for single-scale local voxel box observations.
-    box_radii : list[int] | None
-        Radii used for hierarchical box observations.
-    ray_max_len : int
-        Maximum ray length for radial observations.
-    grid_size : int
-        Side length of the cubic voxel grid.
-    trail_mode : bool
-        Whether movement automatically fills visited cells.
-    geometry_boxes : list[list[int]] | None
-        Procedural box geometry definitions.
-    waypoints_file : str | None
-        Optional JSON file with fixed start and goal waypoints.
-    step_cost : float
-        Per-step reward penalty.
-    collision_cost : float
-        Additional reward penalty on blocked moves.
-    goal_reward : float
-        Terminal reward awarded when the goal is reached.
-    distance_shaping : float
-        Potential-based shaping coefficient toward the goal.
-    distance_reward_mode : {"progress", "zone"}
-        Strategy used for distance-based per-step rewards.
-    zone_reward_min : float
-        Most negative per-step zone reward when far from the goal.
-    zone_reward_max : float
-        Least negative per-step zone reward when near the goal.
-    zone_reward_curve : {"linear", "exponential"}
-        Curve used to interpolate between zone reward values.
-    distance_metric : {"euclidean", "manhattan"}
-        Distance metric used for shaping.
-    stl_paths : list[Path] | None
-        Optional set of STL files used for map diversity.
-    scale_range : list[float] | None
-        Minimum and maximum voxelization scale for STL diversity.
-    geometry_pool_size : int
-        Number of procedural geometries to pre-generate.
-    scale_variants_per_map : int
-        Number of STL re-voxelizations generated per map.
-    geometry_padding : int
-        Free-space padding around imported geometry.
-    geometry_pool : dict | None
-        Precomputed geometry pool configuration produced by extraction tools.
-    """
-    include_voxel_count: bool = True
     model_config = ConfigDict(extra="forbid")
-
     stl_path: Path | None = None
+    stl_paths: list[Path] | None = None
     scale: float = 1.0
-    agent_count: int = 4
-    max_steps: int = 200
-    seed: int = 42
-    obs_mode: Literal["scalar", "box", "radial", "hierarchical_box"] = "scalar"
-    box_radius: int = 2
-    box_radii: list[int] | None = None   # hierarchical_box mode: list of radii to concatenate
-    ray_max_len: int = 16
-    grid_size: int = 32                  # side length of the cubic grid (coords in [1, grid_size]³)
-    trail_mode: bool = True              # movement auto-fills visited cells (one-way)
-    geometry_boxes: list[list[int]] | None = None  # [[xmin,ymin,zmin,xmax,ymax,zmax], ...]
-    # Navigation / reward (modifiable from Python, computed in Rust)
-    waypoints_file: str | None = None   # path to JSON {"start":[x,y,z],"goal":[x,y,z]}
-    step_cost: float = -0.01            # per-step reward penalty
-    collision_cost: float = 0.0         # extra penalty subtracted on blocked moves
-    goal_reward: float = 1.0            # bonus when cursor reaches goal position
-    distance_shaping: float = 0.0       # potential-based shaping coefficient toward goal
+    scale_range: list[float] | None = None
+    grid_size: int = Field(default=32, ge=1)
+    boxes: list[list[int]] | None = None
+    pool_size: int = Field(default=0, ge=0)
+    scale_variants_per_map: int = Field(default=4, ge=1)
+    padding: int = Field(default=2, ge=0)
+    pool: dict[str, Any] | None = None
+
+
+class ObservationConfig(BaseModel):
+    """Policy observation representation."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["scalar", "box", "radial", "hierarchical_box"] = "scalar"
+    box_radius: int = Field(default=2, ge=0)
+    box_radii: list[int] | None = None
+    ray_max_len: int = Field(default=16, ge=1)
+    include_voxel_count: bool = True
+
+
+class ActionConfig(BaseModel):
+    """Policy action-space representation."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["discrete_26", "vector_3"] = "discrete_26"
+
+
+class RewardConfig(BaseModel):
+    """Reward terms computed by the voxel environment."""
+
+    model_config = ConfigDict(extra="forbid")
+    step_cost: float = -0.01
+    collision_cost: float = 0.0
+    goal_reward: float = 1.0
+    distance_shaping: float = 0.0
     distance_reward_mode: Literal["progress", "zone"] = "progress"
-    zone_reward_min: float = -1.0       # farthest-from-goal reward in zone mode
-    zone_reward_max: float = -0.01      # nearest-to-goal reward in zone mode
+    zone_reward_min: float = -1.0
+    zone_reward_max: float = -0.01
     zone_reward_curve: Literal["linear", "exponential"] = "linear"
     distance_metric: Literal["euclidean", "manhattan"] = "euclidean"
     invalid_action_cost: float = 0.0
     construction_residual_weight: float = Field(default=0.0, ge=0.0)
     construction_overshoot_weight: float = Field(default=0.0, ge=0.0)
-    task: TaskConfig = Field(default_factory=TaskConfig)
-
-    # --- Training diversity ---
-    # Geometry pool: pre-load N geometries at init; at each reset pick one randomly.
-    # stl_paths + scale_range: voxelise each STL at M random scales → large pool.
-    # geometry_pool_size alone: procedural random-box geometries.
-    stl_paths: list[Path] | None = None           # multiple STL maps to cycle through
-    scale_range: list[float] | None = None        # [min, max] voxelisation scale for stl_paths
-    geometry_pool_size: int = 0                   # >0: use this many random-box geometries
-    scale_variants_per_map: int = 4               # STL re-voxelisations per scale sweep
-    geometry_padding: int = 2                     # free voxels on each side of the geometry (circumnavigation margin)
-
-    # --- Geometry pool (pre-computed .npy files built by `anysearch extract`) ---
-    # When set, each episode loads a random .npy file from pool_dir instead of
-    # re-voxelizing at runtime. stl_path / scale_range still work independently.
-    geometry_pool: dict | None = None             # {pool_dir, augmentation: {paste_boxes: {...}}}
 
     @model_validator(mode="after")
-    def validate_zone_rewards(self) -> "EnvConfig":
-        """Ensure zone reward configuration remains negative and ordered."""
-
+    def validate_zone_rewards(self) -> "RewardConfig":
         if self.zone_reward_min > self.zone_reward_max:
             raise ValueError("zone_reward_min must be less than or equal to zone_reward_max")
         if self.zone_reward_max >= 0.0:
@@ -130,6 +71,207 @@ class EnvConfig(BaseModel):
             raise ValueError("zone_reward_min must stay negative")
         return self
 
+
+_LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
+    "stl_path": ("geometry", "stl_path"),
+    "stl_paths": ("geometry", "stl_paths"),
+    "scale": ("geometry", "scale"),
+    "scale_range": ("geometry", "scale_range"),
+    "grid_size": ("geometry", "grid_size"),
+    "geometry_boxes": ("geometry", "boxes"),
+    "geometry_pool_size": ("geometry", "pool_size"),
+    "scale_variants_per_map": ("geometry", "scale_variants_per_map"),
+    "geometry_padding": ("geometry", "padding"),
+    "geometry_pool": ("geometry", "pool"),
+    "obs_mode": ("observation", "mode"),
+    "box_radius": ("observation", "box_radius"),
+    "box_radii": ("observation", "box_radii"),
+    "ray_max_len": ("observation", "ray_max_len"),
+    "include_voxel_count": ("observation", "include_voxel_count"),
+    "action_mode": ("action", "mode"),
+    "step_cost": ("rewards", "step_cost"),
+    "collision_cost": ("rewards", "collision_cost"),
+    "goal_reward": ("rewards", "goal_reward"),
+    "distance_shaping": ("rewards", "distance_shaping"),
+    "distance_reward_mode": ("rewards", "distance_reward_mode"),
+    "zone_reward_min": ("rewards", "zone_reward_min"),
+    "zone_reward_max": ("rewards", "zone_reward_max"),
+    "zone_reward_curve": ("rewards", "zone_reward_curve"),
+    "distance_metric": ("rewards", "distance_metric"),
+    "invalid_action_cost": ("rewards", "invalid_action_cost"),
+    "construction_residual_weight": ("rewards", "construction_residual_weight"),
+    "construction_overshoot_weight": ("rewards", "construction_overshoot_weight"),
+}
+
+
+class EnvConfig(BaseModel):
+    """Environment settings grouped by geometry, observation, action, and rewards."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_count: int = Field(default=4, ge=1)
+    max_steps: int = Field(default=200, ge=1)
+    seed: int = 42
+    trail_mode: bool = True
+    target_fill: int | None = Field(default=None, ge=0)
+    waypoints_file: str | None = None
+    task: TaskConfig = Field(default_factory=TaskConfig)
+    geometry: GeometryConfig = Field(default_factory=GeometryConfig)
+    observation: ObservationConfig = Field(default_factory=ObservationConfig)
+    action: ActionConfig = Field(default_factory=ActionConfig)
+    rewards: RewardConfig = Field(default_factory=RewardConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_blocks(cls, value: Any) -> Any:
+        """Accept legacy-only input during migration, but reject mixed blocks."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        legacy_by_block: dict[str, list[str]] = {}
+        for legacy, (block, _) in _LEGACY_ENV_FIELDS.items():
+            if legacy in data:
+                legacy_by_block.setdefault(block, []).append(legacy)
+        conflicts = sorted(block for block in legacy_by_block if block in data)
+        if conflicts:
+            joined = ", ".join(conflicts)
+            raise ValueError(
+                f"legacy flattened environment fields cannot be mixed with nested blocks: {joined}"
+            )
+        for block, legacy_fields in legacy_by_block.items():
+            nested: dict[str, Any] = {}
+            for legacy in legacy_fields:
+                _, nested_name = _LEGACY_ENV_FIELDS[legacy]
+                nested[nested_name] = data.pop(legacy)
+            data[block] = nested
+        return data
+
+    @property
+    def stl_path(self):
+        return self.geometry.stl_path
+    @property
+    def stl_paths(self):
+        return self.geometry.stl_paths
+    @property
+    def scale(self):
+        return self.geometry.scale
+    @property
+    def scale_range(self):
+        return self.geometry.scale_range
+    @property
+    def grid_size(self):
+        return self.geometry.grid_size
+    @property
+    def geometry_boxes(self):
+        return self.geometry.boxes
+    @property
+    def geometry_pool_size(self):
+        return self.geometry.pool_size
+    @property
+    def scale_variants_per_map(self):
+        return self.geometry.scale_variants_per_map
+    @property
+    def geometry_padding(self):
+        return self.geometry.padding
+    @property
+    def geometry_pool(self):
+        return self.geometry.pool
+    @property
+    def obs_mode(self):
+        return self.observation.mode
+    @property
+    def box_radius(self):
+        return self.observation.box_radius
+    @property
+    def box_radii(self):
+        return self.observation.box_radii
+    @property
+    def ray_max_len(self):
+        return self.observation.ray_max_len
+    @property
+    def include_voxel_count(self):
+        return self.observation.include_voxel_count
+    @property
+    def action_mode(self):
+        return self.action.mode
+    @property
+    def step_cost(self):
+        return self.rewards.step_cost
+    @property
+    def collision_cost(self):
+        return self.rewards.collision_cost
+    @property
+    def goal_reward(self):
+        return self.rewards.goal_reward
+    @property
+    def distance_shaping(self):
+        return self.rewards.distance_shaping
+    @property
+    def distance_reward_mode(self):
+        return self.rewards.distance_reward_mode
+    @property
+    def zone_reward_min(self):
+        return self.rewards.zone_reward_min
+    @property
+    def zone_reward_max(self):
+        return self.rewards.zone_reward_max
+    @property
+    def zone_reward_curve(self):
+        return self.rewards.zone_reward_curve
+    @property
+    def distance_metric(self):
+        return self.rewards.distance_metric
+    @property
+    def invalid_action_cost(self):
+        return self.rewards.invalid_action_cost
+    @property
+    def construction_residual_weight(self):
+        return self.rewards.construction_residual_weight
+    @property
+    def construction_overshoot_weight(self):
+        return self.rewards.construction_overshoot_weight
+
+    def to_runtime_dict(self) -> dict[str, Any]:
+        """Return the flat dictionary consumed by the existing environments."""
+        return {
+            "stl_path": str(self.stl_path) if self.stl_path else None,
+            "stl_paths": (
+                [str(path) for path in self.stl_paths] if self.stl_paths else None
+            ),
+            "scale": self.scale,
+            "scale_range": self.scale_range,
+            "grid_size": self.grid_size,
+            "geometry_boxes": self.geometry_boxes,
+            "geometry_pool_size": self.geometry_pool_size,
+            "scale_variants_per_map": self.scale_variants_per_map,
+            "geometry_padding": self.geometry_padding,
+            "geometry_pool": self.geometry_pool,
+            "obs_mode": self.obs_mode,
+            "box_radius": self.box_radius,
+            "box_radii": self.box_radii,
+            "ray_max_len": self.ray_max_len,
+            "include_voxel_count": self.include_voxel_count,
+            "action_mode": self.action_mode,
+            "agent_count": self.agent_count,
+            "max_steps": self.max_steps,
+            "seed": self.seed,
+            "trail_mode": self.trail_mode,
+            "target_fill": self.target_fill,
+            "waypoints_file": self.waypoints_file,
+            "step_cost": self.step_cost,
+            "collision_cost": self.collision_cost,
+            "goal_reward": self.goal_reward,
+            "distance_shaping": self.distance_shaping,
+            "distance_reward_mode": self.distance_reward_mode,
+            "zone_reward_min": self.zone_reward_min,
+            "zone_reward_max": self.zone_reward_max,
+            "zone_reward_curve": self.zone_reward_curve,
+            "distance_metric": self.distance_metric,
+            "invalid_action_cost": self.invalid_action_cost,
+            "construction_residual_weight": self.construction_residual_weight,
+            "construction_overshoot_weight": self.construction_overshoot_weight,
+            "task": self.task.model_dump(mode="json"),
+        }
 
 
 class TrainingConfig(BaseModel):

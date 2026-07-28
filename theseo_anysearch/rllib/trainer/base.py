@@ -360,37 +360,9 @@ class Trainer(ABC):
     def _env_config_dict(self) -> dict:
         """Build the env config dict passed to VoxelEnv / MultiVoxelEnv."""
         env = self._config.env
-        return {
-            "stl_path": str(env.stl_path) if env.stl_path else None,
-            "scale": env.scale,
-            "scale_range": env.scale_range,
-            "agent_count": env.agent_count,
-            "max_steps": env.max_steps,
-            "seed": env.seed,
-            "obs_mode": env.obs_mode,
-            "box_radius": env.box_radius,
-            "box_radii": env.box_radii,
-            "ray_max_len": env.ray_max_len,
-            "include_voxel_count": env.include_voxel_count,
-            "grid_size": env.grid_size,
-            "trail_mode": env.trail_mode,
-            "geometry_boxes": env.geometry_boxes,
-            "geometry_pool": _resolve_pool_dir(env.geometry_pool),
-            "geometry_padding": env.geometry_padding,
-            "waypoints_file": env.waypoints_file,
-            "step_cost": env.step_cost,
-            "collision_cost": env.collision_cost,
-            "goal_reward": env.goal_reward,
-            "distance_shaping": env.distance_shaping,
-            "distance_reward_mode": env.distance_reward_mode,
-            "zone_reward_min": env.zone_reward_min,
-            "zone_reward_max": env.zone_reward_max,
-            "zone_reward_curve": env.zone_reward_curve,
-            "invalid_action_cost": env.invalid_action_cost,
-            "construction_residual_weight": env.construction_residual_weight,
-            "construction_overshoot_weight": env.construction_overshoot_weight,
-            "task": env.task.model_dump(mode="json"),
-        }
+        runtime = env.to_runtime_dict()
+        runtime["geometry_pool"] = _resolve_pool_dir(env.geometry_pool)
+        return runtime
 
     # ------------------------------------------------------------------
     # Public API

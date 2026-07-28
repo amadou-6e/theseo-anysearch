@@ -8,19 +8,27 @@ experiment:
 
 env:
   waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
-  grid_size: 8
   max_steps: 10
   seed: 42
   agent_count: 1
-  obs_mode: radial
-  ray_max_len: 10
   trail_mode: false
-  action_mode: discrete_26
-  step_cost: -0.5
-  collision_cost: -0.02
-  goal_reward: 2.0
-  distance_shaping: 0.25
-  distance_reward_mode: progress
+
+  geometry:
+    grid_size: 8
+
+  observation:
+    mode: radial
+    ray_max_len: 10
+
+  action:
+    mode: discrete_26
+
+  rewards:
+    step_cost: -0.5
+    collision_cost: -0.02
+    goal_reward: 2.0
+    distance_shaping: 0.25
+    distance_reward_mode: progress
 
 training:
   algorithm: ppo
