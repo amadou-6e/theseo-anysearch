@@ -403,6 +403,7 @@ class Trainer(ABC):
             EarlyStopState,
             TrainingEarlyStopController,
             heuristic_action_accuracy,
+            heuristic_action_distance,
         )
         early_stop_config = training.early_stop
         early_stop_state = (
@@ -515,8 +516,11 @@ class Trainer(ABC):
                     )
                     standardized = success_metrics.scalar_metrics()
                     heuristic_accuracy = None
+                    heuristic_distance = None
                     heuristic_compared_states = 0
-                    if early_stop_config.enabled and early_stop_config.mode == "heuristic_accuracy":
+                    if early_stop_config.enabled and early_stop_config.mode in {
+                        "heuristic_accuracy", "heuristic_distance"
+                    }:
                         from theseo_anysearch.experiments.trajectory import collect_heuristic_episode
 
                         heuristic_episodes = [
@@ -528,14 +532,22 @@ class Trainer(ABC):
                             )
                             for episode_index in range(evaluation_episodes)
                         ]
-                        heuristic_accuracy, heuristic_compared_states = heuristic_action_accuracy(
-                            episodes, heuristic_episodes
-                        )
+                        if early_stop_config.mode == "heuristic_accuracy":
+                            heuristic_accuracy, heuristic_compared_states = heuristic_action_accuracy(
+                                episodes, heuristic_episodes
+                            )
+                        else:
+                            heuristic_distance, heuristic_compared_states = heuristic_action_distance(
+                                episodes,
+                                heuristic_episodes,
+                                metric=early_stop_config.heuristic_distance_metric,
+                            )
                     early_stop_decision = early_stop_controller.evaluate(
                         self._iteration,
                         reward_mean=evaluation_reward_mean,
                         goal_finishes=metrics.finish_count,
                         heuristic_accuracy=heuristic_accuracy,
+                        heuristic_distance=heuristic_distance,
                     )
                     early_stop_triggered = early_stop_decision.triggered
                     if early_stop_config.enabled:
@@ -557,6 +569,7 @@ class Trainer(ABC):
                                 **standardized,
                                 **metrics.as_scalar_dict(),
                                 "evaluation_heuristic_accuracy": heuristic_accuracy,
+                                "evaluation_heuristic_distance": heuristic_distance,
                                 "evaluation_heuristic_compared_states": heuristic_compared_states,
                                 "early_stop_consecutive_matches": early_stop_decision.consecutive_matches,
                                 "early_stop_triggered": early_stop_triggered,

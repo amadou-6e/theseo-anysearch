@@ -6,19 +6,21 @@ from theseo_anysearch.rllib.trainer.early_stop import (
     EarlyStopState,
     TrainingEarlyStopController,
     heuristic_action_accuracy,
+    heuristic_action_distance,
 )
 
 
 def _config(mode: str, **updates) -> TrainingEarlyStopConfig:
     threshold = {
-        "reward": {"reward_threshold": 1.5},
-        "goal_finishes": {"goal_finishes_threshold": 3},
-        "heuristic_accuracy": {"heuristic_accuracy_threshold": 0.8},
+        "reward": {"min_reward": 1.5},
+        "goal_finishes": {"min_goal_finishes": 3},
+        "heuristic_accuracy": {"min_heuristic_accuracy": 0.8},
+        "heuristic_distance": {"max_heuristic_distance": 1.0},
     }[mode]
     return TrainingEarlyStopConfig(
         enabled=True,
         mode=mode,
-        consecutive_evaluations=2,
+        min_consecutive_evaluation=2,
         **threshold,
         **updates,
     )
@@ -33,9 +35,13 @@ def _config(mode: str, **updates) -> TrainingEarlyStopConfig:
             "heuristic_accuracy",
             {"reward_mean": 0.0, "goal_finishes": 0, "heuristic_accuracy": 0.8},
         ),
+        (
+            "heuristic_distance",
+            {"reward_mean": 0.0, "goal_finishes": 0, "heuristic_distance": 1.0},
+        ),
     ],
 )
-def test_condition_requires_consecutive_evaluations(mode: str, values: dict) -> None:
+def test_condition_requires_min_consecutive_evaluation(mode: str, values: dict) -> None:
     controller = TrainingEarlyStopController(_config(mode))
     assert not controller.evaluate(1, **values).triggered
     assert controller.evaluate(2, **values).triggered
@@ -50,7 +56,7 @@ def test_failed_evaluation_resets_consecutive_count() -> None:
 
 
 def test_minimum_iteration_is_enforced() -> None:
-    controller = TrainingEarlyStopController(_config("reward", minimum_iterations=3))
+    controller = TrainingEarlyStopController(_config("reward", min_iterations=3))
     controller.evaluate(1, reward_mean=2.0, goal_finishes=0)
     assert not controller.evaluate(2, reward_mean=2.0, goal_finishes=0).triggered
     assert not controller.evaluate(3, reward_mean=2.0, goal_finishes=0).triggered
@@ -74,8 +80,8 @@ def test_configuration_requires_only_matching_threshold() -> None:
         TrainingEarlyStopConfig(
             enabled=True,
             mode="reward",
-            reward_threshold=1.0,
-            goal_finishes_threshold=2,
+            min_reward=1.0,
+            min_goal_finishes=2,
         )
 
 
@@ -87,7 +93,7 @@ def test_goal_threshold_cannot_exceed_evaluation_batch() -> None:
             early_stop={
                 "enabled": True,
                 "mode": "goal_finishes",
-                "goal_finishes_threshold": 3,
+                "min_goal_finishes": 3,
             },
         )
 
@@ -109,3 +115,27 @@ def test_heuristic_accuracy_uses_canonical_action_sequences() -> None:
     )
     assert compared == 5
     assert accuracy == pytest.approx(3 / 5)
+
+def test_heuristic_distance_uses_unit_block_l1_and_l2() -> None:
+    from theseo_anysearch.environments.action_spaces import ACTION_OFFSETS_26
+
+    action_x = ACTION_OFFSETS_26.index((1, 0, 0))
+    action_xy = ACTION_OFFSETS_26.index((1, 1, 0))
+    action_opposite_x = ACTION_OFFSETS_26.index((-1, 1, 0))
+    policy = [_Episode([action_x, action_x])]
+    heuristic = [_Episode([action_xy, action_opposite_x])]
+
+    l1, compared = heuristic_action_distance(policy, heuristic, metric="l1")
+    l2, _ = heuristic_action_distance(policy, heuristic, metric="l2")
+
+    assert compared == 2
+    assert l1 == pytest.approx((1.0 + 3.0) / 2.0)
+    assert l2 == pytest.approx((1.0 + 5**0.5) / 2.0)
+
+
+def test_heuristic_distance_is_a_maximum_stop_bound() -> None:
+    controller = TrainingEarlyStopController(_config("heuristic_distance"))
+    values = {"reward_mean": 0.0, "goal_finishes": 0, "heuristic_distance": 0.75}
+    assert not controller.evaluate(1, **values).triggered
+    assert controller.evaluate(2, **values).triggered
+    assert not controller.evaluate(3, heuristic_distance=1.25, reward_mean=0.0, goal_finishes=0).triggered

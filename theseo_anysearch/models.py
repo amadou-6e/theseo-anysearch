@@ -214,12 +214,14 @@ class TrainingEarlyStopConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    mode: Literal["reward", "heuristic_accuracy", "goal_finishes"] | None = None
-    minimum_iterations: int = Field(default=1, ge=1)
-    consecutive_evaluations: int = Field(default=1, ge=1)
-    reward_threshold: float | None = None
-    heuristic_accuracy_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
-    goal_finishes_threshold: int | None = Field(default=None, ge=1)
+    mode: Literal["reward", "heuristic_accuracy", "heuristic_distance", "goal_finishes"] | None = None
+    min_iterations: int = Field(default=1, ge=1)
+    min_consecutive_evaluation: int = Field(default=1, ge=1)
+    min_reward: float | None = None
+    min_heuristic_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_heuristic_distance: float | None = Field(default=None, ge=0.0)
+    min_goal_finishes: int | None = Field(default=None, ge=1)
+    heuristic_distance_metric: Literal["l1", "l2"] = "l1"
     heuristic_type: Literal[
         "astar", "dijkstra", "weighted_astar", "replanning_astar"
     ] = "astar"
@@ -228,9 +230,10 @@ class TrainingEarlyStopConfig(BaseModel):
     @model_validator(mode="after")
     def validate_selected_threshold(self) -> "TrainingEarlyStopConfig":
         thresholds = {
-            "reward": self.reward_threshold,
-            "heuristic_accuracy": self.heuristic_accuracy_threshold,
-            "goal_finishes": self.goal_finishes_threshold,
+            "reward": self.min_reward,
+            "heuristic_accuracy": self.min_heuristic_accuracy,
+            "heuristic_distance": self.max_heuristic_distance,
+            "goal_finishes": self.min_goal_finishes,
         }
         configured = [name for name, value in thresholds.items() if value is not None]
         if not self.enabled:
@@ -298,10 +301,10 @@ class TrainingConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_early_stop_goal_count(self) -> "TrainingConfig":
-        threshold = self.early_stop.goal_finishes_threshold
+        threshold = self.early_stop.min_goal_finishes
         if threshold is not None and threshold > self.evaluation_episodes:
             raise ValueError(
-                "goal_finishes_threshold cannot exceed training.evaluation_episodes"
+                "min_goal_finishes cannot exceed training.evaluation_episodes"
             )
         return self
 
@@ -376,11 +379,11 @@ class AlgorithmEnvCompatibilityMixin:
         algorithm = self.training.algorithm.lower()
         if (
             self.training.early_stop.enabled
-            and self.training.early_stop.mode == "heuristic_accuracy"
+            and self.training.early_stop.mode in {"heuristic_accuracy", "heuristic_distance"}
             and self.env.agent_count != 1
         ):
             raise ValueError(
-                "heuristic_accuracy early stopping requires env.agent_count: 1"
+                "heuristic comparison early stopping requires env.agent_count: 1"
             )
         if algorithm in single_agent_algorithms and self.env.agent_count != 1:
             raise ValueError(

@@ -631,8 +631,8 @@ class TestTrainingEarlyStop:
                 "early_stop": TrainingEarlyStopConfig(
                     enabled=True,
                     mode="goal_finishes",
-                    goal_finishes_threshold=2,
-                    consecutive_evaluations=2,
+                    min_goal_finishes=2,
+                    min_consecutive_evaluation=2,
                 ),
             }
         )
