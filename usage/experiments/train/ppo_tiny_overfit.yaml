@@ -52,7 +52,7 @@ evaluation:
   episodes: 20
   seed: 42
   min_success_rate: 0.5
-  num_env_runners: 8
+  num_env_runners: 4
 
 algorithm_config:
   lr: 0.001
