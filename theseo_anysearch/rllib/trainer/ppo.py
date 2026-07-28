@@ -157,14 +157,14 @@ class PPOTrainer(Trainer):
             Path(config.training.output_dir, "env_debug.log")
         )
         _log_stage(
-            f"Registering VoxelEnv with obs_mode={env.observation.mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+            f"Registering VoxelEnv with obs_mode={env.observation.mode} grid_size={env.geometry__grid_size} max_steps={env.max_steps}"
         )
         _append_stage_log(
             str(config.training.output_dir),
             "ppo",
             (
                 "Registering VoxelEnv with "
-                f"obs_mode={env.observation.mode} grid_size={env.grid_size} max_steps={env.max_steps}"
+                f"obs_mode={env.observation.mode} grid_size={env.geometry__grid_size} max_steps={env.max_steps}"
             ),
         )
         env_id = VoxelEnv.register_with_ray(env_config=env_config)

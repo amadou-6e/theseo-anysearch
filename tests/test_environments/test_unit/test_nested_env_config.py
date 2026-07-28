@@ -16,6 +16,10 @@ def test_nested_blocks_resolve_to_runtime_environment() -> None:
         action={"mode": "discrete_26"},
         rewards={"step_cost": -0.02, "goal_reward": 2.0},
     )
+    assert configured.rewards__step_cost == -0.02
+    assert configured.geometry__boxes == [[3, 3, 3, 3, 3, 3]]
+    assert configured.observation__mode == "box"
+    assert configured.action__mode == "discrete_26"
     runtime = configured.to_runtime_dict()
     assert runtime["grid_size"] == 8
     assert runtime["geometry_boxes"] == [[3, 3, 3, 3, 3, 3]]
@@ -50,13 +54,13 @@ def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
 
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
-        exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {
-            "geometry": ("grid_size",),
-        }
+        exposed_nested_fields: ClassVar[tuple[str, ...]] = ("geometry",)
         geometry: GeometryConfig
 
     wrapped = GeometryWrapper(geometry=GeometryConfig(grid_size=64))
-    assert wrapped.grid_size == 64
-    assert "grid_size" not in wrapped.model_dump()
+    assert wrapped.geometry__grid_size == 64
+    assert "geometry__grid_size" not in wrapped.model_dump()
+    with pytest.raises(AttributeError):
+        _ = wrapped.grid_size
     with pytest.raises(AttributeError):
         _ = wrapped.unknown_attribute

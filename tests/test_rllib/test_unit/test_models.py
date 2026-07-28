@@ -34,11 +34,11 @@ class TestEnvConfig:
     """Tests EnvConfig."""
     def test_can_construct_without_stl_path(self):
         cfg = EnvConfig()
-        assert cfg.stl_path is None
+        assert cfg.geometry__stl_path is None
 
     def test_defaults(self):
         cfg = EnvConfig(stl_path=Path("/tmp/a.stl"))
-        assert cfg.scale == 1.0
+        assert cfg.geometry__scale == 1.0
         assert cfg.agent_count == 4
         assert cfg.max_steps == 200
         assert cfg.seed == 42

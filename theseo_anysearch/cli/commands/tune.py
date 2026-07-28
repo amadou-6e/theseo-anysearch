@@ -741,7 +741,7 @@ def _close_child_runs(tracking_uri: str, parent_run_id: str, results: Any) -> No
 
 @app.callback(invoke_without_command=True)
 def tune(
-    stl: Optional[Path] = typer.Option(None, help="Path to the STL geometry file. Inferred from --config env.stl_path when omitted."),
+    stl: Optional[Path] = typer.Option(None, help="Path to the STL geometry file. Inferred from --config env.geometry.stl_path when omitted."),
     algorithm: str = typer.Option("ppo", help="Base RLlib algorithm (ppo, sac)."),
     scheduler: str = typer.Option(
         "asha",
@@ -804,17 +804,21 @@ def tune(
         _print_error("ray not found", hint="pip install ray[tune]")
         raise typer.Exit(code=1)
 
-    # Infer stl from YAML env.stl_path when not provided explicitly.
+    # Infer stl from YAML env.geometry.stl_path when not provided explicitly.
     if stl is None and config is not None:
         try:
             raw_cfg = _load_tune_config_yaml(config)
-            stl_from_yaml = raw_cfg.get("env", {}).get("stl_path")
+            env_raw = raw_cfg.get("env", {})
+            stl_from_yaml = (
+                (env_raw.get("geometry") or {}).get("stl_path")
+                or env_raw.get("stl_path")
+            )
             if stl_from_yaml:
                 stl = Path(stl_from_yaml)
         except Exception:
             pass
     if stl is None:
-        _print_error("--stl is required (or set env.stl_path in --config)")
+        _print_error("--stl is required (or set env.geometry.stl_path in --config)")
         raise typer.Exit(code=1)
     if not stl.exists():
         _print_error("stl file not found", path=str(stl))

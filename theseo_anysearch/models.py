@@ -105,16 +105,16 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
 
 
 class NestedFieldAccessMixin:
-    """Expose selected attributes from nested models through the parent model."""
+    """Expose Pydantic fields as ``<container>__<field>`` attributes."""
 
-    exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {}
+    exposed_nested_fields: ClassVar[tuple[str, ...]] = ()
 
     def __getattr__(self, name: str) -> Any:
-        for container_name, field_names in self.exposed_nested_fields.items():
-            if name in field_names:
-                container = getattr(self, container_name)
-                return getattr(container, name)
-
+        container_name, separator, nested_name = name.partition("__")
+        if separator and container_name in self.exposed_nested_fields:
+            container = getattr(self, container_name)
+            if nested_name in type(container).model_fields:
+                return getattr(container, nested_name)
         return super().__getattr__(name)
 
 
@@ -122,36 +122,12 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     """Environment settings grouped by geometry, observation, action, and rewards."""
 
     model_config = ConfigDict(extra="forbid")
-    exposed_nested_fields: ClassVar[dict[str, tuple[str, ...]]] = {
-        "geometry": (
-            "stl_path",
-            "stl_paths",
-            "scale",
-            "scale_range",
-            "grid_size",
-            "scale_variants_per_map",
-        ),
-        "observation": (
-            "box_radius",
-            "box_radii",
-            "ray_max_len",
-            "include_voxel_count",
-        ),
-        "rewards": (
-            "step_cost",
-            "collision_cost",
-            "goal_reward",
-            "distance_shaping",
-            "distance_reward_mode",
-            "zone_reward_min",
-            "zone_reward_max",
-            "zone_reward_curve",
-            "distance_metric",
-            "invalid_action_cost",
-            "construction_residual_weight",
-            "construction_overshoot_weight",
-        ),
-    }
+    exposed_nested_fields: ClassVar[tuple[str, ...]] = (
+        "geometry",
+        "observation",
+        "action",
+        "rewards",
+    )
     agent_count: int = Field(default=4, ge=1)
     max_steps: int = Field(default=200, ge=1)
     seed: int = 42
@@ -192,42 +168,42 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
         return {
-            "stl_path": str(self.stl_path) if self.stl_path else None,
+            "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
-                [str(path) for path in self.stl_paths] if self.stl_paths else None
+                [str(path) for path in self.geometry__stl_paths] if self.geometry__stl_paths else None
             ),
-            "scale": self.scale,
-            "scale_range": self.scale_range,
-            "grid_size": self.grid_size,
-            "geometry_boxes": self.geometry.boxes,
-            "geometry_pool_size": self.geometry.pool_size,
-            "scale_variants_per_map": self.scale_variants_per_map,
-            "geometry_padding": self.geometry.padding,
-            "geometry_pool": self.geometry.pool,
-            "obs_mode": self.observation.mode,
-            "box_radius": self.box_radius,
-            "box_radii": self.box_radii,
-            "ray_max_len": self.ray_max_len,
-            "include_voxel_count": self.include_voxel_count,
-            "action_mode": self.action.mode,
+            "scale": self.geometry__scale,
+            "scale_range": self.geometry__scale_range,
+            "grid_size": self.geometry__grid_size,
+            "geometry_boxes": self.geometry__boxes,
+            "geometry_pool_size": self.geometry__pool_size,
+            "scale_variants_per_map": self.geometry__scale_variants_per_map,
+            "geometry_padding": self.geometry__padding,
+            "geometry_pool": self.geometry__pool,
+            "obs_mode": self.observation__mode,
+            "box_radius": self.observation__box_radius,
+            "box_radii": self.observation__box_radii,
+            "ray_max_len": self.observation__ray_max_len,
+            "include_voxel_count": self.observation__include_voxel_count,
+            "action_mode": self.action__mode,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,
             "trail_mode": self.trail_mode,
             "target_fill": self.target_fill,
             "waypoints_file": self.waypoints_file,
-            "step_cost": self.step_cost,
-            "collision_cost": self.collision_cost,
-            "goal_reward": self.goal_reward,
-            "distance_shaping": self.distance_shaping,
-            "distance_reward_mode": self.distance_reward_mode,
-            "zone_reward_min": self.zone_reward_min,
-            "zone_reward_max": self.zone_reward_max,
-            "zone_reward_curve": self.zone_reward_curve,
-            "distance_metric": self.distance_metric,
-            "invalid_action_cost": self.invalid_action_cost,
-            "construction_residual_weight": self.construction_residual_weight,
-            "construction_overshoot_weight": self.construction_overshoot_weight,
+            "step_cost": self.rewards__step_cost,
+            "collision_cost": self.rewards__collision_cost,
+            "goal_reward": self.rewards__goal_reward,
+            "distance_shaping": self.rewards__distance_shaping,
+            "distance_reward_mode": self.rewards__distance_reward_mode,
+            "zone_reward_min": self.rewards__zone_reward_min,
+            "zone_reward_max": self.rewards__zone_reward_max,
+            "zone_reward_curve": self.rewards__zone_reward_curve,
+            "distance_metric": self.rewards__distance_metric,
+            "invalid_action_cost": self.rewards__invalid_action_cost,
+            "construction_residual_weight": self.rewards__construction_residual_weight,
+            "construction_overshoot_weight": self.rewards__construction_overshoot_weight,
             "task": self.task.model_dump(mode="json"),
         }
 
