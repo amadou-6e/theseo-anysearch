@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import math
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -21,46 +20,48 @@ pytestmark = pytest.mark.ray
 from theseo_anysearch.rllib.trainer.base import TrainResult
 from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _build_rllib_ppo
 
+RAY_TEST_YAML = """env:
+    stl_path: {stl_path}
+    scale: 1.0
+    agent_count: 1
+    max_steps: 10
+    seed: 0
 
-RAY_TEST_YAML = textwrap.dedent("""    env:
-      stl_path: /tmp/toy.stl
-      scale: 1.0
-      agent_count: 1
-      max_steps: 10
-      seed: 0
+training:
+    algorithm: ppo
+    model: voxel_encoder
+    runner: local
+    iterations: 2
+    checkpoint_interval: 1
+    output_dir: {output_dir}
+    video_every: 999
+    num_env_runners: 1
+    num_envs_per_env_runner: 2
+    num_gpus_per_env_runner: 0.0
 
-    training:
-      algorithm: ppo
-      model: voxel_encoder
-      runner: local
-      iterations: 2
-      checkpoint_interval: 1
-      output_dir: {output_dir}
-      video_every: 999
+anyscale:
+    cluster_env: x
+    compute_config: y
+    project: z
 
-    anyscale:
-      cluster_env: x
-      compute_config: y
-      project: z
+algorithm_config:
+    lr: 1.0e-3
+    gamma: 0.99
+    train_batch_size: 200
+    clip_param: 0.2
+    num_sgd_iter: 1
+    lambda_: 0.95
+    kl_coeff: 0.2
 
-    algorithm_config:
-      lr: 1.0e-3
-      gamma: 0.99
-      train_batch_size: 200
-      clip_param: 0.2
-      num_sgd_iter: 1
-      lambda_: 0.95
-      kl_coeff: 0.2
-
-    model_config:
-      hidden_sizes: [32]
-      activation: relu
-""")
-
+model_config:
+    hidden_sizes: [32]
+    activation: relu
+"""
 
 # ---------------------------------------------------------------------------
 # Module-scoped shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def module_tmp(tmp_path_factory):
@@ -72,8 +73,25 @@ def module_tmp(tmp_path_factory):
 def shared_settings(ray_session, module_tmp):
     """Settings loaded once; output_dir points at module_tmp."""
     from theseo_anysearch.settings import load_settings
+    stl_path = module_tmp / "toy.stl"
+    stl_path.write_text(
+        "solid toy\n"
+        "facet normal 0 0 1\n"
+        "outer loop\n"
+        "vertex 0 0 0\n"
+        "vertex 1 0 0\n"
+        "vertex 0 1 0\n"
+        "endloop\n"
+        "endfacet\n"
+        "endsolid toy\n",
+        encoding="utf-8",
+    )
     p = module_tmp / "settings.yaml"
-    p.write_text(RAY_TEST_YAML.format(output_dir=str(module_tmp)))
+    p.write_text(
+        RAY_TEST_YAML.format(
+            output_dir=json.dumps(str(module_tmp)),
+            stl_path=json.dumps(str(stl_path)),
+        ))
     return load_settings(p)
 
 
@@ -92,8 +110,10 @@ def trained(ray_session, shared_settings):
 # 1. Build
 # ---------------------------------------------------------------------------
 
+
 class TestPPOTrainerRayBuild:
     """Tests PPOTrainerRayBuild."""
+
     def test_algo_has_train_method(self, trained):
         trainer, _ = trained
         assert hasattr(trainer._algo, "train")
@@ -106,13 +126,21 @@ class TestPPOTrainerRayBuild:
         trainer, _ = trained
         assert hasattr(trainer._algo, "restore")
 
+    def test_algo_uses_vectorized_cpu_rollouts(self, trained):
+        trainer, _ = trained
+        assert trainer._algo.config.num_env_runners == 1
+        assert trainer._algo.config.num_envs_per_env_runner == 2
+        assert trainer._algo.config.num_gpus_per_env_runner == 0.0
+
 
 # ---------------------------------------------------------------------------
 # 2. Train
 # ---------------------------------------------------------------------------
 
+
 class TestPPOTrainerRayTrain:
     """Tests PPOTrainerRayTrain."""
+
     def test_returns_list_of_train_results(self, trained):
         _, results = trained
         assert isinstance(results, list)
@@ -141,8 +169,10 @@ class TestPPOTrainerRayTrain:
 # 3. Checkpoint
 # ---------------------------------------------------------------------------
 
+
 class TestPPOTrainerRayCheckpoint:
     """Tests PPOTrainerRayCheckpoint."""
+
     def test_checkpoint_dir_created(self, trained, shared_settings):
         ckpt_root = Path(shared_settings.training.output_dir) / "checkpoints"
         assert ckpt_root.is_dir()
@@ -164,6 +194,7 @@ class TestPPOTrainerRayCheckpoint:
 # ---------------------------------------------------------------------------
 # 4. Resume
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def resumed(ray_session, trained, shared_settings):
@@ -187,6 +218,7 @@ def resumed(ray_session, trained, shared_settings):
 
 class TestPPOTrainerRayResume:
     """Tests PPOTrainerRayResume."""
+
     def test_resumed_is_true(self, resumed):
         assert resumed._iteration > 0
 

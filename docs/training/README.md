@@ -11,6 +11,8 @@ training:
   checkpoint_interval: 20
   require_gpu: true
   num_env_runners: 8
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
   trajectory_every: 10
   best_trajectory: true
   video_every: 0
@@ -28,6 +30,8 @@ training:
 | `require_gpu` | `false` | Fails startup when a GPU is required but unavailable. |
 | `num_gpus` | automatic | Explicit RLlib GPU allocation override. |
 | `num_env_runners` | `0` | Parallel training rollout workers; zero samples in the local trainer process. |
+| `num_envs_per_env_runner` | `1` | Synchronously vectorized environments hosted by each rollout worker. Values above one batch policy inference without creating more Ray actors. |
+| `num_gpus_per_env_runner` | `0.0` | GPU allocation per rollout worker. Keep zero for CPU rollout inference so learner updates retain the configured training GPU. |
 | `trajectory_every` | `10` | Iteration interval for replayable evaluation trajectories. |
 | `best_trajectory` | `true` | Retains the best evaluation trajectory observed so far. |
 | `video_every` | `10` | Iteration interval for rendered video artifacts. |
@@ -47,6 +51,22 @@ model_config:
 ```
 
 Algorithm-specific models validate additional fields such as PPO clipping, minibatch, and SGD settings. See [goal-finding evaluation](evaluation.md) for deterministic evaluation behavior and reported metrics.
+
+Vectorized rollouts improve inference batching when a worker's single environment
+does not provide enough work. For example, two workers with four environments
+each collect from eight environments while using only two Ray actors:
+
+```yaml
+training:
+  num_env_runners: 2
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
+```
+
+`num_gpus` and `num_gpus_per_env_runner` are independent. The former reserves
+GPU capacity for the learner; the latter is normally left at zero because voxel
+environment stepping and rollout policy inference run on CPU. A nonzero rollout
+GPU value also increases each Tune trial's placement-group GPU requirement.
 ## Early stopping
 
 Standard training can stop before its hard `iterations` limit when deterministic

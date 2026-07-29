@@ -783,6 +783,7 @@ def tensorboard(
     """Launch TensorBoard for an experiment, run, or sweep."""
     import shutil
     import subprocess
+    import sys
     from theseo_anysearch.cli.registry import resolve_ref
 
     if ref is None:
@@ -830,7 +831,16 @@ def tensorboard(
 
     tb_exe = shutil.which("tensorboard")
     if tb_exe is None:
-        typer.echo("Error: tensorboard not found on PATH. Install it with: pip install tensorboard", err=True)
+        executable_name = "tensorboard.exe" if sys.platform == "win32" else "tensorboard"
+        environment_executable = Path(sys.executable).parent / executable_name
+        if environment_executable.is_file():
+            tb_exe = str(environment_executable)
+    if tb_exe is None:
+        typer.echo(
+            "Error: tensorboard is not installed in the active environment. "
+            "Reinstall the project to restore declared dependencies.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     try:

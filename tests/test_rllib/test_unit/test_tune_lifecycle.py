@@ -148,6 +148,8 @@ def test_resource_report_exposes_compute_and_architecture_cost() -> None:
         model_cfg=SimpleNamespace(hidden_sizes=[128, 128, 128, 128]),
         training=SimpleNamespace(
             num_env_runners=2,
+            num_envs_per_env_runner=4,
+            num_gpus_per_env_runner=0.0,
             num_gpus=0.5,
         ),
     )
@@ -159,6 +161,8 @@ def test_resource_report_exposes_compute_and_architecture_cost() -> None:
     assert metrics["resource/model_parameter_count"] == 16
     assert metrics["resource/hidden_layer_count"] == 4
     assert metrics["resource/hidden_layer_width"] == 128
+    assert metrics["resource/num_envs_per_env_runner"] == 4
+    assert metrics["resource/num_gpus_per_env_runner"] == 0.0
 
 
 def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
