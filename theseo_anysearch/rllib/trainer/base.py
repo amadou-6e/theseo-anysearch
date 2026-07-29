@@ -154,6 +154,9 @@ class _TensorBoardRunWriter:
             result.elapsed_s,
             result.iteration,
         )
+        for tag, value in result.standard_metrics().items():
+            if tag.startswith("curriculum/"):
+                self._writer.add_scalar(tag, value, result.iteration)
         self._writer.flush()
 
     def log_scalars(self, iteration: int, scalars: Mapping[str, float]) -> None:
@@ -272,7 +275,10 @@ class TrainResult(BaseModel):
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
-            if key.startswith("evaluation_") and isinstance(value, (int, float))
+            if (
+                key.startswith("evaluation_") or key.startswith("curriculum/")
+            )
+            and isinstance(value, (int, float))
         })
         return metrics
 
@@ -487,6 +493,10 @@ class Trainer(ABC):
                     rllib_result,
                     elapsed,
                 )
+                if self._waypoint_curriculum is not None:
+                    result.extra["curriculum/stage"] = float(
+                        self._waypoint_curriculum.state.stage
+                    )
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
@@ -599,7 +609,12 @@ class Trainer(ABC):
                             },
                         }
                     )
-                    curriculum_metrics: dict[str, float] = {}
+                    curriculum_metrics: dict[str, float] = {
+                        key: value
+                        for key, value in result.extra.items()
+                        if key.startswith("curriculum/")
+                        and isinstance(value, (int, float))
+                    }
                     if self._waypoint_curriculum is not None:
                         retention = evaluation.waypoint_curriculum
                         retention_due = (
@@ -672,6 +687,7 @@ class Trainer(ABC):
                                 "curriculum/retention_success_rate": overall_rate,
                                 "curriculum/retention_pass": float(retention_pass),
                             }
+                            result.extra.update(curriculum_metrics)
                             _store.write_json(
                                 f"evaluation/curriculum_iter_{self._iteration:06d}.json",
                                 {"stages": stage_results, "passed": retention_pass},
@@ -686,7 +702,6 @@ class Trainer(ABC):
 
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
-                        **curriculum_metrics,
                     }
                     tb_writer.log_scalars(self._iteration, scalar_metrics)
                     _store.write_json(

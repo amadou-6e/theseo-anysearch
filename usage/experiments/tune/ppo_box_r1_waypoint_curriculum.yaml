@@ -50,8 +50,9 @@ training:
   iterations: 100
   checkpoint_interval: 10
   require_gpu: true
-  num_gpus: 1.0
-  num_env_runners: 8
+  num_env_runners: 2
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
   trajectory_every: 10
   best_trajectory: true
   video_every: 0
@@ -60,7 +61,7 @@ evaluation:
   episodes: 10
   seed: 142
   min_success_rate: 0.8
-  num_env_runners: 4
+  num_env_runners: 0
   waypoint_curriculum:
     enabled: true
     frequency: 1
@@ -74,12 +75,12 @@ evaluation:
 
 algorithm_config:
   lr: 0.00047613798737828277
-  train_batch_size: 1024
+  train_batch_size: 4096
   gamma: 0.9784356671807992
   clip_param: 0.14250875942490643
   kl_coeff: 0.18279103186070939
-  num_sgd_iter: 20
-  minibatch_size: 128
+  num_sgd_iter: 10
+  minibatch_size: 256
   lambda_: 0.9423692880503198
 
 model_config:
@@ -91,7 +92,7 @@ tune_config:
   num_samples: 10
   metric: evaluation_success_rate
   mode: max
-  max_concurrent: 1
+  max_concurrent: 8
   checkpoint_frequency: 1
   asha_config:
     max_t: 100
@@ -99,11 +100,11 @@ tune_config:
     reduction_factor: 2
   search_space:
     algorithm_config:
-      lr: {loguniform: [2.0e-4, 8.0e-4]}
+      lr: {loguniform: [5.0e-5, 5.0e-4]}
       gamma: {uniform: [0.95, 0.99]}
       clip_param: {uniform: [0.1, 0.25]}
       kl_coeff: {uniform: [0.1, 0.3]}
-      num_sgd_iter: {choice: [10, 20, 30]}
+      num_sgd_iter: {choice: [5, 10]}
 
 mlflow:
   tracking_uri: sqlite:///runtime/experiments/mlflow.db

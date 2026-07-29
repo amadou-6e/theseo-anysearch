@@ -17,6 +17,23 @@ minimum/mean/maximum, final and minimum Euclidean goal distance,
 terminated/truncated counts, shaped return, and reconstructed unshaped task
 return.
 
+When waypoint curriculum training is enabled, the same map automatically
+includes `curriculum/stage` on every training iteration. When curriculum
+retention evaluation is enabled and due, it also includes the remaining
+evaluation metrics:
+
+| Metric | Meaning |
+|---|---|
+| `curriculum/stage` | Current zero-based curriculum stage after evaluation and any promotion. |
+| `curriculum/transition` | `1` when this evaluation promoted the curriculum, otherwise `0`. |
+| `curriculum/retention_success_rate` | Goal-finish rate across all retained-stage evaluation episodes. |
+| `curriculum/retention_pass` | `1` when the overall and per-stage retention thresholds pass. |
+
+These metrics require no Tune `metric` configuration. Retention metrics are
+reported on iterations selected by `evaluation.waypoint_curriculum.frequency`.
+The stage value reflects a promotion made during that iteration and remains
+available on subsequent iterations.
+
 ## Fields
 
 | Field | Default | Purpose |
