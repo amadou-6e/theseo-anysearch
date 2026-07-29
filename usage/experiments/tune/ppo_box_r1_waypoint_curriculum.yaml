@@ -50,7 +50,7 @@ training:
   iterations: 100
   checkpoint_interval: 10
   require_gpu: true
-  num_env_runners: 2
+  num_env_runners: 6
   num_envs_per_env_runner: 4
   num_gpus_per_env_runner: 0.0
   trajectory_every: 10
@@ -92,7 +92,7 @@ tune_config:
   num_samples: 10
   metric: evaluation_success_rate
   mode: max
-  max_concurrent: 8
+  max_concurrent: 4
   checkpoint_frequency: 1
   asha_config:
     max_t: 100

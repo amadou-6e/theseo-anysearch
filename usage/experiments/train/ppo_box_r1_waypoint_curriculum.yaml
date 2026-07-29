@@ -49,7 +49,8 @@ training:
   iterations: 80
   checkpoint_interval: 20
   require_gpu: true
-  num_env_runners: 8
+  num_env_runners: 6
+  num_envs_per_env_runner: 4
   trajectory_every: 10
   best_trajectory: true
   video_every: 0
