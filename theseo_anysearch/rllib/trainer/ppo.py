@@ -18,6 +18,15 @@ def _build_rllib_ppo(config: Settings) -> Any:
     return PPOTrainer.build_algorithm_from_settings(config)
 
 
+def _configure_rllib_env_runners(rllib_config: Any, training: Any) -> Any:
+    """Apply rollout parallelism, vectorization, and inference resources."""
+    return rllib_config.env_runners(
+        num_env_runners=training.num_env_runners,
+        num_envs_per_env_runner=training.num_envs_per_env_runner,
+        num_gpus_per_env_runner=training.num_gpus_per_env_runner,
+    )
+
+
 def _log_stage(message: str) -> None:
     """Print a timestamped PPO startup message for foreground debugging."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -208,7 +217,8 @@ class PPOTrainer(Trainer):
         _log_stage(
             "Constructing RLlib PPOConfig "
             f"train_batch_size={algo_cfg.train_batch_size} "
-            f"num_env_runners={config.training.num_env_runners}"
+            f"num_env_runners={config.training.num_env_runners} "
+            f"num_envs_per_env_runner={config.training.num_envs_per_env_runner}"
         )
         _append_stage_log(
             str(config.training.output_dir),
@@ -216,7 +226,8 @@ class PPOTrainer(Trainer):
             (
                 "Constructing RLlib PPOConfig "
                 f"train_batch_size={algo_cfg.train_batch_size} "
-                f"num_env_runners={config.training.num_env_runners}"
+                f"num_env_runners={config.training.num_env_runners} "
+                f"num_envs_per_env_runner={config.training.num_envs_per_env_runner}"
             ),
         )
         rllib_config = (RllibPPOConfig().api_stack(
@@ -235,7 +246,9 @@ class PPOTrainer(Trainer):
             model=rllib_model,
         ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus)).framework("torch"))
 
-        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = _configure_rllib_env_runners(
+            rllib_config, config.training
+        )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,

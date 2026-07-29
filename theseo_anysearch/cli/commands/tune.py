@@ -249,7 +249,7 @@ _KNOWN_TUNE_PARAMS: frozenset[str] = _KNOWN_PPO_PARAMS | _KNOWN_MODEL_PARAMS
 def _validate_tune_config(
     base_config: dict[str, Any],
     search_space: dict[str, Any],
-    num_gpus: int,
+    num_gpus: float,
 ) -> list[str]:
     """Return a list of human-readable warnings about the combined tune config.
 
@@ -446,7 +446,7 @@ def _real_trainable(
     output_dir: str,
     metric: str,
     mode: str = "max",
-    num_gpus: int = 0,
+    num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
@@ -516,6 +516,7 @@ def _real_trainable(
             output_dir=trial_dir,
             video_every=max_iterations,
             require_gpu=num_gpus > 0,
+            num_gpus=num_gpus,
         ),
         anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
         algorithm_config=PPOConfig(
@@ -634,7 +635,7 @@ def _make_trainable(
     output_dir: Path,
     metric: str,
     mode: str = "max",
-    num_gpus: int = 0,
+    num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
@@ -837,7 +838,7 @@ def tune(
     # was not explicitly set (i.e. still at its default value).
     base_config: dict[str, Any] = {}
     env_base: dict[str, Any] = {}
-    num_gpus: int = 0
+    num_gpus: float = 0
     if config is not None:
         if not config.exists():
             _print_error("tune config file not found", path=str(config))
@@ -870,7 +871,7 @@ def tune(
         # GPU count from training.num_gpus in YAML; fall back to auto-detect.
         training_cfg = raw_cfg.get("training", {})
         if "num_gpus" in training_cfg:
-            num_gpus = int(training_cfg["num_gpus"])
+            num_gpus = float(training_cfg["num_gpus"])
         else:
             import torch
             num_gpus = min(1, torch.cuda.device_count())

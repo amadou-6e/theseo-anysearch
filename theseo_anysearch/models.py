@@ -322,6 +322,10 @@ class TrainingConfig(BaseModel):
         Explicit RLlib GPU allocation override.
     num_env_runners : int
         Number of rollout workers or env runners.
+    num_envs_per_env_runner : int
+        Number of vectorized environments hosted by each rollout worker.
+    num_gpus_per_env_runner : float
+        GPU allocation for each rollout worker. Zero keeps rollout inference on CPU.
     trajectory_every : int
         Iteration interval for periodic trajectory snapshots.
     best_trajectory : bool
@@ -341,6 +345,8 @@ class TrainingConfig(BaseModel):
     require_gpu: bool = False
     num_gpus: float | None = None  # override _detect_num_gpus (e.g. 0.5 for two concurrent Tune trials)
     num_env_runners: int = 0       # CPU rollout workers (0 = inline; >0 = parallel actors)
+    num_envs_per_env_runner: int = Field(default=1, ge=1)
+    num_gpus_per_env_runner: float = Field(default=0.0, ge=0.0)
     trajectory_every: int = 10
     best_trajectory: bool = True
     output_dir: Path = Path("runtime/")

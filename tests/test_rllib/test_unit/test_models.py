@@ -57,10 +57,36 @@ class TestTrainingConfig:
         assert cfg.checkpoint_interval == 10
         assert cfg.video_every == 10
         assert cfg.require_gpu is False
+        assert cfg.num_envs_per_env_runner == 1
+        assert cfg.num_gpus_per_env_runner == 0.0
 
     def test_require_gpu_can_be_set(self):
         cfg = TrainingConfig(algorithm="ppo", require_gpu=True)
         assert cfg.require_gpu is True
+
+    def test_vectorized_rollout_settings_can_be_set(self):
+        cfg = TrainingConfig(
+            algorithm="ppo",
+            num_envs_per_env_runner=4,
+            num_gpus_per_env_runner=0.25,
+        )
+        assert cfg.num_envs_per_env_runner == 4
+        assert cfg.num_gpus_per_env_runner == 0.25
+
+    @pytest.mark.parametrize("num_envs", [0, -1])
+    def test_rejects_non_positive_envs_per_runner(self, num_envs):
+        with pytest.raises(ValidationError):
+            TrainingConfig(
+                algorithm="ppo",
+                num_envs_per_env_runner=num_envs,
+            )
+
+    def test_rejects_negative_rollout_gpu_allocation(self):
+        with pytest.raises(ValidationError):
+            TrainingConfig(
+                algorithm="ppo",
+                num_gpus_per_env_runner=-0.1,
+            )
 
     def test_requires_algorithm(self):
         with pytest.raises(ValidationError):

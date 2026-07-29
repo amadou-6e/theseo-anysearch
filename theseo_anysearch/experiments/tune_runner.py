@@ -80,6 +80,12 @@ def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
         "resource/hidden_layer_count": float(len(hidden_sizes)),
         "resource/hidden_layer_width": float(max(hidden_sizes, default=0)),
         "resource/num_env_runners": float(settings.training.num_env_runners),
+        "resource/num_envs_per_env_runner": float(
+            getattr(settings.training, "num_envs_per_env_runner", 1)
+        ),
+        "resource/num_gpus_per_env_runner": float(
+            getattr(settings.training, "num_gpus_per_env_runner", 0.0)
+        ),
         "resource/evaluation_num_env_runners": float(
             getattr(getattr(settings, "evaluation", None), "num_env_runners", 0)
         ),
@@ -464,7 +470,11 @@ def _trial_dirname(trial: Any) -> str:
     return f"trial_{trial.trial_id}"
 
 
-def _tune_trial_num_gpus(require_gpu: bool, max_concurrent: int) -> float:
+def _tune_trial_num_gpus(
+    require_gpu: bool,
+    max_concurrent: int,
+    configured_num_gpus: float | None = None,
+) -> float:
     """Return the explicit RLlib GPU allocation to embed in tune trial settings.
 
     Parameters
@@ -473,6 +483,9 @@ def _tune_trial_num_gpus(require_gpu: bool, max_concurrent: int) -> float:
         Whether the sweep requires CUDA-backed training.
     max_concurrent : int
         Maximum number of concurrent Ray Tune trials.
+    configured_num_gpus : float or None
+        Explicit GPU allocation per trial. When omitted, one GPU is split
+        evenly across concurrent trials.
 
     Returns
     -------
@@ -482,6 +495,8 @@ def _tune_trial_num_gpus(require_gpu: bool, max_concurrent: int) -> float:
     """
     if not require_gpu:
         return 0.0
+    if configured_num_gpus is not None:
+        return configured_num_gpus
     if max_concurrent > 1:
         return 1.0 / max_concurrent
     return 1.0
@@ -810,7 +825,11 @@ class TuneRunner:
         # e.g. max_concurrent=2 → 0.5 GPU per trial so both can run at once  #
         # ------------------------------------------------------------------ #
         require_gpu = self._config.training.require_gpu
-        gpu_fraction = _tune_trial_num_gpus(require_gpu, tc.max_concurrent)
+        gpu_fraction = _tune_trial_num_gpus(
+            require_gpu,
+            tc.max_concurrent,
+            self._config.training.num_gpus,
+        )
 
         # ------------------------------------------------------------------ #
         # Serialise ExperimentConfig for workers                              #
@@ -988,7 +1007,17 @@ class TuneRunner:
         driver_bundle: dict[str, float] = {"CPU": 1.0}
         if gpu_fraction > 0:
             driver_bundle["GPU"] = gpu_fraction
-        worker_bundles = [{"CPU": 1.0}] * num_env_runners
+        rollout_worker_bundle: dict[str, float] = {"CPU": 1.0}
+        rollout_gpu = self._config.training.num_gpus_per_env_runner
+        if rollout_gpu > 0:
+            rollout_worker_bundle["GPU"] = rollout_gpu
+        worker_bundles = [
+            dict(rollout_worker_bundle)
+            for _ in range(self._config.training.num_env_runners)
+        ] + [
+            {"CPU": 1.0}
+            for _ in range(self._config.evaluation.num_env_runners)
+        ]
 
         trainable_with_resources = ray_tune.with_resources(
             _experiment_trainable,
