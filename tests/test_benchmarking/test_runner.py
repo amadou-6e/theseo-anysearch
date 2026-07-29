@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -16,6 +16,7 @@ from theseo_anysearch.benchmarking.models import (
 from theseo_anysearch.benchmarking.runner import (
     ResourceBenchmarkRunner,
     _TeeTextIO,
+    _capture_stderr_fd,
     _effective_worker_limit,
     _sampled_steps,
 )
@@ -153,6 +154,54 @@ def test_debug_tee_writes_to_foreground_and_artifact() -> None:
 
     assert foreground.getvalue() == "Ray startup detail\n"
     assert artifact.getvalue() == "Ray startup detail\n"
+
+
+def test_stderr_capture_redirects_native_file_descriptor_output(
+    tmp_path: Path, ) -> None:
+    import os
+    import sys
+
+    log_path = tmp_path / "benchmark.stderr.log"
+    with log_path.open("w", encoding="utf-8") as artifact:
+        with _capture_stderr_fd(artifact, sys.stderr, tee=False):
+            os.write(sys.stderr.fileno(), b"native Ray diagnostic\n")
+
+    assert "native Ray diagnostic" in log_path.read_text(encoding="utf-8")
+
+
+def test_debug_stderr_capture_tees_native_output(tmp_path: Path) -> None:
+    import os
+
+    foreground_path = tmp_path / "foreground.log"
+    artifact_path = tmp_path / "benchmark.stderr.log"
+    with foreground_path.open("w", encoding="utf-8") as foreground:
+        with artifact_path.open("w", encoding="utf-8") as artifact:
+            with _capture_stderr_fd(artifact, foreground, tee=True):
+                os.write(foreground.fileno(), b"native debug diagnostic\n")
+
+    assert "native debug diagnostic" in foreground_path.read_text(
+        encoding="utf-8")
+    assert "native debug diagnostic" in artifact_path.read_text(
+        encoding="utf-8")
+
+
+def test_stderr_capture_keeps_python_and_native_output_valid(
+    tmp_path: Path, ) -> None:
+    import os
+    import sys
+
+    foreground_path = tmp_path / "foreground.log"
+    artifact_path = tmp_path / "benchmark.stderr.log"
+    with foreground_path.open("w", encoding="utf-8") as foreground:
+        with artifact_path.open("w", encoding="utf-8") as artifact:
+            with redirect_stderr(artifact):
+                with _capture_stderr_fd(artifact, foreground, tee=False):
+                    print("Python Ray diagnostic", file=sys.stderr)
+                    os.write(foreground.fileno(), b"native Ray diagnostic\n")
+
+    diagnostics = artifact_path.read_text(encoding="utf-8")
+    assert "Python Ray diagnostic" in diagnostics
+    assert "native Ray diagnostic" in diagnostics
 
 
 def test_rejects_algorithm_without_vector_rollout_controls() -> None:

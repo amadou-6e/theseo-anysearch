@@ -12,10 +12,10 @@
       --border: #343840;
       --text: #e8e8e8;
       --muted: #9ba3af;
-      --cyan: #5fd7ff;
-      --green: #73daca;
-      --yellow: #e0af68;
-      --blue: #7aa2f7;
+      --cyan: #00afff;
+      --green: #00d787;
+      --yellow: #d7af00;
+      --blue: #5f87ff;
     }
 
     * { box-sizing: border-box; }
@@ -60,11 +60,11 @@
     .window-controls { display: flex; gap: 18px; color: #9da4af; }
 
     .terminal {
-      min-height: 620px;
-      padding: 28px 30px 32px;
+      min-height: 690px;
+      padding: 26px 30px 30px;
       color: var(--text);
-      font-size: 13px;
-      line-height: 1.62;
+      font-size: 14px;
+      line-height: 1.5;
       white-space: nowrap;
     }
 
@@ -75,14 +75,43 @@
     .cyan { color: var(--cyan); }
     .yellow { color: var(--yellow); }
     .green { color: var(--green); }
-    .spacer { height: 18px; }
-    .command, .report, .completion > div { white-space: normal; }
+    .bold { color: #fff; font-weight: 700; }
+    .spacer { height: 16px; }
+    .command, .notice { white-space: normal; }
+
+    .panel {
+      position: relative;
+      margin: 23px 0 20px;
+      padding: 17px 20px 15px;
+      border: 1px solid #7b8089;
+      border-radius: 3px;
+    }
+
+    .panel-title {
+      position: absolute;
+      top: -12px;
+      left: 11px;
+      padding: 0 7px;
+      color: #fff;
+      background: var(--terminal);
+      font-weight: 700;
+    }
+
+    .table-row {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      min-height: 22px;
+      white-space: normal;
+    }
+
+    .table-label { color: #7f8792; }
 
     .progress-row {
       display: grid;
-      grid-template-columns: 18px 165px 280px 50px minmax(220px, 1fr) 58px;
+      grid-template-columns: 18px 190px 285px 55px minmax(230px, 1fr) 62px;
       align-items: center;
       column-gap: 8px;
+      min-height: 26px;
     }
 
     .bar {
@@ -102,25 +131,8 @@
     .waiting .bar { border-color: #2c3037; background: #15171b; }
     .waiting .spinner { color: #666d78; }
 
-    .report {
-      margin-top: 18px;
-      padding: 10px 12px;
-      border-left: 3px solid var(--blue);
-      color: #cbd3df;
-      background: rgba(122,162,247,.08);
-    }
-
-    .completion {
-      margin-top: 30px;
-      padding-top: 22px;
-      border-top: 1px solid #2a2e35;
-    }
-
-    .label {
-      display: inline-block;
-      min-width: 124px;
-      color: var(--muted);
-    }
+    .notice { margin: 10px 0 4px 26px; color: var(--muted); }
+    .divider { height: 1px; margin: 18px 0; background: #24272d; }
   </style>
 </head>
 <body>
@@ -133,40 +145,50 @@
       <div><span class="prompt">(.venv)</span> <span class="path">C:\Users\acisse\Documents\CodeWorkspace\theseo-anysearch&gt;</span></div>
       <div class="command">anysearch benchmark resources usage/experiments/train/ppo_box_r1_waypoint_curriculum.yaml --max-envs-per-worker 16 --max-workers 20 --open</div>
 
-      <div class="spacer"></div>
-      <div><span class="label">Artifacts</span><span class="path">runtime\train\box_r1_waypoint_curriculum\benchmarks\20260729-153000</span></div>
-      <div><span class="label">Stopping rules</span><span class="muted">3 declines &gt; 2% · GPU target 95% · budget 30 min</span></div>
-      <div><span class="label">Measurements</span><span class="muted">1 warmup · 3 measured iterations · 3 repeats</span></div>
+      <section class="panel">
+        <div class="panel-title">Starting resource benchmark</div>
+        <div class="table-row"><span class="table-label">experiment</span><span>ppo-box-r1-waypoint-curriculum</span></div>
+        <div class="table-row"><span class="table-label">algorithm</span><span>ppo</span></div>
+        <div class="table-row"><span class="table-label">environment limit</span><span>16 per rollout worker</span></div>
+        <div class="table-row"><span class="table-label">worker limit</span><span>20 rollout workers</span></div>
+        <div class="table-row"><span class="table-label">stopping rules</span><span>3 declines beyond 2% · GPU target 95% · 30 minute budget</span></div>
+        <div class="table-row"><span class="table-label">measurement</span><span>1 warmup · 3 measured iterations · 3 repeats</span></div>
+        <div class="table-row"><span class="table-label">output</span><span class="path">runtime\train\box_r1_waypoint_curriculum\benchmarks\20260729-153000</span></div>
+      </section>
 
-      <div class="spacer"></div>
       <div class="progress-row">
-        <span class="spinner cyan">⠹</span>
-        <span>Environments / worker</span>
+        <span class="spinner cyan">╱</span>
+        <span class="cyan">Environments per worker</span>
         <span class="bar"><span class="fill" style="width: 37.5%"></span></span>
         <span class="cyan">6 / 16</span>
-        <span>192.1 steps/s · GPU 5.9% · measuring tick 7</span>
+        <span>measuring tick 7 · 192.1 steps/s · GPU 5.9%</span>
         <span class="muted">08:42</span>
       </div>
       <div class="progress-row waiting">
-        <span class="spinner">○</span>
+        <span class="spinner"> </span>
         <span>Rollout workers</span>
         <span class="bar"><span class="fill"></span></span>
         <span>0 / 20</span>
-        <span>waiting for environment sweep</span>
+        <span>waiting</span>
         <span>--:--</span>
       </div>
 
-      <div class="report"><span class="green">Live report ready</span> · report.html updates after every completed tick and refreshes automatically</div>
+      <div class="notice"><span class="green">report ready</span>  report.html updates after every completed tick and refreshes automatically</div>
 
-      <div class="completion">
-        <div class="muted">On completion:</div>
-        <div><span class="green">✓ Benchmark complete</span> in 26m 18s</div>
-        <div><span class="label">Recommended</span><strong>6 workers × 4 environments</strong></div>
-        <div><span class="label">Throughput</span>484.7 steps/s · 4.25× baseline</div>
-        <div><span class="label">Report</span><span class="path">...\benchmarks\20260729-153000\report.html</span></div>
-        <div><span class="label">Data</span><span class="path">results.json · results.csv · recommended.yaml</span></div>
-        <div class="muted">Use --debug to stream PPO and Ray diagnostics. Captured diagnostics are preserved per candidate.</div>
-      </div>
+      <div class="divider"></div>
+
+      <section class="panel">
+        <div class="panel-title">Resource benchmark complete</div>
+        <div class="table-row"><span class="table-label">recommended</span><span class="bold">6 workers × 4 environments</span></div>
+        <div class="table-row"><span class="table-label">throughput</span><span>484.7 steps/s  <span class="green">4.25× baseline</span></span></div>
+        <div class="table-row"><span class="table-label">environment sweep</span><span>stopped after 3 throughput declines</span></div>
+        <div class="table-row"><span class="table-label">worker sweep</span><span>stopped at measured throughput plateau</span></div>
+        <div class="table-row"><span class="table-label">elapsed</span><span>26m 18s</span></div>
+        <div class="table-row"><span class="table-label">report</span><span class="path">...\benchmarks\20260729-153000\report.html</span></div>
+        <div class="table-row"><span class="table-label">diagnostics</span><span class="path">benchmark.stdout.log · benchmark.stderr.log</span></div>
+      </section>
+
+      <div class="muted">Use --debug to stream PPO and Ray diagnostics while retaining the same log files.</div>
     </section>
   </main>
 </body>

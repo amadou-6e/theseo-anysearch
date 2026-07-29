@@ -6,9 +6,10 @@ import logging
 import os
 import statistics
 import sys
+import threading
 import time
 from collections.abc import Callable
-from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from io import TextIOBase
 from pathlib import Path
@@ -60,6 +61,61 @@ class _TeeTextIO(TextIOBase):
 
     def isatty(self) -> bool:
         return bool(getattr(self._foreground, "isatty", lambda: False)())
+
+
+@contextmanager
+def _capture_stderr_fd(artifact: Any, foreground: Any, *, tee: bool):
+    """Capture Python, logging-handler, and native writes to stderr."""
+    try:
+        stderr_fd = foreground.fileno()
+        artifact_fd = artifact.fileno()
+    except (AttributeError, OSError):
+        from contextlib import redirect_stderr
+
+        stream = _TeeTextIO(foreground, artifact) if tee else artifact
+        with redirect_stderr(stream):
+            yield
+        return
+
+    foreground.flush()
+    artifact.flush()
+    saved_fd = os.dup(stderr_fd)
+    read_fd: int | None = None
+    reader: threading.Thread | None = None
+    try:
+        if tee:
+            read_fd, write_fd = os.pipe()
+
+            def copy_stderr() -> None:
+                try:
+                    while chunk := os.read(read_fd, 8192):
+                        os.write(saved_fd, chunk)
+                        os.write(artifact_fd, chunk)
+                except OSError:
+                    return
+
+            reader = threading.Thread(
+                target=copy_stderr,
+                name="anysearch-stderr-capture",
+                daemon=True,
+            )
+            reader.start()
+            os.dup2(write_fd, stderr_fd)
+            os.close(write_fd)
+        else:
+            os.dup2(artifact_fd, stderr_fd)
+        yield
+    finally:
+        foreground.flush()
+        os.dup2(saved_fd, stderr_fd)
+        if reader is not None:
+            reader.join(timeout=5.0)
+        if read_fd is not None:
+            os.close(read_fd)
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=1.0)
+        os.close(saved_fd)
+        artifact.flush()
 
 
 class ResourceBenchmarkRunner:
@@ -136,18 +192,35 @@ class ResourceBenchmarkRunner:
         self._output_dir.mkdir(parents=True, exist_ok=True)
         stdout_log = self._output_dir / "benchmark.stdout.log"
         stderr_log = self._output_dir / "benchmark.stderr.log"
-        self._foreground_stderr = sys.stderr
         output_stack = ExitStack()
         stdout_handle = output_stack.enter_context(
             stdout_log.open("w", encoding="utf-8", buffering=1))
         stderr_handle = output_stack.enter_context(
             stderr_log.open("w", encoding="utf-8", buffering=1))
+        native_stderr = sys.stderr
+        try:
+            self._foreground_stderr = output_stack.enter_context(
+                os.fdopen(
+                    os.dup(native_stderr.fileno()),
+                    "w",
+                    encoding=getattr(sys.stderr, "encoding", None) or "utf-8",
+                    errors="replace",
+                    buffering=1,
+                ))
+        except (AttributeError, OSError):
+            self._foreground_stderr = sys.stderr
         stdout_stream = (_TeeTextIO(sys.stdout, stdout_handle)
                          if self._debug else stdout_handle)
-        stderr_stream = (_TeeTextIO(sys.stderr, stderr_handle)
+        stderr_stream = (_TeeTextIO(self._foreground_stderr, stderr_handle)
                          if self._debug else stderr_handle)
         output_stack.enter_context(redirect_stdout(stdout_stream))
         output_stack.enter_context(redirect_stderr(stderr_stream))
+        output_stack.enter_context(
+            _capture_stderr_fd(
+                stderr_handle,
+                native_stderr,
+                tee=self._debug,
+            ))
         self._tracker = MLflowTracker(
             self._config.mlflow,
             f"benchmark/{self._config.experiment.name}",
@@ -345,9 +418,8 @@ class ResourceBenchmarkRunner:
         return summary
 
     def _candidate_completed(self, summary: CandidateSummary) -> None:
-        candidates = (self._environment_candidates
-                      if summary.phase == "environments"
-                      else self._worker_candidates)
+        candidates = (self._environment_candidates if summary.phase
+                      == "environments" else self._worker_candidates)
         candidates.append(summary)
         write_progress_report(
             environment_candidates=self._environment_candidates,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import sys
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -65,7 +65,8 @@ def resources(
     debug: bool = typer.Option(
         False,
         "--debug",
-        help="Show PPO and Ray startup diagnostics instead of quiet progress bars.",
+        help=
+        "Show PPO and Ray startup diagnostics instead of quiet progress bars.",
     ),
     open_report: bool = typer.Option(
         False,
@@ -93,9 +94,8 @@ def resources(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     artifact_dir = output_dir or (experiment.run_output_dir / "benchmarks" /
                                   timestamp)
-    typer.echo(f"Benchmark artifacts: {artifact_dir}")
-
     from rich.console import Console
+    from rich.panel import Panel
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -104,10 +104,38 @@ def resources(
         TextColumn,
         TimeElapsedColumn,
     )
+    from rich.table import Table
 
-    console = Console()
+    console = Console(file=sys.stdout)
+    starting = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+    starting.add_column(style="dim", min_width=20)
+    starting.add_column()
+    starting.add_row("experiment", experiment.experiment.name)
+    starting.add_row("algorithm", experiment.training.algorithm)
+    starting.add_row("environment limit",
+                     f"{max_envs_per_worker} per rollout worker")
+    starting.add_row("worker limit", f"{max_workers} rollout workers")
+    starting.add_row(
+        "stopping rules",
+        f"{decline_patience} declines beyond {decline_tolerance:.0%} · "
+        f"GPU target {max_gpu_utilization:g}% · "
+        f"{max_duration_minutes:g} minute budget",
+    )
+    starting.add_row(
+        "measurement",
+        f"{warmup_iterations} warmup · {measure_iterations} measured iterations · "
+        f"{repeats} repeats",
+    )
+    starting.add_row("output", str(artifact_dir))
+    console.print(
+        Panel(
+            starting,
+            title="[bold]Starting resource benchmark[/bold]",
+            title_align="left",
+        ))
+
     progress = Progress(
-        SpinnerColumn(),
+        SpinnerColumn("line"),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
@@ -118,7 +146,7 @@ def resources(
     environment_task = progress.add_task(
         "Environments per worker",
         total=max_envs_per_worker,
-        status="waiting",
+        status="initializing Ray",
     )
     worker_task = progress.add_task(
         "Rollout workers",
@@ -185,16 +213,36 @@ def resources(
         raise typer.Exit(130)
 
     recommendation = result.recommendation
-    typer.echo("Recommended: "
-               f"{recommendation.num_env_runners} workers x "
-               f"{recommendation.num_envs_per_env_runner} environments "
-               f"({recommendation.steps_per_second:.1f} steps/s, "
-               f"{recommendation.speedup:.2f}x baseline)")
-    typer.echo(
-        json.dumps({
-            key: str(path)
-            for key, path in artifacts.items()
-        },
-                   indent=2))
+    complete = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+    complete.add_column(style="dim", min_width=20)
+    complete.add_column()
+    complete.add_row(
+        "recommended",
+        f"[bold]{recommendation.num_env_runners} workers × "
+        f"{recommendation.num_envs_per_env_runner} environments[/bold]",
+    )
+    complete.add_row(
+        "throughput",
+        f"{recommendation.steps_per_second:.1f} steps/s · "
+        f"[green]{recommendation.speedup:.2f}× baseline[/green]",
+    )
+    complete.add_row("environment sweep", result.environment_sweep.stop_reason)
+    complete.add_row("worker sweep", result.worker_sweep.stop_reason)
+    complete.add_row("elapsed", f"{result.elapsed_seconds / 60.0:.1f} minutes")
+    complete.add_row("report", str(artifacts["html"]))
+    complete.add_row(
+        "diagnostics",
+        f"{artifacts['stdout_log'].name} · {artifacts['stderr_log'].name}",
+    )
+    console.print(
+        Panel(
+            complete,
+            title="[bold]Resource benchmark complete[/bold]",
+            title_align="left",
+        ))
+    if not debug:
+        console.print(
+            "[dim]Use --debug to stream PPO and Ray diagnostics while retaining "
+            "the same log files.[/dim]")
     if open_report and not report_opened:
         webbrowser.open(artifacts["html"].resolve().as_uri())
