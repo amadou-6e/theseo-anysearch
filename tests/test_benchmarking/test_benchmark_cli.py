@@ -14,4 +14,5 @@ def test_resource_benchmark_help_is_discoverable() -> None:
     assert "--max-workers" in result.output
     assert "--max-gpu-utilization" in result.output
     assert "--max-duration-minutes" in result.output
+    assert "--debug" in result.output
     assert "--open" in result.output

@@ -8,6 +8,7 @@ from theseo_anysearch.benchmarking.models import CandidateSummary, SweepResult
 
 CandidateEvaluator = Callable[[int], CandidateSummary]
 StopRequested = Callable[[], bool]
+CandidateCompleted = Callable[[CandidateSummary], None]
 
 
 def gpu_saturation_sweep(
@@ -16,6 +17,7 @@ def gpu_saturation_sweep(
     maximum: int,
     max_gpu_utilization: float,
     stop_requested: StopRequested | None = None,
+    on_candidate_completed: CandidateCompleted | None = None,
 ) -> SweepResult:
     """Increase workers until measured GPU utilization reaches the target."""
     if maximum < 1:
@@ -45,6 +47,8 @@ def gpu_saturation_sweep(
                    if baseline_steps_per_second > 0.0 else 0.0)
         summary = summary.model_copy(update={"speedup": speedup})
         candidates.append(summary)
+        if on_candidate_completed is not None:
+            on_candidate_completed(summary)
 
         if best is None or summary.steps_per_second > best.steps_per_second:
             best = summary
@@ -74,6 +78,7 @@ def adaptive_sweep(
     decline_patience: int,
     decline_tolerance: float,
     stop_requested: StopRequested | None = None,
+    on_candidate_completed: CandidateCompleted | None = None,
 ) -> SweepResult:
     """Evaluate increasing candidates until throughput declines repeatedly.
 
@@ -109,6 +114,8 @@ def adaptive_sweep(
                    if baseline_steps_per_second > 0.0 else 0.0)
         summary = summary.model_copy(update={"speedup": speedup})
         candidates.append(summary)
+        if on_candidate_completed is not None:
+            on_candidate_completed(summary)
 
         if best is None or summary.steps_per_second > best.steps_per_second:
             best = summary

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import statistics
+import sys
 import time
+from collections.abc import Callable
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
+from io import TextIOBase
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +20,10 @@ from theseo_anysearch.benchmarking.models import (
     CandidateSummary,
     ResourceBenchmarkResult,
 )
-from theseo_anysearch.benchmarking.report import write_benchmark_artifacts
+from theseo_anysearch.benchmarking.report import (
+    write_benchmark_artifacts,
+    write_progress_report,
+)
 from theseo_anysearch.benchmarking.search import (
     adaptive_sweep,
     gpu_saturation_sweep,
@@ -26,6 +35,31 @@ from theseo_anysearch.benchmarking.telemetry import (
     rollout_worker_pids,
 )
 from theseo_anysearch.experiments.models import ExperimentConfig
+
+ProgressCallback = Callable[
+    [str, str, int, CandidateSummary | None],
+    None,
+]
+
+
+class _TeeTextIO(TextIOBase):
+    """Write diagnostics to both the foreground stream and an artifact file."""
+
+    def __init__(self, foreground: Any, artifact: Any) -> None:
+        self._foreground = foreground
+        self._artifact = artifact
+
+    def write(self, text: str) -> int:
+        self._foreground.write(text)
+        self._artifact.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self._foreground.flush()
+        self._artifact.flush()
+
+    def isatty(self) -> bool:
+        return bool(getattr(self._foreground, "isatty", lambda: False)())
 
 
 class ResourceBenchmarkRunner:
@@ -46,6 +80,8 @@ class ResourceBenchmarkRunner:
         max_workers: int = 20,
         max_gpu_utilization: float = 95.0,
         max_duration_minutes: float = 30.0,
+        debug: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         if config.training.algorithm.lower() != "ppo":
             raise ValueError(
@@ -76,6 +112,10 @@ class ResourceBenchmarkRunner:
         self._max_workers = _effective_worker_limit(max_workers)
         self._max_gpu_utilization = max_gpu_utilization
         self._max_duration_minutes = max_duration_minutes
+        self._debug = debug
+        self._progress_callback = progress_callback
+        self._environment_candidates: list[CandidateSummary] = []
+        self._worker_candidates: list[CandidateSummary] = []
         self._uses_gpu = bool(config.training.require_gpu
                               or (config.training.num_gpus is not None
                                   and config.training.num_gpus > 0))
@@ -94,6 +134,20 @@ class ResourceBenchmarkRunner:
         deadline = benchmark_started + self._max_duration_minutes * 60.0
         stop_requested = lambda: time.perf_counter() >= deadline
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log = self._output_dir / "benchmark.stdout.log"
+        stderr_log = self._output_dir / "benchmark.stderr.log"
+        self._foreground_stderr = sys.stderr
+        output_stack = ExitStack()
+        stdout_handle = output_stack.enter_context(
+            stdout_log.open("w", encoding="utf-8", buffering=1))
+        stderr_handle = output_stack.enter_context(
+            stderr_log.open("w", encoding="utf-8", buffering=1))
+        stdout_stream = (_TeeTextIO(sys.stdout, stdout_handle)
+                         if self._debug else stdout_handle)
+        stderr_stream = (_TeeTextIO(sys.stderr, stderr_handle)
+                         if self._debug else stderr_handle)
+        output_stack.enter_context(redirect_stdout(stdout_stream))
+        output_stack.enter_context(redirect_stderr(stderr_stream))
         self._tracker = MLflowTracker(
             self._config.mlflow,
             f"benchmark/{self._config.experiment.name}",
@@ -124,6 +178,14 @@ class ResourceBenchmarkRunner:
         })
 
         ray_was_initialized = False
+        previous_quiet = os.environ.get("ANYSEARCH_QUIET")
+        previous_quiet_log = os.environ.get("ANYSEARCH_QUIET_LOG")
+        ray_logger = logging.getLogger("ray")
+        previous_ray_level = ray_logger.level
+        if not self._debug:
+            os.environ["ANYSEARCH_QUIET"] = "1"
+            os.environ["ANYSEARCH_QUIET_LOG"] = str(stdout_log)
+            ray_logger.setLevel(logging.INFO)
         try:
             import ray
 
@@ -152,6 +214,7 @@ class ResourceBenchmarkRunner:
                 decline_patience=self._decline_patience,
                 decline_tolerance=self._decline_tolerance,
                 stop_requested=stop_requested,
+                on_candidate_completed=self._candidate_completed,
             )
             best_envs = environment_sweep.peak_candidate
             worker_sweep = gpu_saturation_sweep(
@@ -164,6 +227,7 @@ class ResourceBenchmarkRunner:
                 maximum=self._max_workers,
                 max_gpu_utilization=self._max_gpu_utilization,
                 stop_requested=stop_requested,
+                on_candidate_completed=self._candidate_completed,
             )
             final_steps = worker_sweep.peak_steps_per_second
             baseline_steps = environment_sweep.candidates[0].steps_per_second
@@ -187,6 +251,10 @@ class ResourceBenchmarkRunner:
                 ),
             )
             artifacts = write_benchmark_artifacts(result, self._output_dir)
+            stdout_handle.flush()
+            stderr_handle.flush()
+            artifacts["stdout_log"] = stdout_log
+            artifacts["stderr_log"] = stderr_log
             for artifact in artifacts.values():
                 self._tracker.log_artifact(artifact)
             self._tracker.set_tag("benchmark.stop.environments",
@@ -199,6 +267,15 @@ class ResourceBenchmarkRunner:
             self._tracker.end_run("FAILED")
             raise
         finally:
+            ray_logger.setLevel(previous_ray_level)
+            if previous_quiet is None:
+                os.environ.pop("ANYSEARCH_QUIET", None)
+            else:
+                os.environ["ANYSEARCH_QUIET"] = previous_quiet
+            if previous_quiet_log is None:
+                os.environ.pop("ANYSEARCH_QUIET_LOG", None)
+            else:
+                os.environ["ANYSEARCH_QUIET_LOG"] = previous_quiet_log
             if not ray_was_initialized:
                 try:
                     import ray
@@ -206,6 +283,7 @@ class ResourceBenchmarkRunner:
                     ray.shutdown()
                 except Exception:
                     pass
+            output_stack.close()
 
     def _evaluate_candidate(
         self,
@@ -215,6 +293,7 @@ class ResourceBenchmarkRunner:
         num_env_runners: int,
         num_envs_per_env_runner: int,
     ) -> CandidateSummary:
+        self._notify_progress("started", phase, candidate, None)
         samples = [
             self._measure_repeat(
                 phase=phase,
@@ -265,6 +344,36 @@ class ResourceBenchmarkRunner:
         )
         return summary
 
+    def _candidate_completed(self, summary: CandidateSummary) -> None:
+        candidates = (self._environment_candidates
+                      if summary.phase == "environments"
+                      else self._worker_candidates)
+        candidates.append(summary)
+        write_progress_report(
+            environment_candidates=self._environment_candidates,
+            worker_candidates=self._worker_candidates,
+            output_dir=self._output_dir,
+            max_envs_per_worker=self._max_envs_per_worker,
+            max_workers=self._max_workers,
+        )
+        self._notify_progress(
+            "completed",
+            summary.phase,
+            summary.candidate,
+            summary,
+        )
+
+    def _notify_progress(
+        self,
+        event: str,
+        phase: str,
+        candidate: int,
+        summary: CandidateSummary | None,
+    ) -> None:
+        callback = getattr(self, "_progress_callback", None)
+        if callback is not None:
+            callback(event, phase, candidate, summary)
+
     def _measure_repeat(
         self,
         *,
@@ -278,6 +387,11 @@ class ResourceBenchmarkRunner:
 
         candidate_dir = self._output_dir / "runs" / phase / str(
             candidate) / str(repeat)
+        print(
+            f"[{phase} candidate {candidate}, repeat {repeat}] "
+            f"workers={num_env_runners} environments={num_envs_per_env_runner}",
+            flush=True,
+        )
         training = self._config.training.model_copy(
             update={
                 "iterations": 1,
@@ -294,9 +408,10 @@ class ResourceBenchmarkRunner:
                 self._config.evaluation.model_copy(
                     update={"num_env_runners": 0}),
             })
-        trainer = Trainer.from_settings(settings)
-        algo = trainer._build_algorithm()
+        algo: Any | None = None
         try:
+            trainer = Trainer.from_settings(settings)
+            algo = trainer._build_algorithm()
             last_result: dict[str, Any] = {}
             for _ in range(self._warmup_iterations):
                 last_result = algo.train()
@@ -344,8 +459,22 @@ class ResourceBenchmarkRunner:
                 gpu_memory_mb=gpu_average("memory_mb"),
                 gpu_power_watts=gpu_average("power_watts"),
             )
+        except BaseException:
+            if not self._debug:
+                log_path = candidate_dir / "debug_stage.log"
+                print(
+                    f"Benchmark candidate failed; diagnostics: {log_path}",
+                    file=getattr(self, "_foreground_stderr", sys.stderr),
+                )
+                if log_path.is_file():
+                    print(
+                        log_path.read_text(encoding="utf-8"),
+                        file=getattr(self, "_foreground_stderr", sys.stderr),
+                    )
+            raise
         finally:
-            algo.stop()
+            if algo is not None:
+                algo.stop()
 
 
 def _sampled_steps(result: dict[str, Any]) -> int:

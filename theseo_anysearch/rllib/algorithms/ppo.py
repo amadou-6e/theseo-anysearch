@@ -52,6 +52,13 @@ def _evaluation_env_config(config: Settings, env_config: dict[str, Any]) -> dict
 
 def _log_stage(message: str) -> None:
     """Print a timestamped PPO startup message for foreground debugging."""
+    import os
+
+    if os.environ.get("ANYSEARCH_QUIET") == "1":
+        if os.environ.get("ANYSEARCH_QUIET_LOG"):
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[ppo] {ts} {message}", flush=True)
+        return
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[ppo] {ts} {message}", flush=True)
 
@@ -108,6 +115,14 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
         ignore_reinit_error=True,
         include_dashboard=False,
         log_to_driver=False,
+        logging_level=(
+            "ERROR"
+            if (
+                _os.environ.get("ANYSEARCH_QUIET") == "1"
+                and not _os.environ.get("ANYSEARCH_QUIET_LOG")
+            )
+            else "INFO"
+        ),
         _temp_dir=str(ray_root),
     )
     _log_stage("Ray runtime initialized")

@@ -62,6 +62,11 @@ def resources(
         min=0.01,
         help="Soft wall-clock budget; active candidates finish cleanly.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Show PPO and Ray startup diagnostics instead of quiet progress bars.",
+    ),
     open_report: bool = typer.Option(
         False,
         "--open",
@@ -89,7 +94,68 @@ def resources(
     artifact_dir = output_dir or (experiment.run_output_dir / "benchmarks" /
                                   timestamp)
     typer.echo(f"Benchmark artifacts: {artifact_dir}")
-    typer.echo("Phase 1: environments per rollout worker")
+
+    from rich.console import Console
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    console = Console()
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("{task.fields[status]}"),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    environment_task = progress.add_task(
+        "Environments per worker",
+        total=max_envs_per_worker,
+        status="waiting",
+    )
+    worker_task = progress.add_task(
+        "Rollout workers",
+        total=max_workers,
+        status="waiting",
+        visible=False,
+    )
+    report_opened = False
+
+    def update_progress(event, phase, candidate, summary) -> None:
+        nonlocal report_opened
+        if debug:
+            if event == "completed" and summary is not None:
+                typer.echo(
+                    f"{phase} {candidate}: {summary.steps_per_second:.1f} steps/s"
+                )
+            return
+        task = environment_task if phase == "environments" else worker_task
+        if event == "started":
+            progress.update(
+                task,
+                visible=True,
+                status=f"measuring tick {candidate}",
+            )
+            return
+        if summary is not None:
+            gpu = summary.gpu_utilization_percent
+            gpu_text = f", GPU {gpu:.1f}%" if gpu is not None else ""
+            progress.update(
+                task,
+                completed=candidate,
+                visible=True,
+                status=f"{summary.steps_per_second:.1f} steps/s{gpu_text}",
+            )
+        if open_report and not report_opened:
+            webbrowser.open((artifact_dir / "report.html").resolve().as_uri())
+            report_opened = True
 
     runner = ResourceBenchmarkRunner(
         experiment,
@@ -104,9 +170,15 @@ def resources(
         max_workers=max_workers,
         max_gpu_utilization=max_gpu_utilization,
         max_duration_minutes=max_duration_minutes,
+        debug=debug,
+        progress_callback=update_progress,
     )
     try:
-        result, artifacts = runner.run()
+        if debug:
+            result, artifacts = runner.run()
+        else:
+            with progress:
+                result, artifacts = runner.run()
     except KeyboardInterrupt:
         typer.echo("Benchmark interrupted; active Ray resources were stopped.",
                    err=True)
@@ -124,5 +196,5 @@ def resources(
             for key, path in artifacts.items()
         },
                    indent=2))
-    if open_report:
+    if open_report and not report_opened:
         webbrowser.open(artifacts["html"].resolve().as_uri())

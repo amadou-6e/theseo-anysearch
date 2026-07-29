@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from theseo_anysearch.benchmarking.models import BenchmarkSample
+from theseo_anysearch.benchmarking.models import (
+    BenchmarkSample,
+    CandidateSummary,
+)
 from theseo_anysearch.benchmarking.runner import (
     ResourceBenchmarkRunner,
+    _TeeTextIO,
     _effective_worker_limit,
     _sampled_steps,
 )
@@ -71,6 +77,82 @@ def test_cpu_only_config_disables_gpu_telemetry() -> None:
     )
 
     assert runner._uses_gpu is False
+
+
+def test_completed_candidate_refreshes_report_and_notifies_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = object.__new__(ResourceBenchmarkRunner)
+    runner._environment_candidates = []
+    runner._worker_candidates = []
+    runner._output_dir = tmp_path
+    runner._max_envs_per_worker = 16
+    runner._max_workers = 20
+    events = []
+    runner._progress_callback = lambda *event: events.append(event)
+    write_progress = MagicMock()
+    monkeypatch.setattr(
+        "theseo_anysearch.benchmarking.runner.write_progress_report",
+        write_progress,
+    )
+    summary = CandidateSummary(
+        phase="environments",
+        candidate=1,
+        num_env_runners=1,
+        num_envs_per_env_runner=1,
+        steps_per_second=100.0,
+        iteration_seconds=1.0,
+    )
+
+    runner._candidate_completed(summary)
+
+    assert runner._environment_candidates == [summary]
+    write_progress.assert_called_once()
+    assert events == [("completed", "environments", 1, summary)]
+
+
+def test_quiet_mode_suppresses_foreground_ppo_stage_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from theseo_anysearch.rllib.trainer.ppo import _log_stage
+
+    monkeypatch.setenv("ANYSEARCH_QUIET", "1")
+
+    _log_stage("hidden startup detail")
+
+    assert capsys.readouterr().out == ""
+
+
+def test_quiet_mode_writes_ppo_stage_output_to_redirected_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from theseo_anysearch.rllib.trainer.ppo import _log_stage
+
+    log_path = tmp_path / "benchmark.stdout.log"
+    monkeypatch.setenv("ANYSEARCH_QUIET", "1")
+    monkeypatch.setenv("ANYSEARCH_QUIET_LOG", str(log_path))
+
+    with log_path.open("w", encoding="utf-8") as handle:
+        with redirect_stdout(handle):
+            _log_stage("captured startup detail")
+
+    assert "[ppo]" in log_path.read_text(encoding="utf-8")
+    assert "captured startup detail" in log_path.read_text(encoding="utf-8")
+
+
+def test_debug_tee_writes_to_foreground_and_artifact() -> None:
+    foreground = StringIO()
+    artifact = StringIO()
+
+    stream = _TeeTextIO(foreground, artifact)
+    stream.write("Ray startup detail\n")
+    stream.flush()
+
+    assert foreground.getvalue() == "Ray startup detail\n"
+    assert artifact.getvalue() == "Ray startup detail\n"
 
 
 def test_rejects_algorithm_without_vector_rollout_controls() -> None:

@@ -34,8 +34,16 @@ anysearch benchmark resources CONFIG \
   --max-envs-per-worker 16 \
    --max-workers 20 \
    --max-gpu-utilization 95 \
-   --max-duration-minutes 30
+   --max-duration-minutes 30 \
+   --open
 ```
+
+By default, the CLI replaces PPO and Ray startup chatter with one progress bar
+per phase. Each completed tick reports throughput and average GPU utilization.
+The first completed candidate creates `report.html`; `--open` opens it at that
+point, and the page refreshes every five seconds as later candidates complete.
+Use `--debug` to stream the captured PPO and Ray diagnostics to the terminal as
+well as retaining them in the artifact directory.
 
 Always set finite maximums. Candidate algorithms and Ray actors are stopped
 after every repetition and Ray is shut down when the benchmark started it.
@@ -57,9 +65,17 @@ The command writes a timestamped directory below the experiment output path:
 | `results.json` | Machine metadata, raw samples, median candidate summaries, stop reasons, and recommendation. |
 | `results.csv` | One row per measured repetition for external analysis. |
 | `recommended.yaml` | Recommended rollout settings ready to merge into a training config. |
+| `benchmark.stdout.log` | Captured PPO stages and other standard output. |
+| `benchmark.stderr.log` | Captured Ray, warning, and error output. |
+
+The HTML report links directly to both diagnostic logs. Candidate-specific
+runtime logs remain under `runs/<phase>/<candidate>/<repeat>/`, including each
+repeat's `debug_stage.log` and Ray/RLlib runtime artifacts. If a candidate
+fails, the CLI prints the relevant candidate log path and its stage log before
+exiting.
 
 When MLflow is enabled in the experiment, candidate summaries are logged as
-metrics and all four report files are logged as artifacts. GPU telemetry is
+metrics and all six top-level report files are logged as artifacts. GPU telemetry is
 collected every 100 ms during measured iterations, reported as average
 utilization across that region, and degrades gracefully when `nvidia-smi` is
 unavailable.

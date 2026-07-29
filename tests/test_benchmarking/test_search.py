@@ -84,6 +84,22 @@ def test_hard_limit_stops_non_declining_search() -> None:
     assert result.stop_reason == "maximum candidate 3 reached"
 
 
+def test_reports_each_completed_environment_candidate() -> None:
+    completed: list[CandidateSummary] = []
+
+    adaptive_sweep(
+        phase="environments",
+        evaluate=_evaluator([100.0, 150.0]),
+        maximum=2,
+        decline_patience=2,
+        decline_tolerance=0.0,
+        on_candidate_completed=completed.append,
+    )
+
+    assert [item.candidate for item in completed] == [1, 2]
+    assert completed[-1].speedup == pytest.approx(1.5)
+
+
 def test_environment_sweep_stops_before_candidate_when_budget_expires(
 ) -> None:
     checks = iter([False, True])
@@ -127,6 +143,20 @@ def test_worker_sweep_uses_hard_limit_when_gpu_target_is_not_reached() -> None:
     assert result.peak_candidate == 2
     assert result.stop_reason == (
         "maximum candidate 2 reached before GPU utilization reached 95%")
+
+
+def test_reports_each_completed_worker_candidate() -> None:
+    completed: list[CandidateSummary] = []
+
+    gpu_saturation_sweep(
+        evaluate=_worker_evaluator([100.0, 180.0], [20.0, 40.0]),
+        maximum=2,
+        max_gpu_utilization=95.0,
+        on_candidate_completed=completed.append,
+    )
+
+    assert [item.candidate for item in completed] == [1, 2]
+    assert completed[-1].speedup == pytest.approx(1.8)
 
 
 def test_worker_sweep_stops_before_candidate_when_budget_expires() -> None:

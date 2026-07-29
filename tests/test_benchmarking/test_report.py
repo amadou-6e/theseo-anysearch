@@ -13,7 +13,10 @@ from theseo_anysearch.benchmarking.models import (
     ResourceBenchmarkResult,
     SweepResult,
 )
-from theseo_anysearch.benchmarking.report import write_benchmark_artifacts
+from theseo_anysearch.benchmarking.report import (
+    write_benchmark_artifacts,
+    write_progress_report,
+)
 
 
 def _candidate(phase: str, candidate: int, steps: float) -> CandidateSummary:
@@ -109,7 +112,32 @@ def test_writes_machine_readable_and_interactive_artifacts(
         encoding="utf-8")
     assert "Wall-clock budget: 12 minutes" in artifacts["html"].read_text(
         encoding="utf-8")
+    assert 'href="benchmark.stdout.log"' in artifacts["html"].read_text(
+        encoding="utf-8")
+    assert 'href="benchmark.stderr.log"' in artifacts["html"].read_text(
+        encoding="utf-8")
     with artifacts["csv"].open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) == 4
     assert rows[-1]["speedup"] == "2.5"
+
+
+def test_progress_report_exposes_completed_ticks_and_refreshes(
+        tmp_path: Path) -> None:
+    path = write_progress_report(
+        environment_candidates=[_candidate("environments", 1, 100.0)],
+        worker_candidates=[],
+        output_dir=tmp_path,
+        max_envs_per_worker=16,
+        max_workers=20,
+    )
+
+    document = path.read_text(encoding="utf-8")
+    assert 'http-equiv="refresh" content="5"' in document
+    assert ("Environment ticks: 1\\u002f16; worker ticks: 0\\u002f20"
+            in document)
+    assert "Waiting for the environment sweep to finish" in document
+    assert '"texttemplate":"%{text:.1f}%"' in document
+    assert 'href="benchmark.stdout.log"' in document
+    assert 'href="benchmark.stderr.log"' in document
+    assert not tmp_path.joinpath("report.progress.html").exists()

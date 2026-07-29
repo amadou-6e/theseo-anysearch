@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AnySearch resource benchmark CLI mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #16181d;
+      --terminal: #0c0d10;
+      --border: #343840;
+      --text: #e8e8e8;
+      --muted: #9ba3af;
+      --cyan: #5fd7ff;
+      --green: #73daca;
+      --yellow: #e0af68;
+      --blue: #7aa2f7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 40px;
+      background:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
+        var(--page);
+      background-size: 24px 24px;
+      font-family: "Cascadia Mono", Consolas, monospace;
+      letter-spacing: 0;
+    }
+
+    .frame {
+      width: min(1180px, 100%);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--terminal);
+      box-shadow: 0 24px 70px rgba(0,0,0,.42);
+    }
+
+    .titlebar {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px 0 18px;
+      color: #c8ccd4;
+      background: #202329;
+      border-bottom: 1px solid var(--border);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+
+    .window-controls { display: flex; gap: 18px; color: #9da4af; }
+
+    .terminal {
+      min-height: 620px;
+      padding: 28px 30px 32px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.62;
+      white-space: nowrap;
+    }
+
+    .prompt { color: var(--green); }
+    .path { color: var(--blue); }
+    .command { color: #fff; }
+    .muted { color: var(--muted); }
+    .cyan { color: var(--cyan); }
+    .yellow { color: var(--yellow); }
+    .green { color: var(--green); }
+    .spacer { height: 18px; }
+    .command, .report, .completion > div { white-space: normal; }
+
+    .progress-row {
+      display: grid;
+      grid-template-columns: 18px 165px 280px 50px minmax(220px, 1fr) 58px;
+      align-items: center;
+      column-gap: 8px;
+    }
+
+    .bar {
+      height: 12px;
+      border: 1px solid #3d424b;
+      background: #1d2026;
+      overflow: hidden;
+    }
+
+    .fill {
+      height: 100%;
+      background: var(--cyan);
+    }
+
+    .waiting .fill { width: 0; }
+    .waiting { color: #747c88; }
+    .waiting .bar { border-color: #2c3037; background: #15171b; }
+    .waiting .spinner { color: #666d78; }
+
+    .report {
+      margin-top: 18px;
+      padding: 10px 12px;
+      border-left: 3px solid var(--blue);
+      color: #cbd3df;
+      background: rgba(122,162,247,.08);
+    }
+
+    .completion {
+      margin-top: 30px;
+      padding-top: 22px;
+      border-top: 1px solid #2a2e35;
+    }
+
+    .label {
+      display: inline-block;
+      min-width: 124px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="frame" aria-label="Proposed AnySearch benchmark terminal output">
+    <header class="titlebar">
+      <span>Command Prompt - anysearch benchmark resources</span>
+      <span class="window-controls"><span>—</span><span>□</span><span>×</span></span>
+    </header>
+    <section class="terminal">
+      <div><span class="prompt">(.venv)</span> <span class="path">C:\Users\acisse\Documents\CodeWorkspace\theseo-anysearch&gt;</span></div>
+      <div class="command">anysearch benchmark resources usage/experiments/train/ppo_box_r1_waypoint_curriculum.yaml --max-envs-per-worker 16 --max-workers 20 --open</div>
+
+      <div class="spacer"></div>
+      <div><span class="label">Artifacts</span><span class="path">runtime\train\box_r1_waypoint_curriculum\benchmarks\20260729-153000</span></div>
+      <div><span class="label">Stopping rules</span><span class="muted">3 declines &gt; 2% · GPU target 95% · budget 30 min</span></div>
+      <div><span class="label">Measurements</span><span class="muted">1 warmup · 3 measured iterations · 3 repeats</span></div>
+
+      <div class="spacer"></div>
+      <div class="progress-row">
+        <span class="spinner cyan">⠹</span>
+        <span>Environments / worker</span>
+        <span class="bar"><span class="fill" style="width: 37.5%"></span></span>
+        <span class="cyan">6 / 16</span>
+        <span>192.1 steps/s · GPU 5.9% · measuring tick 7</span>
+        <span class="muted">08:42</span>
+      </div>
+      <div class="progress-row waiting">
+        <span class="spinner">○</span>
+        <span>Rollout workers</span>
+        <span class="bar"><span class="fill"></span></span>
+        <span>0 / 20</span>
+        <span>waiting for environment sweep</span>
+        <span>--:--</span>
+      </div>
+
+      <div class="report"><span class="green">Live report ready</span> · report.html updates after every completed tick and refreshes automatically</div>
+
+      <div class="completion">
+        <div class="muted">On completion:</div>
+        <div><span class="green">✓ Benchmark complete</span> in 26m 18s</div>
+        <div><span class="label">Recommended</span><strong>6 workers × 4 environments</strong></div>
+        <div><span class="label">Throughput</span>484.7 steps/s · 4.25× baseline</div>
+        <div><span class="label">Report</span><span class="path">...\benchmarks\20260729-153000\report.html</span></div>
+        <div><span class="label">Data</span><span class="path">results.json · results.csv · recommended.yaml</span></div>
+        <div class="muted">Use --debug to stream PPO and Ray diagnostics. Captured diagnostics are preserved per candidate.</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

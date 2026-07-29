@@ -15,6 +15,11 @@ pip-wheel-metadata/
 .anysearch
 spec*
 /AGENT.md
+!spec/
+spec/*
+!spec/benchmark-cli-progress.png
+!spec/benchmark-cli-progress-mockup.html
+Agent*
 context
 later
 /experiments/

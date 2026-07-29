@@ -6,7 +6,152 @@ import csv
 import json
 from pathlib import Path
 
-from theseo_anysearch.benchmarking.models import ResourceBenchmarkResult
+from theseo_anysearch.benchmarking.models import (
+    CandidateSummary,
+    ResourceBenchmarkResult,
+)
+
+
+def write_progress_report(
+    *,
+    environment_candidates: list[CandidateSummary],
+    worker_candidates: list[CandidateSummary],
+    output_dir: Path,
+    max_envs_per_worker: int,
+    max_workers: int,
+) -> Path:
+    """Atomically refresh the inspectable HTML while a benchmark is running."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    html_path = output_dir / "report.html"
+    temporary_path = output_dir / "report.progress.html"
+    figure = make_subplots(
+        rows=4,
+        cols=1,
+        specs=[[{"secondary_y": True}] for _ in range(4)],
+        subplot_titles=(
+            "Environment vectorization",
+            "Environment sweep resources",
+            "Rollout worker scaling",
+            "Worker sweep resources",
+        ),
+        vertical_spacing=0.08,
+    )
+
+    for throughput_row, resource_row, candidates, x_title, waiting in (
+        (1, 2, environment_candidates, "Environments per worker",
+         "Waiting for the first environment candidate"),
+        (3, 4, worker_candidates, "Rollout workers",
+         "Waiting for the environment sweep to finish"),
+    ):
+        if not candidates:
+            figure.add_annotation(
+                text=waiting,
+                x=0.5,
+                y=0.5,
+                xref=f"x{throughput_row} domain",
+                yref=f"y{throughput_row} domain",
+                showarrow=False,
+                font={"color": "#868e96"},
+            )
+            continue
+        x_values = [candidate.candidate for candidate in candidates]
+        gpu = [candidate.gpu_utilization_percent for candidate in candidates]
+        figure.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=[candidate.steps_per_second for candidate in candidates],
+                name=f"{x_title} steps/s",
+                mode="lines+markers",
+                line={"color": "#087f5b", "width": 3},
+            ),
+            row=throughput_row,
+            col=1,
+            secondary_y=False,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=[candidate.speedup for candidate in candidates],
+                name=f"{x_title} speedup",
+                mode="lines+markers",
+                line={"color": "#e67700", "dash": "dot", "width": 2},
+            ),
+            row=throughput_row,
+            col=1,
+            secondary_y=True,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=[candidate.cpu_percent for candidate in candidates],
+                name=f"{x_title} CPU %",
+                mode="lines+markers",
+                line={"color": "#1971c2", "width": 2},
+            ),
+            row=resource_row,
+            col=1,
+            secondary_y=False,
+        )
+        if any(value is not None for value in gpu):
+            figure.add_trace(
+                go.Bar(
+                    x=x_values,
+                    y=gpu,
+                    name=f"{x_title} GPU average %",
+                    text=gpu,
+                    texttemplate="%{text:.1f}%",
+                    textposition="outside",
+                    cliponaxis=False,
+                    marker_color="rgba(116,192,252,0.35)",
+                ),
+                row=resource_row,
+                col=1,
+                secondary_y=False,
+            )
+        figure.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=[candidate.memory_mb for candidate in candidates],
+                name=f"{x_title} memory MB",
+                mode="lines+markers",
+                line={"color": "#862e9c", "dash": "dot", "width": 2},
+            ),
+            row=resource_row,
+            col=1,
+            secondary_y=True,
+        )
+        for row in (throughput_row, resource_row):
+            figure.update_xaxes(title_text=x_title, dtick=1, row=row, col=1)
+
+    figure.update_layout(
+        title={
+            "text": (
+                "AnySearch resource benchmark — in progress"
+                f"<br><sup>Environment ticks: {len(environment_candidates)}/"
+                f"{max_envs_per_worker}; worker ticks: {len(worker_candidates)}/"
+                f"{max_workers}. This page refreshes every 5 seconds.</sup>"
+            ),
+            "x": 0.03,
+        },
+        template="plotly_white",
+        height=1680,
+        hovermode="x unified",
+        margin={"l": 80, "r": 80, "t": 170, "b": 70},
+    )
+    figure.write_html(temporary_path, include_plotlyjs=True, full_html=True)
+    document = temporary_path.read_text(encoding="utf-8")
+    document = document.replace(
+        "<head>",
+        '<head><meta http-equiv="refresh" content="5">',
+        1,
+    )
+    temporary_path.write_text(document, encoding="utf-8")
+    temporary_path.replace(html_path)
+    _add_diagnostic_links(html_path)
+    return html_path
 
 
 def write_benchmark_artifacts(
@@ -333,3 +478,18 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
         ],
     )
     figure.write_html(path, include_plotlyjs=True, full_html=True)
+    _add_diagnostic_links(path)
+
+
+def _add_diagnostic_links(path: Path) -> None:
+    """Add stable links to captured benchmark output without altering plots."""
+    document = path.read_text(encoding="utf-8")
+    diagnostics = (
+        '<aside style="position:fixed;right:12px;bottom:12px;z-index:9999;'
+        'padding:9px 12px;border:1px solid #ced4da;border-radius:6px;'
+        'background:rgba(255,255,255,.94);font:13px sans-serif;color:#343a40">'
+        'Diagnostics: <a href="benchmark.stdout.log">stdout</a> · '
+        '<a href="benchmark.stderr.log">stderr</a></aside>'
+    )
+    document = document.replace("<body>", f"<body>{diagnostics}", 1)
+    path.write_text(document, encoding="utf-8")
