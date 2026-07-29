@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 import yaml
@@ -47,6 +48,36 @@ class TestRootHelp:
         assert "replay" in result.output
         assert "mlflow" in result.output
         assert "ray" in result.output
+
+
+# ---------------------------------------------------------------------------
+# anysearch tensorboard
+# ---------------------------------------------------------------------------
+
+class TestTensorBoardCommand:
+    """Tests TensorBoard executable discovery."""
+
+    def test_uses_active_environment_executable_when_not_on_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        executable_name = "tensorboard.exe" if sys.platform == "win32" else "tensorboard"
+        tensorboard_executable = tmp_path / executable_name
+        tensorboard_executable.touch()
+        python_executable = tmp_path / ("python.exe" if sys.platform == "win32" else "python")
+        calls: list[tuple[list[str], bool]] = []
+
+        monkeypatch.setattr("shutil.which", lambda _: None)
+        monkeypatch.setattr(sys, "executable", str(python_executable))
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda command, check: calls.append((command, check)),
+        )
+
+        result = runner.invoke(app, ["tensorboard", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert calls[0][0][0] == str(tensorboard_executable)
+        assert calls[0][1] is True
 
 
 # ---------------------------------------------------------------------------

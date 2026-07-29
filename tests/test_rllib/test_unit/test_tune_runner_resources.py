@@ -49,7 +49,17 @@ class TestGpuFraction:
     def test_concurrent_gpu_sweep_splits_one_gpu_evenly(self):
         from theseo_anysearch.experiments.tune_runner import _tune_trial_num_gpus
 
-        assert _tune_trial_num_gpus(True, 4) == pytest.approx(0.25)
+        assert _tune_trial_num_gpus(True, 8) == pytest.approx(0.125)
+
+    def test_explicit_fraction_overrides_automatic_split(self):
+        from theseo_anysearch.experiments.tune_runner import _tune_trial_num_gpus
+
+        assert _tune_trial_num_gpus(True, 8, 0.25) == pytest.approx(0.25)
+
+    def test_cpu_only_sweep_ignores_explicit_fraction(self):
+        from theseo_anysearch.experiments.tune_runner import _tune_trial_num_gpus
+
+        assert _tune_trial_num_gpus(False, 1, 0.25) == pytest.approx(0.0)
 
 
 class TestPlacementGroupBundles:
@@ -219,6 +229,45 @@ class TestPlacementGroupFactoryCreation:
         pgf = captured[0]
         assert isinstance(pgf, PlacementGroupFactory)
         assert len(pgf.bundles) == 1 + 2 + 3
+
+    def test_tunerunner_reserves_rollout_gpu_on_training_workers(self, tmp_path: Path):
+        from ray.tune import PlacementGroupFactory
+        from theseo_anysearch.experiments.tune_runner import TuneRunner
+
+        captured = []
+
+        def fake_with_resources(fn, resources):
+            captured.append(resources)
+            return MagicMock()
+
+        cfg = make_experiment_config(
+            require_gpu=True,
+            num_env_runners=2,
+            evaluation_num_env_runners=1,
+            max_concurrent=1,
+            output_dir=str(tmp_path),
+        )
+        cfg = cfg.model_copy(update={
+            "training": cfg.training.model_copy(update={
+                "num_gpus_per_env_runner": 0.25,
+            }),
+        })
+
+        patches = patch_ray_tune(fake_with_resources=fake_with_resources)
+        with ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            try:
+                TuneRunner(cfg, config_path=None).run()
+            except Exception:
+                pass
+
+        assert captured
+        pgf = captured[0]
+        assert isinstance(pgf, PlacementGroupFactory)
+        assert pgf.bundles[1]["GPU"] == pytest.approx(0.25)
+        assert pgf.bundles[2]["GPU"] == pytest.approx(0.25)
+        assert "GPU" not in pgf.bundles[3]
 
 
 class TestWithResourcesOrderingRegression:

@@ -51,3 +51,18 @@ tune_config:
 ```
 
 Available subblocks are `asha_config`, `pbt_config`, `hyperband_config`, `bohb_config`, `optuna_config`, `cmaes_config`, and `flaml_config`. See [Tune lifecycle and trial budgets](lifecycle.md) for reporting, pruning, checkpoint, artifact, and resume behavior.
+
+## TensorBoard
+
+TensorBoard is installed as a project dependency. Launch it through AnySearch so
+the experiment or sweep reference resolves to the correct log directory:
+
+```bash
+anysearch tensorboard <experiment-name>:<tag-or-run-id>
+```
+
+Use `--port` when the default port is occupied:
+
+```bash
+anysearch tensorboard <experiment-name>:<tag-or-run-id> --port 6007
+```

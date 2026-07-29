@@ -649,6 +649,36 @@ class TestRealTrainableReport:
 
         mock_train.report.assert_not_called()
 
+    def test_fractional_gpu_is_forwarded_to_trainer(self, tmp_path):
+        import ray.tune as _real_ray_tune
+
+        mock_tune = MagicMock(spec=_real_ray_tune)
+        mock_tune.get_context.return_value = MagicMock(
+            get_trial_id=MagicMock(return_value="t0")
+        )
+        mock_trainer_cls = MagicMock()
+        mock_trainer_cls.return_value.train.return_value = []
+        (tmp_path / "geo.stl").write_bytes(b"")
+
+        with patch("ray.tune", mock_tune), \
+             patch("theseo_anysearch.rllib.trainer.ppo.PPOTrainer", mock_trainer_cls):
+            from theseo_anysearch.cli.commands.tune import _real_trainable
+            _real_trainable(
+                config=self._minimal_config(),
+                stl=str(tmp_path / "geo.stl"),
+                agents=1,
+                max_steps=50,
+                seed=0,
+                max_iterations=1,
+                output_dir=str(tmp_path / "out"),
+                metric="episode_reward_mean",
+                num_gpus=0.25,
+            )
+
+        settings = mock_trainer_cls.call_args.args[0]
+        assert settings.training.require_gpu is True
+        assert settings.training.num_gpus == pytest.approx(0.25)
+
 
 # ---------------------------------------------------------------------------
 # _make_trainable: paths passed to Ray workers must be absolute
@@ -709,6 +739,29 @@ class TestMakeTrainablePaths:
     def test_output_dir_is_string_not_path_object(self, tmp_path):
         captured = self._call(tmp_path)
         assert isinstance(captured["output_dir"], str)
+
+    def test_fractional_gpu_resource_is_preserved(self, tmp_path):
+        mock_tune = MagicMock()
+        parameterized = MagicMock()
+        mock_tune.with_parameters.return_value = parameterized
+
+        with patch("ray.tune", mock_tune), \
+             patch("theseo_anysearch.cli.commands.tune.tune", mock_tune):
+            from theseo_anysearch.cli.commands.tune import _make_trainable
+            _make_trainable(
+                stl=tmp_path / "geo.stl",
+                agents=1,
+                max_steps=50,
+                seed=0,
+                max_iterations=1,
+                output_dir=tmp_path / "out",
+                metric="episode_reward_mean",
+                num_gpus=0.25,
+            )
+
+        mock_tune.with_resources.assert_called_once_with(
+            parameterized, resources={"gpu": 0.25}
+        )
 
 
 # ---------------------------------------------------------------------------
