@@ -130,3 +130,125 @@ def test_broadcast_queues_waypoints_on_every_environment():
 def test_enabled_curriculum_requires_initial_waypoints():
     with pytest.raises(ValueError, match="initial_start and initial_goal"):
         EnvConfig(waypoint_curriculum={"enabled": True})
+
+
+def monotonic_curriculum(**difficulty):
+    return WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            initial_start=(16, 16, 16),
+            initial_goal=(18, 18, 18),
+            seed=42,
+            difficulty={
+                "mode": "monotonic_distance",
+                "distance_increment": 4.0,
+                **difficulty,
+            },
+            advance={"mode": "success"},
+        )
+    )
+
+
+def empty_grid(grid_size=32):
+    return {
+        "grid_size": grid_size,
+        "geometry_boxes": [],
+        "stl_path": None,
+        "stl_paths": None,
+        "geometry_pool": None,
+    }
+
+
+def distance(pair):
+    import math
+
+    return math.dist(*pair)
+
+
+def test_monotonic_distance_keeps_start_centered_within_grid_radius():
+    scheduler = monotonic_curriculum()
+
+    first = scheduler.sample(empty_grid())
+    scheduler.advance(1, *first)
+    second = scheduler.sample(empty_grid())
+
+    assert first[0] == (16, 16, 16)
+    assert second[0] == (16, 16, 16)
+    assert distance(second) >= distance(first)
+
+
+def test_monotonic_distance_randomizes_both_waypoints_beyond_grid_radius():
+    scheduler = monotonic_curriculum(distance_increment=20.0)
+
+    pair = scheduler.sample(empty_grid())
+
+    assert pair[0] != (16, 16, 16)
+    assert all(1 <= coordinate <= 32 for waypoint in pair for coordinate in waypoint)
+    assert distance(pair) > 15.0
+
+
+def test_monotonic_distance_never_decreases_and_caps_at_grid_diagonal():
+    import math
+
+    scheduler = monotonic_curriculum(distance_increment=8.0)
+    distances = [distance((scheduler.state.start, scheduler.state.goal))]
+    for iteration in range(1, 8):
+        pair = scheduler.sample(empty_grid())
+        distances.append(distance(pair))
+        scheduler.advance(iteration, *pair)
+
+    assert distances == sorted(distances)
+    assert distances[-1] <= math.sqrt(3.0) * 31
+
+
+def test_monotonic_distance_sampling_is_reproducible():
+    first = monotonic_curriculum(distance_increment=20.0)
+    second = monotonic_curriculum(distance_increment=20.0)
+
+    assert first.sample(empty_grid()) == second.sample(empty_grid())
+
+
+def test_monotonic_distance_honors_configured_maximum():
+    scheduler = monotonic_curriculum(
+        distance_increment=20.0,
+        maximum_distance=12.0,
+    )
+
+    pair = scheduler.sample(empty_grid())
+
+    assert distance(pair) <= 12.5
+
+
+def test_monotonic_distance_rejects_static_geometry():
+    scheduler = monotonic_curriculum()
+    config = empty_grid()
+    config["geometry_boxes"] = [[1, 1, 1, 2, 2, 2]]
+
+    with pytest.raises(ValueError, match="requires empty geometry"):
+        scheduler.sample(config)
+
+def test_monotonic_distance_rejects_maximum_below_initial_distance():
+    with pytest.raises(ValueError, match="below the initial waypoint distance"):
+        WaypointCurriculumConfig(
+            enabled=True,
+            initial_start=(1, 1, 1),
+            initial_goal=(5, 5, 5),
+            difficulty={
+                "mode": "monotonic_distance",
+                "maximum_distance": 2.0,
+            },
+        )
+
+
+def test_monotonic_distance_resamples_directions_at_distance_cap():
+    scheduler = monotonic_curriculum(
+        distance_increment=20.0,
+        maximum_distance=12.0,
+    )
+
+    first = scheduler.sample(empty_grid())
+    scheduler.advance(1, *first)
+    second = scheduler.sample(empty_grid())
+
+    assert distance(second) >= distance(first)
+    assert second != first

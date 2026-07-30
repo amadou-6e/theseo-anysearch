@@ -35,6 +35,15 @@ class WaypointTrainingSamplingConfig(BaseModel):
         return self
 
 
+class WaypointDifficultyConfig(BaseModel):
+    """Controls how successive waypoint-pair difficulty is sampled."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["random", "monotonic_distance"] = "random"
+    distance_increment: float = Field(default=1.0, gt=0.0)
+    maximum_distance: float | None = Field(default=None, gt=0.0)
+    sampling_attempts: int = Field(default=512, ge=1)
+
 class WaypointCurriculumConfig(BaseModel):
     """Curriculum of reproducible start/goal stages."""
 
@@ -43,6 +52,9 @@ class WaypointCurriculumConfig(BaseModel):
     initial_start: tuple[int, int, int] | None = None
     initial_goal: tuple[int, int, int] | None = None
     seed: int = 42
+    difficulty: WaypointDifficultyConfig = Field(
+        default_factory=WaypointDifficultyConfig
+    )
     training_sampling: WaypointTrainingSamplingConfig = Field(
         default_factory=WaypointTrainingSamplingConfig
     )
@@ -54,6 +66,20 @@ class WaypointCurriculumConfig(BaseModel):
             raise ValueError(
                 "enabled waypoint_curriculum requires initial_start and initial_goal"
             )
+        if (
+            self.initial_start is not None
+            and self.initial_goal is not None
+            and self.difficulty.mode == "monotonic_distance"
+            and self.difficulty.maximum_distance is not None
+        ):
+            initial_distance = sum(
+                (goal - start) ** 2
+                for start, goal in zip(self.initial_start, self.initial_goal)
+            ) ** 0.5
+            if self.difficulty.maximum_distance < initial_distance:
+                raise ValueError(
+                    "difficulty.maximum_distance cannot be below the initial waypoint distance"
+                )
         return self
 
 

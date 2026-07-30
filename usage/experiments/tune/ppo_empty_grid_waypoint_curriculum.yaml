@@ -34,9 +34,13 @@ env:
 
   waypoint_curriculum:
     enabled: true
-    initial_start: [4, 4, 4]
-    initial_goal: [6, 6, 6]
+    initial_start: [16, 16, 16]
+    initial_goal: [18, 18, 18]
     seed: 42
+    difficulty:
+      mode: monotonic_distance
+      distance_increment: 2.0
+      sampling_attempts: 512
     training_sampling:
       current_stage_probability: 0.75
       retained_stage_probability: 0.25
