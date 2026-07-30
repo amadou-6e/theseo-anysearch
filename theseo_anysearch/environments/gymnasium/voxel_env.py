@@ -60,6 +60,12 @@ class VoxelEnv(RustGymnasiumEnv):
         self._previous_task_distance = 0.0
         self._initial_filled: set[tuple[int, int, int]] = set()
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
+        self._pending_waypoints: tuple[
+            tuple[int, int, int], tuple[int, int, int]
+        ] | None = None
+        self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
+        self._current_stage_probability = 1.0
+        self._retained_stage_probability = 0.0
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -145,13 +151,26 @@ class VoxelEnv(RustGymnasiumEnv):
             zone_reward_curve=config.get("zone_reward_curve", "linear"),
         )
 
-        # Load fixed waypoints from file if specified.
+        # Load fixed or curriculum waypoints if specified.
         wp = None
+        inline_waypoints = config.get("waypoints")
+        curriculum = config.get("waypoint_curriculum") or {}
+        if not inline_waypoints and curriculum.get("enabled"):
+            inline_waypoints = {
+                "start": curriculum.get("initial_start"),
+                "goal": curriculum.get("initial_goal"),
+            }
+        if (
+            inline_waypoints
+            and inline_waypoints.get("start")
+            and inline_waypoints.get("goal")
+        ):
+            wp = inline_waypoints
         waypoints_file = config.get("waypoints_file")
-        if waypoints_file:
+        if wp is None and waypoints_file:
             wp = self._load_waypoints(waypoints_file)
-            if wp:
-                env.set_waypoints(tuple(wp["start"]), tuple(wp["goal"]))
+        if wp:
+            env.set_waypoints(tuple(wp["start"]), tuple(wp["goal"]))
 
         configured_targets = goal_voxels(self._task.goal, None)
         if configured_targets:
@@ -188,6 +207,8 @@ class VoxelEnv(RustGymnasiumEnv):
             cells = GeometryPool.grid_to_cells(grid)
             self._rust_env.set_geometry(cells)
             log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
+            self._apply_pending_waypoints()
+            self._sample_curriculum_waypoints()
             return self._reset_task_state(super().reset(seed=seed, options=options))
 
         scale_range = self._config.get("scale_range")
@@ -199,7 +220,47 @@ class VoxelEnv(RustGymnasiumEnv):
             cfg = dict(self._config)
             cfg["scale"] = new_scale
             self._rust_env = self._build_rust_env(cfg)
+        self._apply_pending_waypoints()
+        self._sample_curriculum_waypoints()
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def queue_waypoints(
+        self,
+        start: tuple[int, int, int],
+        goal: tuple[int, int, int],
+    ) -> None:
+        """Apply a trainer-broadcast waypoint pair on the next episode reset."""
+        self._pending_waypoints = (tuple(start), tuple(goal))
+
+    def _apply_pending_waypoints(self) -> None:
+        if self._pending_waypoints is None:
+            return
+        start, goal = self._pending_waypoints
+        self._rust_env.set_waypoints(start, goal)
+        self._config["waypoints"] = {"start": start, "goal": goal}
+        self._pending_waypoints = None
+
+    def set_waypoint_curriculum(
+        self,
+        stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]],
+        current_stage_probability: float,
+        retained_stage_probability: float,
+    ) -> None:
+        """Set the stage pool sampled by subsequent training resets."""
+        self._curriculum_stages = list(stages)
+        self._current_stage_probability = float(current_stage_probability)
+        self._retained_stage_probability = float(retained_stage_probability)
+
+    def _sample_curriculum_waypoints(self) -> None:
+        if not self._curriculum_stages:
+            return
+        selected = self._curriculum_stages[-1]
+        retained = self._curriculum_stages[:-1]
+        if retained and self._obs_rng.random() < self._retained_stage_probability:
+            selected = retained[int(self._obs_rng.integers(len(retained)))]
+        start, goal = selected
+        self._rust_env.set_waypoints(start, goal)
+        self._config["waypoints"] = {"start": start, "goal": goal}
 
     def _reset_task_state(self, reset_result):
         """Initialize episode-level task metrics after a Rust reset."""
@@ -303,6 +364,8 @@ class VoxelEnv(RustGymnasiumEnv):
         return bool(
             self._config.get("geometry_boxes")
             or self._config.get("waypoints_file")
+            or self._config.get("waypoints")
+            or (self._config.get("waypoint_curriculum") or {}).get("enabled")
             or self._config.get("stl_path")
             or self._config.get("geometry_pool")
         )

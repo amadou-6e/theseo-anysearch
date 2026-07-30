@@ -6,6 +6,7 @@ These files launch multi-trial searches or repeat one configuration across multi
 
 - [`ppo_asha.yaml`](ppo_asha.yaml) tunes core PPO optimization parameters and prunes weak trials with ASHA.
 - [`ppo_arch_search.yaml`](ppo_arch_search.yaml) jointly searches PPO settings and fully connected network depth and width.
+- [`ppo_box_r1_waypoint_curriculum.yaml`](ppo_box_r1_waypoint_curriculum.yaml) tunes discrete-18 radius-1 PPO with 25% retained-stage training and evaluation-driven waypoint promotion.
 - [`ppo_maps_asha.yaml`](ppo_maps_asha.yaml) tunes radial-observation PPO on augmented industrial map crops.
 - [`ppo_diverse_asha.yaml`](ppo_diverse_asha.yaml) tunes PPO across augmented high-resolution geometry-pool samples.
 - [`multi_agent_ppo_asha.yaml`](multi_agent_ppo_asha.yaml) applies ASHA to shared-policy multi-agent PPO.

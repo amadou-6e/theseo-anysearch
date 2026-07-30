@@ -10,6 +10,53 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from theseo_anysearch.environments.task import TaskConfig
 
 
+class WaypointAdvanceConfig(BaseModel):
+    """Condition used to advance a waypoint curriculum stage."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["fixed", "interval", "success"] = "fixed"
+    interval_iterations: int = Field(default=10, ge=1)
+    require_success: bool = True
+    successes_required: int = Field(default=1, ge=1)
+
+
+class WaypointTrainingSamplingConfig(BaseModel):
+    """Episode sampling split between the current and retained stages."""
+
+    model_config = ConfigDict(extra="forbid")
+    current_stage_probability: float = Field(default=1.0, ge=0.0, le=1.0)
+    retained_stage_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_probabilities(self) -> "WaypointTrainingSamplingConfig":
+        total = self.current_stage_probability + self.retained_stage_probability
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError("waypoint training sampling probabilities must sum to 1.0")
+        return self
+
+
+class WaypointCurriculumConfig(BaseModel):
+    """Curriculum of reproducible start/goal stages."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    initial_start: tuple[int, int, int] | None = None
+    initial_goal: tuple[int, int, int] | None = None
+    seed: int = 42
+    training_sampling: WaypointTrainingSamplingConfig = Field(
+        default_factory=WaypointTrainingSamplingConfig
+    )
+    advance: WaypointAdvanceConfig = Field(default_factory=WaypointAdvanceConfig)
+
+    @model_validator(mode="after")
+    def validate_initial_pair(self) -> "WaypointCurriculumConfig":
+        if self.enabled and (self.initial_start is None or self.initial_goal is None):
+            raise ValueError(
+                "enabled waypoint_curriculum requires initial_start and initial_goal"
+            )
+        return self
+
+
 class GeometryConfig(BaseModel):
     """Geometry source and voxelization settings."""
 
@@ -134,6 +181,9 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     trail_mode: bool = True
     target_fill: int | None = Field(default=None, ge=0)
     waypoints_file: str | None = None
+    waypoint_curriculum: WaypointCurriculumConfig = Field(
+        default_factory=WaypointCurriculumConfig
+    )
     task: TaskConfig = Field(default_factory=TaskConfig)
     geometry: GeometryConfig = Field(default_factory=GeometryConfig)
     observation: ObservationConfig = Field(default_factory=ObservationConfig)
@@ -192,6 +242,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "trail_mode": self.trail_mode,
             "target_fill": self.target_fill,
             "waypoints_file": self.waypoints_file,
+            "waypoint_curriculum": self.waypoint_curriculum.model_dump(mode="json"),
             "step_cost": self.rewards__step_cost,
             "collision_cost": self.rewards__collision_cost,
             "goal_reward": self.rewards__goal_reward,
@@ -303,6 +354,19 @@ class TrainingConfig(BaseModel):
     early_stop: TrainingEarlyStopConfig = Field(default_factory=TrainingEarlyStopConfig)
 
 
+class WaypointCurriculumEvaluationConfig(BaseModel):
+    """Retention evaluation over visited waypoint stages."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    frequency: int = Field(default=1, ge=1)
+    episodes: int = Field(default=1, ge=1)
+    stages: Literal["all"] = "all"
+    min_success_rate: float = Field(default=0.8, ge=0.0, le=1.0)
+    min_per_stage_success_rate: float = Field(default=0.67, ge=0.0, le=1.0)
+    advance: WaypointAdvanceConfig | None = None
+
+
 class EvaluationConfig(BaseModel):
     """Deterministic policy evaluation and RLlib evaluation-worker settings."""
 
@@ -313,6 +377,9 @@ class EvaluationConfig(BaseModel):
     min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
     num_env_runners: int = Field(default=0, ge=0)
     num_envs_per_env_runner: int = Field(default=1, ge=1)
+    waypoint_curriculum: WaypointCurriculumEvaluationConfig = Field(
+        default_factory=WaypointCurriculumEvaluationConfig
+    )
 
 
 class AnyscaleConfig(BaseModel):
@@ -381,6 +448,19 @@ class AlgorithmEnvCompatibilityMixin:
     @model_validator(mode="after")
     def _validate_algorithm_env_compatibility(self):
         """Reject unsupported algorithm and agent-count combinations."""
+        curriculum = self.env.waypoint_curriculum
+        evaluation_curriculum = self.evaluation.waypoint_curriculum
+        if curriculum.enabled and self.env.waypoints_file is not None:
+            raise ValueError("waypoints_file and enabled waypoint_curriculum are mutually exclusive")
+        if curriculum.enabled and self.training.algorithm.lower() != "ppo":
+            raise ValueError("waypoint_curriculum currently requires training.algorithm='ppo'")
+        training_advance = curriculum.advance.mode != "fixed"
+        evaluation_advance = evaluation_curriculum.advance is not None
+        if training_advance and evaluation_advance:
+            raise ValueError(
+                "waypoint curriculum advance may be configured under either "
+                "env.waypoint_curriculum or evaluation.waypoint_curriculum, not both"
+            )
         threshold = self.training.early_stop.min_goal_finishes
         if threshold is not None and threshold > self.evaluation.episodes:
             raise ValueError(
