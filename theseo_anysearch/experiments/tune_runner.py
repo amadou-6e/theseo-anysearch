@@ -89,6 +89,13 @@ def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
         "resource/evaluation_num_env_runners": float(
             getattr(getattr(settings, "evaluation", None), "num_env_runners", 0)
         ),
+        "resource/evaluation_num_envs_per_env_runner": float(
+            getattr(
+                getattr(settings, "evaluation", None),
+                "num_envs_per_env_runner",
+                1,
+            )
+        ),
         "resource/num_gpus": float(settings.training.num_gpus or 0.0),
     }
 
