@@ -8,6 +8,7 @@ import pytest
 from theseo_anysearch.experiments.trajectory import (
     collect_eval_episode,
     collect_eval_episodes,
+    collect_vectorized_eval_episodes,
 )
 
 
@@ -53,6 +54,40 @@ class _RecordingAlgorithm:
     def compute_single_action(self, observation: Any, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         return self.result
+
+
+class _VariableLengthEnv(_OneStepEnv):
+    lengths = {10: 1, 11: 3, 12: 2}
+
+    def __init__(self, env_config: dict[str, Any]) -> None:
+        super().__init__()
+        self.remaining = 0
+
+    def reset(self, seed: int | None = None):
+        self.remaining = self.lengths[int(seed)]
+        return _observation(), {}
+
+    def step(self, action: Any):
+        self.actions.append(action)
+        self.remaining -= 1
+        done = self.remaining == 0
+        return (
+            _observation(),
+            1.0,
+            done,
+            False,
+            {"goal_reached": done},
+        )
+
+
+class _BatchRecordingAlgorithm:
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def compute_actions(self, observations: list[Any], **kwargs: Any):
+        self.batch_sizes.append(len(observations))
+        assert kwargs == {"policy_id": "default_policy", "explore": False}
+        return np.ones(len(observations), dtype=np.int64)
 
 
 def test_collect_eval_episode_uses_deterministic_policy_inference() -> None:
@@ -132,3 +167,24 @@ def test_collect_eval_episodes_uses_stable_sequential_seeds(monkeypatch) -> None
 def test_collect_eval_episodes_rejects_empty_batch() -> None:
     with pytest.raises(ValueError, match="at least one"):
         collect_eval_episodes(object(), {}, 0)
+
+
+def test_vectorized_collection_handles_different_episode_lengths(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "theseo_anysearch.environments.gymnasium.voxel_env.VoxelEnv",
+        _VariableLengthEnv,
+    )
+    algorithm = _BatchRecordingAlgorithm()
+
+    episodes = collect_vectorized_eval_episodes(
+        algorithm,
+        {"max_steps": 3},
+        (10, 11, 12),
+    )
+
+    assert algorithm.batch_sizes == [3, 2, 1]
+    assert [len(episode.steps) for episode in episodes] == [1, 3, 2]
+    assert [episode.total_reward for episode in episodes] == [1.0, 3.0, 2.0]
+    assert all(episode.success for episode in episodes)
