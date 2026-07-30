@@ -1,11 +1,11 @@
 description: >
-  Tests waypoint-curriculum learning on an empty 32 x 32 x 32 grid. The long
+  Tests waypoint-curriculum learning on an empty 32 x 32 x 32 grid. The short
   initial route has no static obstacles, isolating curriculum advancement,
   retained-stage sampling, and vectorized rollout/evaluation behavior.
 
 experiment:
   name: ppo-empty-grid-waypoint-curriculum
-  output_dir: runtime/train/empty_grid_waypoint_curriculum
+  output_dir: runtime/train/empty_grid_waypoint_curriculum_short
   seed: 42
 
 env:
@@ -35,7 +35,7 @@ env:
   waypoint_curriculum:
     enabled: true
     initial_start: [4, 4, 4]
-    initial_goal: [27, 27, 27]
+    initial_goal: [6, 6, 6]
     seed: 42
     training_sampling:
       current_stage_probability: 0.75
