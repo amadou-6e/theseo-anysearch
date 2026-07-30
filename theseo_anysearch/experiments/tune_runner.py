@@ -15,9 +15,6 @@ _tune: Any | None = None
 Trainer: Any | None = None
 
 
-
-
-
 def _tune_stop_criteria(
     tune_config: Any,
     *,
@@ -35,6 +32,7 @@ def _tune_stop_criteria(
         stop["evaluation_success_rate"] = tune_config.target_success_rate
     return stop
 
+
 def _selected_metric(
     payload: dict[str, Any],
     metric: str,
@@ -48,6 +46,54 @@ def _selected_metric(
         return value
     return -1e9 if mode == "max" else 1e9
 
+
+def _apply_sampled_model_config(model: Any, config: dict[str, Any]) -> Any:
+    """Apply sampled architecture dimensions as one coherent model shape."""
+    model_updates: dict[str, Any] = {}
+    if "base_width" in config:
+        base_width = int(config["base_width"])
+        head_width = int(config.get("head_width", base_width))
+        layers_per_width = int(config.get("layers_per_width", 1))
+        if base_width < 1 or head_width < 1 or layers_per_width < 1:
+            raise ValueError(
+                "sampled model widths and repetitions must be positive")
+
+        widths: list[int] = []
+        width = base_width
+        while width != head_width:
+            widths.extend([width] * layers_per_width)
+            if width > head_width:
+                width = max(width // 2, head_width)
+            else:
+                width = min(width * 2, head_width)
+        widths.extend([head_width] * layers_per_width)
+        model_updates["hidden_sizes"] = widths
+        if "encoder_depth" in type(model).model_fields:
+            model_updates["encoder_depth"] = len(widths)
+        return model.model_copy(update=model_updates)
+
+    sampled_depth = config.get("encoder_depth", config.get("num_layers"))
+    hidden_sizes = list(getattr(model, "hidden_sizes", []))
+    depth = int(sampled_depth) if sampled_depth is not None else len(
+        hidden_sizes)
+
+    if sampled_depth is not None and "encoder_depth" in type(
+            model).model_fields:
+        model_updates["encoder_depth"] = max(depth, 1)
+    if "layer_size" in config:
+        model_updates["hidden_sizes"] = [int(config["layer_size"])] * max(
+            depth, 1)
+    elif sampled_depth is not None:
+        width = hidden_sizes[-1] if hidden_sizes else 256
+        model_updates["hidden_sizes"] = [int(width)] * max(depth, 1)
+    if ("use_position_encoding" in config
+            and "use_position_encoding" in type(model).model_fields):
+        model_updates["use_position_encoding"] = bool(
+            config["use_position_encoding"])
+
+    return model.model_copy(update=model_updates)
+
+
 def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
     """Return comparable per-trial compute and architecture metadata."""
     algorithm = settings.algorithm_config
@@ -60,8 +106,8 @@ def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
         policy_model = getattr(policy, "model", None)
         if policy_model is not None:
             parameter_count = sum(
-                int(parameter.numel()) for parameter in policy_model.parameters()
-            )
+                int(parameter.numel())
+                for parameter in policy_model.parameters())
         from gymnasium.spaces.utils import flatdim
 
         observation_size = int(flatdim(policy.observation_space))
@@ -69,27 +115,30 @@ def _trial_resource_metrics(trainer: Any, settings: Any) -> dict[str, float]:
         pass
 
     return {
-        "resource/train_batch_size": float(
-            getattr(algorithm, "train_batch_size", 0)
-        ),
-        "resource/num_sgd_iter": float(
-            getattr(algorithm, "num_sgd_iter", 0)
-        ),
-        "resource/model_parameter_count": float(parameter_count),
-        "resource/observation_size": float(observation_size),
-        "resource/hidden_layer_count": float(len(hidden_sizes)),
-        "resource/hidden_layer_width": float(max(hidden_sizes, default=0)),
-        "resource/num_env_runners": float(settings.training.num_env_runners),
-        "resource/num_envs_per_env_runner": float(
-            getattr(settings.training, "num_envs_per_env_runner", 1)
-        ),
-        "resource/num_gpus_per_env_runner": float(
-            getattr(settings.training, "num_gpus_per_env_runner", 0.0)
-        ),
-        "resource/evaluation_num_env_runners": float(
-            getattr(getattr(settings, "evaluation", None), "num_env_runners", 0)
-        ),
-        "resource/num_gpus": float(settings.training.num_gpus or 0.0),
+        "resource/train_batch_size":
+        float(getattr(algorithm, "train_batch_size", 0)),
+        "resource/num_sgd_iter":
+        float(getattr(algorithm, "num_sgd_iter", 0)),
+        "resource/model_parameter_count":
+        float(parameter_count),
+        "resource/observation_size":
+        float(observation_size),
+        "resource/hidden_layer_count":
+        float(len(hidden_sizes)),
+        "resource/hidden_layer_width":
+        float(max(hidden_sizes, default=0)),
+        "resource/num_env_runners":
+        float(settings.training.num_env_runners),
+        "resource/num_envs_per_env_runner":
+        float(getattr(settings.training, "num_envs_per_env_runner", 1)),
+        "resource/num_gpus_per_env_runner":
+        float(getattr(settings.training, "num_gpus_per_env_runner", 0.0)),
+        "resource/evaluation_num_env_runners":
+        float(
+            getattr(getattr(settings, "evaluation", None), "num_env_runners",
+                    0)),
+        "resource/num_gpus":
+        float(settings.training.num_gpus or 0.0),
     }
 
 
@@ -111,12 +160,14 @@ def _write_tune_status(
 ) -> None:
     trial_dir.joinpath("tune_status.json").write_text(
         json.dumps(
-            {"status": status, "training_iteration": iteration},
+            {
+                "status": status,
+                "training_iteration": iteration
+            },
             indent=2,
         ),
         encoding="utf-8",
     )
-
 
 
 def _persist_trial_outcomes(
@@ -144,6 +195,7 @@ def _persist_trial_outcomes(
         if trial_dir.is_dir():
             _write_tune_status(trial_dir, status, iteration=iteration)
 
+
 def _restore_reported_checkpoint(trainer: Any, tune_api: Any) -> bool:
     """Restore a project trainer from Ray's incoming function checkpoint."""
     try:
@@ -167,9 +219,11 @@ def _ray_checkpoint(checkpoint_dir: Any) -> Any | None:
 
     return Checkpoint.from_directory(str(checkpoint_dir))
 
+
 # ---------------------------------------------------------------------------
 # Module-level trainable (must be picklable by cloudpickle / Ray)
 # ---------------------------------------------------------------------------
+
 
 def _experiment_trainable(
     config: dict[str, Any],
@@ -239,23 +293,15 @@ def _experiment_trainable(
     # and would raise a Pydantic validation error if PPO-only fields were  #
     # passed to a non-PPO config via model_copy().                         #
     # ------------------------------------------------------------------ #
-    valid_algo_fields = set(type(exp_config.algorithm_config).model_fields.keys())
+    valid_algo_fields = set(
+        type(exp_config.algorithm_config).model_fields.keys())
     algo_updates = {k: v for k, v in config.items() if k in valid_algo_fields}
     new_algo = exp_config.algorithm_config.model_copy(update=algo_updates)
 
     # ------------------------------------------------------------------ #
     # Apply sampled model hyper-params to model_cfg                        #
     # ------------------------------------------------------------------ #
-    model_updates: dict[str, Any] = {}
-    for k, v in config.items():
-        if k in ("encoder_depth", "num_layers"):
-            model_updates["encoder_depth"] = int(v)
-        elif k == "use_position_encoding":
-            model_updates["use_position_encoding"] = bool(v)
-        elif k == "layer_size":
-            depth = getattr(exp_config.model_cfg, "encoder_depth", 2)
-            model_updates["hidden_sizes"] = [int(v)] * max(int(depth), 1)
-    new_model = exp_config.model_cfg.model_copy(update=model_updates)
+    new_model = _apply_sampled_model_config(exp_config.model_cfg, config)
 
     # ------------------------------------------------------------------ #
     # Trial output directory                                               #
@@ -290,41 +336,52 @@ def _experiment_trainable(
     # and eval trajectory snapshots. Using a hash of trial_id makes the
     # offset deterministic (reproducible on resume) and unique per trial.
     import hashlib as _hashlib
-    _seed_offset = int(_hashlib.md5(output_trial_id.encode()).hexdigest()[:8], 16) % 10000
+    _seed_offset = int(
+        _hashlib.md5(output_trial_id.encode()).hexdigest()[:8], 16) % 10000
 
     base_settings = exp_config.to_settings()
-    trial_env = base_settings.env.model_copy(update={
-        "seed": base_settings.env.seed + _seed_offset,
-    })
-    settings = base_settings.model_copy(update={
-        "training": base_settings.training.model_copy(update={
-            "output_dir": trial_dir,
-            "iterations": max_iterations,
-            "checkpoint_interval": max_iterations + 1,
-            "trajectory_every": (
-                1
-                if preserve_trial_artifacts
-                else base_settings.training.trajectory_every
-            ),
-            "best_trajectory": (
-                True
-                if preserve_trial_artifacts
-                else base_settings.training.best_trajectory
-            ),
-        }),
-        "algorithm_config": new_algo,
-        "model_cfg": new_model,
-        "env": trial_env,
-    })
+    trial_env = base_settings.env.model_copy(
+        update={
+            "seed": base_settings.env.seed + _seed_offset,
+        })
+    settings = base_settings.model_copy(
+        update={
+            "training":
+            base_settings.training.model_copy(
+                update={
+                    "output_dir":
+                    trial_dir,
+                    "iterations":
+                    max_iterations,
+                    "checkpoint_interval":
+                    max_iterations + 1,
+                    "trajectory_every": (
+                        1 if preserve_trial_artifacts else base_settings.
+                        training.trajectory_every),
+                    "best_trajectory": (
+                        True if preserve_trial_artifacts else base_settings.
+                        training.best_trajectory),
+                }),
+            "algorithm_config":
+            new_algo,
+            "model_cfg":
+            new_model,
+            "env":
+            trial_env,
+        })
 
     # ------------------------------------------------------------------ #
     # MLflow child run                                                     #
     # ------------------------------------------------------------------ #
-    mlflow_cfg = MLflowConfig(tracking_uri=mlflow_tracking_uri) if mlflow_tracking_uri else None
+    mlflow_cfg = MLflowConfig(
+        tracking_uri=mlflow_tracking_uri) if mlflow_tracking_uri else None
     tracker = MLflowTracker(mlflow_cfg, mlflow_experiment_name)
     tracker.start_child_run(
         run_name=output_trial_id,
-        tags={"trial_id": output_trial_id, "ray_trial_id": trial_id},
+        tags={
+            "trial_id": output_trial_id,
+            "ray_trial_id": trial_id
+        },
         parent_run_id=mlflow_parent_run_id or None,
     )
     tracker.log_params({k: str(v) for k, v in config.items()})
@@ -410,6 +467,7 @@ def _experiment_trainable(
 # TuneRunner
 # ---------------------------------------------------------------------------
 
+
 def apply_win_atomic_save_patch() -> None:
     """
     Patch Ray's internal _atomic_save to normalise mixed path separators on
@@ -442,7 +500,8 @@ def apply_win_atomic_save_patch() -> None:
             try:
                 return _orig_save(state, norm_dir, file_name, tmp_file_name)
             except FileNotFoundError as exc:
-                path_len = len(os.path.join(norm_dir, f".uuid-{tmp_file_name}"))
+                path_len = len(os.path.join(norm_dir,
+                                            f".uuid-{tmp_file_name}"))
                 raise FileNotFoundError(
                     f"\n\nRay could not write its internal state file — path too long "
                     f"for Windows MAX_PATH (260 chars).\n\n"
@@ -453,8 +512,7 @@ def apply_win_atomic_save_patch() -> None:
                     f"  tune_config:\n"
                     f"    ray_storage_dir: C:/ray_tmp\n"
                     f"    ray_temp_dir: C:/ray_tmp\n\n"
-                    f"See spec/bugs.md for full details."
-                ) from exc
+                    f"See spec/bugs.md for full details.") from exc
 
         _tune_util._atomic_save = _win_atomic_save
         try:
@@ -529,10 +587,8 @@ def _existing_trial_dirs(sweep_dir: Path) -> list[Path]:
     if not sweep_dir.exists():
         return []
     return sorted(
-        path
-        for path in sweep_dir.iterdir()
-        if path.is_dir() and path.joinpath("ray_runtime.json").exists()
-    )
+        path for path in sweep_dir.iterdir()
+        if path.is_dir() and path.joinpath("ray_runtime.json").exists())
 
 
 def _segment_name(index: int) -> str:
@@ -594,7 +650,8 @@ def _lookup_sweep_registered_name(output_dir: Path) -> str | None:
     return None
 
 
-def _print_sweep_replay_hint(sweep_dir: Path, run_tag: str, best_trial_id: str | None) -> None:
+def _print_sweep_replay_hint(sweep_dir: Path, run_tag: str,
+                             best_trial_id: str | None) -> None:
     sep = "-" * 62
     reg_name = _lookup_sweep_registered_name(sweep_dir.parent.parent)
     sweep_ref = f"{reg_name}:{run_tag}" if reg_name else str(sweep_dir)
@@ -664,7 +721,8 @@ def _print_sweep_overview(
                 desc = f"choice{list(sampler.categories)}"
             elif isinstance(sampler, (Float, Integer)):
                 lo, hi = sampler.lower, sampler.upper
-                kind = "log_uniform" if isinstance(sampler, LogUniform) else "uniform"
+                kind = "log_uniform" if isinstance(sampler,
+                                                   LogUniform) else "uniform"
                 desc = f"{kind}({lo}, {hi})"
             else:
                 desc = repr(sampler)
@@ -692,13 +750,18 @@ def _print_sweep_overview(
     console = Console(file=sys.stdout, highlight=False)
     try:
         console.print(
-            Panel(content, title=f"[bold]Sweep[/bold]  [dim]{run_tag}[/dim]", title_align="left"),
+            Panel(content,
+                  title=f"[bold]Sweep[/bold]  [dim]{run_tag}[/dim]",
+                  title_align="left"),
             new_line_start=True,
         )
     except UnicodeEncodeError:
         sep = "-" * 62
         lines = [
-            "", sep, f"  Sweep : {run_tag}", sep,
+            "",
+            sep,
+            f"  Sweep : {run_tag}",
+            sep,
             f"  Source        : {config_path or '(no file)'}",
             f"  Algorithm     : {algorithm}",
             f"  Scheduler     : {scheduler}",
@@ -706,16 +769,21 @@ def _print_sweep_overview(
             f"  Iterations    : up to {iterations} per trial",
             f"  Env runners   : {num_env_runners} rollout workers per trial",
             f"  GPU           : {'yes' if require_gpu else 'no'}",
-            "", "  Output",
+            "",
+            "  Output",
             f"    Trials      : {sweep_dir}",
         ]
         if mlflow_tracking_uri:
             lines.append(f"    MLflow      : {mlflow_tracking_uri}")
-        lines += ["", "  TensorBoard", f'    tensorboard --logdir "{tb_logdir}"', sep, ""]
+        lines += [
+            "", "  TensorBoard", f'    tensorboard --logdir "{tb_logdir}"',
+            sep, ""
+        ]
         print("\n".join(lines), flush=True)
 
 
-def _close_child_runs(tracking_uri: str, parent_run_id: str, results: Any) -> None:
+def _close_child_runs(tracking_uri: str, parent_run_id: str,
+                      results: Any) -> None:
     """Terminate open child MLflow runs from the driver after tuner.fit()."""
     if not tracking_uri or not parent_run_id:
         return
@@ -732,7 +800,8 @@ def _close_child_runs(tracking_uri: str, parent_run_id: str, results: Any) -> No
                 client.set_terminated(run.info.run_id, "FINISHED")
     except Exception:
         import warnings
-        warnings.warn(f"MLflow child-run cleanup failed: {tracking_uri!r}", stacklevel=2)
+        warnings.warn(f"MLflow child-run cleanup failed: {tracking_uri!r}",
+                      stacklevel=2)
 
 
 def _first_trial_error(results: Any) -> str | None:
@@ -800,18 +869,21 @@ class TuneRunner:
 
         tc = self._config.tune_config
         if tc is None:
-            raise ValueError("TuneRunner requires tune_config to be set in ExperimentConfig.")
+            raise ValueError(
+                "TuneRunner requires tune_config to be set in ExperimentConfig."
+            )
         if self._resume and self._extra_trials > 0:
-            raise ValueError("resume and extra_trials cannot be used together for the same sweep launch.")
+            raise ValueError(
+                "resume and extra_trials cannot be used together for the same sweep launch."
+            )
         if self._extra_trials < 0:
             raise ValueError("extra_trials must be non-negative.")
 
         # ------------------------------------------------------------------ #
         # Build Ray Tune objects from tune_config                             #
         # ------------------------------------------------------------------ #
-        search_space = (
-            _parse_search_space(tc.search_space, ray_tune) if tc.search_space else {}
-        )
+        search_space = (_parse_search_space(tc.search_space, ray_tune)
+                        if tc.search_space else {})
         scheduler_obj = _build_scheduler(
             scheduler_name=tc.scheduler,
             max_iterations=self._config.training.iterations,
@@ -838,31 +910,35 @@ class TuneRunner:
         # Inject gpu_fraction so RLlib uses the same fractional value.        #
         # ------------------------------------------------------------------ #
         geometry = self._config.env.geometry
-        absolute_geometry = geometry.model_copy(update={
-            "stl_path": geometry.stl_path.resolve() if geometry.stl_path else None,
-            "stl_paths": (
-                [path.resolve() for path in geometry.stl_paths]
-                if geometry.stl_paths
-                else None
-            ),
-        })
-        absolute_env = self._config.env.model_copy(update={
-            "geometry": absolute_geometry,
-            "waypoints_file": (
-                str(Path(self._config.env.waypoints_file).resolve())
-                if self._config.env.waypoints_file
-                else None
-            ),
-        })
-        abs_config = self._config.model_copy(update={
-            "experiment": self._config.experiment.model_copy(update={
-                "output_dir": self._config.experiment.output_dir.resolve(),
-            }),
-            "env": absolute_env,
-            "training": self._config.training.model_copy(update={
-                "num_gpus": gpu_fraction,
-            }),
-        })
+        absolute_geometry = geometry.model_copy(
+            update={
+                "stl_path":
+                geometry.stl_path.resolve() if geometry.stl_path else None,
+                "stl_paths": ([path.resolve() for path in geometry.
+                               stl_paths] if geometry.stl_paths else None),
+            })
+        absolute_env = self._config.env.model_copy(
+            update={
+                "geometry":
+                absolute_geometry,
+                "waypoints_file": (
+                    str(Path(self._config.env.waypoints_file).resolve()
+                        ) if self._config.env.waypoints_file else None),
+            })
+        abs_config = self._config.model_copy(
+            update={
+                "experiment":
+                self._config.experiment.model_copy(update={
+                    "output_dir":
+                    self._config.experiment.output_dir.resolve(),
+                }),
+                "env":
+                absolute_env,
+                "training":
+                self._config.training.model_copy(update={
+                    "num_gpus": gpu_fraction,
+                }),
+            })
         experiment_dict = abs_config.model_dump(by_alias=True, mode="json")
 
         # ------------------------------------------------------------------ #
@@ -879,7 +955,8 @@ class TuneRunner:
             if mlflow_tracking_uri.startswith("sqlite:///"):
                 rel = mlflow_tracking_uri[len("sqlite:///"):]
                 if not Path(rel).is_absolute():
-                    mlflow_tracking_uri = "sqlite:///" + str(Path(rel).resolve())
+                    mlflow_tracking_uri = "sqlite:///" + str(
+                        Path(rel).resolve())
             mlflow_cfg = MLflowConfig(tracking_uri=mlflow_tracking_uri)
             tracker = MLflowTracker(mlflow_cfg, mlflow_experiment_name)
             parent_run_id = tracker.start_run(
@@ -916,8 +993,10 @@ class TuneRunner:
         # Users may override via tune_config.ray_storage_dir if they need
         # results to survive a reboot or land in a specific location.
         # See spec/bugs.md for why this is separate from output_dir.
-        _default_ray_storage = os.path.join(tempfile.gettempdir(), "anysearch_tune")
-        ray_storage_root = str(tc.ray_storage_dir) if tc.ray_storage_dir else _default_ray_storage
+        _default_ray_storage = os.path.join(tempfile.gettempdir(),
+                                            "anysearch_tune")
+        ray_storage_root = str(
+            tc.ray_storage_dir) if tc.ray_storage_dir else _default_ray_storage
         os.makedirs(ray_storage_root, exist_ok=True)
         storage_path = os.path.normpath(ray_storage_root)
         stored_ray_root = runtime_meta.get("ray_storage_root")
@@ -937,8 +1016,7 @@ class TuneRunner:
         if continuation_mode and not existing_trials:
             raise FileNotFoundError(
                 f"No existing tune sweep '{run_tag}' was found at {sweep_dir}. "
-                "Start the sweep first before appending extra trials."
-            )
+                "Start the sweep first before appending extra trials.")
 
         if continuation_mode:
             segment_name = _segment_name(_next_segment_index(runtime_meta))
@@ -948,10 +1026,15 @@ class TuneRunner:
             restore_path: Path | None = None
         elif self._resume:
             segments = runtime_meta.get("segments", [])
-            last_segment = segments[-1] if isinstance(segments, list) and segments else {}
+            last_segment = segments[-1] if isinstance(
+                segments, list) and segments else {}
             segment_name = str(last_segment.get("segment_name") or "base")
-            trial_prefix = str(last_segment.get("trial_prefix") or _segment_trial_prefix(segment_name))
-            tune_run_name = str(last_segment.get("tune_run_name") or _segment_tune_run_name(run_tag, segment_name))
+            trial_prefix = str(
+                last_segment.get("trial_prefix")
+                or _segment_trial_prefix(segment_name))
+            tune_run_name = str(
+                last_segment.get("tune_run_name")
+                or _segment_tune_run_name(run_tag, segment_name))
             restore_path = Path(storage_path, tune_run_name)
             num_samples = tc.num_samples
             if not ray_tune.Tuner.can_restore(str(restore_path)):
@@ -971,10 +1054,10 @@ class TuneRunner:
         # Keep temp dir short to avoid Windows MAX_PATH issues.               #
         # Users may override via tune_config.ray_temp_dir.                   #
         # ------------------------------------------------------------------ #
-        _default_ray_temp = os.path.join(
-            tempfile.gettempdir(), f"anysearch_tune_{os.getpid()}"
-        )
-        ray_temp_dir = str(tc.ray_temp_dir) if tc.ray_temp_dir else _default_ray_temp
+        _default_ray_temp = os.path.join(tempfile.gettempdir(),
+                                         f"anysearch_tune_{os.getpid()}")
+        ray_temp_dir = str(
+            tc.ray_temp_dir) if tc.ray_temp_dir else _default_ray_temp
         os.makedirs(ray_temp_dir, exist_ok=True)
         os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
         ray.init(
@@ -999,10 +1082,8 @@ class TuneRunner:
         # ------------------------------------------------------------------ #
         from ray.tune import PlacementGroupFactory
 
-        num_env_runners = (
-            self._config.training.num_env_runners
-            + self._config.evaluation.num_env_runners
-        )
+        num_env_runners = (self._config.training.num_env_runners +
+                           self._config.evaluation.num_env_runners)
 
         driver_bundle: dict[str, float] = {"CPU": 1.0}
         if gpu_fraction > 0:
@@ -1014,10 +1095,9 @@ class TuneRunner:
         worker_bundles = [
             dict(rollout_worker_bundle)
             for _ in range(self._config.training.num_env_runners)
-        ] + [
-            {"CPU": 1.0}
-            for _ in range(self._config.evaluation.num_env_runners)
-        ]
+        ] + [{
+            "CPU": 1.0
+        } for _ in range(self._config.evaluation.num_env_runners)]
 
         trainable_with_resources = ray_tune.with_resources(
             _experiment_trainable,
@@ -1066,15 +1146,19 @@ class TuneRunner:
         }
         runtime_meta = {
             **runtime_meta,
-            "run_tag": run_tag,
-            "experiment_name": experiment_name,
-            "ray_storage_root": storage_path,
-            "active_segment": segment_name,
+            "run_tag":
+            run_tag,
+            "experiment_name":
+            experiment_name,
+            "ray_storage_root":
+            storage_path,
+            "active_segment":
+            segment_name,
             "segments": [
                 *[
-                    segment
-                    for segment in runtime_segments
-                    if isinstance(segment, dict) and segment.get("segment_name") != segment_name
+                    segment for segment in runtime_segments
+                    if isinstance(segment, dict)
+                    and segment.get("segment_name") != segment_name
                 ],
                 active_segment_meta,
             ],
@@ -1135,7 +1219,8 @@ class TuneRunner:
                         max_concurrent_trials=tc.max_concurrent,
                         scheduler=scheduler_obj,
                         search_alg=search_alg_obj,
-                        reuse_actors=False,  # reuse causes stale PG bundle refs after many trials
+                        reuse_actors=
+                        False,  # reuse causes stale PG bundle refs after many trials
                         trial_name_creator=_trial_dirname,
                         trial_dirname_creator=_trial_dirname,
                     ),
@@ -1149,7 +1234,6 @@ class TuneRunner:
                 )
             results = tuner.fit()
 
-
             try:
                 best = results.get_best_result(metric=tc.metric, mode=tc.mode)
             except RuntimeError as exc:
@@ -1157,23 +1241,22 @@ class TuneRunner:
                 if first_error:
                     raise RuntimeError(
                         f"Tune sweep '{run_tag}' produced no valid '{tc.metric}' results. "
-                        f"The first trial error was: {first_error}"
-                    ) from exc
+                        f"The first trial error was: {first_error}") from exc
                 raise
-            best_trial_id = best.metrics.get("trial_id") if best.metrics else None
+            best_trial_id = best.metrics.get(
+                "trial_id") if best.metrics else None
             _persist_trial_outcomes(
                 sweep_dir,
                 results,
                 max_iterations=self._config.training.iterations,
             )
             runtime_meta["active_segment"] = None
-            runtime_meta["segments"] = [
-                {
-                    **segment,
-                    "status": "COMPLETED" if segment.get("segment_name") == segment_name else segment.get("status", "COMPLETED"),
-                }
-                for segment in runtime_meta["segments"]
-            ]
+            runtime_meta["segments"] = [{
+                **segment,
+                "status":
+                "COMPLETED" if segment.get("segment_name") == segment_name else
+                segment.get("status", "COMPLETED"),
+            } for segment in runtime_meta["segments"]]
             _write_sweep_runtime(sweep_dir, runtime_meta)
             if tracker:
                 _close_child_runs(mlflow_tracking_uri, parent_run_id, results)
@@ -1183,7 +1266,8 @@ class TuneRunner:
                 "best_config": best.config,
                 "best_result": {
                     tc.metric: best.metrics.get(tc.metric),
-                    "training_iteration": best.metrics.get("training_iteration"),
+                    "training_iteration":
+                    best.metrics.get("training_iteration"),
                 },
                 "best_trial_id": best_trial_id,
                 "experiment_dir": str(output_dir.joinpath(experiment_name)),
@@ -1191,13 +1275,12 @@ class TuneRunner:
                 "segment_name": segment_name,
             }
         except KeyboardInterrupt:
-            runtime_meta["segments"] = [
-                {
-                    **segment,
-                    "status": "INTERRUPTED" if segment.get("segment_name") == segment_name else segment.get("status", "COMPLETED"),
-                }
-                for segment in runtime_meta["segments"]
-            ]
+            runtime_meta["segments"] = [{
+                **segment,
+                "status":
+                "INTERRUPTED" if segment.get("segment_name") == segment_name
+                else segment.get("status", "COMPLETED"),
+            } for segment in runtime_meta["segments"]]
             _write_sweep_runtime(sweep_dir, runtime_meta)
             if tracker:
                 _close_child_runs(mlflow_tracking_uri, parent_run_id, results)
@@ -1205,13 +1288,12 @@ class TuneRunner:
             _print_sweep_replay_hint(sweep_dir, run_tag, best_trial_id=None)
             raise
         except Exception:
-            runtime_meta["segments"] = [
-                {
-                    **segment,
-                    "status": "FAILED" if segment.get("segment_name") == segment_name else segment.get("status", "COMPLETED"),
-                }
-                for segment in runtime_meta["segments"]
-            ]
+            runtime_meta["segments"] = [{
+                **segment,
+                "status":
+                "FAILED" if segment.get("segment_name") == segment_name else
+                segment.get("status", "COMPLETED"),
+            } for segment in runtime_meta["segments"]]
             _write_sweep_runtime(sweep_dir, runtime_meta)
             if tracker:
                 _close_child_runs(mlflow_tracking_uri, parent_run_id, results)
