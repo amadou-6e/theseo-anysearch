@@ -59,6 +59,7 @@ evaluation:
   seed: 142
   min_success_rate: 0.8
   num_env_runners: 4
+  num_envs_per_env_runner: 4
   waypoint_curriculum:
     enabled: true
     frequency: 1

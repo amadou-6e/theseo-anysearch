@@ -19,10 +19,39 @@ class _PolicyAdapter:
         policy_id: str = "default_policy",
         explore: bool = False,
     ) -> Any:
+        policy = self._env_runner.get_policy(policy_id)
+        observation = self._preprocess_observation(
+            policy, observation, env_id="0"
+        )
+        return policy.compute_single_action(obs=observation, explore=explore)
+
+    def compute_actions(
+        self,
+        observations: list[Any],
+        *,
+        policy_id: str = "default_policy",
+        explore: bool = False,
+    ) -> Any:
+        policy = self._env_runner.get_policy(policy_id)
+        processed = [
+            self._preprocess_observation(policy, observation, env_id=str(index))
+            for index, observation in enumerate(observations)
+        ]
+        return policy.compute_actions(
+            _stack_observations(processed),
+            explore=explore,
+        )
+
+    @staticmethod
+    def _preprocess_observation(
+        policy: Any,
+        observation: Any,
+        *,
+        env_id: str,
+    ) -> Any:
         from ray.rllib.connectors.agent.obs_preproc import ObsPreprocessorConnector
         from ray.rllib.utils.typing import AgentConnectorDataType
 
-        policy = self._env_runner.get_policy(policy_id)
         preprocessors = policy.agent_connectors[ObsPreprocessorConnector]
         if preprocessors:
             if len(preprocessors) != 1:
@@ -30,14 +59,32 @@ class _PolicyAdapter:
             preprocessor = preprocessors[0]
             if not preprocessor.is_identity():
                 preprocessor.in_eval()
-                preprocessor.reset(env_id="0")
+                preprocessor.reset(env_id=env_id)
                 connector_data = AgentConnectorDataType(
-                    "0",
+                    env_id,
                     "0",
                     {"obs": observation},
                 )
                 observation = preprocessor([connector_data])[0].data["obs"]
-        return policy.compute_single_action(obs=observation, explore=explore)
+        return observation
+
+
+def _stack_observations(observations: list[Any]) -> Any:
+    """Stack nested observations into the batch shape expected by RLlib."""
+    import numpy as np
+
+    first = observations[0]
+    if isinstance(first, dict):
+        return {
+            key: _stack_observations([observation[key] for observation in observations])
+            for key in first
+        }
+    if isinstance(first, tuple):
+        return tuple(
+            _stack_observations([observation[index] for observation in observations])
+            for index in range(len(first))
+        )
+    return np.stack(observations)
 
 
 def _collect_worker_episodes(
@@ -46,15 +93,26 @@ def _collect_worker_episodes(
     seeds: tuple[int, ...],
     env_config: dict[str, Any],
     multi_agent: bool,
+    num_envs_per_env_runner: int,
 ) -> list[tuple[int, Any]]:
     """Collect assigned seeds inside one RLlib evaluation actor."""
     from theseo_anysearch.experiments.trajectory import (
         collect_eval_episode,
         collect_multi_eval_episode,
+        collect_vectorized_eval_episodes,
     )
 
     collector = collect_multi_eval_episode if multi_agent else collect_eval_episode
     policy = _PolicyAdapter(env_runner)
+    if not multi_agent and num_envs_per_env_runner > 1:
+        results: list[tuple[int, Any]] = []
+        for offset in range(0, len(seeds), num_envs_per_env_runner):
+            batch_seeds = seeds[offset:offset + num_envs_per_env_runner]
+            episodes = collect_vectorized_eval_episodes(
+                policy, env_config, batch_seeds
+            )
+            results.extend(zip(batch_seeds, episodes))
+        return results
     return [
         (seed, collector(policy, env_config, seed=seed))
         for seed in seeds
@@ -68,10 +126,13 @@ def collect_rllib_evaluation_episodes(
     *,
     seed: int,
     multi_agent: bool,
+    num_envs_per_env_runner: int = 1,
 ) -> list[Any]:
     """Collect a deterministic batch concurrently on RLlib evaluation workers."""
     if count < 1:
         raise ValueError("evaluation episode count must be at least one")
+    if num_envs_per_env_runner < 1:
+        raise ValueError("evaluation environments per runner must be at least one")
 
     group = getattr(algorithm, "eval_env_runner_group", None)
     worker_ids = group.healthy_env_runner_ids() if group is not None else []
@@ -79,6 +140,7 @@ def collect_rllib_evaluation_episodes(
         from theseo_anysearch.experiments.trajectory import (
             collect_eval_episodes,
             collect_multi_eval_episode,
+            collect_vectorized_eval_episodes,
         )
 
         if multi_agent:
@@ -90,6 +152,17 @@ def collect_rllib_evaluation_episodes(
                 )
                 for episode_index in range(count)
             ]
+        if num_envs_per_env_runner > 1:
+            episodes: list[Any] = []
+            seeds = tuple(seed + episode_index for episode_index in range(count))
+            policy = _PolicyAdapter(algorithm)
+            for offset in range(0, count, num_envs_per_env_runner):
+                episodes.extend(collect_vectorized_eval_episodes(
+                    policy,
+                    env_config,
+                    seeds[offset:offset + num_envs_per_env_runner],
+                ))
+            return episodes
         return collect_eval_episodes(algorithm, env_config, count, seed=seed)
 
     active_worker_ids = worker_ids[: min(len(worker_ids), count)]
@@ -108,6 +181,7 @@ def collect_rllib_evaluation_episodes(
             seeds=tuple(worker_seeds),
             env_config=env_config,
             multi_agent=multi_agent,
+            num_envs_per_env_runner=num_envs_per_env_runner,
         )
         for worker_seeds in assignments
     ]

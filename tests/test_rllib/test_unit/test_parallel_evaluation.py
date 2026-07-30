@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
+import numpy as np
+
 from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+    _PolicyAdapter,
+    _collect_worker_episodes,
+    _stack_observations,
     collect_rllib_evaluation_episodes,
     configure_rllib_evaluation,
 )
@@ -31,6 +36,7 @@ class _FakeEvaluationGroup:
         self.received_worker_ids = remote_worker_ids
         results = []
         for function in reversed(functions):
+            assert function.keywords["num_envs_per_env_runner"] == 1
             results.append([
                 (seed, f"episode-{seed}")
                 for seed in function.keywords["seeds"]
@@ -82,6 +88,107 @@ def test_parallel_collection_uses_only_workers_with_assigned_episodes() -> None:
 
     assert episodes == ["episode-7", "episode-8"]
     assert group.received_worker_ids == [11, 12]
+
+
+def test_worker_collection_chunks_vectorized_episodes(monkeypatch) -> None:
+    calls = []
+
+    def collect_vectorized(policy, env_config, seeds):
+        calls.append((policy, env_config, seeds))
+        return [f"episode-{seed}" for seed in seeds]
+
+    monkeypatch.setattr(
+        "theseo_anysearch.experiments.trajectory.collect_vectorized_eval_episodes",
+        collect_vectorized,
+    )
+    env_runner = object()
+
+    episodes = _collect_worker_episodes(
+        env_runner,
+        seeds=(10, 11, 12, 13, 14),
+        env_config={"max_steps": 5},
+        multi_agent=False,
+        num_envs_per_env_runner=2,
+    )
+
+    assert [call[2] for call in calls] == [(10, 11), (12, 13), (14,)]
+    assert episodes == [
+        (10, "episode-10"),
+        (11, "episode-11"),
+        (12, "episode-12"),
+        (13, "episode-13"),
+        (14, "episode-14"),
+    ]
+
+
+def test_inline_collection_honors_vectorization(monkeypatch) -> None:
+    calls = []
+
+    def collect_vectorized(algorithm, env_config, seeds):
+        calls.append(seeds)
+        return [f"episode-{seed}" for seed in seeds]
+
+    monkeypatch.setattr(
+        "theseo_anysearch.experiments.trajectory.collect_vectorized_eval_episodes",
+        collect_vectorized,
+    )
+
+    episodes = collect_rllib_evaluation_episodes(
+        SimpleNamespace(),
+        {},
+        5,
+        seed=20,
+        multi_agent=False,
+        num_envs_per_env_runner=2,
+    )
+
+    assert calls == [(20, 21), (22, 23), (24,)]
+    assert episodes == [
+        "episode-20",
+        "episode-21",
+        "episode-22",
+        "episode-23",
+        "episode-24",
+    ]
+
+
+def test_stack_observations_preserves_nested_structure() -> None:
+    stacked = _stack_observations([
+        {"box": [1, 2], "goal": (3, 4)},
+        {"box": [5, 6], "goal": (7, 8)},
+    ])
+
+    assert stacked["box"].tolist() == [[1, 2], [5, 6]]
+    assert [part.tolist() for part in stacked["goal"]] == [[3, 7], [4, 8]]
+
+
+def test_policy_adapter_batches_observations_for_policy(monkeypatch) -> None:
+    received = {}
+
+    class _Policy:
+        def compute_actions(self, observations, *, explore):
+            received["observations"] = observations
+            received["explore"] = explore
+            return np.asarray([2, 3]), [], {}
+
+    policy = _Policy()
+    env_runner = SimpleNamespace(get_policy=lambda policy_id: policy)
+    monkeypatch.setattr(
+        _PolicyAdapter,
+        "_preprocess_observation",
+        staticmethod(
+            lambda selected_policy, observation, env_id: observation
+        ),
+    )
+
+    actions, _, _ = _PolicyAdapter(env_runner).compute_actions(
+        [{"box": [1, 2]}, {"box": [3, 4]}],
+        explore=False,
+    )
+
+    assert actions.tolist() == [2, 3]
+    assert received["observations"]["box"].tolist() == [[1, 2], [3, 4]]
+    assert received["explore"] is False
 
 
 class _FakeRllibConfig:
