@@ -26,3 +26,4 @@ These configurations are longer-running policy-training baselines and task-speci
 - [`ppo_tiny_overfit.yaml`](ppo_tiny_overfit.yaml) is an intentionally tiny fixed task used to diagnose whether PPO, evaluation, and replay can learn and report a simple solution.
 
 Use the showcase configurations for fast installation checks; use these files when comparing learning behavior or producing durable checkpoints.
+- [`ppo_empty_grid_waypoint_curriculum.yaml`](ppo_empty_grid_waypoint_curriculum.yaml) tests curriculum advancement and retained-stage learning on an obstacle-free 32³ grid with vectorized training and evaluation.
