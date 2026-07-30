@@ -350,10 +350,13 @@ class VoxelEnv(RustGymnasiumEnv):
             collision_limit is not None
             and self._consecutive_collisions >= collision_limit
         )
-        terminated = (
-            success and self._task.termination.terminate_on_success
-        ) or collision_limit_reached
-        truncated = self._episode_steps >= int(self._config.get("max_steps", 200)) and not terminated
+        terminated = success and self._task.termination.terminate_on_success
+        step_limit_reached = self._episode_steps >= int(
+            self._config.get("max_steps", 200)
+        )
+        truncated = (
+            collision_limit_reached or step_limit_reached
+        ) and not terminated
         reason = (
             "success"
             if success and self._task.termination.terminate_on_success

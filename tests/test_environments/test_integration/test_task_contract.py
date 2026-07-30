@@ -100,11 +100,12 @@ class TestTaskContract:
             assert info["consecutive_collisions"] == expected_count
 
         _, _, terminated, truncated, info = env.step(ACTION_PLUS_X)
-        assert terminated is True
-        assert truncated is False
+        assert terminated is False
+        assert truncated is True
         assert info["goal_reached"] is False
         assert info["termination_reason"] == "collision_limit"
         assert info["consecutive_collisions"] == 3
+
     def test_invalid_action_is_separate_from_collision(self, tmp_path):
         env = make_radial_test_env(
             tmp_path,
