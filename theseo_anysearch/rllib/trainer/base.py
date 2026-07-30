@@ -523,6 +523,7 @@ class Trainer(ABC):
                         evaluation_episodes,
                         seed=evaluation_seed,
                         multi_agent=_is_multi,
+                        num_envs_per_env_runner=evaluation.num_envs_per_env_runner,
                     )
                     metrics_factory = (
                         EpisodeRunMetrics.from_multi_voxel_episodes
@@ -711,6 +712,12 @@ class Trainer(ABC):
                             "seed_start": evaluation_seed,
                             "episode_count": len(episodes),
                             "num_env_runners": evaluation.num_env_runners,
+                            "num_envs_per_env_runner": evaluation.num_envs_per_env_runner,
+                            "max_evaluation_concurrency": min(
+                                evaluation_episodes,
+                                max(evaluation.num_env_runners, 1)
+                                * evaluation.num_envs_per_env_runner,
+                            ),
                             "goals_reached": metrics.finish_count,
                             "success_rate": metrics.finish_rate,
                             "reward_mean": evaluation_reward_mean,

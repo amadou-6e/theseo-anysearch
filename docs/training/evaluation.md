@@ -41,7 +41,8 @@ available on subsequent iterations.
 | `episodes` | `1` | Deterministic episodes collected after each training iteration. |
 | `seed` | `42` | First seed in every deterministic evaluation batch. |
 | `min_success_rate` | `0.5` | Success-rate threshold used to classify the policy as solved. |
-| `num_env_runners` | `0` | Dedicated RLlib evaluation workers; zero evaluates serially in the driver. |
+| `num_env_runners` | `0` | Dedicated RLlib evaluation workers; zero evaluates in the driver. |
+| `num_envs_per_env_runner` | `1` | Evaluation environments batched within each worker or the driver. |
 
 ## Evaluation-driven early stopping
 
@@ -62,16 +63,19 @@ evaluation:
   episodes: 20
   seed: 42
   min_success_rate: 0.5
-  num_env_runners: 8
+  num_env_runners: 4
+  num_envs_per_env_runner: 4
 ```
 
 `training.num_env_runners` controls training sampling.
-`evaluation.num_env_runners` controls deterministic evaluation separately. Evaluation episodes are assigned
-round-robin to the dedicated workers, which receive synchronized policy weights
-before every batch. Returned trajectories are sorted by seed before metrics,
+`evaluation.num_env_runners` controls dedicated evaluation workers, while
+`evaluation.num_envs_per_env_runner` controls the vector width within each worker.
+Active observations are passed through one batched policy inference call. Dedicated
+workers receive synchronized policy weights before every batch. Returned trajectories are sorted by seed before metrics,
 early stopping, and replay artifacts are produced, so worker completion order
 does not affect results.
 
-A value of `0` preserves inline serial evaluation for constrained machines and
-tests. Tune placement groups and local Ray CPU allocation reserve resources for
+A `num_env_runners` value of `0` evaluates inline and still supports vectorization.
+The effective concurrency is limited by the episode count and equals at most
+`max(num_env_runners, 1) * num_envs_per_env_runner`. Tune placement groups and local Ray CPU allocation reserve resources for
 both training and evaluation workers. Evaluation does not overlap training.
