@@ -21,3 +21,4 @@ These files launch multi-trial searches or repeat one configuration across multi
 ASHA is appropriate for independent trials with early stopping. PBT is appropriate when strong trials should transfer weights and mutate their settings during training. The geometry sweep isolates environment difficulty rather than hyperparameter quality.
 
 Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop budgets are documented in [Tune lifecycle and trial budgets](../../../docs/tuning/lifecycle.md).
+- [`ppo_empty_grid_waypoint_curriculum.yaml`](ppo_empty_grid_waypoint_curriculum.yaml) runs a 10-trial ASHA curriculum sweep on an obstacle-free grid with vectorized training and evaluation.
