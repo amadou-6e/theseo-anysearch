@@ -35,6 +35,7 @@ class TerminationPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     terminate_on_success: bool = True
+    max_consecutive_collisions: int | None = Field(default=None, ge=1)
 
 
 class TaskConfig(BaseModel):

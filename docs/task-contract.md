@@ -23,6 +23,7 @@ env:
       tolerance: 0.0
     termination:
       terminate_on_success: true
+      max_consecutive_collisions: 10
 ```
 
 For a region-like goal, use `type: target_voxel_set` and provide `voxels`.
@@ -33,9 +34,10 @@ the start position is unambiguous.
 Every step returns these `info` fields:
 
 - `goal_reached` and `termination_reason` (`in_progress`, `success`, or
-  `step_limit`);
+  `step_limit`, or `collision_limit`);
 - `reward_breakdown`, with step, distance, success, invalid-action, collision,
   construction-residual, and construction-overshoot components;
+- `consecutive_collisions`, reset to zero by any non-collision step;
 - `unshaped_reward`, which excludes distance shaping;
 - initial, final, and minimum goal distance.
 
@@ -47,7 +49,10 @@ Distance-progress shaping is potential based:
 
 ```text
 distance_shaping * (previous Euclidean distance - current Euclidean distance)
+/ maximum action-space movement distance
 ```
 
-Set `distance_shaping: 0.0` to disable it. Construction weights are non-negative;
+The normalization divisor is `1` for `discrete_6`, `sqrt(2)` for
+`discrete_18`, and `sqrt(3)` for `discrete_26` and `vector_3`. Set
+`distance_shaping: 0.0` to disable it. Construction weights are non-negative;
 their reward terms are the negative weighted residual and overshoot voxel counts.

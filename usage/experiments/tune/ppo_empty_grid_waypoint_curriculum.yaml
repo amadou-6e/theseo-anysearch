@@ -14,6 +14,10 @@ env:
   seed: 42
   trail_mode: true
 
+  task:
+    termination:
+      max_consecutive_collisions: 10
+
   geometry:
     grid_size: 32
     boxes: []

@@ -55,6 +55,7 @@ class VoxelEnv(RustGymnasiumEnv):
     def __init__(self, config: dict) -> None:
         self._task = TaskConfig.model_validate(config.get("task") or {})
         self._episode_steps = 0
+        self._consecutive_collisions = 0
         self._episode_reward_breakdown: dict[str, float] = {}
         self._initial_distance = 0.0
         self._minimum_distance = 0.0
@@ -271,6 +272,7 @@ class VoxelEnv(RustGymnasiumEnv):
         fallback = self._rust_env.goal_pos()
         distance = goal_distance(self._task.goal, cursor, fallback)
         self._episode_steps = 0
+        self._consecutive_collisions = 0
         self._initial_distance = distance
         self._minimum_distance = distance
         self._previous_task_distance = distance
@@ -297,6 +299,9 @@ class VoxelEnv(RustGymnasiumEnv):
             not invalid_action
             and action_index != NOOP_ACTION_INDEX
             and cursor == previous_cursor
+        )
+        self._consecutive_collisions = (
+            self._consecutive_collisions + 1 if collision else 0
         )
 
         if self._config.get("distance_reward_mode", "progress") == "progress":
@@ -340,9 +345,24 @@ class VoxelEnv(RustGymnasiumEnv):
         self._episode_steps += 1
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
-        terminated = success and self._task.termination.terminate_on_success
+        collision_limit = self._task.termination.max_consecutive_collisions
+        collision_limit_reached = (
+            collision_limit is not None
+            and self._consecutive_collisions >= collision_limit
+        )
+        terminated = (
+            success and self._task.termination.terminate_on_success
+        ) or collision_limit_reached
         truncated = self._episode_steps >= int(self._config.get("max_steps", 200)) and not terminated
-        reason = "success" if terminated else "step_limit" if truncated else "in_progress"
+        reason = (
+            "success"
+            if success and self._task.termination.terminate_on_success
+            else "collision_limit"
+            if collision_limit_reached
+            else "step_limit"
+            if truncated
+            else "in_progress"
+        )
         info = {
             "task_version": self._task.version,
             "goal_reached": success,
@@ -355,6 +375,7 @@ class VoxelEnv(RustGymnasiumEnv):
             "minimum_goal_distance": self._minimum_distance,
             "invalid_action": invalid_action,
             "collision": collision,
+            "consecutive_collisions": self._consecutive_collisions,
             "construction_residual": residual,
             "construction_overshoot": overshoot,
         }
