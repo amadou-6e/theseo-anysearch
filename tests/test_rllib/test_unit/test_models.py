@@ -9,7 +9,6 @@ from theseo_anysearch.models import (
     AlgorithmConfig,
     AnyscaleConfig,
     EnvConfig,
-    EvaluationConfig,
     ModelConfig,
     Settings,
     TrainingConfig,
@@ -96,23 +95,6 @@ class TestTrainingConfig:
     def test_runner_literal(self):
         with pytest.raises(ValidationError):
             TrainingConfig(algorithm="ppo", model="m", runner="invalid")
-
-
-class TestEvaluationConfig:
-    """Tests EvaluationConfig."""
-
-    def test_env_vectorization_defaults_to_one(self):
-        assert EvaluationConfig().num_envs_per_env_runner == 1
-
-    def test_env_vectorization_can_be_set(self):
-        assert EvaluationConfig(
-            num_envs_per_env_runner=4
-        ).num_envs_per_env_runner == 4
-
-    @pytest.mark.parametrize("num_envs", [0, -1])
-    def test_rejects_non_positive_envs_per_runner(self, num_envs):
-        with pytest.raises(ValidationError):
-            EvaluationConfig(num_envs_per_env_runner=num_envs)
 
 
 class TestAnyscaleConfig:

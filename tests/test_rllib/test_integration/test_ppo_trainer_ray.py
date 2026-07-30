@@ -39,11 +39,6 @@ training:
     num_envs_per_env_runner: 2
     num_gpus_per_env_runner: 0.0
 
-evaluation:
-    episodes: 2
-    num_env_runners: 0
-    num_envs_per_env_runner: 2
-
 anyscale:
     cluster_env: x
     compute_config: y
@@ -136,11 +131,6 @@ class TestPPOTrainerRayBuild:
         assert trainer._algo.config.num_env_runners == 1
         assert trainer._algo.config.num_envs_per_env_runner == 2
         assert trainer._algo.config.num_gpus_per_env_runner == 0.0
-
-    def test_trainer_uses_vectorized_evaluation(self, trained):
-        trainer, results = trained
-        assert trainer._config.evaluation.num_envs_per_env_runner == 2
-        assert all(result.evaluation_episodes == 2 for result in results)
 
 
 # ---------------------------------------------------------------------------

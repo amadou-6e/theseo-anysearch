@@ -376,7 +376,6 @@ class EvaluationConfig(BaseModel):
     seed: int = 42
     min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0)
     num_env_runners: int = Field(default=0, ge=0)
-    num_envs_per_env_runner: int = Field(default=1, ge=1)
     waypoint_curriculum: WaypointCurriculumEvaluationConfig = Field(
         default_factory=WaypointCurriculumEvaluationConfig
     )

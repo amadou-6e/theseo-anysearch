@@ -262,201 +262,121 @@ class EpisodeRunMetrics:
 # Eval episode collector
 # ---------------------------------------------------------------------------
 
-@dataclass
-class _VoxelEpisodeState:
-    env_config: dict[str, Any]
-    env: Any
-    obs: Any
-    init_filled: list[tuple[int, int, int]]
-    start_pos: tuple[int, int, int] | None
-    goal_pos: tuple[int, int, int] | None
-    prev_voxel_count: int
-    steps: list[VoxelStepData]
-    total_reward: float = 0.0
-    final_info: dict[str, Any] | None = None
-    done: bool = False
+def collect_eval_episode(algo: Any, env_config: dict, *, env: Any = None, seed: int | None = None) -> VoxelEpisodeData:
+    """
+    Run one evaluation episode using the given RLlib algorithm's policy and
+    return the trajectory as a VoxelEpisodeData.
 
-    @classmethod
-    def create(
-        cls,
-        env_config: dict[str, Any],
-        *,
-        env: Any = None,
-        seed: int | None = None,
-    ) -> "_VoxelEpisodeState":
-        if env is None:
-            from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+    Creates a fresh VoxelEnv directly (not through Ray workers) so it runs
+    in the main process. Policy inference failures are surfaced so invalid fallback
+    trajectories cannot be mistaken for policy rollouts.
 
-            env = VoxelEnv(env_config)
-        obs, _ = env.reset(seed=seed)
-        init_filled: list[tuple[int, int, int]] = []
-        start_pos: tuple[int, int, int] | None = None
-        goal_pos: tuple[int, int, int] | None = None
-        if hasattr(env, "_rust_env") and env._rust_env is not None:
-            init_filled = [
-                (int(x), int(y), int(z))
-                for x, y, z in env._rust_env.filled_voxels()
-            ]
-            raw_goal = env._rust_env.goal_pos()
-            if raw_goal is not None:
-                goal_pos = (
-                    int(raw_goal[0]),
-                    int(raw_goal[1]),
-                    int(raw_goal[2]),
-                )
-            raw_cursor = env._rust_env.cursor_pos()
-            start_pos = (
-                int(raw_cursor[0]),
-                int(raw_cursor[1]),
-                int(raw_cursor[2]),
-            )
-        return cls(
-            env_config=env_config,
-            env=env,
-            obs=obs,
-            init_filled=init_filled,
-            start_pos=start_pos,
-            goal_pos=goal_pos,
-            prev_voxel_count=_extract_voxel_count(obs),
-            steps=[],
+    Raises ImportError if theseo_core is not installed.
+
+    ``env`` may be supplied explicitly (e.g. in tests) to bypass VoxelEnv construction.
+    """
+    if env is None:
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+        env = VoxelEnv(env_config)
+    obs, _ = env.reset(seed=seed)
+
+    init_filled: list[tuple[int, int, int]] = []
+    start_pos: tuple[int, int, int] | None = None
+    goal_pos: tuple[int, int, int] | None = None
+    if hasattr(env, "_rust_env") and env._rust_env is not None:
+        init_filled = [
+            (int(x), int(y), int(z))
+            for x, y, z in env._rust_env.filled_voxels()
+        ]
+        raw_goal = env._rust_env.goal_pos()
+        if raw_goal is not None:
+            goal_pos = (int(raw_goal[0]), int(raw_goal[1]), int(raw_goal[2]))
+        raw_cursor = env._rust_env.cursor_pos()
+        start_pos = (int(raw_cursor[0]), int(raw_cursor[1]), int(raw_cursor[2]))
+
+    steps: list[VoxelStepData] = []
+    total_reward = 0.0
+    step_count = 0
+    prev_voxel_count = _extract_voxel_count(obs)
+
+    final_info: dict[str, Any] = {}
+    while True:
+        raw_action = algo.compute_single_action(
+            obs,
+            policy_id="default_policy",
+            explore=False,
         )
-
-    def advance(self, raw_action: Any) -> None:
-        raw_action = _unwrap_policy_action(raw_action)
+        if (
+            isinstance(raw_action, tuple)
+            and len(raw_action) == 3
+            and isinstance(raw_action[2], dict)
+        ):
+            raw_action = raw_action[0]
         action = (
-            int(self.env._encode_action(raw_action))
-            if hasattr(self.env, "_encode_action")
+            int(env._encode_action(raw_action))
+            if hasattr(env, "_encode_action")
             else int(raw_action)
         )
-        obs_next, reward, terminated, truncated, info = self.env.step(raw_action)
-        self.done = bool(terminated or truncated)
+
+        obs_next, reward, terminated, truncated, final_info = env.step(raw_action)
+        done = terminated or truncated
         voxel_count = _extract_voxel_count(obs_next)
+        placed = voxel_count > prev_voxel_count
+
+        # Record cursor position AFTER the step: for movement actions this is
+        # the destination cell where any trail voxel was placed.
         cursor = (1, 1, 1)
-        if hasattr(self.env, "_rust_env") and self.env._rust_env is not None:
-            cursor = self.env._rust_env.cursor_pos()
-        self.steps.append(VoxelStepData(
-            step=len(self.steps),
+        if hasattr(env, "_rust_env") and env._rust_env is not None:
+            cursor = env._rust_env.cursor_pos()
+
+        steps.append(VoxelStepData(
+            step=step_count,
             action=action,
             reward=float(reward),
-            done=self.done,
+            done=done,
             cursor_x=int(cursor[0]),
             cursor_y=int(cursor[1]),
             cursor_z=int(cursor[2]),
             voxel_count=voxel_count,
-            placed=voxel_count > self.prev_voxel_count,
-            reward_breakdown=dict(info.get("reward_breakdown", {})),
-            termination_reason=str(info.get("termination_reason", "in_progress")),
+            placed=placed,
+            reward_breakdown=dict(final_info.get("reward_breakdown", {})),
+            termination_reason=str(final_info.get("termination_reason", "in_progress")),
         ))
-        self.total_reward += float(reward)
-        self.prev_voxel_count = voxel_count
-        self.obs = obs_next
-        self.final_info = info
 
-    def finish(self) -> VoxelEpisodeData:
-        self.close()
-        final_info = self.final_info or {}
-        return VoxelEpisodeData(
-            agent_count=1,
-            max_steps=self.env_config.get("max_steps", 200),
-            obs_mode=self.env_config.get("obs_mode", "scalar"),
-            grid_size=self.env_config.get("grid_size", 32),
-            init_filled=self.init_filled,
-            steps=self.steps,
-            total_reward=self.total_reward,
-            success=bool(final_info.get("goal_reached", False)),
-            start_pos=self.start_pos,
-            goal_pos=self.goal_pos,
-            termination_reason=str(final_info.get("termination_reason", "unknown")),
-            initial_goal_distance=final_info.get("initial_goal_distance"),
-            final_goal_distance=final_info.get("final_goal_distance"),
-            minimum_goal_distance=final_info.get("minimum_goal_distance"),
-            reward_breakdown=dict(final_info.get("episode_reward_breakdown", {})),
-            unshaped_return=sum(
-                step.reward
-                - (step.reward_breakdown or {}).get("distance_progress", 0.0)
-                for step in self.steps
-            ),
-        )
+        total_reward += float(reward)
+        prev_voxel_count = voxel_count
+        step_count += 1
 
-    def close(self) -> None:
-        try:
-            self.env.close()
-        except Exception:
-            pass
+        if done:
+            break
+        obs = obs_next
 
-
-def _unwrap_policy_action(raw_action: Any) -> Any:
-    if (
-        isinstance(raw_action, tuple)
-        and len(raw_action) == 3
-        and isinstance(raw_action[2], dict)
-    ):
-        return raw_action[0]
-    return raw_action
-
-
-def collect_eval_episode(
-    algo: Any,
-    env_config: dict,
-    *,
-    env: Any = None,
-    seed: int | None = None,
-) -> VoxelEpisodeData:
-    """Run one deterministic single-agent evaluation episode."""
-    state = _VoxelEpisodeState.create(env_config, env=env, seed=seed)
     try:
-        while not state.done:
-            action = algo.compute_single_action(
-                state.obs,
-                policy_id="default_policy",
-                explore=False,
-            )
-            state.advance(action)
-        return state.finish()
-    finally:
-        state.close()
+        env.close()
+    except Exception:
+        pass
 
+    max_steps = env_config.get("max_steps", 200)
+    success = bool(final_info.get("goal_reached", False))
 
-def collect_vectorized_eval_episodes(
-    algo: Any,
-    env_config: dict,
-    seeds: tuple[int, ...],
-) -> list[VoxelEpisodeData]:
-    """Collect independent episodes with batched policy inference."""
-    if not seeds:
-        raise ValueError("evaluation episode seeds must not be empty")
-    states = [
-        _VoxelEpisodeState.create(env_config, seed=seed)
-        for seed in seeds
-    ]
-    active = list(enumerate(states))
-    completed: dict[int, VoxelEpisodeData] = {}
-    try:
-        while active:
-            raw_actions = algo.compute_actions(
-                [state.obs for _, state in active],
-                policy_id="default_policy",
-                explore=False,
-            )
-            if isinstance(raw_actions, tuple):
-                raw_actions = raw_actions[0]
-            if len(raw_actions) != len(active):
-                raise RuntimeError(
-                    "policy returned "
-                    f"{len(raw_actions)} actions for {len(active)} evaluation environments"
-                )
-            remaining: list[tuple[int, _VoxelEpisodeState]] = []
-            for (episode_index, state), action in zip(active, raw_actions):
-                state.advance(action)
-                if state.done:
-                    completed[episode_index] = state.finish()
-                else:
-                    remaining.append((episode_index, state))
-            active = remaining
-        return [completed[index] for index in range(len(states))]
-    finally:
-        for state in states:
-            state.close()
+    return VoxelEpisodeData(
+        agent_count=1,
+        max_steps=max_steps,
+        obs_mode=env_config.get("obs_mode", "scalar"),
+        grid_size=env_config.get("grid_size", 32),
+        init_filled=init_filled,
+        steps=steps,
+        total_reward=total_reward,
+        success=success,
+        start_pos=start_pos,
+        goal_pos=goal_pos,
+        termination_reason=str(final_info.get("termination_reason", "unknown")),
+        initial_goal_distance=final_info.get("initial_goal_distance"),
+        final_goal_distance=final_info.get("final_goal_distance"),
+        minimum_goal_distance=final_info.get("minimum_goal_distance"),
+        reward_breakdown=dict(final_info.get("episode_reward_breakdown", {})),
+        unshaped_return=sum(step.reward - (step.reward_breakdown or {}).get("distance_progress", 0.0) for step in steps),
+    )
 
 
 def collect_eval_episodes(
