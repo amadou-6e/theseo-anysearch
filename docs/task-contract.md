@@ -17,13 +17,13 @@ env:
     construction_overshoot_weight: 0.0
   task:
     version: 1
+    max_consecutive_collisions: 10
     goal:
       type: point
       position: [6, 7, 1]
       tolerance: 0.0
     termination:
       terminate_on_success: true
-      max_consecutive_collisions: 10
 ```
 
 For a region-like goal, use `type: target_voxel_set` and provide `voxels`.

@@ -345,7 +345,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._episode_steps += 1
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
-        collision_limit = self._task.termination.max_consecutive_collisions
+        collision_limit = self._task.max_consecutive_collisions
         collision_limit_reached = (
             collision_limit is not None
             and self._consecutive_collisions >= collision_limit

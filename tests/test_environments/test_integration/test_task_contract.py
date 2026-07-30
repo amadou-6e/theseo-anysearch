@@ -79,9 +79,7 @@ class TestTaskContract:
             tmp_path,
             geometry_boxes=[[5, 4, 4, 5, 4, 5]],
             reward_overrides={
-                "task": {
-                    "termination": {"max_consecutive_collisions": 3},
-                },
+                "task": {"max_consecutive_collisions": 3},
             },
         )
         env.reset(seed=0)

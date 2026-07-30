@@ -35,7 +35,6 @@ class TerminationPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     terminate_on_success: bool = True
-    max_consecutive_collisions: int | None = Field(default=None, ge=1)
 
 
 class TaskConfig(BaseModel):
@@ -43,6 +42,7 @@ class TaskConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
+    max_consecutive_collisions: int | None = Field(default=None, ge=1)
     goal: Goal = Field(default_factory=PointGoal)
     termination: TerminationPolicy = Field(default_factory=TerminationPolicy)
     construction_target_voxels: list[Coord] = Field(default_factory=list)

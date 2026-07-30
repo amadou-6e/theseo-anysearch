@@ -15,8 +15,7 @@ env:
   trail_mode: true
 
   task:
-    termination:
-      max_consecutive_collisions: 10
+    max_consecutive_collisions: 10
 
   geometry:
     grid_size: 32
