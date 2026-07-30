@@ -16,6 +16,7 @@ from theseo_anysearch.environments.action_spaces import (
     NOOP_ACTION_INDEX,
     build_action_space,
     encode_action,
+    maximum_movement_distance,
 )
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
@@ -300,9 +301,12 @@ class VoxelEnv(RustGymnasiumEnv):
 
         if self._config.get("distance_reward_mode", "progress") == "progress":
             step_cost = float(self._config.get("step_cost", -0.01))
+            max_movement_distance = maximum_movement_distance(
+                self._config.get("action_mode", "discrete_26")
+            )
             distance_component = float(self._config.get("distance_shaping", 0.0)) * (
                 self._previous_task_distance - current_distance
-            )
+            ) / max_movement_distance
         else:
             rust_goal_reward = float(self._config.get("goal_reward", 1.0)) if success else 0.0
             rust_collision = float(self._config.get("collision_cost", 0.0)) if collision else 0.0

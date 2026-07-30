@@ -1,6 +1,7 @@
 """Action-space construction and canonical voxel-movement encoding."""
 from __future__ import annotations
 from itertools import product
+from math import sqrt
 from typing import Any
 import numpy as np
 from gymnasium import spaces
@@ -16,6 +17,13 @@ def offsets_for_mode(mode: str) -> tuple[tuple[int, int, int], ...]:
     if mode == "discrete_18":
         return tuple(offset for offset in ACTION_OFFSETS_26 if sum(v * v for v in offset) <= 2)
     return ACTION_OFFSETS_26
+
+
+def maximum_movement_distance(mode: str) -> float:
+    """Return the largest Euclidean displacement selectable by ``mode``."""
+    offsets = offsets_for_mode(mode)
+    return max(sqrt(sum(value * value for value in offset)) for offset in offsets)
+
 
 def build_action_space(mode: str) -> spaces.Space:
     """Build the Gymnasium action space configured by ``mode``."""
