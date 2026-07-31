@@ -109,7 +109,7 @@ def test_custom_sampling_function_uses_function_name_as_strategy():
     assert probabilities == pytest.approx([1 / 7, 1 / 7, 5 / 7])
 
 
-def test_curriculum_accumulates_stage_evaluation_results():
+def test_curriculum_uses_only_latest_stage_evaluation_results():
     curriculum = WaypointCurriculum(
         WaypointCurriculumConfig(
             enabled=True,
@@ -123,9 +123,9 @@ def test_curriculum_accumulates_stage_evaluation_results():
     curriculum.record_stage_evaluations([(10, 9), (10, 2)])
     curriculum.record_stage_evaluations([(10, 7), (10, 4)])
 
-    assert curriculum.state.stage_evaluations[0].attempts == 20
-    assert curriculum.state.stage_evaluations[0].successes == 16
-    assert curriculum.sampling_probabilities() == pytest.approx([2 / 9, 7 / 9])
+    assert curriculum.state.stage_evaluations[0].attempts == 10
+    assert curriculum.state.stage_evaluations[0].successes == 7
+    assert curriculum.sampling_probabilities() == pytest.approx([1 / 3, 2 / 3])
 
 
 def test_broadcast_sends_normalized_stage_probabilities_to_environments():

@@ -27,7 +27,7 @@ class WaypointTransition(BaseModel):
 
 
 class WaypointStageEvaluation(BaseModel):
-    """Accumulated deterministic evaluation outcomes for one stage."""
+    """Most recent deterministic evaluation outcome for one stage."""
 
     model_config = ConfigDict(extra="forbid")
     attempts: int = Field(default=0, ge=0)
@@ -91,17 +91,15 @@ class WaypointCurriculum:
         self,
         outcomes: list[tuple[int, int]],
     ) -> None:
-        """Accumulate ``(attempts, successes)`` for each visited stage."""
+        """Store the latest ``(attempts, successes)`` for each visited stage."""
         if len(outcomes) != len(self.stages()):
             raise ValueError("stage evaluation outcomes must cover every visited stage")
         for stage_index, (attempts, successes) in enumerate(outcomes):
             if attempts < 0 or successes < 0 or successes > attempts:
                 raise ValueError("invalid stage evaluation outcome")
-            aggregate = self.state.stage_evaluations.setdefault(
-                stage_index, WaypointStageEvaluation()
+            self.state.stage_evaluations[stage_index] = WaypointStageEvaluation(
+                attempts=attempts, successes=successes
             )
-            aggregate.attempts += attempts
-            aggregate.successes += successes
 
     def sampling_probabilities(self) -> list[float]:
         """Return normalized training probabilities for all visited stages."""

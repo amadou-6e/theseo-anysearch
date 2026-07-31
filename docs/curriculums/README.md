@@ -69,7 +69,7 @@ training_sampling:
   recency_decay: 0.7
   minimum_weight: 0.1
 
-# Emphasize stages with low cumulative evaluation success.
+# Emphasize stages with low success in their latest evaluation batch.
 training_sampling:
   strategy: inverse_success
   minimum_weight: 0.1
@@ -77,7 +77,7 @@ training_sampling:
   unevaluated_success_rate: 0.0
 ```
 
-`inverse_success` uses cumulative deterministic retention-evaluation results.
+`inverse_success` uses each stage's latest deterministic retention-evaluation result.
 An unevaluated stage uses `unevaluated_success_rate`. Raw weights are normalized
 after every retention evaluation and broadcast to all rollout environments.
 The probabilities used by each evaluation are recorded in its curriculum JSON.
@@ -106,8 +106,8 @@ training_sampling:
 Custom functions return one finite, non-negative raw weight per stage. AnySearch
 performs normalization and rejects missing, negative, non-finite, or all-zero
 weights. `StageSamplingContext.stages` exposes the stage index, start and goal,
-age, latest-stage flag, evaluation attempts, evaluation successes, and cumulative
-evaluation success rate.
+age, latest-stage flag, evaluation attempts, evaluation successes, and the
+success rate from the latest evaluation batch.
 
 | Sampling parameter | Meaning |
 |---|---|
