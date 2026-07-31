@@ -9,3 +9,7 @@ These are deliberately small examples for learning the experiment format and che
 - [`multi_agent_demo.yaml`](multi_agent_demo.yaml) demonstrates three agents sharing one PPO policy and producing a multi-agent replay.
 
 These configurations prioritize quick feedback over final policy quality.
+
+## Custom reward example
+
+`quick_demo.yaml` automatically discovers `reward.quick_demo.py`. The module adds a small non-positive diagonal-movement penalty to the standard YAML reward and records it as `diagonal_move_penalty` in the reward breakdown.

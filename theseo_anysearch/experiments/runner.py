@@ -345,7 +345,12 @@ class ExperimentRunner:
             )
 
             copy_metric_sources(self._config_path, run_dir)
-            _append_run_stage(run_dir, "Custom metric sources copied")
+            from theseo_anysearch.experiments.custom_rewards import (
+                copy_reward_source,
+            )
+
+            copy_reward_source(self._config_path, run_dir)
+            _append_run_stage(run_dir, "Custom extension sources copied")
 
             tracker = MLflowTracker(
                 _resolve_mlflow_config(self._config),

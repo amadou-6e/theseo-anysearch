@@ -337,6 +337,16 @@ class Trainer(ABC):
             metric_config_path if metric_config_path.is_file() else None
         )
         write_metric_manifest(self._metric_providers, self._output_dir)
+        from theseo_anysearch.experiments.custom_rewards import (
+            load_reward_provider,
+            write_reward_manifest,
+        )
+
+        reward_source = self._output_dir.joinpath("reward.py")
+        reward_provider = load_reward_provider(
+            reward_source if reward_source.is_file() else None
+        )
+        write_reward_manifest(reward_provider, self._output_dir)
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -373,6 +383,9 @@ class Trainer(ABC):
         env = self._config.env
         runtime = env.to_runtime_dict()
         runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        reward_source = self._output_dir.joinpath("reward.py")
+        if reward_source.is_file():
+            runtime["reward_module_path"] = str(reward_source.resolve())
         return runtime
 
     # ------------------------------------------------------------------
