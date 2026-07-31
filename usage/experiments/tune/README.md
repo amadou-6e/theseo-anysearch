@@ -23,4 +23,7 @@ Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop b
 
 ## Custom ranking metrics
 
-ppo_asha.yaml automatically discovers evaluation_metrics.ppo_asha.py. Its evaluation_navigation_score combines success rate with normalized goal progress so ASHA can distinguish policies before the first finish.
+`ppo_asha.yaml` automatically discovers both experiment-specific examples:
+
+- `evaluation_metrics.ppo_asha.py` emits `evaluation_navigation_score`, combining success rate with normalized goal progress so ASHA can distinguish policies before the first finish.
+- `training_metrics.ppo_asha.py` emits `training_reward_per_episode_step` and `training_episodes_per_1000_env_steps`, demonstrating metrics derived from standard training results and sampled environment steps.
