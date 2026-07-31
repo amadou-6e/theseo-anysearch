@@ -53,6 +53,12 @@ class VoxelEnv(RustGymnasiumEnv):
 
     def __init__(self, config: dict) -> None:
         self._task = TaskConfig.model_validate(config.get("task") or {})
+        from theseo_anysearch.experiments.custom_rewards import load_reward_provider
+
+        reward_module_path = config.get("reward_module_path")
+        self._reward_provider = load_reward_provider(
+            Path(reward_module_path) if reward_module_path else None
+        )
         self._episode_steps = 0
         self._episode_reward_breakdown: dict[str, float] = {}
         self._initial_distance = 0.0
@@ -214,6 +220,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._previous_task_distance = distance
         self._episode_reward_breakdown = {}
         self._initial_filled = {tuple(coord) for coord in self._rust_env.filled_voxels()}
+        self._last_observation = observation
         return observation, {
             "task_version": self._task.version,
             "initial_goal_distance": distance,
@@ -222,6 +229,7 @@ class VoxelEnv(RustGymnasiumEnv):
     def step(self, action):
         """Apply one action and expose task-owned reward and termination data."""
 
+        previous_observation = self._last_observation
         invalid_action = not self.action_space.contains(action)
         action_index = self._encode_action(action)
         previous_cursor = tuple(self._rust_env.cursor_pos())
@@ -265,18 +273,57 @@ class VoxelEnv(RustGymnasiumEnv):
                 self._config.get("construction_overshoot_weight", 0.0)
             ) * overshoot,
         }
-        reward = float(sum(breakdown.values()))
-        unshaped_reward = reward - breakdown["distance_progress"]
+        standard_reward = float(sum(breakdown.values()))
+        self._episode_steps += 1
+        terminated = success and self._task.termination.terminate_on_success
+        truncated = (
+            self._episode_steps >= int(self._config.get("max_steps", 200))
+            and not terminated
+        )
+
+        from theseo_anysearch.experiments.custom_rewards import (
+            RewardContext,
+            apply_custom_reward,
+        )
+
+        raw_goal = fallback
+        goal = tuple(raw_goal) if raw_goal is not None else None
+        reward, breakdown = apply_custom_reward(
+            self._reward_provider,
+            RewardContext(
+                step=self._episode_steps,
+                action=action,
+                action_index=int(action_index),
+                previous_observation=previous_observation,
+                observation=observation,
+                previous_cursor=previous_cursor,
+                cursor=cursor,
+                goal=goal,
+                previous_goal_distance=self._previous_task_distance,
+                goal_distance=current_distance,
+                invalid_action=invalid_action,
+                collision=collision,
+                terminated=terminated,
+                truncated=truncated,
+                standard_reward=standard_reward,
+                standard_breakdown=breakdown,
+                env_config=dict(self._config),
+                info={
+                    "success": success,
+                    "construction_residual": residual,
+                    "construction_overshoot": overshoot,
+                },
+            ),
+        )
+        unshaped_reward = reward - breakdown.get("distance_progress", 0.0)
         for name, value in breakdown.items():
             self._episode_reward_breakdown[name] = (
                 self._episode_reward_breakdown.get(name, 0.0) + value
             )
 
-        self._episode_steps += 1
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
-        terminated = success and self._task.termination.terminate_on_success
-        truncated = self._episode_steps >= int(self._config.get("max_steps", 200)) and not terminated
+        self._last_observation = observation
         reason = "success" if terminated else "step_limit" if truncated else "in_progress"
         info = {
             "task_version": self._task.version,

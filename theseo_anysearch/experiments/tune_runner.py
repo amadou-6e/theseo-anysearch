@@ -193,6 +193,7 @@ def _experiment_trainable(
     checkpoint_frequency: int = 1,
     preserve_trial_artifacts: bool = True,
     metric_source_contents: dict[str, str] | None = None,
+    reward_source_content: str | None = None,
 ) -> None:
     """
     Generic Ray Tune function trainable for any algorithm in Trainer._registry.
@@ -290,9 +291,14 @@ def _experiment_trainable(
         encoding="utf-8",
     )
 
-    # Archive the exact metric source used by this trial.
+    # Archive the exact extension sources used by this trial.
     for filename, source in (metric_source_contents or {}).items():
         trial_dir.joinpath(filename).write_text(source, encoding="utf-8")
+    if reward_source_content is not None:
+        trial_dir.joinpath("reward.py").write_text(
+            reward_source_content,
+            encoding="utf-8",
+        )
 
     # ------------------------------------------------------------------ #
     # Build Settings for this trial                                        #
@@ -866,6 +872,16 @@ class TuneRunner:
             f"{scope}_metrics.py": path.read_text(encoding="utf-8")
             for scope, path in discover_metric_sources(self._config_path).items()
         }
+        from theseo_anysearch.experiments.custom_rewards import (
+            discover_reward_source,
+        )
+
+        reward_source = discover_reward_source(self._config_path)
+        reward_source_content = (
+            reward_source.read_text(encoding="utf-8")
+            if reward_source is not None
+            else None
+        )
 
         # ------------------------------------------------------------------ #
         # MLflow parent run (optional)                                        #
@@ -1046,6 +1062,7 @@ class TuneRunner:
             checkpoint_frequency=tc.checkpoint_frequency,
             preserve_trial_artifacts=tc.preserve_trial_artifacts,
             metric_source_contents=metric_source_contents,
+            reward_source_content=reward_source_content,
         )
 
         # ------------------------------------------------------------------ #
