@@ -140,3 +140,7 @@ An early-stopped run remains `COMPLETED`. It writes `early_stop.json`, preserves
 its consecutive state in `early_stop_state.json`, forces a final trajectory, and
 saves a checkpoint at the stopping iteration. The final `run.json` records the
 reason, iteration, achieved value, and threshold.
+
+## Custom metrics
+
+See [Custom training and evaluation metrics](custom_metrics.md) for convention-based Python metrics shared by training, evaluation, Tune, TensorBoard, and MLflow.

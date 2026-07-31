@@ -192,6 +192,7 @@ def _experiment_trainable(
     trial_prefix: str = "",
     checkpoint_frequency: int = 1,
     preserve_trial_artifacts: bool = True,
+    metric_source_contents: dict[str, str] | None = None,
 ) -> None:
     """
     Generic Ray Tune function trainable for any algorithm in Trainer._registry.
@@ -288,6 +289,10 @@ def _experiment_trainable(
         yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",
     )
+
+    # Archive the exact metric source used by this trial.
+    for filename, source in (metric_source_contents or {}).items():
+        trial_dir.joinpath(filename).write_text(source, encoding="utf-8")
 
     # ------------------------------------------------------------------ #
     # Build Settings for this trial                                        #
@@ -853,6 +858,14 @@ class TuneRunner:
             }),
         })
         experiment_dict = abs_config.model_dump(by_alias=True, mode="json")
+        from theseo_anysearch.experiments.custom_metrics import (
+            discover_metric_sources,
+        )
+
+        metric_source_contents = {
+            f"{scope}_metrics.py": path.read_text(encoding="utf-8")
+            for scope, path in discover_metric_sources(self._config_path).items()
+        }
 
         # ------------------------------------------------------------------ #
         # MLflow parent run (optional)                                        #
@@ -1032,6 +1045,7 @@ class TuneRunner:
             trial_prefix=trial_prefix,
             checkpoint_frequency=tc.checkpoint_frequency,
             preserve_trial_artifacts=tc.preserve_trial_artifacts,
+            metric_source_contents=metric_source_contents,
         )
 
         # ------------------------------------------------------------------ #
