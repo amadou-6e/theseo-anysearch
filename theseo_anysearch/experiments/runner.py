@@ -349,7 +349,12 @@ class ExperimentRunner:
                 copy_reward_source,
             )
 
-            copy_reward_source(self._config_path, run_dir)
+            copy_reward_source(
+                self._config_path, run_dir, self._config.env.rewards.custom
+            )
+            from theseo_anysearch.experiments.native_extensions import copy_native_extension
+
+            copy_native_extension(self._config_path, run_dir)
             _append_run_stage(run_dir, "Custom extension sources copied")
 
             tracker = MLflowTracker(

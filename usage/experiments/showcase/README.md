@@ -12,4 +12,4 @@ These configurations prioritize quick feedback over final policy quality.
 
 ## Custom reward example
 
-`quick_demo.yaml` automatically discovers `reward.quick_demo.py`. The module adds a small non-positive diagonal-movement penalty to the standard YAML reward and records it as `diagonal_move_penalty` in the reward breakdown.
+`quick_demo.yaml` selects `custom: quick_demo`, which resolves the identically named function in `rewards.py`. The module adds a small non-positive diagonal-movement penalty to the standard YAML reward and records it as `diagonal_move_penalty` in the reward breakdown.

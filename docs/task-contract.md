@@ -17,6 +17,7 @@ env:
     construction_overshoot_weight: 0.0
   task:
     version: 1
+    max_consecutive_collisions: 10
     goal:
       type: point
       position: [6, 7, 1]
@@ -32,12 +33,16 @@ the start position is unambiguous.
 
 Every step returns these `info` fields:
 
-- `goal_reached` and `termination_reason` (`in_progress`, `success`, or
-  `step_limit`);
+- `goal_reached` and `termination_reason` (`in_progress`, `success`,
+  `step_limit`, or `consecutive_collisions`);
 - `reward_breakdown`, with step, distance, success, invalid-action, collision,
   construction-residual, and construction-overshoot components;
 - `unshaped_reward`, which excludes distance shaping;
 - initial, final, and minimum goal distance.
+
+The collision counter and its termination decision are maintained in the Rust core.
+It resets after any non-collision action. Omit `max_consecutive_collisions` to disable
+this termination condition.
 
 Episode trajectories retain the same breakdown and distances. Evaluation
 metrics expose component means as `evaluation_reward_<component>_mean`, so Tune,
