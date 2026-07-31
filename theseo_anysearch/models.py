@@ -92,17 +92,17 @@ class WaypointCurriculumConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_initial_pair(self) -> "WaypointCurriculumConfig":
-        if self.enabled and self.initial_start is None:
-            raise ValueError("enabled waypoint_curriculum requires initial_start")
         if (
             self.enabled
             and self.completion_mode == "terminate_episode"
-            and self.initial_goal is None
+            and (self.initial_start is None or self.initial_goal is None)
         ):
             raise ValueError(
                 "enabled waypoint_curriculum requires initial_start and initial_goal"
             )
         if self.completion_mode == "continue_route":
+            if self.enabled and self.initial_start is None:
+                raise ValueError("enabled waypoint_curriculum requires initial_start")
             if self.route_length is None:
                 raise ValueError("continue_route requires route_length")
             if self.difficulty.mode != "segment_distance":
