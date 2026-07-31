@@ -54,10 +54,21 @@ class VoxelEnv(RustGymnasiumEnv):
     def __init__(self, config: dict) -> None:
         self._task = TaskConfig.model_validate(config.get("task") or {})
         from theseo_anysearch.experiments.custom_rewards import load_reward_provider
+        from theseo_anysearch.experiments.native_extensions import CAP_REWARD, NativeExtension
 
+        native_manifest_path = config.get("native_extension_manifest")
+        self._native_extension = NativeExtension.load(
+            Path(native_manifest_path) if native_manifest_path else None
+        )
         reward_module_path = config.get("reward_module_path")
         self._reward_provider = load_reward_provider(
-            Path(reward_module_path) if reward_module_path else None
+            Path(reward_module_path)
+            if reward_module_path
+            and (
+                self._native_extension is None
+                or not self._native_extension.capabilities & CAP_REWARD
+            )
+            else None
         )
         self._episode_steps = 0
         self._episode_reward_breakdown: dict[str, float] = {}
@@ -288,9 +299,7 @@ class VoxelEnv(RustGymnasiumEnv):
 
         raw_goal = fallback
         goal = tuple(raw_goal) if raw_goal is not None else None
-        reward, breakdown = apply_custom_reward(
-            self._reward_provider,
-            RewardContext(
+        reward_context = RewardContext(
                 step=self._episode_steps,
                 action=action,
                 action_index=int(action_index),
@@ -313,8 +322,16 @@ class VoxelEnv(RustGymnasiumEnv):
                     "construction_residual": residual,
                     "construction_overshoot": overshoot,
                 },
-            ),
-        )
+            )
+        if (
+            self._native_extension is not None
+            and self._native_extension.capabilities & CAP_REWARD
+        ):
+            from theseo_anysearch.experiments.native_extensions import apply_native_reward
+
+            reward, breakdown = apply_native_reward(self._native_extension, reward_context)
+        else:
+            reward, breakdown = apply_custom_reward(self._reward_provider, reward_context)
         unshaped_reward = reward - breakdown.get("distance_progress", 0.0)
         for name, value in breakdown.items():
             self._episode_reward_breakdown[name] = (

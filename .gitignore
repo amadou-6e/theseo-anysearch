@@ -73,3 +73,6 @@ usage/maps/
 # Secrets / env files
 .env
 *.env
+
+# Experiment-local Rust extension build outputs
+**/extension/target/

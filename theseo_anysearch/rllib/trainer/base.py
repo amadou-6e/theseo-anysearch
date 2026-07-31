@@ -347,6 +347,12 @@ class Trainer(ABC):
             reward_source if reward_source.is_file() else None
         )
         write_reward_manifest(reward_provider, self._output_dir)
+        from theseo_anysearch.experiments.native_extensions import NativeExtension
+
+        native_manifest = self._output_dir.joinpath("native_extension", "extension.json")
+        self._native_extension = NativeExtension.load(
+            native_manifest if native_manifest.is_file() else None
+        )
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -383,9 +389,19 @@ class Trainer(ABC):
         env = self._config.env
         runtime = env.to_runtime_dict()
         runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
-        reward_source = self._output_dir.joinpath("reward.py")
-        if reward_source.is_file():
-            runtime["reward_module_path"] = str(reward_source.resolve())
+        native_manifest = self._output_dir.joinpath("native_extension", "extension.json")
+        from theseo_anysearch.experiments.native_extensions import CAP_REWARD
+
+        if (
+            native_manifest.is_file()
+            and self._native_extension is not None
+            and self._native_extension.capabilities & CAP_REWARD
+        ):
+            runtime["native_extension_manifest"] = str(native_manifest.resolve())
+        else:
+            reward_source = self._output_dir.joinpath("reward.py")
+            if reward_source.is_file():
+                runtime["reward_module_path"] = str(reward_source.resolve())
         return runtime
 
     # ------------------------------------------------------------------
@@ -538,31 +554,56 @@ class Trainer(ABC):
                         min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
-                    evaluation_custom = compute_custom_metrics(
-                        self._metric_providers.evaluation,
-                        EvaluationContext(
-                            iteration=self._iteration,
-                            episodes=tuple(episodes),
-                            standard_metrics={
-                                **result.standard_metrics(),
-                                **standardized,
-                                **metrics.as_scalar_dict(),
-                                "evaluation_reward_mean": evaluation_reward_mean,
-                                "evaluation_len_mean": evaluation_len_mean,
-                            },
-                            env_config=dict(_env_cfg),
-                            final_infos=tuple(
-                                dict(getattr(episode, "final_info", None) or {})
-                                for episode in episodes
-                            ),
-                        ),
-                        reserved_names=(
-                            set(result.standard_metrics())
-                            | set(standardized)
-                            | set(metrics.as_scalar_dict())
-                            | {"evaluation_reward_mean", "evaluation_len_mean"}
+                    evaluation_context = EvaluationContext(
+                        iteration=self._iteration,
+                        episodes=tuple(episodes),
+                        standard_metrics={
+                            **result.standard_metrics(), **standardized,
+                            **metrics.as_scalar_dict(),
+                            "evaluation_reward_mean": evaluation_reward_mean,
+                            "evaluation_len_mean": evaluation_len_mean,
+                        },
+                        env_config=dict(_env_cfg),
+                        final_infos=tuple(
+                            dict(getattr(episode, "final_info", None) or {})
+                            for episode in episodes
                         ),
                     )
+                    evaluation_reserved = (
+                        set(result.standard_metrics()) | set(standardized)
+                        | set(metrics.as_scalar_dict())
+                        | {"evaluation_reward_mean", "evaluation_len_mean"}
+                    )
+                    from theseo_anysearch.experiments.native_extensions import (
+                        CAP_EVALUATION_METRICS,
+                        validate_native_metrics,
+                    )
+
+                    native_has_evaluation = (
+                        self._native_extension is not None
+                        and self._native_extension.capabilities & CAP_EVALUATION_METRICS
+                    )
+                    native_raw = (
+                        self._native_extension.compute_metrics(
+                            "evaluation",
+                            {
+                                "iteration": evaluation_context.iteration,
+                                "standard_metrics": evaluation_context.standard_metrics,
+                                "env_config": evaluation_context.env_config,
+                                "final_infos": evaluation_context.final_infos,
+                            },
+                        )
+                        if native_has_evaluation else {}
+                    )
+                    if native_has_evaluation:
+                        evaluation_custom = validate_native_metrics(
+                            "evaluation", native_raw, reserved_names=evaluation_reserved
+                        )
+                    else:
+                        evaluation_custom = compute_custom_metrics(
+                            self._metric_providers.evaluation, evaluation_context,
+                            reserved_names=evaluation_reserved,
+                        )
                     heuristic_accuracy = None
                     heuristic_distance = None
                     heuristic_compared_states = 0
@@ -702,18 +743,46 @@ class Trainer(ABC):
                         stacklevel=2,
                     )
 
-                training_custom = compute_custom_metrics(
-                    self._metric_providers.training,
-                    TrainingContext(
-                        iteration=self._iteration,
-                        standard_metrics=result.standard_metrics(),
-                        rllib_result=rllib_result,
-                        environment_steps_total=result.environment_steps_total,
-                        duration_s=elapsed,
-                        env_config=dict(_env_cfg),
-                    ),
-                    reserved_names=set(result.standard_metrics()),
+                training_context = TrainingContext(
+                    iteration=self._iteration,
+                    standard_metrics=result.standard_metrics(),
+                    rllib_result=rllib_result,
+                    environment_steps_total=result.environment_steps_total,
+                    duration_s=elapsed,
+                    env_config=dict(_env_cfg),
                 )
+                from theseo_anysearch.experiments.native_extensions import (
+                    CAP_TRAINING_METRICS,
+                    validate_native_metrics,
+                )
+
+                native_has_training = (
+                    self._native_extension is not None
+                    and self._native_extension.capabilities & CAP_TRAINING_METRICS
+                )
+                native_raw = (
+                    self._native_extension.compute_metrics(
+                        "training",
+                        {
+                            "iteration": training_context.iteration,
+                            "standard_metrics": training_context.standard_metrics,
+                            "environment_steps_total": training_context.environment_steps_total,
+                            "duration_s": training_context.duration_s,
+                            "env_config": training_context.env_config,
+                        },
+                    )
+                    if native_has_training else {}
+                )
+                if native_has_training:
+                    training_custom = validate_native_metrics(
+                        "training", native_raw,
+                        reserved_names=set(result.standard_metrics()),
+                    )
+                else:
+                    training_custom = compute_custom_metrics(
+                        self._metric_providers.training, training_context,
+                        reserved_names=set(result.standard_metrics()),
+                    )
                 if training_custom:
                     result = result.model_copy(
                         update={"extra": {**result.extra, **training_custom}}
