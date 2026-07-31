@@ -340,6 +340,12 @@ class ExperimentRunner:
                     self._config.model_dump(by_alias=True, mode="json"),
                 )
             _append_run_stage(run_dir, "experiment.yaml written")
+            from theseo_anysearch.experiments.custom_metrics import (
+                copy_metric_sources,
+            )
+
+            copy_metric_sources(self._config_path, run_dir)
+            _append_run_stage(run_dir, "Custom metric sources copied")
 
             tracker = MLflowTracker(
                 _resolve_mlflow_config(self._config),

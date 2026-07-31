@@ -20,3 +20,10 @@ These files launch multi-trial searches or repeat one configuration across multi
 ASHA is appropriate for independent trials with early stopping. PBT is appropriate when strong trials should transfer weights and mutate their settings during training. The geometry sweep isolates environment difficulty rather than hyperparameter quality.
 
 Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop budgets are documented in [Tune lifecycle and trial budgets](../../../docs/tuning/lifecycle.md).
+
+## Custom ranking metrics
+
+`ppo_asha.yaml` automatically discovers both experiment-specific examples:
+
+- `evaluation_metrics.ppo_asha.py` emits `evaluation_navigation_score`, combining success rate with normalized goal progress so ASHA can distinguish policies before the first finish.
+- `training_metrics.ppo_asha.py` emits `training_reward_per_episode_step` and `training_episodes_per_1000_env_steps`, demonstrating metrics derived from standard training results and sampled environment steps.

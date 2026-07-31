@@ -272,7 +272,8 @@ class TrainResult(BaseModel):
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
-            if key.startswith("evaluation_") and isinstance(value, (int, float))
+            if key.startswith(("evaluation_", "training_"))
+            and isinstance(value, (int, float))
         })
         return metrics
 
@@ -326,6 +327,16 @@ class Trainer(ABC):
         self._iteration: int = 0
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
+        from theseo_anysearch.experiments.custom_metrics import (
+            load_metric_providers,
+            write_metric_manifest,
+        )
+
+        metric_config_path = self._output_dir.joinpath("experiment.yaml")
+        self._metric_providers = load_metric_providers(
+            metric_config_path if metric_config_path.is_file() else None
+        )
+        write_metric_manifest(self._metric_providers, self._output_dir)
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -398,6 +409,12 @@ class Trainer(ABC):
         from theseo_anysearch.experiments.output import OutputStore
         from theseo_anysearch.experiments.trajectory import EpisodeRunMetrics
         from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
+        from theseo_anysearch.experiments.custom_metrics import (
+            CustomMetricError,
+            EvaluationContext,
+            TrainingContext,
+            compute_custom_metrics,
+        )
 
         _store = OutputStore(self._output_dir)
         from theseo_anysearch.rllib.trainer.early_stop import (
@@ -508,6 +525,31 @@ class Trainer(ABC):
                         min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
+                    evaluation_custom = compute_custom_metrics(
+                        self._metric_providers.evaluation,
+                        EvaluationContext(
+                            iteration=self._iteration,
+                            episodes=tuple(episodes),
+                            standard_metrics={
+                                **result.standard_metrics(),
+                                **standardized,
+                                **metrics.as_scalar_dict(),
+                                "evaluation_reward_mean": evaluation_reward_mean,
+                                "evaluation_len_mean": evaluation_len_mean,
+                            },
+                            env_config=dict(_env_cfg),
+                            final_infos=tuple(
+                                dict(getattr(episode, "final_info", None) or {})
+                                for episode in episodes
+                            ),
+                        ),
+                        reserved_names=(
+                            set(result.standard_metrics())
+                            | set(standardized)
+                            | set(metrics.as_scalar_dict())
+                            | {"evaluation_reward_mean", "evaluation_len_mean"}
+                        ),
+                    )
                     heuristic_accuracy = None
                     heuristic_distance = None
                     heuristic_compared_states = 0
@@ -561,6 +603,7 @@ class Trainer(ABC):
                                 "evaluation_len_mean": evaluation_len_mean,
                                 **standardized,
                                 **metrics.as_scalar_dict(),
+                                **evaluation_custom,
                                 "evaluation_heuristic_accuracy": heuristic_accuracy,
                                 "evaluation_heuristic_distance": heuristic_distance,
                                 "evaluation_heuristic_compared_states": heuristic_compared_states,
@@ -572,6 +615,10 @@ class Trainer(ABC):
                     scalar_metrics = {
                         **metrics.as_scalar_dict(),
                         **success_metrics.tensorboard_metrics(),
+                        **{
+                            f"eval/custom/{key.removeprefix('evaluation_')}": value
+                            for key, value in evaluation_custom.items()
+                        },
 
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
@@ -634,12 +681,37 @@ class Trainer(ABC):
                         f"Evaluation batch completed for iteration {self._iteration}: "
                         f"{metrics.finish_count} goals reached",
                     )
+                except CustomMetricError:
+                    raise
                 except Exception as exc:
                     warnings.warn(
                         f"evaluation collection failed at iter {self._iteration}: {exc}",
                         stacklevel=2,
                     )
 
+                training_custom = compute_custom_metrics(
+                    self._metric_providers.training,
+                    TrainingContext(
+                        iteration=self._iteration,
+                        standard_metrics=result.standard_metrics(),
+                        rllib_result=rllib_result,
+                        environment_steps_total=result.environment_steps_total,
+                        duration_s=elapsed,
+                        env_config=dict(_env_cfg),
+                    ),
+                    reserved_names=set(result.standard_metrics()),
+                )
+                if training_custom:
+                    result = result.model_copy(
+                        update={"extra": {**result.extra, **training_custom}}
+                    )
+                    tb_writer.log_scalars(
+                        self._iteration,
+                        {
+                            f"train/custom/{key.removeprefix('training_')}": value
+                            for key, value in training_custom.items()
+                        },
+                    )
                 results.append(result)
                 tb_writer.log_iteration(result)
                 self.on_iteration_end(result)
