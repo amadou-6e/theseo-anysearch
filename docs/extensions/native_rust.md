@@ -22,7 +22,7 @@ Artifacts are platform-specific and should be recompiled on the target machine.
 Every library exports `anysearch_extension_abi_version` and
 `anysearch_extension_capabilities`. It may then export any combination of:
 
-- `anysearch_compute_reward_v1`
+- `anysearch_reward_<yaml-name>_v1`
 - `anysearch_compute_training_metrics_v1`
 - `anysearch_compute_evaluation_metrics_v1`
 

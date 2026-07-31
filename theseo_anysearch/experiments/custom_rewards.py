@@ -79,61 +79,65 @@ class RewardProvider(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
+    name: str
     source_path: Path
     source_sha256: str
     compute_reward: RewardFunction = Field(exclude=True)
 
 
-def discover_reward_source(config_path: Path | None) -> Path | None:
-    """Prefer ``reward.<stem>.py``, then the shared ``reward.py`` fallback."""
-    if config_path is None:
+def discover_reward_source(config_path: Path | None, reward_name: str | None) -> Path | None:
+    """Discover the shared ``rewards.py`` module for a named reward."""
+    if config_path is None or reward_name is None:
         return None
-    specific = config_path.with_name(f"reward.{config_path.stem}.py")
-    shared = config_path.with_name("reward.py")
-    if specific.is_file():
-        return specific
-    return shared if shared.is_file() else None
+    source = config_path.with_name("rewards.py")
+    return source if source.is_file() else None
 
 
-def copy_reward_source(config_path: Path | None, destination: Path) -> Path | None:
-    """Archive the selected reward module under the stable name ``reward.py``."""
-    source = discover_reward_source(config_path)
+def copy_reward_source(
+    config_path: Path | None,
+    destination: Path,
+    reward_name: str | None,
+) -> Path | None:
+    """Archive the named reward module under the stable name ``rewards.py``."""
+    source = discover_reward_source(config_path, reward_name)
     if source is None:
         return None
     destination.mkdir(parents=True, exist_ok=True)
-    target = destination.joinpath("reward.py")
+    target = destination.joinpath("rewards.py")
     shutil.copy2(source, target)
     return target
 
 
-def load_reward_provider(source_path: Path | None) -> RewardProvider | None:
-    """Import and validate an optional custom reward module."""
-    if source_path is None:
+def load_reward_provider(
+    source_path: Path | None,
+    reward_name: str | None,
+) -> RewardProvider | None:
+    """Import one YAML-selected function from an optional ``rewards.py`` module."""
+    if source_path is None or reward_name is None:
         return None
     digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
     spec = importlib.util.spec_from_file_location(
-        f"_theseo_anysearch_reward_{digest[:16]}", source_path
+        f"_theseo_anysearch_rewards_{digest[:16]}", source_path
     )
     if spec is None or spec.loader is None:
-        raise CustomRewardError(f"Cannot import custom reward from {source_path}")
+        raise CustomRewardError(f"Cannot import custom rewards from {source_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    function = getattr(module, "compute_reward", None)
+    function = getattr(module, reward_name, None)
     if not callable(function):
         raise CustomRewardError(
-            f"{source_path} must define callable compute_reward(context)"
+            f"{source_path} must define callable {reward_name}(context)"
         )
     if len(inspect.signature(function).parameters) != 1:
         raise CustomRewardError(
-            f"{source_path}: compute_reward must accept exactly one argument"
+            f"{source_path}: {reward_name} must accept exactly one argument"
         )
     return RewardProvider(
+        name=reward_name,
         source_path=source_path,
         source_sha256=digest,
         compute_reward=function,
     )
-
-
 def apply_custom_reward(
     provider: RewardProvider | None,
     context: RewardContext,
@@ -148,7 +152,7 @@ def apply_custom_reward(
             f"{provider.source_path}: invalid custom reward result: {exc}"
         ) from exc
 
-    component_name = "custom_reward"
+    component_name = provider.name
     components = dict(result.components) or {component_name: result.reward}
     collisions = set(components) & set(context.standard_breakdown)
     if collisions:
@@ -175,6 +179,7 @@ def write_reward_manifest(
     path.write_text(
         json.dumps(
             {
+                "name": provider.name,
                 "source": provider.source_path.name,
                 "sha256": provider.source_sha256,
             },

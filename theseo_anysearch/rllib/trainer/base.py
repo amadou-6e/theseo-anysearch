@@ -342,9 +342,10 @@ class Trainer(ABC):
             write_reward_manifest,
         )
 
-        reward_source = self._output_dir.joinpath("reward.py")
+        reward_source = self._output_dir.joinpath("rewards.py")
         reward_provider = load_reward_provider(
-            reward_source if reward_source.is_file() else None
+            reward_source if reward_source.is_file() else None,
+            config.env.rewards.custom,
         )
         write_reward_manifest(reward_provider, self._output_dir)
         from theseo_anysearch.experiments.native_extensions import NativeExtension
@@ -399,7 +400,7 @@ class Trainer(ABC):
         ):
             runtime["native_extension_manifest"] = str(native_manifest.resolve())
         else:
-            reward_source = self._output_dir.joinpath("reward.py")
+            reward_source = self._output_dir.joinpath("rewards.py")
             if reward_source.is_file():
                 runtime["reward_module_path"] = str(reward_source.resolve())
         return runtime

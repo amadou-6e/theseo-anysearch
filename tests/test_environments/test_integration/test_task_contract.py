@@ -45,7 +45,7 @@ class TestTaskContract:
                     "version": 1,
                     "goal": {
                         "type": "target_voxel_set",
-                        "voxels": [target, (target[0], target[1] + 1, target[2])],
+                        "voxels": [(target[0], target[1] + 1, target[2]), target],
                     },
                 }
             },

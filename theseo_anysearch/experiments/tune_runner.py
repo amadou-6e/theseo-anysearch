@@ -296,7 +296,7 @@ def _experiment_trainable(
     for filename, source in (metric_source_contents or {}).items():
         trial_dir.joinpath(filename).write_text(source, encoding="utf-8")
     if reward_source_content is not None:
-        trial_dir.joinpath("reward.py").write_text(
+        trial_dir.joinpath("rewards.py").write_text(
             reward_source_content,
             encoding="utf-8",
         )
@@ -886,7 +886,9 @@ class TuneRunner:
             discover_reward_source,
         )
 
-        reward_source = discover_reward_source(self._config_path)
+        reward_source = discover_reward_source(
+            self._config_path, self._config.env.rewards.custom
+        )
         reward_source_content = (
             reward_source.read_text(encoding="utf-8")
             if reward_source is not None

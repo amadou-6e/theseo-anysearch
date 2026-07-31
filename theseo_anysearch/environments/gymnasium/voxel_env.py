@@ -54,21 +54,11 @@ class VoxelEnv(RustGymnasiumEnv):
     def __init__(self, config: dict) -> None:
         self._task = TaskConfig.model_validate(config.get("task") or {})
         from theseo_anysearch.experiments.custom_rewards import load_reward_provider
-        from theseo_anysearch.experiments.native_extensions import CAP_REWARD, NativeExtension
 
-        native_manifest_path = config.get("native_extension_manifest")
-        self._native_extension = NativeExtension.load(
-            Path(native_manifest_path) if native_manifest_path else None
-        )
         reward_module_path = config.get("reward_module_path")
         self._reward_provider = load_reward_provider(
-            Path(reward_module_path)
-            if reward_module_path
-            and (
-                self._native_extension is None
-                or not self._native_extension.capabilities & CAP_REWARD
-            )
-            else None
+            Path(reward_module_path) if reward_module_path else None,
+            config.get("custom_reward"),
         )
         self._episode_steps = 0
         self._episode_reward_breakdown: dict[str, float] = {}
@@ -147,6 +137,21 @@ class VoxelEnv(RustGymnasiumEnv):
                         for bz in range(zmin, zmax + 1):
                             geometry.append((bx, by, bz))
 
+        native_reward_path = None
+        native_manifest_path = config.get("native_extension_manifest")
+        if native_manifest_path and config.get("custom_reward"):
+            from theseo_anysearch.experiments.native_extensions import (
+                NativeExtensionManifest,
+            )
+
+            manifest_path = Path(native_manifest_path)
+            manifest = NativeExtensionManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if "reward" in manifest.capabilities:
+                native_reward_path = str(
+                    manifest_path.parent.joinpath(manifest.library).resolve()
+                )
         env = theseo_core.PyVoxelEnv(
             max_steps=config.get("max_steps", 200),
             trail_mode=config.get("trail_mode", True),
@@ -160,6 +165,16 @@ class VoxelEnv(RustGymnasiumEnv):
             zone_reward_min=config.get("zone_reward_min", -1.0),
             zone_reward_max=config.get("zone_reward_max", -0.01),
             zone_reward_curve=config.get("zone_reward_curve", "linear"),
+            invalid_action_cost=config.get("invalid_action_cost", 0.0),
+            construction_residual_weight=config.get("construction_residual_weight", 0.0),
+            construction_overshoot_weight=config.get("construction_overshoot_weight", 0.0),
+            construction_target=list(self._task.construction_target_voxels) or None,
+            max_consecutive_collisions=self._task.max_consecutive_collisions,
+            terminate_on_success=self._task.termination.terminate_on_success,
+            success_targets=list(goal_voxels(self._task.goal, None)) or None,
+            goal_tolerance=float(getattr(self._task.goal, "tolerance", 0.0)),
+            native_reward_path=native_reward_path,
+            custom_reward=config.get("custom_reward"),
         )
 
         # Load fixed waypoints from file if specified.
@@ -248,58 +263,27 @@ class VoxelEnv(RustGymnasiumEnv):
         observation = self._obs_to_numpy(result.observation)
         cursor = tuple(self._rust_env.cursor_pos())
         fallback = self._rust_env.goal_pos()
-        current_distance = goal_distance(self._task.goal, cursor, fallback)
-        success = is_success(self._task.goal, cursor, fallback)
-        collision = (
-            not invalid_action
-            and action_index != NOOP_ACTION_INDEX
-            and cursor == previous_cursor
-        )
-
-        if self._config.get("distance_reward_mode", "progress") == "progress":
-            step_cost = float(self._config.get("step_cost", -0.01))
-            distance_component = float(self._config.get("distance_shaping", 0.0)) * (
-                self._previous_task_distance - current_distance
-            )
-        else:
-            rust_goal_reward = float(self._config.get("goal_reward", 1.0)) if success else 0.0
-            rust_collision = float(self._config.get("collision_cost", 0.0)) if collision else 0.0
-            step_cost = 0.0
-            distance_component = float(result.reward) - rust_goal_reward - rust_collision
-
-        filled = {tuple(coord) for coord in self._rust_env.filled_voxels()} - self._initial_filled
-        construction_target = set(self._task.construction_target_voxels)
-        residual = len(construction_target - filled)
-        overshoot = len(filled - construction_target) if construction_target else 0
-        breakdown = {
-            "step_cost": step_cost,
-            "distance_progress": distance_component,
-            "success": float(self._config.get("goal_reward", 1.0)) if success else 0.0,
-            "invalid_action": float(self._config.get("invalid_action_cost", 0.0)) if invalid_action else 0.0,
-            "collision": float(self._config.get("collision_cost", 0.0)) if collision else 0.0,
-            "construction_residual": -float(
-                self._config.get("construction_residual_weight", 0.0)
-            ) * residual,
-            "construction_overshoot": -float(
-                self._config.get("construction_overshoot_weight", 0.0)
-            ) * overshoot,
-        }
-        standard_reward = float(sum(breakdown.values()))
+        current_distance = float(result.goal_distance_l2)
+        collision = bool(result.collision)
+        success = bool(result.goal_reached)
+        breakdown = dict(result.reward_breakdown)
+        standard_reward = float(result.reward)
         self._episode_steps += 1
-        terminated = success and self._task.termination.terminate_on_success
-        truncated = (
-            self._episode_steps >= int(self._config.get("max_steps", 200))
-            and not terminated
-        )
+        terminated = bool(result.terminated)
+        truncated = bool(result.truncated)
 
-        from theseo_anysearch.experiments.custom_rewards import (
-            RewardContext,
-            apply_custom_reward,
-        )
+        residual = int(result.construction_residual)
+        overshoot = int(result.construction_overshoot)
+        reward = standard_reward
+        if self._reward_provider is not None:
+            from theseo_anysearch.experiments.custom_rewards import (
+                RewardContext,
+                apply_custom_reward,
+            )
 
-        raw_goal = fallback
-        goal = tuple(raw_goal) if raw_goal is not None else None
-        reward_context = RewardContext(
+            raw_goal = fallback
+            goal = tuple(raw_goal) if raw_goal is not None else None
+            reward_context = RewardContext(
                 step=self._episode_steps,
                 action=action,
                 action_index=int(action_index),
@@ -321,17 +305,12 @@ class VoxelEnv(RustGymnasiumEnv):
                     "success": success,
                     "construction_residual": residual,
                     "construction_overshoot": overshoot,
+                    "consecutive_collisions": int(result.consecutive_collisions),
                 },
             )
-        if (
-            self._native_extension is not None
-            and self._native_extension.capabilities & CAP_REWARD
-        ):
-            from theseo_anysearch.experiments.native_extensions import apply_native_reward
-
-            reward, breakdown = apply_native_reward(self._native_extension, reward_context)
-        else:
-            reward, breakdown = apply_custom_reward(self._reward_provider, reward_context)
+            reward, breakdown = apply_custom_reward(
+                self._reward_provider, reward_context
+            )
         unshaped_reward = reward - breakdown.get("distance_progress", 0.0)
         for name, value in breakdown.items():
             self._episode_reward_breakdown[name] = (
@@ -341,7 +320,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
         self._last_observation = observation
-        reason = "success" if terminated else "step_limit" if truncated else "in_progress"
+        reason = str(result.termination_reason)
         info = {
             "task_version": self._task.version,
             "goal_reached": success,
@@ -354,6 +333,7 @@ class VoxelEnv(RustGymnasiumEnv):
             "minimum_goal_distance": self._minimum_distance,
             "invalid_action": invalid_action,
             "collision": collision,
+            "consecutive_collisions": int(result.consecutive_collisions),
             "construction_residual": residual,
             "construction_overshoot": overshoot,
         }

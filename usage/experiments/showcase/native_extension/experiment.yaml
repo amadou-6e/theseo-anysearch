@@ -21,6 +21,7 @@ env:
   action:
     mode: discrete_18
   rewards:
+    custom: native_collision
     step_cost: -0.01
     collision_cost: 0.0
     goal_reward: 1.0

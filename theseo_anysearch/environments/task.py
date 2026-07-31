@@ -44,6 +44,7 @@ class TaskConfig(BaseModel):
     version: Literal[1] = 1
     goal: Goal = Field(default_factory=PointGoal)
     termination: TerminationPolicy = Field(default_factory=TerminationPolicy)
+    max_consecutive_collisions: int | None = Field(default=None, ge=1)
     construction_target_voxels: list[Coord] = Field(default_factory=list)
 
     @model_validator(mode="after")

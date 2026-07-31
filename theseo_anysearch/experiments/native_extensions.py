@@ -15,13 +15,10 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from theseo_anysearch.experiments.custom_rewards import RewardContext, RewardResult
-
 ABI_VERSION = 1
 CAP_REWARD = 1
 CAP_TRAINING_METRICS = 2
 CAP_EVALUATION_METRICS = 4
-MAX_COMPONENTS = 8
 METRIC_BUFFER_SIZE = 65536
 
 
@@ -39,34 +36,9 @@ class NativeExtensionManifest(BaseModel):
     binary_sha256: str
     library: str
     capabilities: tuple[str, ...]
+    rewards: tuple[str, ...] = ()
     platform: str
     machine: str
-
-
-class _RewardContextV1(ctypes.Structure):
-    _fields_ = [
-        ("abi_version", ctypes.c_uint32), ("struct_size", ctypes.c_uint32),
-        ("step", ctypes.c_uint64), ("action_index", ctypes.c_int32),
-        ("previous_cursor", ctypes.c_int32 * 3), ("cursor", ctypes.c_int32 * 3),
-        ("goal", ctypes.c_int32 * 3), ("has_goal", ctypes.c_uint8),
-        ("invalid_action", ctypes.c_uint8), ("collision", ctypes.c_uint8),
-        ("terminated", ctypes.c_uint8), ("truncated", ctypes.c_uint8),
-        ("previous_goal_distance", ctypes.c_double),
-        ("goal_distance", ctypes.c_double), ("standard_reward", ctypes.c_double),
-    ]
-
-
-class _RewardComponentV1(ctypes.Structure):
-    _fields_ = [("name", ctypes.c_char * 64), ("value", ctypes.c_double)]
-
-
-class _RewardResultV1(ctypes.Structure):
-    _fields_ = [
-        ("abi_version", ctypes.c_uint32), ("struct_size", ctypes.c_uint32),
-        ("mode", ctypes.c_uint32), ("reward", ctypes.c_double),
-        ("component_count", ctypes.c_uint32),
-        ("components", _RewardComponentV1 * MAX_COMPONENTS),
-    ]
 
 
 def _source_digest(extension_dir: Path) -> str:
@@ -94,6 +66,20 @@ def _library_filename(crate_name: str) -> str:
     return f"lib{stem}.so"
 
 
+def _selected_reward_name(experiment_dir: Path) -> str | None:
+    import yaml
+
+    candidates = [
+        experiment_dir.joinpath("experiment.yaml"),
+        experiment_dir.joinpath("config.yaml"),
+    ]
+    candidates.extend(sorted(experiment_dir.glob("*.yaml")))
+    config_path = next((path for path in candidates if path.is_file()), None)
+    if config_path is None:
+        return None
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    return ((raw.get("env") or {}).get("rewards") or {}).get("custom")
+
 def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Path:
     """Compile ``extension/`` and return its stable manifest path."""
     root = experiment_dir.resolve()
@@ -110,13 +96,21 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
         cwd=extension_dir, check=True,
     )
     source_sha = _source_digest(extension_dir)
+    reward_name = _selected_reward_name(root)
     build_dir = root.joinpath(".anysearch", "build", source_sha)
     stable_manifest = root.joinpath(".anysearch", "extension.json")
     if stable_manifest.is_file() and not force:
         current = NativeExtensionManifest.model_validate_json(stable_manifest.read_text(encoding="utf-8"))
         candidate = stable_manifest.parent.joinpath(current.library)
-        if current.source_sha256 == source_sha and candidate.is_file():
-            NativeExtension.load(stable_manifest)
+        expected_rewards = (reward_name,) if "reward" in current.capabilities and reward_name else ()
+        if (
+            current.source_sha256 == source_sha
+            and current.rewards == expected_rewards
+            and candidate.is_file()
+        ):
+            loaded = NativeExtension.load(stable_manifest)
+            if loaded is not None and reward_name is not None:
+                loaded.validate_reward(reward_name)
             return stable_manifest
     subprocess.run(
         ["cargo", "build", "--manifest-path", str(cargo_manifest), "--release"],
@@ -133,10 +127,18 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     relative = target.relative_to(stable_manifest.parent).as_posix()
     probe = NativeExtension.load_library(target)
     capabilities = probe.capability_names
+    rewards: tuple[str, ...] = ()
+    if "reward" in capabilities:
+        if reward_name is None:
+            raise NativeExtensionError(
+                "A reward-capable extension requires env.rewards.custom in YAML"
+            )
+        probe.validate_reward(reward_name)
+        rewards = (reward_name,)
     manifest = NativeExtensionManifest(
         abi_version=ABI_VERSION, source_sha256=source_sha,
         binary_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
-        library=relative, capabilities=capabilities,
+        library=relative, capabilities=capabilities, rewards=rewards,
         platform=sys.platform, machine=platform.machine(),
     )
     stable_content = manifest.model_dump_json(indent=2)
@@ -155,6 +157,12 @@ def discover_native_manifest(config_path: Path | None) -> Path | None:
     if not manifest_path.is_file():
         return None
     manifest = NativeExtensionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    selected_reward = _selected_reward_name(config_path.parent)
+    if "reward" in manifest.capabilities and manifest.rewards != ((selected_reward,) if selected_reward else ()):
+        raise NativeExtensionError(
+            "Selected YAML reward changed; run "
+            f"'anysearch compile {config_path.parent}'"
+        )
     extension_dir = config_path.parent.joinpath("extension")
     if not extension_dir.is_dir() or _source_digest(extension_dir) != manifest.source_sha256:
         raise NativeExtensionError(
@@ -196,6 +204,17 @@ class NativeExtension:
                  (CAP_EVALUATION_METRICS, "evaluation_metrics"))
         return tuple(name for flag, name in pairs if self.capabilities & flag)
 
+    def validate_reward(self, name: str) -> None:
+        if not name.isidentifier():
+            raise NativeExtensionError(f"Invalid reward name {name!r}")
+        symbol = f"anysearch_reward_{name}_v1"
+        try:
+            getattr(self._library, symbol)
+        except AttributeError as exc:
+            raise NativeExtensionError(
+                f"Native extension does not export selected reward {name!r} ({symbol})"
+            ) from exc
+
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":
         library = ctypes.CDLL(str(path))
@@ -234,34 +253,6 @@ class NativeExtension:
             raise NativeExtensionError("Native extension capabilities do not match its manifest")
         return loaded
 
-    def compute_reward(self, context: RewardContext) -> RewardResult:
-        if not self.capabilities & CAP_REWARD:
-            raise NativeExtensionError("Native extension has no reward capability")
-        goal = context.goal or (0, 0, 0)
-        raw = _RewardContextV1(
-            ABI_VERSION, ctypes.sizeof(_RewardContextV1), context.step, context.action_index,
-            (ctypes.c_int32 * 3)(*context.previous_cursor), (ctypes.c_int32 * 3)(*context.cursor),
-            (ctypes.c_int32 * 3)(*goal), int(context.goal is not None), int(context.invalid_action),
-            int(context.collision), int(context.terminated), int(context.truncated),
-            context.previous_goal_distance, context.goal_distance, context.standard_reward,
-        )
-        result = _RewardResultV1(ABI_VERSION, ctypes.sizeof(_RewardResultV1))
-        function = self._library.anysearch_compute_reward_v1
-        function.argtypes = [ctypes.POINTER(_RewardContextV1), ctypes.POINTER(_RewardResultV1)]
-        function.restype = ctypes.c_int32
-        status = int(function(ctypes.byref(raw), ctypes.byref(result)))
-        if status != 0 or result.component_count > MAX_COMPONENTS:
-            raise NativeExtensionError(f"Native reward failed with status {status}")
-        if result.mode not in (0, 1):
-            raise NativeExtensionError(f"Native reward returned invalid mode {result.mode}")
-        components = {}
-        for index in range(result.component_count):
-            component = result.components[index]
-            name = bytes(component.name).split(b"\0", 1)[0].decode("utf-8")
-            components[name] = float(component.value)
-        return RewardResult(reward=float(result.reward), components=components,
-                            mode="replace" if result.mode == 1 else "add")
-
     def compute_metrics(self, scope: str, context: Mapping[str, Any]) -> dict[str, float]:
         flag = CAP_TRAINING_METRICS if scope == "training" else CAP_EVALUATION_METRICS
         if not self.capabilities & flag:
@@ -280,25 +271,6 @@ class NativeExtension:
         if not isinstance(raw, dict):
             raise NativeExtensionError(f"Native {scope} metrics must return a JSON object")
         return {str(name): float(value) for name, value in raw.items()}
-
-
-def apply_native_reward(
-    extension: NativeExtension | None,
-    context: RewardContext,
-) -> tuple[float, dict[str, float]]:
-    """Apply a native reward result with the same semantics as Python hooks."""
-    if extension is None or not extension.capabilities & CAP_REWARD:
-        return context.standard_reward, dict(context.standard_breakdown)
-    result = extension.compute_reward(context)
-    components = dict(result.components) or {"native_reward": result.reward}
-    collisions = set(components) & set(context.standard_breakdown)
-    if collisions:
-        raise NativeExtensionError(
-            f"Native reward components collide with built-ins: {', '.join(sorted(collisions))}"
-        )
-    if result.mode == "replace":
-        return result.reward, components
-    return context.standard_reward + result.reward, {**context.standard_breakdown, **components}
 
 
 def validate_native_metrics(

@@ -10,6 +10,9 @@ env:
   agent_count: 1
   max_steps: 50
 
+  rewards:
+    custom: quick_demo
+
   geometry:
     stl_path: usage/geometries/cube.stl
     scale: 40.0

@@ -1,7 +1,7 @@
 # Native Rust extension example
 
 This folder demonstrates an experiment-local compiled reward and metric extension.
-The Rust library adds a collision penalty and publishes one training and evaluation
+The YAML selects `custom: native_collision`; `rewards.rs` defines that reward and the Rust library adds its collision penalty and publishes one training and evaluation
 metric proving that the native hook ran.
 
 Compile it before launching the experiment:

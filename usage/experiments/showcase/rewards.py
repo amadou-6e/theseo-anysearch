@@ -3,7 +3,7 @@
 from theseo_anysearch.experiments.custom_rewards import RewardResult
 
 
-def compute_reward(context):
+def quick_demo(context):
     changed_axes = sum(
         previous != current
         for previous, current in zip(context.previous_cursor, context.cursor)

@@ -28,6 +28,7 @@ env:
 | `invalid_action_cost` | `0.0` | Additional term for an invalid action. |
 | `construction_residual_weight` | `0.0` | Weight for remaining construction work. |
 | `construction_overshoot_weight` | `0.0` | Weight for construction beyond the requested target. |
+| `custom` | `null` | Name of a function in `rewards.py` or `rewards.rs`. |
 
 Progress shaping is:
 
@@ -39,17 +40,24 @@ A move toward the goal therefore receives a less negative or more positive resul
 
 Legacy reward fields such as `env.step_cost` and `env.goal_reward` remain loadable during migration. Do not combine them with `env.rewards` in the same configuration.
 
-## Custom Python rewards
+## Named custom rewards
 
-An experiment can replace or extend the built-in YAML reward without configuring an import path. For `example.yaml`, Anysearch looks beside the YAML for `reward.example.py`, then falls back to `reward.py`.
+Select a reward by name in YAML:
 
-The module defines:
+```yaml
+env:
+  rewards:
+    custom: collision_aware
+```
+
+The same selector is used for Python and Rust definitions. A Python experiment
+places the named function in `rewards.py` beside its YAML:
 
 ```python
 from theseo_anysearch.experiments.custom_rewards import RewardResult
 
 
-def compute_reward(context):
+def collision_aware(context):
     penalty = -0.02 if context.collision else 0.0
     return RewardResult(
         reward=penalty,
@@ -58,10 +66,18 @@ def compute_reward(context):
     )
 ```
 
-`RewardContext` exposes the action, previous/current observations and cursor positions, goal and distance values, termination flags, standard reward and breakdown, task information, and runtime environment configuration.
+A compiled extension defines `collision_aware` in `extension/src/rewards.rs` and
+exports `anysearch_reward_collision_aware_v1` from `lib.rs`. When both exist, the
+compiled Rust definition takes precedence. It is loaded once by the Rust core and
+called directly inside `VoxelEnv::step`; the per-step reward does not pass through
+Python. Python remains the fallback when the compiled extension does not supply a
+reward capability.
 
-`mode="add"` adds the returned reward and components to the standard reward. `mode="replace"` discards the standard reward and uses only the returned value and components. Component values must be finite, use Python identifier names, sum to `reward`, and not collide with built-in component names.
+`mode="add"` retains built-in components and appends custom components.
+`mode="replace"` discards built-in components. Rust owns and validates the final
+named breakdown, and Python exposes it unchanged through Gymnasium `info`.
 
-The selected source is archived as `reward.py` in every ordinary run or Tune trial. `custom_reward.json` records its SHA-256 hash. Single-agent Ray training and evaluation workers receive the archived absolute path, so they execute the same source captured by the run.
-
-See [`reward.quick_demo.py`](../../usage/experiments/showcase/reward.quick_demo.py) for a complete additive example.
+The selected `rewards.py` or compiled library is archived in every ordinary run
+or Tune trial. See [`rewards.py`](../../usage/experiments/showcase/rewards.py) and
+the [`native_extension`](../../usage/experiments/showcase/native_extension)
+example.
