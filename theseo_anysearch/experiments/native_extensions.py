@@ -41,21 +41,43 @@ class NativeExtensionManifest(BaseModel):
     machine: str
 
 
+def _extension_sdk_dir() -> Path:
+    sdk = Path(__file__).resolve().parent.parent.joinpath("extension_sdk")
+    if not sdk.joinpath("Cargo.toml").is_file():
+        raise NativeExtensionError(f"Bundled Rust extension SDK is missing: {sdk}")
+    return sdk
+
+
+def _cargo_command(command: str, cargo_manifest: Path, *arguments: str) -> list[str]:
+    sdk = _extension_sdk_dir().as_posix()
+    patch = f'patch.crates-io.anysearch-extension.path="{sdk}"'
+    return [
+        "cargo",
+        "--config",
+        patch,
+        command,
+        "--manifest-path",
+        str(cargo_manifest),
+        *arguments,
+    ]
+
+
 def _source_digest(extension_dir: Path) -> str:
     digest = hashlib.sha256()
-    files = sorted(
-        path for path in extension_dir.rglob("*")
-        if path.is_file() and "target" not in path.relative_to(extension_dir).parts
-    )
-    for path in files:
-        relative = path.relative_to(extension_dir).as_posix().encode()
-        digest.update(len(relative).to_bytes(8, "little"))
-        digest.update(relative)
-        data = path.read_bytes()
-        digest.update(len(data).to_bytes(8, "little"))
-        digest.update(data)
+    roots = (("extension", extension_dir), ("sdk", _extension_sdk_dir()))
+    for label, root in roots:
+        files = sorted(
+            path for path in root.rglob("*")
+            if path.is_file() and "target" not in path.relative_to(root).parts
+        )
+        for path in files:
+            relative = f"{label}/{path.relative_to(root).as_posix()}".encode()
+            digest.update(len(relative).to_bytes(8, "little"))
+            digest.update(relative)
+            data = path.read_bytes()
+            digest.update(len(data).to_bytes(8, "little"))
+            digest.update(data)
     return digest.hexdigest()
-
 
 def _library_filename(crate_name: str) -> str:
     stem = crate_name.replace("-", "_")
@@ -92,7 +114,7 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     if not crate_name:
         raise NativeExtensionError("Cargo.toml must define package.name or lib.name")
     subprocess.run(
-        ["cargo", "generate-lockfile", "--manifest-path", str(cargo_manifest)],
+        _cargo_command("generate-lockfile", cargo_manifest),
         cwd=extension_dir, check=True,
     )
     source_sha = _source_digest(extension_dir)
@@ -113,7 +135,7 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
                 loaded.validate_reward(reward_name)
             return stable_manifest
     subprocess.run(
-        ["cargo", "build", "--manifest-path", str(cargo_manifest), "--release"],
+        _cargo_command("build", cargo_manifest, "--release"),
         cwd=extension_dir, check=True,
     )
     filename = _library_filename(crate_name)

@@ -41,6 +41,7 @@ experiments/mlflow.db
 
 # Rust / Cargo
 theseo_anysearch/core/target/
+theseo_anysearch/extension_sdk/target/
 
 # Maturin build output
 *.pyi

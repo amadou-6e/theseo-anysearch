@@ -66,12 +66,24 @@ def collision_aware(context):
     )
 ```
 
-A compiled extension defines `collision_aware` in `extension/src/rewards.rs` and
-exports `anysearch_reward_collision_aware_v1` from `lib.rs`. When both exist, the
-compiled Rust definition takes precedence. It is loaded once by the Rust core and
-called directly inside `VoxelEnv::step`; the per-step reward does not pass through
-Python. Python remains the fallback when the compiled extension does not supply a
-reward capability.
+A compiled extension defines the same name in `extension/src/rewards.rs`:
+
+```rust
+use anysearch_extension::{anysearch_reward, RewardContext, RewardResult};
+
+#[anysearch_reward]
+pub fn collision_aware(context: &RewardContext) -> RewardResult {
+    let penalty = if context.collision { -0.02 } else { 0.0 };
+    RewardResult::add(penalty).with_component("extra_collision_penalty", penalty)
+}
+```
+
+The attribute generates `anysearch_reward_collision_aware_v1` automatically.
+There is no handwritten ABI wrapper in `lib.rs`. When both Python and Rust
+implement the selected name, the compiled Rust definition takes precedence. It
+is loaded once by the Rust core and called directly inside `VoxelEnv::step`; the
+per-step reward does not pass through Python. Python remains the fallback when
+the compiled extension does not supply a reward capability.
 
 `mode="add"` retains built-in components and appends custom components.
 `mode="replace"` discards built-in components. Rust owns and validates the final
