@@ -186,6 +186,15 @@ def compute_custom_metrics(
     return metrics
 
 
+def merge_custom_metrics(
+    python_metrics: Mapping[str, float],
+    native_metrics: Mapping[str, float],
+) -> dict[str, float]:
+    """Combine both providers, with native values replacing identical names."""
+
+    return {**python_metrics, **native_metrics}
+
+
 def write_metric_manifest(
     providers: MetricProviders,
     destination: Path,

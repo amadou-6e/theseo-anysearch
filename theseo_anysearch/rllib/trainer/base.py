@@ -444,6 +444,7 @@ class Trainer(ABC):
             EvaluationContext,
             TrainingContext,
             compute_custom_metrics,
+            merge_custom_metrics,
         )
 
         _store = OutputStore(self._output_dir)
@@ -596,15 +597,20 @@ class Trainer(ABC):
                         )
                         if native_has_evaluation else {}
                     )
-                    if native_has_evaluation:
-                        evaluation_custom = validate_native_metrics(
-                            "evaluation", native_raw, reserved_names=evaluation_reserved
-                        )
-                    else:
-                        evaluation_custom = compute_custom_metrics(
-                            self._metric_providers.evaluation, evaluation_context,
+                    python_evaluation_custom = compute_custom_metrics(
+                        self._metric_providers.evaluation, evaluation_context,
+                        reserved_names=evaluation_reserved,
+                    )
+                    native_evaluation_custom = (
+                        validate_native_metrics(
+                            "evaluation", native_raw,
                             reserved_names=evaluation_reserved,
                         )
+                        if native_has_evaluation else {}
+                    )
+                    evaluation_custom = merge_custom_metrics(
+                        python_evaluation_custom, native_evaluation_custom
+                    )
                     heuristic_accuracy = None
                     heuristic_distance = None
                     heuristic_compared_states = 0
@@ -774,16 +780,21 @@ class Trainer(ABC):
                     )
                     if native_has_training else {}
                 )
-                if native_has_training:
-                    training_custom = validate_native_metrics(
+                training_reserved = set(result.standard_metrics())
+                python_training_custom = compute_custom_metrics(
+                    self._metric_providers.training, training_context,
+                    reserved_names=training_reserved,
+                )
+                native_training_custom = (
+                    validate_native_metrics(
                         "training", native_raw,
-                        reserved_names=set(result.standard_metrics()),
+                        reserved_names=training_reserved,
                     )
-                else:
-                    training_custom = compute_custom_metrics(
-                        self._metric_providers.training, training_context,
-                        reserved_names=set(result.standard_metrics()),
-                    )
+                    if native_has_training else {}
+                )
+                training_custom = merge_custom_metrics(
+                    python_training_custom, native_training_custom
+                )
                 if training_custom:
                     result = result.model_copy(
                         update={"extra": {**result.extra, **training_custom}}

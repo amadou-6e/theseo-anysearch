@@ -9,6 +9,7 @@ from theseo_anysearch.experiments.custom_metrics import (
     copy_metric_sources,
     discover_metric_sources,
     load_metric_providers,
+    merge_custom_metrics,
     write_metric_manifest,
 )
 
@@ -84,3 +85,20 @@ def test_invalid_metric_results_fail_fast(
 
     with pytest.raises(CustomMetricError, match=message):
         compute_custom_metrics(provider, context, reserved_names=set())
+
+
+def test_native_metrics_only_supersede_identical_python_names() -> None:
+    assert merge_custom_metrics(
+        {
+            "training_python_only": 1.0,
+            "training_shared": 2.0,
+        },
+        {
+            "training_native_only": 3.0,
+            "training_shared": 4.0,
+        },
+    ) == {
+        "training_python_only": 1.0,
+        "training_native_only": 3.0,
+        "training_shared": 4.0,
+    }
