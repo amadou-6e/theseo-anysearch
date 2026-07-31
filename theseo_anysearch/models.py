@@ -39,18 +39,48 @@ class WaypointDifficultyConfig(BaseModel):
     """Controls how successive waypoint-pair difficulty is sampled."""
 
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["random", "monotonic_distance"] = "random"
+    mode: Literal[
+        "random", "monotonic_distance", "goal_distance", "segment_distance"
+    ] = "random"
+    initial_distance: int | None = Field(default=None, ge=1)
     distance_increment: float = Field(default=1.0, gt=0.0)
     maximum_distance: float | None = Field(default=None, gt=0.0)
     sampling_attempts: int = Field(default=512, ge=1)
+
+
+class WaypointRouteLengthConfig(BaseModel):
+    """Exact shortest-path length requested for a multi-waypoint route."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["fixed", "fraction"]
+    distance: int | None = Field(default=None, ge=1)
+    fraction: float | None = Field(default=None, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_mode_value(self) -> "WaypointRouteLengthConfig":
+        if self.mode == "fixed":
+            if self.distance is None or self.fraction is not None:
+                raise ValueError("fixed route_length requires distance only")
+        elif self.fraction is None or self.distance is not None:
+            raise ValueError("fraction route_length requires fraction only")
+        return self
+
+    def resolve(self, max_steps: int) -> int:
+        if self.mode == "fixed":
+            assert self.distance is not None
+            return self.distance
+        assert self.fraction is not None
+        return max(1, int(max_steps * self.fraction))
 
 class WaypointCurriculumConfig(BaseModel):
     """Curriculum of reproducible start/goal stages."""
 
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    completion_mode: Literal["terminate_episode", "continue_route"] = "terminate_episode"
     initial_start: tuple[int, int, int] | None = None
     initial_goal: tuple[int, int, int] | None = None
+    route_length: WaypointRouteLengthConfig | None = None
     seed: int = 42
     difficulty: WaypointDifficultyConfig = Field(
         default_factory=WaypointDifficultyConfig
@@ -62,10 +92,27 @@ class WaypointCurriculumConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_initial_pair(self) -> "WaypointCurriculumConfig":
-        if self.enabled and (self.initial_start is None or self.initial_goal is None):
+        if (
+            self.enabled
+            and self.completion_mode == "terminate_episode"
+            and (self.initial_start is None or self.initial_goal is None)
+        ):
             raise ValueError(
                 "enabled waypoint_curriculum requires initial_start and initial_goal"
             )
+        if self.completion_mode == "continue_route":
+            if self.enabled and self.initial_start is None:
+                raise ValueError("enabled waypoint_curriculum requires initial_start")
+            if self.route_length is None:
+                raise ValueError("continue_route requires route_length")
+            if self.difficulty.mode != "segment_distance":
+                raise ValueError(
+                    "continue_route requires difficulty.mode: segment_distance"
+                )
+            if self.difficulty.initial_distance is None:
+                raise ValueError("segment_distance requires initial_distance")
+        elif self.route_length is not None:
+            raise ValueError("route_length is only valid with continue_route")
         if (
             self.initial_start is not None
             and self.initial_goal is not None
