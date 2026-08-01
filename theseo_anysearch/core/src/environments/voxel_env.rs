@@ -1,13 +1,9 @@
-use crate::world::{
-    Block,
-    Coord,
-    World,
-    WorldState,
-    BLOCK_KIND_GOAL,
-    BLOCK_KIND_START,
-};
+use crate::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
 
+use super::native_reward::{NativeRewardExtension, RewardContextV1, ABI_VERSION};
 use super::traits::{Environment, StepResult};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 // Reward configuration — passed from Python, computed in Rust
@@ -26,6 +22,9 @@ pub struct RewardConfig {
     /// Extra penalty subtracted when a movement is blocked (boundary hit or
     /// occupied cell).  Positive value = bigger penalty.  Default 0.0.
     pub collision_cost: f32,
+    pub invalid_action_cost: f32,
+    pub construction_residual_weight: f32,
+    pub construction_overshoot_weight: f32,
     /// Distance reward strategy. "progress" preserves potential shaping.
     /// "zone" gives a negative per-step reward based on absolute goal distance.
     pub distance_reward_mode: DistanceRewardMode,
@@ -100,6 +99,9 @@ impl Default for RewardConfig {
             goal_reward: 1.0,
             distance_shaping: 0.1,
             collision_cost: 0.0,
+            invalid_action_cost: 0.0,
+            construction_residual_weight: 0.0,
+            construction_overshoot_weight: 0.0,
             distance_reward_mode: DistanceRewardMode::Progress,
             zone_reward_min: -1.0,
             zone_reward_max: -0.01,
@@ -156,10 +158,31 @@ pub struct VoxelEnv {
     fixed_goal: Option<Coord>,
     /// Active goal for the current episode.
     active_goal: Option<Coord>,
+    /// Optional task-defined success targets. Empty means use the active waypoint.
+    success_targets: Vec<Coord>,
+    goal_tolerance: f32,
     /// L2 (Euclidean) distance from cursor to goal at the end of the previous step
     /// (used for potential-based shaping).
     prev_goal_dist_l2: f32,
     reward_config: RewardConfig,
+    max_consecutive_collisions: Option<u32>,
+    terminate_on_success: bool,
+    consecutive_collisions: u32,
+    construction_target: HashSet<Coord>,
+    native_reward: Option<NativeRewardExtension>,
+    pending_action_index: i32,
+    pending_previous_cursor: Coord,
+    pending_invalid_action: bool,
+    last_reward_breakdown: HashMap<String, f32>,
+    last_collision: bool,
+    last_goal_reached: bool,
+    last_terminated: bool,
+    last_truncated: bool,
+    last_termination_reason: String,
+    last_reward_error: Option<String>,
+    last_goal_distance_l2: f32,
+    last_construction_residual: usize,
+    last_construction_overshoot: usize,
 }
 
 impl VoxelEnv {
@@ -177,8 +200,28 @@ impl VoxelEnv {
             fixed_start: None,
             fixed_goal: None,
             active_goal: None,
+            success_targets: Vec::new(),
+            goal_tolerance: 0.0,
             prev_goal_dist_l2: 0.0,
             reward_config: RewardConfig::default(),
+            max_consecutive_collisions: None,
+            terminate_on_success: true,
+            consecutive_collisions: 0,
+            construction_target: HashSet::new(),
+            native_reward: None,
+            pending_action_index: 26,
+            pending_previous_cursor: (1, 1, 1),
+            pending_invalid_action: false,
+            last_reward_breakdown: HashMap::new(),
+            last_collision: false,
+            last_goal_reached: false,
+            last_terminated: false,
+            last_truncated: false,
+            last_termination_reason: "in_progress".to_owned(),
+            last_reward_error: None,
+            last_goal_distance_l2: 0.0,
+            last_construction_residual: 0,
+            last_construction_overshoot: 0,
         }
     }
 
@@ -218,6 +261,69 @@ impl VoxelEnv {
         self
     }
 
+    pub fn with_terminate_on_success(mut self, value: bool) -> Self {
+        self.terminate_on_success = value;
+        self
+    }
+    pub fn with_success_contract(mut self, targets: Vec<Coord>, tolerance: f32) -> Self {
+        self.success_targets = targets;
+        self.goal_tolerance = tolerance;
+        self
+    }
+
+    pub fn with_max_consecutive_collisions(mut self, value: Option<u32>) -> Self {
+        self.max_consecutive_collisions = value;
+        self
+    }
+
+    pub fn with_construction_target(mut self, target: Vec<Coord>) -> Self {
+        self.construction_target = target.into_iter().collect();
+        self
+    }
+
+    pub fn with_native_reward(mut self, path: &Path, name: &str) -> Result<Self, String> {
+        self.native_reward = Some(NativeRewardExtension::load(path, name)?);
+        Ok(self)
+    }
+
+    pub fn prepare_navigation_step(
+        &mut self,
+        action_index: i32,
+        previous_cursor: Coord,
+        invalid_action: bool,
+    ) {
+        self.pending_action_index = action_index;
+        self.pending_previous_cursor = previous_cursor;
+        self.pending_invalid_action = invalid_action;
+    }
+
+    pub fn last_reward_breakdown(&self) -> &HashMap<String, f32> {
+        &self.last_reward_breakdown
+    }
+    pub fn last_collision(&self) -> bool {
+        self.last_collision
+    }
+    pub fn last_goal_reached(&self) -> bool {
+        self.last_goal_reached
+    }
+    pub fn last_terminated(&self) -> bool {
+        self.last_terminated
+    }
+    pub fn last_truncated(&self) -> bool {
+        self.last_truncated
+    }
+    pub fn last_termination_reason(&self) -> &str {
+        &self.last_termination_reason
+    }
+    pub fn consecutive_collisions(&self) -> u32 {
+        self.consecutive_collisions
+    }
+    pub fn take_reward_error(&mut self) -> Option<String> {
+        self.last_reward_error.take()
+    }
+    pub fn last_goal_distance_l2(&self) -> f32 { self.last_goal_distance_l2 }
+    pub fn last_construction_residual(&self) -> usize { self.last_construction_residual }
+    pub fn last_construction_overshoot(&self) -> usize { self.last_construction_overshoot }
     /// Fix start and goal positions (overrides random selection on reset).
     pub fn set_waypoints(&mut self, start: Coord, goal: Coord) {
         self.fixed_start = Some(start);
@@ -317,14 +423,20 @@ impl VoxelEnv {
 // ---------------------------------------------------------------------------
 
 const DIRS: [(i32, i32, i32); 6] = [
-    (1, 0, 0), (-1, 0, 0),
-    (0, 1, 0), (0, -1, 0),
-    (0, 0, 1), (0, 0, -1),
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
 ];
 
 /// Returns the set of all free (non-geometry) cells reachable from the grid
 /// boundary via 6-connectivity BFS.  Used to exclude enclosed cavities.
-fn reachable_from_boundary(geo_set: &std::collections::HashSet<Coord>, grid_size: u16) -> std::collections::HashSet<Coord> {
+fn reachable_from_boundary(
+    geo_set: &std::collections::HashSet<Coord>,
+    grid_size: u16,
+) -> std::collections::HashSet<Coord> {
     use std::collections::{HashSet, VecDeque};
     let mut reachable: HashSet<Coord> = HashSet::new();
     let mut queue: VecDeque<Coord> = VecDeque::new();
@@ -385,11 +497,15 @@ fn compute_surface_cells(geometry: &[Coord], grid_size: u16) -> Vec<Coord> {
     cells
 }
 
+fn coord_to_i32(coord: Coord) -> [i32; 3] {
+    [i32::from(coord.0), i32::from(coord.1), i32::from(coord.2)]
+}
+
 /// L2 (Euclidean) distance between two coords.
 fn l2(a: Coord, b: Coord) -> f32 {
-    let dx = (a.0 as f32 - b.0 as f32);
-    let dy = (a.1 as f32 - b.1 as f32);
-    let dz = (a.2 as f32 - b.2 as f32);
+    let dx = a.0 as f32 - b.0 as f32;
+    let dy = a.1 as f32 - b.1 as f32;
+    let dz = a.2 as f32 - b.2 as f32;
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
@@ -417,6 +533,17 @@ impl Environment for VoxelEnv {
 
     fn reset(&mut self, seed: u64) -> Self::Observation {
         self.steps = 0;
+        self.consecutive_collisions = 0;
+        self.last_reward_breakdown.clear();
+        self.last_collision = false;
+        self.last_goal_reached = false;
+        self.last_terminated = false;
+        self.last_truncated = false;
+        self.last_termination_reason = "in_progress".to_owned();
+        self.last_reward_error = None;
+        self.last_goal_distance_l2 = 0.0;
+        self.last_construction_residual = 0;
+        self.last_construction_overshoot = 0;
         self.world.clear();
         for &coord in &self.geometry {
             let _ = self.world.set_block(
@@ -434,7 +561,9 @@ impl Environment for VoxelEnv {
             (s, g)
         } else if self.surface_cells.len() >= 2 {
             let idx_a = (seed as usize).wrapping_mul(2654435761) % self.surface_cells.len();
-            let seed2 = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let seed2 = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let idx_b_raw = (seed2 as usize).wrapping_mul(2654435761) % self.surface_cells.len();
             // Ensure the two indices are distinct.
             let idx_b = if idx_b_raw == idx_a {
@@ -445,7 +574,11 @@ impl Environment for VoxelEnv {
             let a = self.surface_cells[idx_a];
             let b = self.surface_cells[idx_b];
             // Swap on alternating seeds to train both navigation directions.
-            if seed % 2 == 0 { (a, b) } else { (b, a) }
+            if seed % 2 == 0 {
+                (a, b)
+            } else {
+                (b, a)
+            }
         } else {
             // No geometry / too few surface cells — fall back to fixed default.
             ((1, 1, 1), (1, 1, 1))
@@ -474,7 +607,15 @@ impl Environment for VoxelEnv {
         }
 
         let goal_distance = self.active_goal.map(|g| manhattan(self.cursor, g));
-        self.prev_goal_dist_l2 = self.active_goal.map_or(0.0, |g| l2(self.cursor, g));
+        self.prev_goal_dist_l2 = if self.success_targets.is_empty() {
+            self.active_goal.map_or(0.0, |goal| l2(self.cursor, goal))
+        } else {
+            self.success_targets
+                .iter()
+                .map(|goal| l2(self.cursor, *goal))
+                .reduce(f32::min)
+                .unwrap_or(0.0)
+        };
 
         VoxelObservation {
             filled: self.agent_filled(),
@@ -486,51 +627,168 @@ impl Environment for VoxelEnv {
     fn step(&mut self, action: Self::Action) -> StepResult<Self::Observation> {
         let is_collision = matches!(action, VoxelAction::Collision);
         self.steps += 1;
+        if is_collision {
+            self.consecutive_collisions += 1;
+        } else {
+            self.consecutive_collisions = 0;
+        }
 
-        // Apply world action (Place / Remove / Noop / Collision).
         match action {
-            VoxelAction::Place(coord) => { let _ = self.world.set_block(coord, Block::default()); }
-            VoxelAction::Remove(coord) => { let _ = self.world.remove_block(coord); }
+            VoxelAction::Place(coord) => {
+                let _ = self.world.set_block(coord, Block::default());
+            }
+            VoxelAction::Remove(coord) => {
+                let _ = self.world.remove_block(coord);
+            }
             VoxelAction::Noop | VoxelAction::Collision => {}
         };
 
-        // Navigation reward: goal reached?
-        let goal_reached = self.active_goal.map_or(false, |g| self.cursor == g);
-        let goal_reward = if goal_reached { self.reward_config.goal_reward } else { 0.0 };
-
-        // L2 distance shaping — computed before updating prev_goal_dist_l2.
-        let new_l2 = self.active_goal.map_or(0.0, |g| l2(self.cursor, g));
-        let goal_distance = self.active_goal.map(|g| manhattan(self.cursor, g));
-
-        let agent_filled = self.agent_filled();
-
-        let base_step_reward = if self.active_goal.is_some() {
-            self.reward_config.base_step_reward(
-                self.prev_goal_dist_l2,
-                new_l2,
-                self.grid_size,
-            )
+        let accepted_targets = if self.success_targets.is_empty() {
+            self.active_goal.iter().copied().collect::<Vec<_>>()
         } else {
+            self.success_targets.clone()
+        };
+        let new_l2 = accepted_targets
+            .iter()
+            .map(|goal| l2(self.cursor, *goal))
+            .reduce(f32::min)
+            .unwrap_or(0.0);
+        let goal_reached = !accepted_targets.is_empty() && new_l2 <= self.goal_tolerance;
+        let goal_distance = self.active_goal.map(|goal| manhattan(self.cursor, goal));
+        let step_cost = if self.reward_config.distance_reward_mode == DistanceRewardMode::Progress {
             self.reward_config.step_cost
+        } else {
+            0.0
+        };
+        let distance_reward = if self.active_goal.is_none() {
+            0.0
+        } else if self.reward_config.distance_reward_mode == DistanceRewardMode::Progress {
+            self.reward_config.distance_shaping * (self.prev_goal_dist_l2 - new_l2)
+        } else {
+            self.reward_config.zone_reward(new_l2, self.grid_size)
+        };
+
+        let filled: HashSet<Coord> = self
+            .world
+            .iter_filled()
+            .copied()
+            .filter(|coord| {
+                self.world.get_block(*coord).is_some_and(|block| {
+                    block.active && block.reward_weight > 0.0
+                })
+            })
+            .collect();
+        let residual = self.construction_target.difference(&filled).count();
+        let overshoot = if self.construction_target.is_empty() {
+            0
+        } else {
+            filled.difference(&self.construction_target).count()
+        };
+        let mut breakdown = HashMap::from([
+            ("step_cost".to_owned(), step_cost),
+            ("distance_progress".to_owned(), distance_reward),
+            (
+                "success".to_owned(),
+                if goal_reached {
+                    self.reward_config.goal_reward
+                } else {
+                    0.0
+                },
+            ),
+            (
+                "invalid_action".to_owned(),
+                if self.pending_invalid_action {
+                    self.reward_config.invalid_action_cost
+                } else {
+                    0.0
+                },
+            ),
+            (
+                "collision".to_owned(),
+                if is_collision {
+                    self.reward_config.collision_cost
+                } else {
+                    0.0
+                },
+            ),
+            (
+                "construction_residual".to_owned(),
+                -(residual as f32) * self.reward_config.construction_residual_weight,
+            ),
+            (
+                "construction_overshoot".to_owned(),
+                -(overshoot as f32) * self.reward_config.construction_overshoot_weight,
+            ),
+        ]);
+        let standard_reward: f32 = breakdown.values().sum();
+
+        let collision_terminated = self
+            .max_consecutive_collisions
+            .is_some_and(|limit| self.consecutive_collisions >= limit);
+        let terminated = (goal_reached && self.terminate_on_success) || collision_terminated;
+        let truncated = self.steps >= self.max_steps && !terminated;
+        let context = RewardContextV1 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<RewardContextV1>() as u32,
+            step: u64::from(self.steps),
+            action_index: self.pending_action_index,
+            previous_cursor: coord_to_i32(self.pending_previous_cursor),
+            cursor: coord_to_i32(self.cursor),
+            goal: self.active_goal.map_or([0; 3], coord_to_i32),
+            has_goal: u8::from(self.active_goal.is_some()),
+            invalid_action: u8::from(self.pending_invalid_action),
+            collision: u8::from(is_collision),
+            goal_reached: u8::from(goal_reached),
+            terminated: u8::from(terminated),
+            truncated: u8::from(truncated),
+            consecutive_collisions: self.consecutive_collisions,
+            previous_goal_distance: f64::from(self.prev_goal_dist_l2),
+            goal_distance: f64::from(new_l2),
+            standard_reward: f64::from(standard_reward),
+        };
+        let reward = if let Some(extension) = &self.native_reward {
+            match extension.compute(&context, &breakdown) {
+                Ok((reward, native_breakdown)) => {
+                    breakdown = native_breakdown;
+                    reward
+                }
+                Err(error) => {
+                    self.last_reward_error = Some(error);
+                    standard_reward
+                }
+            }
+        } else {
+            standard_reward
         };
         self.prev_goal_dist_l2 = new_l2;
-
-        let collision_penalty = if is_collision { self.reward_config.collision_cost } else { 0.0 };
-
-        let done = self.steps >= self.max_steps || goal_reached;
+        self.last_reward_breakdown = breakdown;
+        self.last_goal_distance_l2 = new_l2;
+        self.last_construction_residual = residual;
+        self.last_construction_overshoot = overshoot;
+        self.last_collision = is_collision;
+        self.last_goal_reached = goal_reached;
+        self.last_terminated = terminated;
+        self.last_truncated = truncated;
+        self.last_termination_reason = if goal_reached {
+            "success"
+        } else if collision_terminated {
+            "consecutive_collisions"
+        } else if truncated {
+            "step_limit"
+        } else {
+            "in_progress"
+        }
+        .to_owned();
 
         let observation = VoxelObservation {
-            filled: agent_filled,
+            filled: self.agent_filled(),
             steps_remaining: self.max_steps.saturating_sub(self.steps),
             goal_distance,
         };
-
         StepResult {
             observation,
-            // Formula: base distance reward + goal_reward + collision_cost.
-            // collision_cost is negative (same sign convention as step rewards)
-            reward: base_step_reward + goal_reward + collision_penalty,
-            done,
+            reward,
+            done: terminated || truncated,
         }
     }
 }
@@ -563,6 +821,7 @@ mod tests {
             zone_reward_min: -1.0,
             zone_reward_max: -0.01,
             zone_reward_curve: ZoneRewardCurve::Linear,
+            ..Default::default()
         }
     }
 
@@ -579,8 +838,8 @@ mod tests {
 
     #[test]
     fn reset_restores_geometry() {
-        let mut env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(vec![(5, 5, 5), (6, 6, 6)]);
+        let mut env =
+            VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(5, 5, 5), (6, 6, 6)]);
         env.step(VoxelAction::Place((1, 1, 1)));
         let obs = env.reset(42);
         // geometry_len=2, agent_filled=0
@@ -629,8 +888,7 @@ mod tests {
 
     #[test]
     fn geometry_not_counted_in_agent_filled() {
-        let mut env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(vec![(10, 10, 10)]);
+        let mut env = VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(10, 10, 10)]);
         env.reset(42);
         assert_eq!(env.agent_filled(), 0);
         env.step(VoxelAction::Place((1, 1, 1)));
@@ -649,8 +907,7 @@ mod tests {
 
     #[test]
     fn surface_cells_computed_from_geometry() {
-        let env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(vec![(5, 5, 5)]);
+        let env = VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(5, 5, 5)]);
         // A single geometry cell at (5,5,5) should have 6 surface neighbours.
         assert_eq!(env.surface_cells().len(), 6);
         // All neighbours should be adjacent.
@@ -663,10 +920,12 @@ mod tests {
     #[test]
     fn surface_cells_do_not_include_geometry() {
         let geo = vec![(5, 5, 5), (6, 5, 5)];
-        let env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(geo.clone());
+        let env = VoxelEnv::new(WorldState::new(), 10).with_geometry(geo.clone());
         for &c in env.surface_cells() {
-            assert!(!geo.contains(&c), "surface cell must not be a geometry cell");
+            assert!(
+                !geo.contains(&c),
+                "surface cell must not be a geometry cell"
+            );
         }
     }
 
@@ -684,19 +943,20 @@ mod tests {
 
     #[test]
     fn goal_reached_ends_episode() {
-        let mut env = VoxelEnv::new(WorldState::new(), 100)
-            .with_geometry(vec![(5, 5, 5)]);
+        let mut env = VoxelEnv::new(WorldState::new(), 100).with_geometry(vec![(5, 5, 5)]);
         env.reset(42);
         // Force goal to a known cell.
         let goal = env.active_goal().unwrap_or((4, 5, 5));
         env.set_waypoints(env.cursor(), goal);
-        env.reset(0);  // picks fixed waypoints
-        // Move cursor to goal manually.
+        env.reset(0); // picks fixed waypoints
+                      // Move cursor to goal manually.
         env.set_cursor(goal);
         let sr = env.step(VoxelAction::Noop);
         assert!(sr.done, "episode must end when cursor reaches goal");
-        assert!(sr.reward >= env.reward_config.goal_reward - 1.0,
-                "goal reward must be included");
+        assert!(
+            sr.reward >= env.reward_config.goal_reward - 1.0,
+            "goal reward must be included"
+        );
     }
 
     #[test]
@@ -732,8 +992,7 @@ mod tests {
 
     #[test]
     fn fixed_waypoints_override_random() {
-        let mut env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(vec![(10, 10, 10)]);
+        let mut env = VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(10, 10, 10)]);
         env.set_waypoints((2, 2, 2), (3, 3, 3));
         env.reset(0);
         assert_eq!(env.cursor(), (2, 2, 2));
@@ -742,10 +1001,37 @@ mod tests {
 
     #[test]
     fn manhattan_to_goal_in_observation() {
-        let mut env = VoxelEnv::new(WorldState::new(), 10)
-            .with_geometry(vec![(10, 10, 10)]);
+        let mut env = VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(10, 10, 10)]);
         env.set_waypoints((1, 1, 1), (4, 1, 1));
         let obs = env.reset(0);
         assert_eq!(obs.goal_distance, Some(3));
+    }
+
+    #[test]
+    fn consecutive_collisions_terminate_in_rust() {
+        let mut env = make_env(20).with_max_consecutive_collisions(Some(2));
+        env.set_waypoints((1, 1, 1), (3, 1, 1));
+        env.reset(0);
+        env.prepare_navigation_step(0, env.cursor(), false);
+        let first = env.step(VoxelAction::Collision);
+        assert!(!first.done);
+        env.prepare_navigation_step(0, env.cursor(), false);
+        let second = env.step(VoxelAction::Collision);
+        assert!(second.done);
+        assert!(env.last_terminated());
+        assert!(!env.last_truncated());
+        assert_eq!(env.last_termination_reason(), "consecutive_collisions");
+    }
+
+    #[test]
+    fn rust_breakdown_is_authoritative() {
+        let mut env = make_env(20);
+        env.set_waypoints((1, 1, 1), (3, 1, 1));
+        env.reset(0);
+        env.prepare_navigation_step(0, env.cursor(), false);
+        let result = env.step(VoxelAction::Collision);
+        let component_sum: f32 = env.last_reward_breakdown().values().sum();
+        assert!((result.reward - component_sum).abs() < 1e-6);
+        assert_eq!(env.last_reward_breakdown().get("collision"), Some(&0.0));
     }
 }

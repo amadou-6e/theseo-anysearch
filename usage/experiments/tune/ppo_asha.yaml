@@ -46,7 +46,7 @@ model_config:
 tune_config:
   scheduler: asha
   num_samples: 30
-  metric: evaluation_success_rate
+  metric: evaluation_navigation_score
   mode: max
   max_concurrent: 4
   checkpoint_frequency: 1

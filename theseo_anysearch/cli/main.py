@@ -34,6 +34,21 @@ app = typer.Typer(
 )
 
 
+@app.command("compile")
+def compile_extension(
+    folder: Path = typer.Argument(..., help="Experiment folder containing extension/Cargo.toml."),
+    force: bool = typer.Option(False, "--force", help="Rebuild even when the source hash is cached."),
+) -> None:
+    """Compile and validate an experiment-local Rust reward/metric extension."""
+    from theseo_anysearch.experiments.native_extensions import compile_native_extension
+
+    try:
+        manifest = compile_native_extension(folder, force=force)
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Compiled native extension: {manifest}")
+
 def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
     """Print a Rich panel summarising the run before training starts."""
     import sys

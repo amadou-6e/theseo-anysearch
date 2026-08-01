@@ -33,13 +33,16 @@ the start position is unambiguous.
 
 Every step returns these `info` fields:
 
-- `goal_reached` and `termination_reason` (`in_progress`, `success`, or
-  `step_limit`, or `collision_limit`);
+- `goal_reached` and `termination_reason` (`in_progress`, `success`,
+  `step_limit`, or `consecutive_collisions`);
 - `reward_breakdown`, with step, distance, success, invalid-action, collision,
   construction-residual, and construction-overshoot components;
-- `consecutive_collisions`, reset to zero by any non-collision step;
 - `unshaped_reward`, which excludes distance shaping;
 - initial, final, and minimum goal distance.
+
+The collision counter and its termination decision are maintained in the Rust core.
+It resets after any non-collision action. Omit `max_consecutive_collisions` to disable
+this termination condition.
 
 Episode trajectories retain the same breakdown and distances. Evaluation
 metrics expose component means as `evaluation_reward_<component>_mean`, so Tune,
@@ -49,10 +52,7 @@ Distance-progress shaping is potential based:
 
 ```text
 distance_shaping * (previous Euclidean distance - current Euclidean distance)
-/ maximum action-space movement distance
 ```
 
-The normalization divisor is `1` for `discrete_6`, `sqrt(2)` for
-`discrete_18`, and `sqrt(3)` for `discrete_26` and `vector_3`. Set
-`distance_shaping: 0.0` to disable it. Construction weights are non-negative;
+Set `distance_shaping: 0.0` to disable it. Construction weights are non-negative;
 their reward terms are the negative weighted residual and overshoot voxel counts.

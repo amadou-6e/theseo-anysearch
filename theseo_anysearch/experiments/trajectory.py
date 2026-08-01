@@ -95,6 +95,7 @@ class VoxelEpisodeData:
     minimum_goal_distance: float | None = None
     reward_breakdown: dict[str, float] | None = None
     unshaped_return: float | None = None
+    final_info: dict[str, Any] | None = None
 
 
 @dataclass
@@ -376,6 +377,7 @@ class _VoxelEpisodeState:
                 - (step.reward_breakdown or {}).get("distance_progress", 0.0)
                 for step in self.steps
             ),
+            final_info=dict(final_info),
         )
 
     def close(self) -> None:
