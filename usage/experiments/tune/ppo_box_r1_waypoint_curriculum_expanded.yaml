@@ -94,7 +94,7 @@ tune_config:
   metric: evaluation_success_rate
   mode: max
   max_concurrent: 3
-  checkpoint_frequency: 1
+  checkpoint_frequency: 10
   asha_config:
     max_t: 100
     grace_period: 10

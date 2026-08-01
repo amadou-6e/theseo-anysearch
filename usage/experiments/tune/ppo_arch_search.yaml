@@ -28,6 +28,7 @@ tune_config:
   metric: episode_reward_mean
   mode: max
   max_concurrent: 2          # keep RAM usage reasonable (2 Ray PPO workers)
+  checkpoint_frequency: 10
   search_space:
     algorithm_config:
       lr:               {loguniform: [1.0e-5, 1.0e-2]}

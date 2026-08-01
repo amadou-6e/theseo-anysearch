@@ -49,7 +49,7 @@ tune_config:
   metric: evaluation_success_rate
   mode: max
   max_concurrent: 4
-  checkpoint_frequency: 1
+  checkpoint_frequency: 10
   max_environment_steps: 5000000
   max_wall_time_s: 3600
   target_success_rate: 0.75
