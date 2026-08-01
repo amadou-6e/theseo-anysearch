@@ -21,14 +21,24 @@ class WaypointAdvanceConfig(BaseModel):
 
 
 class WaypointTrainingSamplingConfig(BaseModel):
-    """Episode sampling split between the current and retained stages."""
+    """Select how visited curriculum stages are sampled for training."""
 
     model_config = ConfigDict(extra="forbid")
+    strategy: str = "legacy"
     current_stage_probability: float = Field(default=1.0, ge=0.0, le=1.0)
     retained_stage_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    latest_multiplier: float = Field(default=10.0, gt=0.0)
+    recency_decay: float = Field(default=0.7, gt=0.0, le=1.0)
+    minimum_weight: float = Field(default=0.1, gt=0.0)
+    power: float = Field(default=1.0, gt=0.0)
+    unevaluated_success_rate: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_probabilities(self) -> "WaypointTrainingSamplingConfig":
+        if not self.strategy.strip():
+            raise ValueError("waypoint training sampling strategy cannot be empty")
+        if self.strategy != "legacy":
+            return self
         total = self.current_stage_probability + self.retained_stage_probability
         if abs(total - 1.0) > 1e-9:
             raise ValueError("waypoint training sampling probabilities must sum to 1.0")

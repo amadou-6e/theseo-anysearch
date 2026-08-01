@@ -70,8 +70,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._route_remaining: list[tuple[int, int, int]] = []
         self._route_waypoint_count = 0
         self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
-        self._current_stage_probability = 1.0
-        self._retained_stage_probability = 0.0
+        self._curriculum_stage_probabilities: list[float] = []
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -289,21 +288,26 @@ class VoxelEnv(RustGymnasiumEnv):
     def set_waypoint_curriculum(
         self,
         stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]],
-        current_stage_probability: float,
-        retained_stage_probability: float,
+        probabilities: list[float],
     ) -> None:
         """Set the stage pool sampled by subsequent training resets."""
+        if len(stages) != len(probabilities):
+            raise ValueError("curriculum stages and probabilities must have equal length")
+        if stages and not np.isclose(sum(probabilities), 1.0):
+            raise ValueError("curriculum stage probabilities must sum to 1.0")
         self._curriculum_stages = list(stages)
-        self._current_stage_probability = float(current_stage_probability)
-        self._retained_stage_probability = float(retained_stage_probability)
+        self._curriculum_stage_probabilities = [float(value) for value in probabilities]
 
     def _sample_curriculum_waypoints(self) -> None:
         if not self._curriculum_stages:
             return
-        selected = self._curriculum_stages[-1]
-        retained = self._curriculum_stages[:-1]
-        if retained and self._obs_rng.random() < self._retained_stage_probability:
-            selected = retained[int(self._obs_rng.integers(len(retained)))]
+        index = int(
+            self._obs_rng.choice(
+                len(self._curriculum_stages),
+                p=self._curriculum_stage_probabilities,
+            )
+        )
+        selected = self._curriculum_stages[index]
         if isinstance(selected, dict) and "waypoints" in selected:
             self._activate_route(selected)
             return

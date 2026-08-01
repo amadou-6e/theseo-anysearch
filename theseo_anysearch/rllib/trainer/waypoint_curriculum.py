@@ -28,6 +28,14 @@ class WaypointTransition(BaseModel):
     trigger: str
 
 
+class WaypointStageEvaluation(BaseModel):
+    """Most recent deterministic evaluation outcome for one stage."""
+
+    model_config = ConfigDict(extra="forbid")
+    attempts: int = Field(default=0, ge=0)
+    successes: int = Field(default=0, ge=0)
+
+
 class WaypointCurriculumState(BaseModel):
     """Serializable trainer-owned waypoint curriculum state."""
 
@@ -38,6 +46,7 @@ class WaypointCurriculumState(BaseModel):
     waypoints: tuple[Waypoint, ...] = ()
     successes_in_stage: int = 0
     transitions: list[WaypointTransition] = Field(default_factory=list)
+    stage_evaluations: dict[int, WaypointStageEvaluation] = Field(default_factory=dict)
 
 
 def waypoint_distance(start: Waypoint, goal: Waypoint) -> float:
@@ -95,6 +104,54 @@ class WaypointCurriculum:
         if not advance.require_success:
             return True
         return self.state.successes_in_stage >= advance.successes_required
+
+    def record_stage_evaluations(
+        self,
+        outcomes: list[tuple[int, int]],
+    ) -> None:
+        """Store the latest ``(attempts, successes)`` for each visited stage."""
+        if len(outcomes) != len(self.stages()):
+            raise ValueError("stage evaluation outcomes must cover every visited stage")
+        for stage_index, (attempts, successes) in enumerate(outcomes):
+            if attempts < 0 or successes < 0 or successes > attempts:
+                raise ValueError("invalid stage evaluation outcome")
+            self.state.stage_evaluations[stage_index] = WaypointStageEvaluation(
+                attempts=attempts, successes=successes
+            )
+
+    def sampling_probabilities(self) -> list[float]:
+        """Return normalized training probabilities for all visited stages."""
+        from theseo_anysearch.rllib.trainer.stage_sampling import (
+            StageSamplingContext,
+            StageSamplingStage,
+            stage_probabilities,
+        )
+
+        stages = self.stages()
+        latest = len(stages) - 1
+        context_stages = []
+        for index, (start, goal) in enumerate(stages):
+            evaluation = self.state.stage_evaluations.get(index)
+            attempts = evaluation.attempts if evaluation is not None else 0
+            successes = evaluation.successes if evaluation is not None else 0
+            context_stages.append(
+                StageSamplingStage(
+                    index=index,
+                    start=start,
+                    goal=goal,
+                    age=latest - index,
+                    is_latest=index == latest,
+                    evaluation_attempts=attempts,
+                    evaluation_successes=successes,
+                    evaluation_success_rate=(
+                        successes / attempts if attempts else None
+                    ),
+                )
+            )
+        return stage_probabilities(
+            StageSamplingContext(stages=tuple(context_stages)),
+            self.config.training_sampling,
+        )
 
     def advance(self, iteration: int, start: Waypoint, goal: Waypoint) -> WaypointTransition:
         """Commit a sampled waypoint pair as the next curriculum stage."""
@@ -410,12 +467,11 @@ def broadcast_waypoint_curriculum(algo: Any, curriculum: WaypointCurriculum) -> 
     env_runner_group = getattr(algo, "env_runner_group", None)
     if env_runner_group is None:
         raise RuntimeError("RLlib algorithm has no environment runner group")
-    sampling = curriculum.config.training_sampling
     stages = curriculum.stages()
+    probabilities = curriculum.sampling_probabilities()
     env_runner_group.foreach_env(
         lambda env: env.set_waypoint_curriculum(
             stages,
-            sampling.current_stage_probability,
-            sampling.retained_stage_probability,
+            probabilities,
         )
     )

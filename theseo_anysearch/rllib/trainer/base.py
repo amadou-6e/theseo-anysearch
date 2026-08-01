@@ -675,6 +675,12 @@ class Trainer(ABC):
                                     }
                                 )
                             overall_rate = total_finishes / total_episodes
+                            self._waypoint_curriculum.record_stage_evaluations(
+                                [
+                                    (stage["episodes"], stage["goals_reached"])
+                                    for stage in stage_results
+                                ]
+                            )
                             per_stage_pass = all(
                                 stage["success_rate"] >= retention.min_per_stage_success_rate
                                 for stage in stage_results
@@ -695,12 +701,12 @@ class Trainer(ABC):
                                 else:
                                     start, goal = stage
                                     _env_cfg["waypoints"] = {"start": start, "goal": goal}
-                                from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
-                                    broadcast_waypoint_curriculum,
-                                )
-                                broadcast_waypoint_curriculum(
-                                    self._algo, self._waypoint_curriculum
-                                )
+                            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                                broadcast_waypoint_curriculum,
+                            )
+                            broadcast_waypoint_curriculum(
+                                self._algo, self._waypoint_curriculum
+                            )
                             curriculum_state = self._waypoint_curriculum.state
                             curriculum_metrics = {
                                 "curriculum/stage": float(curriculum_state.stage),
@@ -711,7 +717,13 @@ class Trainer(ABC):
                             result.extra.update(curriculum_metrics)
                             _store.write_json(
                                 f"evaluation/curriculum_iter_{self._iteration:06d}.json",
-                                {"stages": stage_results, "passed": retention_pass},
+                                {
+                                    "stages": stage_results,
+                                    "passed": retention_pass,
+                                    "training_sampling_probabilities": (
+                                        self._waypoint_curriculum.sampling_probabilities()
+                                    ),
+                                },
                             )
                             _store.write_json(
                                 "curriculum/state.json",

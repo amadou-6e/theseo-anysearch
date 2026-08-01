@@ -45,8 +45,10 @@ env:
       distance_increment: 2.0
       sampling_attempts: 512
     training_sampling:
-      current_stage_probability: 0.75
-      retained_stage_probability: 0.25
+      strategy: inverse_success
+      minimum_weight: 0.1
+      power: 1.0
+      unevaluated_success_rate: 0.0
 
 training:
   algorithm: ppo
