@@ -6,16 +6,19 @@ import numpy as np
 from gymnasium import spaces
 
 ACTION_OFFSETS_26 = tuple(offset for offset in product((-1, 0, 1), repeat=3) if offset != (0, 0, 0))
+ACTION_OFFSETS_6 = tuple(offset for offset in ACTION_OFFSETS_26 if sum(value * value for value in offset) <= 1)
+ACTION_OFFSETS_18 = tuple(offset for offset in ACTION_OFFSETS_26 if sum(value * value for value in offset) <= 2)
 NOOP_ACTION_INDEX = 26
 _OFFSET_TO_ACTION = {offset: index for index, offset in enumerate(ACTION_OFFSETS_26)}
+_OFFSETS_BY_MODE = {
+    "discrete_6": ACTION_OFFSETS_6,
+    "discrete_18": ACTION_OFFSETS_18,
+    "discrete_26": ACTION_OFFSETS_26,
+}
 
 def offsets_for_mode(mode: str) -> tuple[tuple[int, int, int], ...]:
     """Return canonical movement vectors selectable by a discrete mode."""
-    if mode == "discrete_6":
-        return tuple(offset for offset in ACTION_OFFSETS_26 if sum(v * v for v in offset) <= 1)
-    if mode == "discrete_18":
-        return tuple(offset for offset in ACTION_OFFSETS_26 if sum(v * v for v in offset) <= 2)
-    return ACTION_OFFSETS_26
+    return _OFFSETS_BY_MODE.get(mode, ACTION_OFFSETS_26)
 
 def build_action_space(mode: str) -> spaces.Space:
     """Build the Gymnasium action space configured by ``mode``."""
