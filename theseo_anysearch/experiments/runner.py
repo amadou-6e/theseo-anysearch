@@ -350,7 +350,13 @@ class ExperimentRunner:
             )
 
             copy_reward_source(
-                self._config_path, run_dir, self._config.env.rewards.custom
+                self._config_path,
+                run_dir,
+                (
+                    self._config.env.rewards.custom.name
+                    if self._config.env.rewards.custom
+                    else None
+                ),
             )
             from theseo_anysearch.experiments.native_extensions import copy_native_extension
 

@@ -931,6 +931,7 @@ impl PyVoxelEnv {
                         goal_tolerance=0.0,
                         native_reward_path=None,
                         custom_reward=None,
+                        custom_reward_parameters_json=None,
                         box_radius=None))]
     pub fn new(
         max_steps: u32,
@@ -955,6 +956,7 @@ impl PyVoxelEnv {
         goal_tolerance: f32,
         native_reward_path: Option<String>,
         custom_reward: Option<String>,
+        custom_reward_parameters_json: Option<String>,
         box_radius: Option<u32>,
     ) -> PyResult<Self> {
         let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
@@ -990,7 +992,12 @@ impl PyVoxelEnv {
             .with_terminate_on_success(terminate_on_success)
             .with_success_contract(success_targets.unwrap_or_default(), goal_tolerance);
         let env = match (native_reward_path, custom_reward) {
-            (Some(path), Some(name)) => env.with_native_reward(Path::new(&path), &name)
+            (Some(path), Some(name)) => env
+                .with_native_reward(
+                    Path::new(&path),
+                    &name,
+                    custom_reward_parameters_json.unwrap_or_else(|| "{}".to_owned()),
+                )
                 .map_err(PyValueError::new_err)?,
             (None, None) | (None, Some(_)) => env,
             (Some(_), None) => return Err(PyValueError::new_err(

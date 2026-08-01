@@ -36,5 +36,5 @@ pub fn native_collision(context: &RewardContext) -> RewardResult {
 }
 ```
 
-The macro generates the `anysearch_reward_native_collision_v1` dynamic-library
+The macro generates the `anysearch_reward_native_collision_v2` dynamic-library
 symbol. `lib.rs` does not contain a reward wrapper.

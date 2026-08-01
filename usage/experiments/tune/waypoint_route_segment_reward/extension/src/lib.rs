@@ -1,6 +1,6 @@
 mod rewards;
 
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 const REWARD: u64 = 1;
 
 #[no_mangle]

@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use std::ffi::c_char;
 use std::path::Path;
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 pub const MAX_COMPONENTS: usize = 8;
 
 #[repr(C)]
-pub struct RewardContextV1 {
+#[derive(Clone, Copy)]
+pub struct RewardContextV2 {
     pub abi_version: u32,
     pub struct_size: u32,
     pub step: u64,
@@ -27,16 +28,18 @@ pub struct RewardContextV1 {
     pub standard_reward: f64,
     pub segment_step: u64,
     pub segment_length: u64,
+    pub parameters_json: *const u8,
+    pub parameters_json_len: usize,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct RewardComponentV1 {
+pub struct RewardComponentV2 {
     pub name: [c_char; 64],
     pub value: f64,
 }
 
-impl Default for RewardComponentV1 {
+impl Default for RewardComponentV2 {
     fn default() -> Self {
         Self {
             name: [0; 64],
@@ -46,16 +49,16 @@ impl Default for RewardComponentV1 {
 }
 
 #[repr(C)]
-pub struct RewardResultV1 {
+pub struct RewardResultV2 {
     pub abi_version: u32,
     pub struct_size: u32,
     pub mode: u32,
     pub reward: f64,
     pub component_count: u32,
-    pub components: [RewardComponentV1; MAX_COMPONENTS],
+    pub components: [RewardComponentV2; MAX_COMPONENTS],
 }
 
-impl Default for RewardResultV1 {
+impl Default for RewardResultV2 {
     fn default() -> Self {
         Self {
             abi_version: ABI_VERSION,
@@ -63,24 +66,27 @@ impl Default for RewardResultV1 {
             mode: 0,
             reward: 0.0,
             component_count: 0,
-            components: [RewardComponentV1::default(); MAX_COMPONENTS],
+            components: [RewardComponentV2::default(); MAX_COMPONENTS],
         }
     }
 }
 
-type RewardFunctionV1 = unsafe extern "C" fn(*const RewardContextV1, *mut RewardResultV1) -> i32;
+type RewardFunctionV2 = unsafe extern "C" fn(*const RewardContextV2, *mut RewardResultV2) -> i32;
 
 pub struct NativeRewardExtension {
     _library: Library,
-    function: RewardFunctionV1,
+    function: RewardFunctionV2,
     pub name: String,
+    parameters_json: Vec<u8>,
 }
 
 impl NativeRewardExtension {
-    pub fn load(path: &Path, name: &str) -> Result<Self, String> {
+    pub fn load(path: &Path, name: &str, parameters_json: String) -> Result<Self, String> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             return Err(format!("invalid reward name {name:?}"));
         }
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&parameters_json)
+            .map_err(|error| format!("invalid custom reward parameters: {error}"))?;
         let library = unsafe { Library::new(path) }.map_err(|error| {
             format!(
                 "cannot load native reward library {}: {error}",
@@ -98,9 +104,9 @@ impl NativeRewardExtension {
                 "native reward ABI {version}, expected {ABI_VERSION}"
             ));
         }
-        let symbol_name = format!("anysearch_reward_{name}_v1\0");
+        let symbol_name = format!("anysearch_reward_{name}_v2\0");
         let function = unsafe {
-            let symbol: Symbol<RewardFunctionV1> = library
+            let symbol: Symbol<RewardFunctionV2> = library
                 .get(symbol_name.as_bytes())
                 .map_err(|error| format!("reward {name:?} is not exported: {error}"))?;
             *symbol
@@ -109,16 +115,19 @@ impl NativeRewardExtension {
             _library: library,
             function,
             name: name.to_owned(),
+            parameters_json: parameters_json.into_bytes(),
         })
     }
 
     pub fn compute(
         &self,
-        context: &RewardContextV1,
+        mut context: RewardContextV2,
         built_in: &HashMap<String, f32>,
     ) -> Result<(f32, HashMap<String, f32>), String> {
-        let mut result = RewardResultV1::default();
-        let status = unsafe { (self.function)(context, &mut result) };
+        context.parameters_json = self.parameters_json.as_ptr();
+        context.parameters_json_len = self.parameters_json.len();
+        let mut result = RewardResultV2::default();
+        let status = unsafe { (self.function)(&context, &mut result) };
         if status != 0 {
             return Err(format!(
                 "native reward {:?} returned status {status}",

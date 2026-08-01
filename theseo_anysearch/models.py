@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from theseo_anysearch.environments.task import TaskConfig
 
@@ -174,6 +181,14 @@ class ActionConfig(BaseModel):
     mode: Literal["discrete_6", "discrete_18", "discrete_26", "vector_3"] = "discrete_26"
 
 
+class CustomRewardConfig(BaseModel):
+    """Named custom reward and its user-defined JSON parameters."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class RewardConfig(BaseModel):
     """Reward terms computed by the voxel environment."""
 
@@ -190,7 +205,14 @@ class RewardConfig(BaseModel):
     invalid_action_cost: float = 0.0
     construction_residual_weight: float = Field(default=0.0, ge=0.0)
     construction_overshoot_weight: float = Field(default=0.0, ge=0.0)
-    custom: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    custom: CustomRewardConfig | None = None
+
+    @field_validator("custom", mode="before")
+    @classmethod
+    def expand_custom_reward_shorthand(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return {"name": value}
+        return value
 
     @model_validator(mode="after")
     def validate_zone_rewards(self) -> "RewardConfig":
@@ -339,7 +361,10 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "invalid_action_cost": self.rewards__invalid_action_cost,
             "construction_residual_weight": self.rewards__construction_residual_weight,
             "construction_overshoot_weight": self.rewards__construction_overshoot_weight,
-            "custom_reward": self.rewards__custom,
+            "custom_reward": self.rewards__custom.name if self.rewards__custom else None,
+            "custom_reward_parameters": (
+                self.rewards__custom.parameters if self.rewards__custom else {}
+            ),
             "task": self.task.model_dump(mode="json"),
         }
 

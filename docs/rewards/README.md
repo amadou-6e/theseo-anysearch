@@ -47,8 +47,16 @@ Select a reward by name in YAML:
 ```yaml
 env:
   rewards:
-    custom: collision_aware
+    custom:
+      name: collision_aware
+      parameters:
+        collision_penalty: -0.02
 ```
+
+The scalar form `custom: collision_aware` remains valid shorthand for a reward
+without parameters. Parameter values must be JSON-compatible and are available as
+`context.parameters` in both Python and Rust. Each reward interprets and validates
+its own parameter names and values.
 
 The same selector is used for Python and Rust definitions. A Python experiment
 places the named function in `rewards.py` beside its YAML:
@@ -58,7 +66,8 @@ from theseo_anysearch.experiments.custom_rewards import RewardResult
 
 
 def collision_aware(context):
-    penalty = -0.02 if context.collision else 0.0
+    configured = float(context.parameters["collision_penalty"])
+    penalty = configured if context.collision else 0.0
     return RewardResult(
         reward=penalty,
         components={"extra_collision_penalty": penalty},
@@ -73,12 +82,13 @@ use anysearch_extension::{anysearch_reward, RewardContext, RewardResult};
 
 #[anysearch_reward]
 pub fn collision_aware(context: &RewardContext) -> RewardResult {
-    let penalty = if context.collision { -0.02 } else { 0.0 };
+    let configured = context.parameters["collision_penalty"].as_f64().unwrap();
+    let penalty = if context.collision { configured } else { 0.0 };
     RewardResult::add(penalty).with_component("extra_collision_penalty", penalty)
 }
 ```
 
-The attribute generates `anysearch_reward_collision_aware_v1` automatically.
+The attribute generates `anysearch_reward_collision_aware_v2` automatically.
 There is no handwritten ABI wrapper in `lib.rs`. When both Python and Rust
 implement the selected name, the compiled Rust definition takes precedence. It
 is loaded once by the Rust core and called directly inside `VoxelEnv::step`; the

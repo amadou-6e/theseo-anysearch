@@ -32,6 +32,10 @@ def test_native_countdown_reward_resets_for_each_waypoint_segment() -> None:
             "construction_residual_weight": 0.0,
             "construction_overshoot_weight": 0.0,
             "custom_reward": "segment_countdown_goal",
+            "custom_reward_parameters": {
+                "budget_multiplier": 2.0,
+                "minimum_reward": 1.0,
+            },
             "native_extension_manifest": str(manifest),
             "task": {},
         }
