@@ -57,6 +57,7 @@ tune_config:
   metric: episode_reward_mean
   mode: max
   max_concurrent: 12          # 0.5 GPU per trial
+  checkpoint_frequency: 10
   asha_config:
     max_t: 100
     grace_period: 20         # min iterations before ASHA can prune (20% of max_t)
