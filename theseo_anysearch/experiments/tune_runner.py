@@ -849,6 +849,30 @@ def _first_trial_error(results: Any) -> str | None:
     return None
 
 
+def _ray_runtime_options(address: str | None, temp_dir: str) -> dict[str, Any]:
+    """Build Ray initialization options without mixing local and external runtimes."""
+    options: dict[str, Any] = {
+        "ignore_reinit_error": True,
+        "include_dashboard": False,
+    }
+    if address:
+        options["address"] = address
+    else:
+        options["_temp_dir"] = temp_dir
+    return options
+
+
+def _should_shutdown_ray(
+    configured: bool | None,
+    *,
+    was_initialized: bool,
+    address: str | None,
+) -> bool:
+    """Return whether this run owns the Ray runtime and should stop it."""
+    if configured is not None:
+        return configured
+    return not was_initialized and not address
+
 class TuneRunner:
     """
     Drives a Ray Tune hyperparameter sweep for an ExperimentConfig that
@@ -1128,11 +1152,9 @@ class TuneRunner:
             tc.ray_temp_dir) if tc.ray_temp_dir else _default_ray_temp
         os.makedirs(ray_temp_dir, exist_ok=True)
         os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
-        ray.init(
-            ignore_reinit_error=True,
-            include_dashboard=False,
-            _temp_dir=ray_temp_dir,
-        )
+        ray_was_initialized = ray.is_initialized()
+        ray.init(**_ray_runtime_options(tc.ray_address, ray_temp_dir))
+
 
         # ------------------------------------------------------------------ #
         # Declare per-trial placement group bundles so RLlib's env-runner     #
@@ -1371,4 +1393,10 @@ class TuneRunner:
                 tracker.end_run("FAILED")
             raise
         finally:
-            ray.shutdown()
+            should_shutdown = _should_shutdown_ray(
+                tc.shutdown_ray_on_complete,
+                was_initialized=ray_was_initialized,
+                address=tc.ray_address,
+            )
+            if should_shutdown and ray.is_initialized():
+                ray.shutdown()
