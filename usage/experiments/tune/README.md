@@ -16,6 +16,7 @@ These files launch multi-trial searches or repeat one configuration across multi
 
 - [`sac_asha.yaml`](sac_asha.yaml) tunes the off-policy SAC baseline, including target updates and n-step returns.
 - [`ppo_sweep_geometries.yaml`](ppo_sweep_geometries.yaml) keeps PPO settings fixed while comparing performance across geometries.
+- [`ppo_empty_grid_waypoint_curriculum.yaml`](ppo_empty_grid_waypoint_curriculum.yaml) runs the expanded 20-trial ASHA curriculum sweep on an obstacle-free grid with vectorized training and evaluation.
 
 ASHA is appropriate for independent trials with early stopping. PBT is appropriate when strong trials should transfer weights and mutate their settings during training. The geometry sweep isolates environment difficulty rather than hyperparameter quality.
 
@@ -27,3 +28,4 @@ Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop b
 
 - `evaluation_metrics.ppo_asha.py` emits `evaluation_navigation_score`, combining success rate with normalized goal progress so ASHA can distinguish policies before the first finish.
 - `training_metrics.ppo_asha.py` emits `training_reward_per_episode_step` and `training_episodes_per_1000_env_steps`, demonstrating metrics derived from standard training results and sampled environment steps.
+- [`waypoint_route_decay/experiment.yaml`](waypoint_route_decay/experiment.yaml) tests a multi-waypoint empty-grid curriculum with an episode-global sparse countdown reward implemented as a native Rust extension.

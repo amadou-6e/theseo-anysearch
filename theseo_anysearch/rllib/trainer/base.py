@@ -154,6 +154,9 @@ class _TensorBoardRunWriter:
             result.elapsed_s,
             result.iteration,
         )
+        for tag, value in result.standard_metrics().items():
+            if tag.startswith("curriculum/"):
+                self._writer.add_scalar(tag, value, result.iteration)
         self._writer.flush()
 
     def log_scalars(self, iteration: int, scalars: Mapping[str, float]) -> None:
@@ -272,7 +275,7 @@ class TrainResult(BaseModel):
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
-            if key.startswith(("evaluation_", "training_"))
+            if key.startswith(("evaluation_", "training_", "curriculum/"))
             and isinstance(value, (int, float))
         })
         return metrics
@@ -354,6 +357,19 @@ class Trainer(ABC):
         self._native_extension = NativeExtension.load(
             native_manifest if native_manifest.is_file() else None
         )
+        self._waypoint_curriculum: Any = None
+        if config.env.waypoint_curriculum.enabled:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
+
+            curriculum_config = config.env.waypoint_curriculum
+            evaluation_advance = config.evaluation.waypoint_curriculum.advance
+            if evaluation_advance is not None:
+                curriculum_config = curriculum_config.model_copy(
+                    update={"advance": evaluation_advance}
+                )
+            self._waypoint_curriculum = WaypointCurriculum(
+                curriculum_config, config.env.to_runtime_dict()
+            )
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -448,6 +464,32 @@ class Trainer(ABC):
         )
 
         _store = OutputStore(self._output_dir)
+        if self._waypoint_curriculum is not None:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                WaypointCurriculumState,
+                broadcast_waypoint_curriculum,
+            )
+
+            if _store.exists("curriculum/state.json"):
+                self._waypoint_curriculum.state = WaypointCurriculumState.model_validate(
+                    _store.read_json("curriculum/state.json")
+                )
+            curriculum_state = self._waypoint_curriculum.state
+            if curriculum_state.waypoints:
+                _env_cfg["waypoint_route"] = {
+                    "start": curriculum_state.start,
+                    "waypoints": curriculum_state.waypoints,
+                }
+            else:
+                _env_cfg["waypoints"] = {
+                    "start": curriculum_state.start,
+                    "goal": curriculum_state.goal,
+                }
+            broadcast_waypoint_curriculum(self._algo, self._waypoint_curriculum)
+            _store.write_json(
+                "curriculum/state.json",
+                curriculum_state.model_dump(mode="json"),
+            )
         from theseo_anysearch.rllib.trainer.early_stop import (
             EarlyStopState,
             TrainingEarlyStopController,
@@ -504,6 +546,10 @@ class Trainer(ABC):
                     rllib_result,
                     elapsed,
                 )
+                if self._waypoint_curriculum is not None:
+                    result.extra["curriculum/stage"] = float(
+                        self._waypoint_curriculum.state.stage
+                    )
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
@@ -673,6 +719,105 @@ class Trainer(ABC):
                             },
                         }
                     )
+                    curriculum_metrics: dict[str, float] = {
+                        key: value
+                        for key, value in result.extra.items()
+                        if key.startswith("curriculum/")
+                        and isinstance(value, (int, float))
+                    }
+                    if self._waypoint_curriculum is not None:
+                        retention = evaluation.waypoint_curriculum
+                        retention_due = (
+                            retention.enabled
+                            and self._iteration % retention.frequency == 0
+                        )
+                        transitioned = False
+                        if retention_due:
+                            stage_results: list[dict[str, Any]] = []
+                            total_finishes = 0
+                            total_episodes = 0
+                            for stage_index, stage in enumerate(
+                                self._waypoint_curriculum.stages()
+                            ):
+                                stage_env_cfg = dict(_env_cfg)
+                                if isinstance(stage, dict):
+                                    start = stage["start"]
+                                    goal = stage["waypoints"][-1]
+                                    stage_env_cfg["waypoint_route"] = stage
+                                    stage_env_cfg.pop("waypoints", None)
+                                else:
+                                    start, goal = stage
+                                    stage_env_cfg["waypoints"] = {
+                                        "start": start,
+                                        "goal": goal,
+                                    }
+                                    stage_env_cfg.pop("waypoint_route", None)
+                                stage_env_cfg["waypoint_curriculum"] = {"enabled": False}
+                                stage_episodes = collect_rllib_evaluation_episodes(
+                                    self._algo,
+                                    stage_env_cfg,
+                                    retention.episodes,
+                                    seed=evaluation_seed + stage_index * retention.episodes,
+                                    multi_agent=False,
+                                )
+                                stage_metrics = EpisodeRunMetrics.from_voxel_episodes(
+                                    stage_episodes
+                                )
+                                total_finishes += stage_metrics.finish_count
+                                total_episodes += len(stage_episodes)
+                                stage_results.append(
+                                    {
+                                        "stage": stage_index,
+                                        "start": start,
+                                        "goal": goal,
+                                        "episodes": len(stage_episodes),
+                                        "goals_reached": stage_metrics.finish_count,
+                                        "success_rate": stage_metrics.finish_rate,
+                                    }
+                                )
+                            overall_rate = total_finishes / total_episodes
+                            per_stage_pass = all(
+                                stage["success_rate"] >= retention.min_per_stage_success_rate
+                                for stage in stage_results
+                            )
+                            retention_pass = (
+                                overall_rate >= retention.min_success_rate and per_stage_pass
+                            )
+                            current_finishes = stage_results[-1]["goals_reached"]
+                            if retention_pass:
+                                transitioned = self._waypoint_curriculum.observe(
+                                    self._iteration, current_finishes
+                                )
+                            if transitioned:
+                                stage = self._waypoint_curriculum.sample_stage(_env_cfg)
+                                self._waypoint_curriculum.advance_stage(self._iteration, stage)
+                                if hasattr(stage, "waypoints"):
+                                    _env_cfg["waypoint_route"] = stage.model_dump(mode="python")
+                                else:
+                                    start, goal = stage
+                                    _env_cfg["waypoints"] = {"start": start, "goal": goal}
+                                from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                                    broadcast_waypoint_curriculum,
+                                )
+                                broadcast_waypoint_curriculum(
+                                    self._algo, self._waypoint_curriculum
+                                )
+                            curriculum_state = self._waypoint_curriculum.state
+                            curriculum_metrics = {
+                                "curriculum/stage": float(curriculum_state.stage),
+                                "curriculum/transition": float(transitioned),
+                                "curriculum/retention_success_rate": overall_rate,
+                                "curriculum/retention_pass": float(retention_pass),
+                            }
+                            result.extra.update(curriculum_metrics)
+                            _store.write_json(
+                                f"evaluation/curriculum_iter_{self._iteration:06d}.json",
+                                {"stages": stage_results, "passed": retention_pass},
+                            )
+                            _store.write_json(
+                                "curriculum/state.json",
+                                curriculum_state.model_dump(mode="json"),
+                            )
                     scalar_metrics = {
                         **metrics.as_scalar_dict(),
                         **success_metrics.tensorboard_metrics(),

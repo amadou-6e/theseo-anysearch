@@ -12,6 +12,7 @@ import pytest
 
 from theseo_anysearch.experiments.models import TuneConfig
 from theseo_anysearch.experiments.tune_runner import (
+    _apply_sampled_model_config,
     _persist_trial_outcomes,
     _ray_checkpoint,
     _restore_reported_checkpoint,
@@ -19,6 +20,41 @@ from theseo_anysearch.experiments.tune_runner import (
     _trial_resource_metrics,
     _tune_stop_criteria,
 )
+from theseo_anysearch.models import ModelConfig
+
+
+@pytest.mark.parametrize(
+    ("base_width", "head_width", "layers_per_width", "expected"),
+    [
+        (512, 64, 1, [512, 256, 128, 64]),
+        (512, 64, 2, [512, 512, 256, 256, 128, 128, 64, 64]),
+        (
+            512,
+            64,
+            3,
+            [512, 512, 512, 256, 256, 256, 128, 128, 128, 64, 64, 64],
+        ),
+        (128, 256, 1, [128, 256]),
+    ],
+)
+def test_sampled_compressed_width_schedule_builds_expected_shape(
+    base_width: int,
+    head_width: int,
+    layers_per_width: int,
+    expected: list[int],
+) -> None:
+    model = ModelConfig(hidden_sizes=[128, 128, 128, 128])
+
+    sampled = _apply_sampled_model_config(
+        model,
+        {
+            "base_width": base_width,
+            "head_width": head_width,
+            "layers_per_width": layers_per_width,
+        },
+    )
+
+    assert sampled.hidden_sizes == expected
 
 
 def test_success_rate_is_the_selected_optimization_metric() -> None:
@@ -59,13 +95,14 @@ def test_stop_criteria_cover_all_explicit_budgets() -> None:
     }
 
 
-def test_project_checkpoint_is_attached_as_ray_checkpoint(tmp_path: Path) -> None:
+def test_project_checkpoint_is_attached_as_ray_checkpoint(
+        tmp_path: Path) -> None:
     checkpoint_dir = tmp_path.joinpath("checkpoints", "iter_000003")
     checkpoint_dir.mkdir(parents=True)
 
     with patch(
-        "ray.train.Checkpoint.from_directory",
-        return_value="ray-checkpoint",
+            "ray.train.Checkpoint.from_directory",
+            return_value="ray-checkpoint",
     ) as from_directory:
         checkpoint = _ray_checkpoint(checkpoint_dir)
 
@@ -91,20 +128,21 @@ def test_resume_restores_trainer_from_reported_checkpoint() -> None:
 
 
 def test_pruned_trial_status_is_persisted_below_iteration_budget(
-    tmp_path: Path,
-) -> None:
+    tmp_path: Path, ) -> None:
     trial_dir = tmp_path.joinpath("trial-a")
     trial_dir.mkdir()
     result = SimpleNamespace(
-        metrics={"trial_id": "trial-a", "training_iteration": 3},
+        metrics={
+            "trial_id": "trial-a",
+            "training_iteration": 3
+        },
         error=None,
     )
 
     _persist_trial_outcomes(tmp_path, [result], max_iterations=10)
 
     status = json.loads(
-        trial_dir.joinpath("tune_status.json").read_text(encoding="utf-8")
-    )
+        trial_dir.joinpath("tune_status.json").read_text(encoding="utf-8"))
     assert status == {"status": "PRUNED", "training_iteration": 3}
 
 
@@ -112,19 +150,22 @@ def test_failed_trial_status_is_persisted(tmp_path: Path) -> None:
     trial_dir = tmp_path.joinpath("trial-b")
     trial_dir.mkdir()
     result = SimpleNamespace(
-        metrics={"trial_id": "trial-b", "training_iteration": 2},
+        metrics={
+            "trial_id": "trial-b",
+            "training_iteration": 2
+        },
         error=RuntimeError("training failed"),
     )
 
     _persist_trial_outcomes(tmp_path, [result], max_iterations=10)
 
     status = json.loads(
-        trial_dir.joinpath("tune_status.json").read_text(encoding="utf-8")
-    )
+        trial_dir.joinpath("tune_status.json").read_text(encoding="utf-8"))
     assert status["status"] == "FAILED"
 
 
 class _Parameter:
+
     def __init__(self, count: int) -> None:
         self._count = count
 
@@ -134,12 +175,12 @@ class _Parameter:
 
 def test_resource_report_exposes_compute_and_architecture_cost() -> None:
     policy = SimpleNamespace(
-        model=SimpleNamespace(parameters=lambda: [_Parameter(10), _Parameter(6)]),
+        model=SimpleNamespace(
+            parameters=lambda: [_Parameter(10), _Parameter(6)]),
         observation_space=None,
     )
     trainer = SimpleNamespace(
-        _algo=SimpleNamespace(get_policy=lambda: policy),
-    )
+        _algo=SimpleNamespace(get_policy=lambda: policy), )
     settings = SimpleNamespace(
         algorithm_config=SimpleNamespace(
             train_batch_size=1024,
@@ -165,12 +206,15 @@ def test_resource_report_exposes_compute_and_architecture_cost() -> None:
     assert metrics["resource/num_gpus_per_env_runner"] == 0.0
 
 
-def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
+def test_environment_step_budget_metric_supports_new_and_legacy_rllib(
+) -> None:
     from theseo_anysearch.rllib.trainer.base import TrainResult
 
     current = TrainResult.from_rllib(
         1,
-        {"env_runners": {"num_env_steps_sampled_lifetime": 123}},
+        {"env_runners": {
+            "num_env_steps_sampled_lifetime": 123
+        }},
         0.1,
     )
     legacy = TrainResult.from_rllib(
@@ -204,12 +248,18 @@ def test_asha_stops_a_deliberately_poor_trial_before_budget() -> None:
     good_decision = scheduler.on_trial_result(
         None,
         good,
-        {"training_iteration": 1, "evaluation_success_rate": 1.0},
+        {
+            "training_iteration": 1,
+            "evaluation_success_rate": 1.0
+        },
     )
     poor_decision = scheduler.on_trial_result(
         None,
         poor,
-        {"training_iteration": 1, "evaluation_success_rate": 0.0},
+        {
+            "training_iteration": 1,
+            "evaluation_success_rate": 0.0
+        },
     )
 
     assert good_decision == TrialScheduler.CONTINUE

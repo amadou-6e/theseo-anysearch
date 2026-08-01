@@ -11,6 +11,8 @@ These configurations are longer-running policy-training baselines and task-speci
 - [`ppo_diverse.yaml`](ppo_diverse.yaml) trains PPO on high-resolution geometry-pool samples with aggressive obstacle augmentation.
 - [`r3_highres_finetune.yaml`](r3_highres_finetune.yaml) fine-tunes a pretrained radius-3 encoder on high-resolution stepped terrain.
 
+- [`ppo_box_r1_waypoint_curriculum.yaml`](ppo_box_r1_waypoint_curriculum.yaml) starts on the historical fixed radius-1 route and advances to a reproducibly sampled route after deterministic evaluation success.
+
 ## Map and action-space comparisons
 
 - [`ppo_maps.yaml`](ppo_maps.yaml) is the discrete 26-action radial-observation baseline on augmented industrial map crops.
@@ -24,3 +26,4 @@ These configurations are longer-running policy-training baselines and task-speci
 - [`ppo_tiny_overfit.yaml`](ppo_tiny_overfit.yaml) is an intentionally tiny fixed task used to diagnose whether PPO, evaluation, and replay can learn and report a simple solution.
 
 Use the showcase configurations for fast installation checks; use these files when comparing learning behavior or producing durable checkpoints.
+- [`ppo_empty_grid_waypoint_curriculum.yaml`](ppo_empty_grid_waypoint_curriculum.yaml) tests curriculum advancement and retained-stage learning on an obstacle-free 32³ grid with vectorized training and evaluation.

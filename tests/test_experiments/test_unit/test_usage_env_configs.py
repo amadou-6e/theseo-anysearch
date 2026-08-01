@@ -55,7 +55,7 @@ def test_usage_experiments_do_not_use_flattened_environment_fields() -> None:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         mappings.extend(environment_mappings(document))
 
-    assert len(paths) == 29
+    assert len(paths) == 35
     assert mappings
     for environment in mappings:
         assert LEGACY_FIELDS.isdisjoint(environment)

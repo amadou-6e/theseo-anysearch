@@ -357,6 +357,30 @@ impl VoxelEnv {
         self.active_goal
     }
 
+    /// Replace the active goal without resetting cursor, trail, or step count.
+    pub fn set_active_goal(&mut self, goal: Coord) -> VoxelObservation {
+        self.active_goal = Some(goal);
+        self.prev_goal_dist_l2 = l2(self.cursor, goal);
+        let _ = self.world.set_block(
+            goal,
+            Block {
+                kind: BLOCK_KIND_GOAL,
+                active: false,
+                reward_weight: 0.0,
+            },
+        );
+        self.observation()
+    }
+
+    /// Snapshot the observation for the current cursor and active goal.
+    pub fn observation(&self) -> VoxelObservation {
+        VoxelObservation {
+            filled: self.agent_filled(),
+            steps_remaining: self.max_steps.saturating_sub(self.steps),
+            goal_distance: self.active_goal.map(|goal| manhattan(self.cursor, goal)),
+        }
+    }
+
     pub fn surface_cells(&self) -> &[Coord] {
         &self.surface_cells
     }
