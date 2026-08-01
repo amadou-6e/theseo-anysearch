@@ -53,6 +53,7 @@ tune_config:
   metric: episode_reward_mean
   mode: max
   max_concurrent: 4
+  checkpoint_frequency: 10
   asha_config:
     max_t: 300
     grace_period: 30

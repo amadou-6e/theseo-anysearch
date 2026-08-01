@@ -36,6 +36,7 @@ tune_config:
   metric: episode_reward_mean
   mode: max
   max_concurrent: 8
+  checkpoint_frequency: 10
   pbt_config:
     perturbation_interval: 20
     resample_probability: 0.25
