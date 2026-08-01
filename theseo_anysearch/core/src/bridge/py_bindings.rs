@@ -932,6 +932,10 @@ impl PyVoxelEnv {
                         native_reward_path=None,
                         custom_reward=None,
                         custom_reward_parameters_json=None,
+                        native_action_path=None,
+                        action_predicates_json="[{\"name\":\"valid_action\"},{\"name\":\"bounds\"},{\"name\":\"unoccupied\"}]".to_string(),
+                        action_outcomes_json="[{\"name\":\"cursor_movement\"}]".to_string(),
+                        action_history_length=16,
                         box_radius=None))]
     pub fn new(
         max_steps: u32,
@@ -957,18 +961,23 @@ impl PyVoxelEnv {
         native_reward_path: Option<String>,
         custom_reward: Option<String>,
         custom_reward_parameters_json: Option<String>,
+        native_action_path: Option<String>,
+        action_predicates_json: String,
+        action_outcomes_json: String,
+        action_history_length: usize,
         box_radius: Option<u32>,
     ) -> PyResult<Self> {
         let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
             distance_reward_mode.as_str(),
-        ).ok_or_else(|| PyValueError::new_err(
-            "distance_reward_mode must be 'progress' or 'zone'",
-        ))?;
-        let zone_reward_curve = crate::environments::voxel_env::ZoneRewardCurve::from_name(
-            zone_reward_curve.as_str(),
-        ).ok_or_else(|| PyValueError::new_err(
-            "zone_reward_curve must be 'linear' or 'exponential'",
-        ))?;
+        )
+        .ok_or_else(|| {
+            PyValueError::new_err("distance_reward_mode must be 'progress' or 'zone'")
+        })?;
+        let zone_reward_curve =
+            crate::environments::voxel_env::ZoneRewardCurve::from_name(zone_reward_curve.as_str())
+                .ok_or_else(|| {
+                    PyValueError::new_err("zone_reward_curve must be 'linear' or 'exponential'")
+                })?;
         let reward_config = crate::environments::voxel_env::RewardConfig {
             step_cost,
             goal_reward,
@@ -1000,11 +1009,24 @@ impl PyVoxelEnv {
                 )
                 .map_err(PyValueError::new_err)?,
             (None, None) | (None, Some(_)) => env,
-            (Some(_), None) => return Err(PyValueError::new_err(
+            (Some(_), None) => {
+                return Err(PyValueError::new_err(
                 "native_reward_path requires custom_reward",
-            )),
+                ))
+            }
         };
-        Ok(Self { inner: env, box_radius })
+        let mut env = env;
+        env.configure_action_pipeline(
+            &action_predicates_json,
+            &action_outcomes_json,
+            action_history_length,
+            native_action_path.as_deref().map(Path::new),
+        )
+        .map_err(PyValueError::new_err)?;
+        Ok(Self {
+            inner: env,
+            box_radius,
+        })
     }
 
     /// Reset the environment and return the initial observation.
@@ -1018,60 +1040,11 @@ impl PyVoxelEnv {
     /// Action space: Discrete(26) — all 26 neighbors in {-1,0,1}³ \ {origin},
     /// enumerated as (dx,dy,dz) with dz inner loop, skip (0,0,0) at index 13.
     pub fn step(&mut self, action: i32) -> PyResult<PyStepResultVoxel> {
-
-        let g = self.inner.grid_size as i32;
-        let clamp = |v: i32| v.clamp(1, g) as u16;
-        let (x, y, z) = self.inner.cursor();
-
-        // Map action 0..25 → (dx, dy, dz) offset into the 26-neighbor cube.
-        // Enumerate all (dx,dy,dz) in {-1,0,1}³, outer→inner: dx, dy, dz; skip (0,0,0).
-        let offsets: [(i32, i32, i32); 26] = {
-            let mut arr = [(0i32, 0i32, 0i32); 26];
-            let mut i = 0;
-            let mut idx = 0i32;
-            for dx in -1i32..=1 {
-                for dy in -1i32..=1 {
-                    for dz in -1i32..=1 {
-                        if dx == 0 && dy == 0 && dz == 0 { idx += 1; continue; }
-                        arr[i] = (dx, dy, dz);
-                        i += 1;
-                        idx += 1;
-                    }
-                }
-            }
-            arr
-        };
-
-        let dest: (u16, u16, u16) = if (action as usize) < 26 {
-            let (dx, dy, dz) = offsets[action as usize];
-            (clamp(x as i32 + dx), clamp(y as i32 + dy), clamp(z as i32 + dz))
-        } else {
-            (x, y, z) // unknown action → treat as boundary collision
-        };
-
+        let previous_cursor = self.inner.cursor();
         let invalid_action = !(0..=26).contains(&action);
-        self.inner.prepare_navigation_step(action, (x, y, z), invalid_action);
-
-        let rust_action = if invalid_action {
-            VoxelAction::Noop
-        } else if action == 26 {
-            VoxelAction::Noop
-        } else if dest == (x, y, z) {
-            // Hit grid boundary or unknown action — blocked.
-            VoxelAction::Collision
-        } else if self.inner.world().is_blocking(dest) {
-            // Occupied cell — blocked, cursor stays.
-            VoxelAction::Collision
-        } else {
-            // Successful move: update cursor first so step() sees new position.
-            self.inner.set_cursor(dest);
-            if self.inner.trail_mode() {
-                VoxelAction::Place(dest)  // trail: auto-fill destination
-            } else {
-                VoxelAction::Noop
-            }
-        };
-
+        self.inner
+            .prepare_navigation_step(action, previous_cursor, invalid_action);
+        let rust_action = self.inner.execute_navigation_action(action);
         let result = self.inner.step(rust_action);
         if let Some(error) = self.inner.take_reward_error() {
             return Err(PyValueError::new_err(error));
@@ -1093,6 +1066,10 @@ impl PyVoxelEnv {
         })
     }
 
+    /// Return feasibility for all 26 canonical moves plus no-op.
+    pub fn action_mask(&mut self) -> Vec<u8> {
+        self.inner.action_mask()
+    }
     /// Returns the current cursor position as (x, y, z) in [1, 32].
     pub fn cursor_pos(&self) -> (u16, u16, u16) {
         self.inner.cursor()
@@ -1154,13 +1131,15 @@ impl PyVoxelEnv {
                         let nx = cx as i32 + dx * step as i32;
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
-                        if nx < 1 || ny < 1 || nz < 1
-                            || nx > g || ny > g || nz > g
-                        {
+                        if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
                             proximity = 1.0 - (step - 1) as f32 / max_len as f32;
                             break;
                         }
-                        if self.inner.world().is_filled((nx as u16, ny as u16, nz as u16)) {
+                        if self
+                            .inner
+                            .world()
+                            .is_filled((nx as u16, ny as u16, nz as u16))
+                        {
                             proximity = 1.0 - (step - 1) as f32 / max_len as f32;
                             break;
                         }
@@ -1190,13 +1169,15 @@ impl PyVoxelEnv {
                         let nx = cx as i32 + dx * step as i32;
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
-                        if nx < 1 || ny < 1 || nz < 1
-                            || nx > g || ny > g || nz > g
-                        {
+                        if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
                             kind = f32::from(BLOCK_KIND_BOUNDARY);
                             break;
                         }
-                        if let Some(block) = self.inner.world().get_block((nx as u16, ny as u16, nz as u16)) {
+                        if let Some(block) = self
+                            .inner
+                            .world()
+                            .get_block((nx as u16, ny as u16, nz as u16))
+                        {
                             kind = f32::from(block.kind);
                             break;
                         }
@@ -1214,7 +1195,6 @@ impl PyVoxelEnv {
         self.inner.world().iter_filled().copied().collect()
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // PyO3 class bindings — SurfaceEnv

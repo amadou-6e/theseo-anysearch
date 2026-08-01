@@ -1,7 +1,12 @@
 use crate::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
 
+use super::native_action::{
+    ActionHistoryEntryV2, NativeOutcomeExtension, NativePredicateExtension, OutcomeContextV2,
+    OutcomeResultV2, PredicateContextV2,
+};
 use super::native_reward::{NativeRewardExtension, RewardContextV2, ABI_VERSION};
 use super::traits::{Environment, StepResult};
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -110,6 +115,63 @@ impl Default for RewardConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct ActionExtensionSpec {
+    pub name: String,
+    #[serde(default)]
+    pub parameters: serde_json::Map<String, serde_json::Value>,
+}
+
+enum ConfiguredPredicate {
+    ValidAction,
+    Bounds,
+    Unoccupied,
+    Native(NativePredicateExtension),
+}
+
+enum ConfiguredOutcome {
+    CursorMovement,
+    TrailPlacement,
+    Place,
+    Remove,
+    Native(NativeOutcomeExtension),
+}
+
+#[derive(Default)]
+struct PendingMutations {
+    cursor: Option<Coord>,
+    place: Option<Coord>,
+    remove: Option<Coord>,
+}
+
+const ACTION_OFFSETS_26: [(i32, i32, i32); 26] = [
+    (-1, -1, -1),
+    (-1, -1, 0),
+    (-1, -1, 1),
+    (-1, 0, -1),
+    (-1, 0, 0),
+    (-1, 0, 1),
+    (-1, 1, -1),
+    (-1, 1, 0),
+    (-1, 1, 1),
+    (0, -1, -1),
+    (0, -1, 0),
+    (0, -1, 1),
+    (0, 0, -1),
+    (0, 0, 1),
+    (0, 1, -1),
+    (0, 1, 0),
+    (0, 1, 1),
+    (1, -1, -1),
+    (1, -1, 0),
+    (1, -1, 1),
+    (1, 0, -1),
+    (1, 0, 0),
+    (1, 0, 1),
+    (1, 1, -1),
+    (1, 1, 0),
+    (1, 1, 1),
+];
 // ---------------------------------------------------------------------------
 // Action / Observation types
 // ---------------------------------------------------------------------------
@@ -171,6 +233,11 @@ pub struct VoxelEnv {
     consecutive_collisions: u32,
     construction_target: HashSet<Coord>,
     native_reward: Option<NativeRewardExtension>,
+    action_predicates: Vec<ConfiguredPredicate>,
+    action_outcomes: Vec<ConfiguredOutcome>,
+    action_history: Vec<ActionHistoryEntryV2>,
+    action_history_length: usize,
+    pending_action_feasible: bool,
     pending_action_index: i32,
     pending_previous_cursor: Coord,
     pending_invalid_action: bool,
@@ -211,6 +278,15 @@ impl VoxelEnv {
             consecutive_collisions: 0,
             construction_target: HashSet::new(),
             native_reward: None,
+            action_predicates: vec![
+                ConfiguredPredicate::ValidAction,
+                ConfiguredPredicate::Bounds,
+                ConfiguredPredicate::Unoccupied,
+            ],
+            action_outcomes: vec![ConfiguredOutcome::CursorMovement],
+            action_history: Vec::new(),
+            action_history_length: 16,
+            pending_action_feasible: true,
             pending_action_index: 26,
             pending_previous_cursor: (1, 1, 1),
             pending_invalid_action: false,
@@ -254,6 +330,14 @@ impl VoxelEnv {
     /// When trail_mode is true, successful movement auto-fills the destination.
     pub fn with_trail_mode(mut self, trail_mode: bool) -> Self {
         self.trail_mode = trail_mode;
+        self.action_outcomes = if trail_mode {
+            vec![
+                ConfiguredOutcome::CursorMovement,
+                ConfiguredOutcome::TrailPlacement,
+            ]
+        } else {
+            vec![ConfiguredOutcome::CursorMovement]
+        };
         self
     }
 
@@ -289,11 +373,7 @@ impl VoxelEnv {
         name: &str,
         parameters_json: String,
     ) -> Result<Self, String> {
-        self.native_reward = Some(NativeRewardExtension::load(
-            path,
-            name,
-            parameters_json,
-        )?);
+        self.native_reward = Some(NativeRewardExtension::load(path, name, parameters_json)?);
         Ok(self)
     }
 
@@ -308,6 +388,283 @@ impl VoxelEnv {
         self.pending_invalid_action = invalid_action;
     }
 
+    pub fn configure_action_pipeline(
+        &mut self,
+        predicates_json: &str,
+        outcomes_json: &str,
+        history_length: usize,
+        native_library: Option<&Path>,
+    ) -> Result<(), String> {
+        let predicate_specs: Vec<ActionExtensionSpec> = serde_json::from_str(predicates_json)
+            .map_err(|error| format!("invalid action predicates: {error}"))?;
+        let outcome_specs: Vec<ActionExtensionSpec> = serde_json::from_str(outcomes_json)
+            .map_err(|error| format!("invalid action outcomes: {error}"))?;
+        self.action_predicates = predicate_specs
+            .into_iter()
+            .map(|spec| {
+                let parameters =
+                    serde_json::to_string(&spec.parameters).expect("JSON map serializes");
+                if let Some(path) = native_library {
+                    if let Ok(extension) =
+                        NativePredicateExtension::load(path, &spec.name, parameters.clone())
+                    {
+                        return Ok(ConfiguredPredicate::Native(extension));
+                    }
+                }
+                match spec.name.as_str() {
+                    "valid_action" => Ok(ConfiguredPredicate::ValidAction),
+                    "bounds" => Ok(ConfiguredPredicate::Bounds),
+                    "unoccupied" => Ok(ConfiguredPredicate::Unoccupied),
+                    _ => Err(format!("unknown action predicate {:?}", spec.name)),
+                }
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.action_outcomes = outcome_specs
+            .into_iter()
+            .map(|spec| {
+                let parameters =
+                    serde_json::to_string(&spec.parameters).expect("JSON map serializes");
+                if let Some(path) = native_library {
+                    if let Ok(extension) =
+                        NativeOutcomeExtension::load(path, &spec.name, parameters.clone())
+                    {
+                        return Ok(ConfiguredOutcome::Native(extension));
+                    }
+                }
+                match spec.name.as_str() {
+                    "cursor_movement" => Ok(ConfiguredOutcome::CursorMovement),
+                    "trail_placement" => Ok(ConfiguredOutcome::TrailPlacement),
+                    "place" => Ok(ConfiguredOutcome::Place),
+                    "remove" => Ok(ConfiguredOutcome::Remove),
+                    _ => Err(format!("unknown action outcome {:?}", spec.name)),
+                }
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.action_history_length = history_length;
+        self.action_history.clear();
+        Ok(())
+    }
+
+    fn proposed_action(&self, action_index: i32) -> (Coord, [i32; 3], bool, bool, bool) {
+        let cursor = coord_to_i32(self.cursor);
+        let valid_action = (0..=26).contains(&action_index);
+        let destination = if (0..26).contains(&action_index) {
+            let offset = ACTION_OFFSETS_26[action_index as usize];
+            [
+                cursor[0] + offset.0,
+                cursor[1] + offset.1,
+                cursor[2] + offset.2,
+            ]
+        } else {
+            cursor
+        };
+        let grid = i32::from(self.grid_size);
+        let in_bounds = destination.iter().all(|value| (1..=grid).contains(value));
+        let coord = if in_bounds {
+            (
+                destination[0] as u16,
+                destination[1] as u16,
+                destination[2] as u16,
+            )
+        } else {
+            self.cursor
+        };
+        let blocked = in_bounds && action_index != 26 && self.world.is_blocking(coord);
+        (coord, destination, valid_action, in_bounds, blocked)
+    }
+
+    fn predicate_context(
+        &self,
+        action_index: i32,
+        destination: [i32; 3],
+        valid_action: bool,
+        in_bounds: bool,
+        blocked: bool,
+    ) -> PredicateContextV2 {
+        let observation = VoxelObservation {
+            filled: self.agent_filled(),
+            steps_remaining: self.max_steps.saturating_sub(self.steps),
+            goal_distance: self.active_goal.map(|goal| manhattan(self.cursor, goal)),
+        };
+        PredicateContextV2 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<PredicateContextV2>() as u32,
+            step: u64::from(self.steps),
+            grid_size: self.grid_size,
+            action_index,
+            cursor: coord_to_i32(self.cursor),
+            destination,
+            goal: self.active_goal.map_or([0; 3], coord_to_i32),
+            has_goal: u8::from(self.active_goal.is_some()),
+            valid_action: u8::from(valid_action),
+            destination_in_bounds: u8::from(in_bounds),
+            destination_blocked: u8::from(blocked),
+            observation_filled: observation.filled,
+            observation_steps_remaining: observation.steps_remaining,
+            observation_goal_distance: observation.goal_distance.unwrap_or(0),
+            has_observation_goal_distance: u8::from(observation.goal_distance.is_some()),
+            history: self.action_history.as_slice().as_ptr(),
+            history_len: self.action_history.len(),
+            parameters_json: std::ptr::null(),
+            parameters_json_len: 0,
+        }
+    }
+
+    fn action_feasible(&self, action_index: i32) -> Result<(Coord, [i32; 3], bool), String> {
+        let (coord, destination, valid_action, in_bounds, blocked) =
+            self.proposed_action(action_index);
+        let context =
+            self.predicate_context(action_index, destination, valid_action, in_bounds, blocked);
+        for predicate in &self.action_predicates {
+            let feasible = match predicate {
+                ConfiguredPredicate::ValidAction => valid_action,
+                ConfiguredPredicate::Bounds => in_bounds,
+                ConfiguredPredicate::Unoccupied => action_index == 26 || !blocked,
+                ConfiguredPredicate::Native(extension) => {
+                    extension.evaluate(PredicateContextV2 { ..context })?
+                }
+            };
+            if !feasible {
+                return Ok((coord, destination, false));
+            }
+        }
+        Ok((coord, destination, true))
+    }
+
+    pub fn action_mask(&mut self) -> Vec<u8> {
+        (0..=26)
+            .map(|action| match self.action_feasible(action) {
+                Ok((_, _, feasible)) => u8::from(feasible),
+                Err(error) => {
+                    self.last_reward_error = Some(error);
+                    0
+                }
+            })
+            .collect()
+    }
+
+    pub fn execute_navigation_action(&mut self, action_index: i32) -> VoxelAction {
+        let previous = self.cursor;
+        let (_destination_coord, destination, feasible) = match self.action_feasible(action_index) {
+            Ok(value) => value,
+            Err(error) => {
+                self.last_reward_error = Some(error);
+                self.pending_action_feasible = false;
+                return VoxelAction::Collision;
+            }
+        };
+        self.pending_action_feasible = feasible;
+        if !feasible {
+            return VoxelAction::Collision;
+        }
+        let history = self.action_history.as_slice();
+        let context = OutcomeContextV2 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<OutcomeContextV2>() as u32,
+            step: u64::from(self.steps),
+            grid_size: self.grid_size,
+            action_index,
+            cursor: coord_to_i32(previous),
+            destination,
+            goal: self.active_goal.map_or([0; 3], coord_to_i32),
+            has_goal: u8::from(self.active_goal.is_some()),
+            history: history.as_ptr(),
+            history_len: history.len(),
+            parameters_json: std::ptr::null(),
+            parameters_json_len: 0,
+        };
+        let mut mutations = PendingMutations::default();
+        for outcome in &self.action_outcomes {
+            let result = match outcome {
+                ConfiguredOutcome::CursorMovement => OutcomeResultV2 {
+                    set_cursor: 1,
+                    cursor: destination,
+                    ..OutcomeResultV2::default()
+                },
+                ConfiguredOutcome::TrailPlacement | ConfiguredOutcome::Place => OutcomeResultV2 {
+                    place_voxel: u8::from(action_index != 26),
+                    place_coord: destination,
+                    ..OutcomeResultV2::default()
+                },
+                ConfiguredOutcome::Remove => OutcomeResultV2 {
+                    remove_voxel: 1,
+                    remove_coord: coord_to_i32(previous),
+                    ..OutcomeResultV2::default()
+                },
+                ConfiguredOutcome::Native(extension) => {
+                    match extension.evaluate(OutcomeContextV2 { ..context }) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            self.last_reward_error = Some(error);
+                            return VoxelAction::Collision;
+                        }
+                    }
+                }
+            };
+            if let Err(error) = merge_mutations(&mut mutations, result, self.grid_size) {
+                self.last_reward_error = Some(error);
+                return VoxelAction::Collision;
+            }
+        }
+        if let Some(coord) = mutations.cursor {
+            if self.world.is_blocking(coord) && coord != previous {
+                self.last_reward_error =
+                    Some(format!("outcome cursor target {coord:?} is blocked"));
+                return VoxelAction::Collision;
+            }
+        }
+        if let Some(coord) = mutations.remove {
+            let removable = self
+                .world
+                .get_block(coord)
+                .is_some_and(|block| block.active && block.reward_weight > 0.0);
+            if !removable {
+                self.last_reward_error =
+                    Some(format!("outcome cannot remove non-agent voxel {coord:?}"));
+                return VoxelAction::Collision;
+            }
+        }
+        if let Some(coord) = mutations.place {
+            let occupied_by_non_agent = self
+                .world
+                .get_block(coord)
+                .is_some_and(|block| block.active && block.reward_weight <= 0.0);
+            if occupied_by_non_agent {
+                self.last_reward_error =
+                    Some(format!("outcome cannot overwrite geometry voxel {coord:?}"));
+                return VoxelAction::Collision;
+            }
+        }
+        if mutations.place.is_some() && mutations.place == mutations.remove {
+            self.last_reward_error =
+                Some("outcome cannot place and remove the same voxel".to_owned());
+            return VoxelAction::Collision;
+        }
+        if let Some(coord) = mutations.remove {
+            let was_agent_filled = self
+                .world
+                .get_block(coord)
+                .is_some_and(|block| block.active && block.reward_weight > 0.0);
+            let _ = self.world.remove_block(coord);
+            if was_agent_filled {
+                self.agent_filled_count = self.agent_filled_count.saturating_sub(1);
+            }
+        }
+        if let Some(coord) = mutations.cursor {
+            self.cursor = coord;
+        }
+        if let Some(coord) = mutations.place {
+            let was_agent_filled = self
+                .world
+                .get_block(coord)
+                .is_some_and(|block| block.active && block.reward_weight > 0.0);
+            let _ = self.world.set_block(coord, Block::default());
+            if !was_agent_filled {
+                self.agent_filled_count += 1;
+            }
+        }
+        VoxelAction::Noop
+    }
     pub fn last_reward_breakdown(&self) -> &HashMap<String, f32> {
         &self.last_reward_breakdown
     }
@@ -332,9 +689,15 @@ impl VoxelEnv {
     pub fn take_reward_error(&mut self) -> Option<String> {
         self.last_reward_error.take()
     }
-    pub fn last_goal_distance_l2(&self) -> f32 { self.last_goal_distance_l2 }
-    pub fn last_construction_residual(&self) -> usize { self.last_construction_residual }
-    pub fn last_construction_overshoot(&self) -> usize { self.last_construction_overshoot }
+    pub fn last_goal_distance_l2(&self) -> f32 {
+        self.last_goal_distance_l2
+    }
+    pub fn last_construction_residual(&self) -> usize {
+        self.last_construction_residual
+    }
+    pub fn last_construction_overshoot(&self) -> usize {
+        self.last_construction_overshoot
+    }
     /// Fix start and goal positions (overrides random selection on reset).
     pub fn set_waypoints(&mut self, start: Coord, goal: Coord) {
         self.fixed_start = Some(start);
@@ -515,6 +878,7 @@ impl Environment for VoxelEnv {
     fn reset(&mut self, seed: u64) -> Self::Observation {
         self.steps = 0;
         self.consecutive_collisions = 0;
+        self.action_history.clear();
         self.last_reward_breakdown.clear();
         self.last_collision = false;
         self.last_goal_reached = false;
@@ -613,22 +977,25 @@ impl Environment for VoxelEnv {
             self.consecutive_collisions += 1;
         } else {
             self.consecutive_collisions = 0;
+            self.action_history.clear();
         }
 
         match action {
             VoxelAction::Place(coord) => {
-                let was_agent_filled = self.world.get_block(coord).is_some_and(|block| {
-                    block.active && block.reward_weight > 0.0
-                });
+                let was_agent_filled = self
+                    .world
+                    .get_block(coord)
+                    .is_some_and(|block| block.active && block.reward_weight > 0.0);
                 let _ = self.world.set_block(coord, Block::default());
                 if !was_agent_filled {
                     self.agent_filled_count += 1;
                 }
             }
             VoxelAction::Remove(coord) => {
-                let was_agent_filled = self.world.get_block(coord).is_some_and(|block| {
-                    block.active && block.reward_weight > 0.0
-                });
+                let was_agent_filled = self
+                    .world
+                    .get_block(coord)
+                    .is_some_and(|block| block.active && block.reward_weight > 0.0);
                 let _ = self.world.remove_block(coord);
                 if was_agent_filled {
                     self.agent_filled_count = self.agent_filled_count.saturating_sub(1);
@@ -665,11 +1032,16 @@ impl Environment for VoxelEnv {
         let (residual, overshoot) = if self.construction_target.is_empty() {
             (0, 0)
         } else {
-            let filled: HashSet<Coord> = self.world.iter_filled().copied().filter(|coord| {
-                self.world.get_block(*coord).is_some_and(|block| {
-                    block.active && block.reward_weight > 0.0
+            let filled: HashSet<Coord> = self
+                .world
+                .iter_filled()
+                .copied()
+                .filter(|coord| {
+                    self.world
+                        .get_block(*coord)
+                        .is_some_and(|block| block.active && block.reward_weight > 0.0)
                 })
-            }).collect();
+                .collect();
             (
                 self.construction_target.difference(&filled).count(),
                 filled.difference(&self.construction_target).count(),
@@ -773,6 +1145,18 @@ impl Environment for VoxelEnv {
         }
         .to_owned();
 
+        if self.action_history_length > 0 {
+            self.action_history.push(ActionHistoryEntryV2 {
+                action_index: self.pending_action_index,
+                previous_cursor: coord_to_i32(self.pending_previous_cursor),
+                cursor: coord_to_i32(self.cursor),
+                feasible: u8::from(self.pending_action_feasible),
+                collision: u8::from(is_collision),
+            });
+            if self.action_history.len() > self.action_history_length {
+                self.action_history.remove(0);
+            }
+        }
         let observation = VoxelObservation {
             filled: self.agent_filled(),
             steps_remaining: self.max_steps.saturating_sub(self.steps),
@@ -789,6 +1173,37 @@ impl Environment for VoxelEnv {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+fn merge_mutations(
+    target: &mut PendingMutations,
+    result: OutcomeResultV2,
+    grid_size: u16,
+) -> Result<(), String> {
+    fn coord(raw: [i32; 3], grid_size: u16) -> Result<Coord, String> {
+        let grid = i32::from(grid_size);
+        if !raw.iter().all(|value| (1..=grid).contains(value)) {
+            return Err(format!("outcome coordinate {raw:?} is outside the grid"));
+        }
+        Ok((raw[0] as u16, raw[1] as u16, raw[2] as u16))
+    }
+    fn merge(slot: &mut Option<Coord>, value: Coord, kind: &str) -> Result<(), String> {
+        if slot.is_some_and(|current| current != value) {
+            return Err(format!("conflicting {kind} outcome mutations"));
+        }
+        *slot = Some(value);
+        Ok(())
+    }
+    if result.set_cursor != 0 {
+        merge(&mut target.cursor, coord(result.cursor, grid_size)?, "cursor")?;
+    }
+    if result.place_voxel != 0 {
+        merge(&mut target.place, coord(result.place_coord, grid_size)?, "place")?;
+    }
+    if result.remove_voxel != 0 {
+        merge(&mut target.remove, coord(result.remove_coord, grid_size)?, "remove")?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -1026,5 +1441,75 @@ mod tests {
         let component_sum: f32 = env.last_reward_breakdown().values().sum();
         assert!((result.reward - component_sum).abs() < 1e-6);
         assert_eq!(env.last_reward_breakdown().get("collision"), Some(&0.0));
+    }
+
+    fn configure_pipeline(env: &mut VoxelEnv, outcomes: &str, history: usize) {
+        env.configure_action_pipeline(
+            r#"[{"name":"valid_action"},{"name":"bounds"},{"name":"unoccupied"}]"#,
+            outcomes,
+            history,
+            None,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn cursor_navigation_moves_without_filling() {
+        let mut env = make_env(10);
+        env.set_waypoints((2, 2, 2), (6, 2, 2));
+        env.reset(1);
+        configure_pipeline(&mut env, r#"[{"name":"cursor_movement"}]"#, 4);
+        env.prepare_navigation_step(21, (2, 2, 2), false);
+        let action = env.execute_navigation_action(21);
+        env.step(action);
+        assert_eq!(env.cursor(), (3, 2, 2));
+        assert_eq!(env.agent_filled(), 0);
+    }
+
+    #[test]
+    fn trail_navigation_moves_and_fills_destination() {
+        let mut env = make_env(10);
+        env.set_waypoints((2, 2, 2), (6, 2, 2));
+        env.reset(1);
+        configure_pipeline(
+            &mut env,
+            r#"[{"name":"cursor_movement"},{"name":"trail_placement"}]"#,
+            4,
+        );
+        env.prepare_navigation_step(21, (2, 2, 2), false);
+        let action = env.execute_navigation_action(21);
+        env.step(action);
+        assert_eq!(env.cursor(), (3, 2, 2));
+        assert_eq!(env.agent_filled(), 1);
+    }
+
+    #[test]
+    fn action_mask_uses_the_same_bounds_and_occupancy_predicates() {
+        let mut env = make_env(10);
+        env.set_waypoints((1, 1, 1), (6, 2, 2));
+        env.reset(1);
+        configure_pipeline(&mut env, r#"[{"name":"cursor_movement"}]"#, 4);
+        let mask = env.action_mask();
+        assert_eq!(mask.len(), 27);
+        assert_eq!(mask[0], 0);
+        assert_eq!(mask[21], 1);
+        assert_eq!(mask[26], 1);
+    }
+
+    #[test]
+    fn action_history_is_bounded() {
+        let mut env = make_env(10);
+        env.set_waypoints((2, 2, 2), (6, 2, 2));
+        env.reset(1);
+        configure_pipeline(&mut env, r#"[{"name":"cursor_movement"}]"#, 1);
+        for action_index in [21, 21] {
+            let previous = env.cursor();
+            env.prepare_navigation_step(action_index, previous, false);
+            let action = env.execute_navigation_action(action_index);
+            env.step(action);
+        }
+        assert_eq!(env.action_history.len(), 1);
+        assert_eq!(env.action_history[0].previous_cursor, [3, 2, 2]);
+        assert_eq!(env.action_history[0].cursor, [4, 2, 2]);
     }
 }

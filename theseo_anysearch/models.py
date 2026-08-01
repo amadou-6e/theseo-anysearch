@@ -44,11 +44,64 @@ class ObservationConfig(BaseModel):
     include_voxel_count: bool = True
 
 
+class ActionExtensionSelector(BaseModel):
+    """Named built-in or compiled Rust action extension."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class ActionConfig(BaseModel):
-    """Policy action-space representation."""
+    """Policy action-space and Rust behavior pipeline."""
 
     model_config = ConfigDict(extra="forbid")
     mode: Literal["discrete_6", "discrete_18", "discrete_26", "vector_3"] = "discrete_26"
+    behavior: Literal["legacy", "cursor_navigation", "trail_navigation"] = "legacy"
+    predicates: tuple[ActionExtensionSelector, ...] | None = None
+    outcomes: tuple[ActionExtensionSelector, ...] | None = None
+    history_length: int = Field(default=16, ge=0, le=4096)
+
+    @field_validator("predicates", "outcomes", mode="before")
+    @classmethod
+    def expand_selector_shorthand(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        return [({"name": item} if isinstance(item, str) else item) for item in value]
+
+    @model_validator(mode="after")
+    def validate_unique_pipeline_names(self) -> "ActionConfig":
+        for kind, selectors in (
+            ("predicate", self.predicates),
+            ("outcome", self.outcomes),
+        ):
+            if selectors is None:
+                continue
+            names = [selector.name for selector in selectors]
+            duplicates = sorted({name for name in names if names.count(name) > 1})
+            if duplicates:
+                raise ValueError(f"duplicate action {kind} names: {duplicates}")
+        return self
+
+    def resolved_pipeline(
+        self, *, trail_mode: bool
+    ) -> tuple[tuple[ActionExtensionSelector, ...], tuple[ActionExtensionSelector, ...]]:
+        behavior = self.behavior
+        if behavior == "legacy":
+            behavior = "trail_navigation" if trail_mode else "cursor_navigation"
+        predicates = self.predicates if self.predicates is not None else tuple(
+            ActionExtensionSelector(name=name)
+            for name in ("valid_action", "bounds", "unoccupied")
+        )
+        default_outcomes = (
+            ("cursor_movement", "trail_placement")
+            if behavior == "trail_navigation"
+            else ("cursor_movement",)
+        )
+        outcomes = self.outcomes if self.outcomes is not None else tuple(
+            ActionExtensionSelector(name=name) for name in default_outcomes
+        )
+        return predicates, outcomes
 
 
 class CustomRewardConfig(BaseModel):
@@ -190,6 +243,9 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
 
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
+        action_predicates, action_outcomes = self.action.resolved_pipeline(
+            trail_mode=self.trail_mode
+        )
         return {
             "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
@@ -209,6 +265,14 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "ray_max_len": self.observation__ray_max_len,
             "include_voxel_count": self.observation__include_voxel_count,
             "action_mode": self.action__mode,
+            "action_behavior": self.action.behavior,
+            "action_predicates": [
+                item.model_dump(mode="json") for item in action_predicates
+            ],
+            "action_outcomes": [
+                item.model_dump(mode="json") for item in action_outcomes
+            ],
+            "action_history_length": self.action.history_length,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,
