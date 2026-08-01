@@ -796,6 +796,10 @@ pub struct PyVoxelObservation {
     /// Signed normalized delta from cursor to goal in x, y, z, or None if unset.
     #[pyo3(get)]
     pub goal_direction: Option<(f32, f32, f32)>,
+    #[pyo3(get)]
+    pub cursor_pos: (u16, u16, u16),
+    #[pyo3(get)]
+    pub local_grid: Option<Vec<f32>>,
 }
 
 /// Python-visible step result returned by PyVoxelEnv.step().
@@ -846,6 +850,7 @@ impl PyStepResultVoxel {
 #[pyclass]
 pub struct PyVoxelEnv {
     inner: VoxelEnv,
+    box_radius: Option<u32>,
 }
 
 impl PyVoxelEnv {
@@ -867,7 +872,35 @@ impl PyVoxelEnv {
             steps_remaining: obs.steps_remaining,
             goal_distance: obs.goal_distance,
             goal_direction,
+            cursor_pos: self.inner.cursor(),
+            local_grid: self.box_radius.map(|radius| self.build_box_obs(radius)),
         }
+    }
+
+    fn build_box_obs(&self, radius: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.cursor();
+        let r = radius as i32;
+        let side = (2 * r + 1) as usize;
+        let mut result = Vec::with_capacity(side * side * side);
+        let grid_size = i32::from(self.inner.grid_size);
+        for dx in -r..=r {
+            for dy in -r..=r {
+                for dz in -r..=r {
+                    let x = i32::from(cx) + dx;
+                    let y = i32::from(cy) + dy;
+                    let z = i32::from(cz) + dz;
+                    let filled = if x >= 1 && y >= 1 && z >= 1
+                        && x <= grid_size && y <= grid_size && z <= grid_size
+                    {
+                        self.inner.world().is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                    } else {
+                        1.0
+                    };
+                    result.push(filled);
+                }
+            }
+        }
+        result
     }
 }
 
@@ -897,7 +930,8 @@ impl PyVoxelEnv {
                         success_targets=None,
                         goal_tolerance=0.0,
                         native_reward_path=None,
-                        custom_reward=None))]
+                        custom_reward=None,
+                        box_radius=None))]
     pub fn new(
         max_steps: u32,
         trail_mode: bool,
@@ -921,6 +955,7 @@ impl PyVoxelEnv {
         goal_tolerance: f32,
         native_reward_path: Option<String>,
         custom_reward: Option<String>,
+        box_radius: Option<u32>,
     ) -> PyResult<Self> {
         let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
             distance_reward_mode.as_str(),
@@ -962,7 +997,7 @@ impl PyVoxelEnv {
                 "native_reward_path requires custom_reward",
             )),
         };
-        Ok(Self { inner: env })
+        Ok(Self { inner: env, box_radius })
     }
 
     /// Reset the environment and return the initial observation.
@@ -1085,29 +1120,7 @@ impl PyVoxelEnv {
     /// Cells outside the configured grid are reported as filled.
     /// Elements are ordered x-outer, y-mid, z-inner (x changes slowest).
     pub fn box_obs(&self, radius: u32) -> Vec<f32> {
-        let (cx, cy, cz) = self.inner.cursor();
-        let r = radius as i32;
-        let side = (2 * r + 1) as usize;
-        let mut result = Vec::with_capacity(side * side * side);
-        for dx in -r..=r {
-            for dy in -r..=r {
-                for dz in -r..=r {
-                    let x = cx as i32 + dx;
-                    let y = cy as i32 + dy;
-                    let z = cz as i32 + dz;
-                    let g = i32::from(self.inner.grid_size);
-                    let filled = if x >= 1 && y >= 1 && z >= 1
-                        && x <= g && y <= g && z <= g
-                    {
-                        self.inner.world().is_filled((x as u16, y as u16, z as u16)) as u8 as f32
-                    } else {
-                        1.0
-                    };
-                    result.push(filled);
-                }
-            }
-        }
-        result
+        self.build_box_obs(radius)
     }
 
     /// Returns a 26-element proximity array, one per non-self direction
@@ -1816,7 +1829,7 @@ mod tests {
     fn env_at_cursor(cursor: (u16, u16, u16)) -> PyVoxelEnv {
         let mut inner = VoxelEnv::new(WorldState::new(), 100);
         inner.set_cursor(cursor);
-        PyVoxelEnv { inner }
+        PyVoxelEnv { inner, box_radius: None }
     }
 
     fn env_with_block(cursor: (u16, u16, u16), coord: Coord) -> PyVoxelEnv {
@@ -1824,7 +1837,7 @@ mod tests {
         world.set_block(coord, Block::default()).unwrap();
         let mut inner = VoxelEnv::new(world, 100);
         inner.set_cursor(cursor);
-        PyVoxelEnv { inner }
+        PyVoxelEnv { inner, box_radius: None }
     }
 
     #[test]
@@ -1836,7 +1849,7 @@ mod tests {
         let mut inner = VoxelEnv::new(WorldState::new(), 10)
             .with_reward_config(reward_config);
         inner.set_cursor((5, 5, 5));
-        let mut env = PyVoxelEnv { inner };
+        let mut env = PyVoxelEnv { inner, box_radius: None };
 
         let result = env.step(26).unwrap();
 

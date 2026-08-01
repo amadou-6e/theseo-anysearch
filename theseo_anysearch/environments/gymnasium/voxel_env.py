@@ -175,6 +175,11 @@ class VoxelEnv(RustGymnasiumEnv):
             goal_tolerance=float(getattr(self._task.goal, "tolerance", 0.0)),
             native_reward_path=native_reward_path,
             custom_reward=config.get("custom_reward"),
+            box_radius=(
+                config.get("box_radius", 2)
+                if config.get("obs_mode", "scalar") == "box"
+                else None
+            ),
         )
 
         # Load fixed waypoints from file if specified.
@@ -433,7 +438,7 @@ class VoxelEnv(RustGymnasiumEnv):
         if self._obs_mode == "scalar":
             return base
 
-        cx, cy, cz = self._rust_env.cursor_pos()
+        cx, cy, cz = rust_obs.cursor_pos
         inv = self._inv_norm
         self._buf_cursor[0] = (cx - 1) * inv
         self._buf_cursor[1] = (cy - 1) * inv
@@ -441,7 +446,10 @@ class VoxelEnv(RustGymnasiumEnv):
         base["cursor_pos"] = self._buf_cursor.copy()
 
         if self._obs_mode == "box":
-            self._buf_grid[:] = self._rust_env.box_obs(self._box_radius)
+            local_grid = rust_obs.local_grid
+            if local_grid is None:
+                local_grid = self._rust_env.box_obs(self._box_radius)
+            self._buf_grid[:] = local_grid
             base["local_grid"] = self._buf_grid.copy()
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
