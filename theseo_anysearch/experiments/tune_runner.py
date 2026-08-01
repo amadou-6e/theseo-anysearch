@@ -246,6 +246,9 @@ def _experiment_trainable(
     trial_prefix: str = "",
     checkpoint_frequency: int = 1,
     preserve_trial_artifacts: bool = True,
+    metric_source_contents: dict[str, str] | None = None,
+    reward_source_content: str | None = None,
+    native_extension_bundle: dict[str, Any] | None = None,
 ) -> None:
     """
     Generic Ray Tune function trainable for any algorithm in Trainer._registry.
@@ -334,6 +337,24 @@ def _experiment_trainable(
         yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",
     )
+
+    # Archive the exact extension sources used by this trial.
+    for filename, source in (metric_source_contents or {}).items():
+        trial_dir.joinpath(filename).write_text(source, encoding="utf-8")
+    if reward_source_content is not None:
+        trial_dir.joinpath("rewards.py").write_text(
+            reward_source_content,
+            encoding="utf-8",
+        )
+    if native_extension_bundle is not None:
+        native_dir = trial_dir.joinpath("native_extension")
+        native_dir.mkdir(parents=True, exist_ok=True)
+        native_dir.joinpath(native_extension_bundle["filename"]).write_bytes(
+            native_extension_bundle["binary"]
+        )
+        native_dir.joinpath("extension.json").write_text(
+            native_extension_bundle["manifest"], encoding="utf-8"
+        )
 
     # ------------------------------------------------------------------ #
     # Build Settings for this trial                                        #
@@ -828,6 +849,30 @@ def _first_trial_error(results: Any) -> str | None:
     return None
 
 
+def _ray_runtime_options(address: str | None, temp_dir: str) -> dict[str, Any]:
+    """Build Ray initialization options without mixing local and external runtimes."""
+    options: dict[str, Any] = {
+        "ignore_reinit_error": True,
+        "include_dashboard": False,
+    }
+    if address:
+        options["address"] = address
+    else:
+        options["_temp_dir"] = temp_dir
+    return options
+
+
+def _should_shutdown_ray(
+    configured: bool | None,
+    *,
+    was_initialized: bool,
+    address: str | None,
+) -> bool:
+    """Return whether this run owns the Ray runtime and should stop it."""
+    if configured is not None:
+        return configured
+    return not was_initialized and not address
+
 class TuneRunner:
     """
     Drives a Ray Tune hyperparameter sweep for an ExperimentConfig that
@@ -947,6 +992,46 @@ class TuneRunner:
                 }),
             })
         experiment_dict = abs_config.model_dump(by_alias=True, mode="json")
+        from theseo_anysearch.experiments.custom_metrics import (
+            discover_metric_sources,
+        )
+
+        metric_source_contents = {
+            f"{scope}_metrics.py": path.read_text(encoding="utf-8")
+            for scope, path in discover_metric_sources(self._config_path).items()
+        }
+        from theseo_anysearch.experiments.custom_rewards import (
+            discover_reward_source,
+        )
+
+        reward_source = discover_reward_source(
+            self._config_path, self._config.env.rewards.custom
+        )
+        reward_source_content = (
+            reward_source.read_text(encoding="utf-8")
+            if reward_source is not None
+            else None
+        )
+        from theseo_anysearch.experiments.native_extensions import (
+            NativeExtensionManifest,
+            discover_native_manifest,
+        )
+
+        native_manifest_path = discover_native_manifest(self._config_path)
+        native_extension_bundle = None
+        if native_manifest_path is not None:
+            native_manifest = NativeExtensionManifest.model_validate_json(
+                native_manifest_path.read_text(encoding="utf-8")
+            )
+            native_binary = native_manifest_path.parent.joinpath(native_manifest.library)
+            archived_manifest = native_manifest.model_copy(
+                update={"library": native_binary.name}
+            )
+            native_extension_bundle = {
+                "filename": native_binary.name,
+                "binary": native_binary.read_bytes(),
+                "manifest": archived_manifest.model_dump_json(indent=2),
+            }
 
         # ------------------------------------------------------------------ #
         # MLflow parent run (optional)                                        #
@@ -1067,11 +1152,9 @@ class TuneRunner:
             tc.ray_temp_dir) if tc.ray_temp_dir else _default_ray_temp
         os.makedirs(ray_temp_dir, exist_ok=True)
         os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
-        ray.init(
-            ignore_reinit_error=True,
-            include_dashboard=False,
-            _temp_dir=ray_temp_dir,
-        )
+        ray_was_initialized = ray.is_initialized()
+        ray.init(**_ray_runtime_options(tc.ray_address, ray_temp_dir))
+
 
         # ------------------------------------------------------------------ #
         # Declare per-trial placement group bundles so RLlib's env-runner     #
@@ -1130,6 +1213,9 @@ class TuneRunner:
             trial_prefix=trial_prefix,
             checkpoint_frequency=tc.checkpoint_frequency,
             preserve_trial_artifacts=tc.preserve_trial_artifacts,
+            metric_source_contents=metric_source_contents,
+            reward_source_content=reward_source_content,
+            native_extension_bundle=native_extension_bundle,
         )
 
         # ------------------------------------------------------------------ #
@@ -1307,4 +1393,10 @@ class TuneRunner:
                 tracker.end_run("FAILED")
             raise
         finally:
-            ray.shutdown()
+            should_shutdown = _should_shutdown_ray(
+                tc.shutdown_ray_on_complete,
+                was_initialized=ray_was_initialized,
+                address=tc.ray_address,
+            )
+            if should_shutdown and ray.is_initialized():
+                ray.shutdown()

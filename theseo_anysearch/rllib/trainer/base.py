@@ -275,9 +275,7 @@ class TrainResult(BaseModel):
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
-            if (
-                key.startswith("evaluation_") or key.startswith("curriculum/")
-            )
+            if key.startswith(("evaluation_", "training_", "curriculum/"))
             and isinstance(value, (int, float))
         })
         return metrics
@@ -332,6 +330,33 @@ class Trainer(ABC):
         self._iteration: int = 0
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
+        from theseo_anysearch.experiments.custom_metrics import (
+            load_metric_providers,
+            write_metric_manifest,
+        )
+
+        metric_config_path = self._output_dir.joinpath("experiment.yaml")
+        self._metric_providers = load_metric_providers(
+            metric_config_path if metric_config_path.is_file() else None
+        )
+        write_metric_manifest(self._metric_providers, self._output_dir)
+        from theseo_anysearch.experiments.custom_rewards import (
+            load_reward_provider,
+            write_reward_manifest,
+        )
+
+        reward_source = self._output_dir.joinpath("rewards.py")
+        reward_provider = load_reward_provider(
+            reward_source if reward_source.is_file() else None,
+            config.env.rewards.custom,
+        )
+        write_reward_manifest(reward_provider, self._output_dir)
+        from theseo_anysearch.experiments.native_extensions import NativeExtension
+
+        native_manifest = self._output_dir.joinpath("native_extension", "extension.json")
+        self._native_extension = NativeExtension.load(
+            native_manifest if native_manifest.is_file() else None
+        )
         self._waypoint_curriculum: Any = None
         if config.env.waypoint_curriculum.enabled:
             from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
@@ -381,6 +406,19 @@ class Trainer(ABC):
         env = self._config.env
         runtime = env.to_runtime_dict()
         runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        native_manifest = self._output_dir.joinpath("native_extension", "extension.json")
+        from theseo_anysearch.experiments.native_extensions import CAP_REWARD
+
+        if (
+            native_manifest.is_file()
+            and self._native_extension is not None
+            and self._native_extension.capabilities & CAP_REWARD
+        ):
+            runtime["native_extension_manifest"] = str(native_manifest.resolve())
+        else:
+            reward_source = self._output_dir.joinpath("rewards.py")
+            if reward_source.is_file():
+                runtime["reward_module_path"] = str(reward_source.resolve())
         return runtime
 
     # ------------------------------------------------------------------
@@ -417,6 +455,13 @@ class Trainer(ABC):
         from theseo_anysearch.experiments.output import OutputStore
         from theseo_anysearch.experiments.trajectory import EpisodeRunMetrics
         from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
+        from theseo_anysearch.experiments.custom_metrics import (
+            CustomMetricError,
+            EvaluationContext,
+            TrainingContext,
+            compute_custom_metrics,
+            merge_custom_metrics,
+        )
 
         _store = OutputStore(self._output_dir)
         if self._waypoint_curriculum is not None:
@@ -557,6 +602,61 @@ class Trainer(ABC):
                         min_success_rate=evaluation.min_success_rate,
                     )
                     standardized = success_metrics.scalar_metrics()
+                    evaluation_context = EvaluationContext(
+                        iteration=self._iteration,
+                        episodes=tuple(episodes),
+                        standard_metrics={
+                            **result.standard_metrics(), **standardized,
+                            **metrics.as_scalar_dict(),
+                            "evaluation_reward_mean": evaluation_reward_mean,
+                            "evaluation_len_mean": evaluation_len_mean,
+                        },
+                        env_config=dict(_env_cfg),
+                        final_infos=tuple(
+                            dict(getattr(episode, "final_info", None) or {})
+                            for episode in episodes
+                        ),
+                    )
+                    evaluation_reserved = (
+                        set(result.standard_metrics()) | set(standardized)
+                        | set(metrics.as_scalar_dict())
+                        | {"evaluation_reward_mean", "evaluation_len_mean"}
+                    )
+                    from theseo_anysearch.experiments.native_extensions import (
+                        CAP_EVALUATION_METRICS,
+                        validate_native_metrics,
+                    )
+
+                    native_has_evaluation = (
+                        self._native_extension is not None
+                        and self._native_extension.capabilities & CAP_EVALUATION_METRICS
+                    )
+                    native_raw = (
+                        self._native_extension.compute_metrics(
+                            "evaluation",
+                            {
+                                "iteration": evaluation_context.iteration,
+                                "standard_metrics": evaluation_context.standard_metrics,
+                                "env_config": evaluation_context.env_config,
+                                "final_infos": evaluation_context.final_infos,
+                            },
+                        )
+                        if native_has_evaluation else {}
+                    )
+                    python_evaluation_custom = compute_custom_metrics(
+                        self._metric_providers.evaluation, evaluation_context,
+                        reserved_names=evaluation_reserved,
+                    )
+                    native_evaluation_custom = (
+                        validate_native_metrics(
+                            "evaluation", native_raw,
+                            reserved_names=evaluation_reserved,
+                        )
+                        if native_has_evaluation else {}
+                    )
+                    evaluation_custom = merge_custom_metrics(
+                        python_evaluation_custom, native_evaluation_custom
+                    )
                     heuristic_accuracy = None
                     heuristic_distance = None
                     heuristic_compared_states = 0
@@ -610,6 +710,7 @@ class Trainer(ABC):
                                 "evaluation_len_mean": evaluation_len_mean,
                                 **standardized,
                                 **metrics.as_scalar_dict(),
+                                **evaluation_custom,
                                 "evaluation_heuristic_accuracy": heuristic_accuracy,
                                 "evaluation_heuristic_distance": heuristic_distance,
                                 "evaluation_heuristic_compared_states": heuristic_compared_states,
@@ -732,6 +833,10 @@ class Trainer(ABC):
                     scalar_metrics = {
                         **metrics.as_scalar_dict(),
                         **success_metrics.tensorboard_metrics(),
+                        **{
+                            f"eval/custom/{key.removeprefix('evaluation_')}": value
+                            for key, value in evaluation_custom.items()
+                        },
 
                         "eval/reward_mean": evaluation_reward_mean,
                         "eval/episode_len_mean": evaluation_len_mean,
@@ -794,12 +899,70 @@ class Trainer(ABC):
                         f"Evaluation batch completed for iteration {self._iteration}: "
                         f"{metrics.finish_count} goals reached",
                     )
+                except CustomMetricError:
+                    raise
                 except Exception as exc:
                     warnings.warn(
                         f"evaluation collection failed at iter {self._iteration}: {exc}",
                         stacklevel=2,
                     )
 
+                training_context = TrainingContext(
+                    iteration=self._iteration,
+                    standard_metrics=result.standard_metrics(),
+                    rllib_result=rllib_result,
+                    environment_steps_total=result.environment_steps_total,
+                    duration_s=elapsed,
+                    env_config=dict(_env_cfg),
+                )
+                from theseo_anysearch.experiments.native_extensions import (
+                    CAP_TRAINING_METRICS,
+                    validate_native_metrics,
+                )
+
+                native_has_training = (
+                    self._native_extension is not None
+                    and self._native_extension.capabilities & CAP_TRAINING_METRICS
+                )
+                native_raw = (
+                    self._native_extension.compute_metrics(
+                        "training",
+                        {
+                            "iteration": training_context.iteration,
+                            "standard_metrics": training_context.standard_metrics,
+                            "environment_steps_total": training_context.environment_steps_total,
+                            "duration_s": training_context.duration_s,
+                            "env_config": training_context.env_config,
+                        },
+                    )
+                    if native_has_training else {}
+                )
+                training_reserved = set(result.standard_metrics())
+                python_training_custom = compute_custom_metrics(
+                    self._metric_providers.training, training_context,
+                    reserved_names=training_reserved,
+                )
+                native_training_custom = (
+                    validate_native_metrics(
+                        "training", native_raw,
+                        reserved_names=training_reserved,
+                    )
+                    if native_has_training else {}
+                )
+                training_custom = merge_custom_metrics(
+                    python_training_custom, native_training_custom
+                )
+                if training_custom:
+                    result = result.model_copy(
+                        update={"extra": {**result.extra, **training_custom}}
+                    )
+                    tb_writer.log_scalars(
+                        self._iteration,
+                        {
+                            f"train/custom/{key.removeprefix('training_')}": value
+                            for key, value in training_custom.items()
+                        },
+                    )
                 results.append(result)
                 tb_writer.log_iteration(result)
                 self.on_iteration_end(result)
