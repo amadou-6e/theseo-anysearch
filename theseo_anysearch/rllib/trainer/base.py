@@ -658,6 +658,9 @@ class Trainer(ABC):
                                     retention.episodes,
                                     seed=evaluation_seed + stage_index * retention.episodes,
                                     multi_agent=False,
+                                    num_envs_per_env_runner=(
+                                        evaluation.num_envs_per_env_runner
+                                    ),
                                 )
                                 stage_metrics = EpisodeRunMetrics.from_voxel_episodes(
                                     stage_episodes
