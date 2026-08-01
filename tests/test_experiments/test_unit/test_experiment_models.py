@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from theseo_anysearch.experiments.loader import expand_sweep, load_experiment
+from theseo_anysearch.models import EnvConfig
 from theseo_anysearch.experiments.models import (
     ExperimentConfig,
     HeuristicConfig,
@@ -99,6 +100,37 @@ class TestExperimentModels:
         result = load_experiment(path)
         assert isinstance(result, ExperimentConfig)
         assert result.to_settings().anyscale.project == "proj-1"
+
+class TestCustomRewardConfig:
+    def test_string_shorthand_preserves_existing_yaml(self):
+        config = EnvConfig.model_validate({"rewards": {"custom": "my_reward"}})
+
+        assert config.rewards.custom is not None
+        assert config.rewards.custom.name == "my_reward"
+        assert config.rewards.custom.parameters == {}
+        assert config.to_runtime_dict()["custom_reward"] == "my_reward"
+
+    def test_structured_reward_exposes_json_parameters(self):
+        config = EnvConfig.model_validate({
+            "rewards": {
+                "custom": {
+                    "name": "my_reward",
+                    "parameters": {
+                        "scale": 2.5,
+                        "enabled": True,
+                        "labels": ["fast", "sparse"],
+                    },
+                }
+            }
+        })
+
+        runtime = config.to_runtime_dict()
+        assert runtime["custom_reward"] == "my_reward"
+        assert runtime["custom_reward_parameters"] == {
+            "scale": 2.5,
+            "enabled": True,
+            "labels": ["fast", "sparse"],
+        }
 
 class TestHeuristicConfig:
     """Verify YAML-facing heuristic configuration and compatibility."""

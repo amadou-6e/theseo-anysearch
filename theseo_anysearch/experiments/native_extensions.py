@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 CAP_REWARD = 1
 CAP_TRAINING_METRICS = 2
 CAP_EVALUATION_METRICS = 4
@@ -100,7 +100,13 @@ def _selected_reward_name(experiment_dir: Path) -> str | None:
     if config_path is None:
         return None
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return ((raw.get("env") or {}).get("rewards") or {}).get("custom")
+    selected = ((raw.get("env") or {}).get("rewards") or {}).get("custom")
+    if isinstance(selected, str) or selected is None:
+        return selected
+    if isinstance(selected, dict):
+        name = selected.get("name")
+        return str(name) if name is not None else None
+    return None
 
 def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Path:
     """Compile ``extension/`` and return its stable manifest path."""
@@ -213,7 +219,7 @@ def copy_native_extension(config_path: Path | None, destination: Path) -> Path |
 
 
 class NativeExtension:
-    """Validated handle to the stable AnySearch native extension ABI v1."""
+    """Validated handle to the stable AnySearch native extension ABI v2."""
 
     def __init__(self, library: Any, source: Path, capabilities: int) -> None:
         self._library = library
@@ -229,7 +235,7 @@ class NativeExtension:
     def validate_reward(self, name: str) -> None:
         if not name.isidentifier():
             raise NativeExtensionError(f"Invalid reward name {name!r}")
-        symbol = f"anysearch_reward_{name}_v1"
+        symbol = f"anysearch_reward_{name}_v2"
         try:
             getattr(self._library, symbol)
         except AttributeError as exc:

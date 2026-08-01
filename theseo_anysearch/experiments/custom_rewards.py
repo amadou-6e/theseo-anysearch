@@ -40,6 +40,7 @@ class RewardContext(BaseModel):
     standard_reward: float
     standard_breakdown: dict[str, float]
     env_config: dict[str, Any]
+    parameters: dict[str, Any] = Field(default_factory=dict)
     info: dict[str, Any] = Field(default_factory=dict)
 
 

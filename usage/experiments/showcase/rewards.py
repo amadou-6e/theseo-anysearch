@@ -8,7 +8,10 @@ def quick_demo(context):
         previous != current
         for previous, current in zip(context.previous_cursor, context.cursor)
     )
-    diagonal_penalty = -0.005 * max(changed_axes - 1, 0)
+    penalty_per_axis = float(
+        context.parameters.get("diagonal_penalty_per_extra_axis", -0.005)
+    )
+    diagonal_penalty = penalty_per_axis * max(changed_axes - 1, 0)
     return RewardResult(
         reward=diagonal_penalty,
         components={"diagonal_move_penalty": diagonal_penalty},

@@ -60,6 +60,7 @@ class VoxelEnv(RustGymnasiumEnv):
             Path(reward_module_path) if reward_module_path else None,
             config.get("custom_reward"),
         )
+        self._reward_parameters = dict(config.get("custom_reward_parameters") or {})
         self._episode_steps = 0
         self._episode_reward_breakdown: dict[str, float] = {}
         self._initial_distance = 0.0
@@ -175,6 +176,11 @@ class VoxelEnv(RustGymnasiumEnv):
             goal_tolerance=float(getattr(self._task.goal, "tolerance", 0.0)),
             native_reward_path=native_reward_path,
             custom_reward=config.get("custom_reward"),
+            custom_reward_parameters_json=json.dumps(
+                config.get("custom_reward_parameters") or {},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
             box_radius=(
                 config.get("box_radius", 2)
                 if config.get("obs_mode", "scalar") == "box"
@@ -306,6 +312,7 @@ class VoxelEnv(RustGymnasiumEnv):
                 standard_reward=standard_reward,
                 standard_breakdown=breakdown,
                 env_config=dict(self._config),
+                parameters=dict(self._reward_parameters),
                 info={
                     "success": success,
                     "construction_residual": residual,
