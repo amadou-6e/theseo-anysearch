@@ -14,6 +14,7 @@ from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
     NOOP_ACTION_INDEX,
+    action_step_distance,
     build_action_space,
     encode_action,
     maximum_movement_distance,
@@ -223,13 +224,29 @@ class VoxelEnv(RustGymnasiumEnv):
         if wp is None and waypoints_file:
             wp = self._load_waypoints(waypoints_file)
         if wp:
-            env.set_waypoints(tuple(wp["start"]), tuple(wp["goal"]))
+            start = tuple(wp["start"])
+            goal = tuple(wp["goal"])
+            env.set_waypoints(
+                start,
+                goal,
+                action_step_distance(
+                    start, goal, config.get("action_mode", "discrete_26")
+                ),
+            )
 
         configured_targets = goal_voxels(self._task.goal, None)
         if configured_targets:
             if not wp:
                 raise ValueError("A configured task goal requires waypoints_file to provide the episode start")
-            env.set_waypoints(tuple(wp["start"]), configured_targets[0])
+            start = tuple(wp["start"])
+            goal = configured_targets[0]
+            env.set_waypoints(
+                start,
+                goal,
+                action_step_distance(
+                    start, goal, config.get("action_mode", "discrete_26")
+                ),
+            )
 
         return env
 
@@ -238,7 +255,7 @@ class VoxelEnv(RustGymnasiumEnv):
         """Load waypoints JSON: {"start": [x, y, z], "goal": [x, y, z]}."""
         resolved = Path(path)
         if not resolved.is_absolute():
-            resolved = Path(os.getcwd()) / resolved
+            resolved = Path(os.getcwd(), resolved)
         try:
             data = json.loads(resolved.read_text())
             s, g = data["start"], data["goal"]
@@ -283,6 +300,17 @@ class VoxelEnv(RustGymnasiumEnv):
         self._sample_curriculum_waypoints()
         return self._reset_task_state(super().reset(seed=seed, options=options))
 
+    def _segment_length(
+        self,
+        start: tuple[int, int, int],
+        goal: tuple[int, int, int],
+    ) -> int:
+        return action_step_distance(
+            start,
+            goal,
+            self._config.get("action_mode", "discrete_26"),
+        )
+
     def queue_waypoints(
         self,
         start: tuple[int, int, int],
@@ -295,7 +323,7 @@ class VoxelEnv(RustGymnasiumEnv):
         if self._pending_waypoints is None:
             return
         start, goal = self._pending_waypoints
-        self._rust_env.set_waypoints(start, goal)
+        self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
         self._config["waypoints"] = {"start": start, "goal": goal}
         self._pending_waypoints = None
 
@@ -311,7 +339,9 @@ class VoxelEnv(RustGymnasiumEnv):
         waypoints = [tuple(waypoint) for waypoint in route["waypoints"]]
         if not waypoints:
             raise ValueError("waypoint route requires at least one goal")
-        self._rust_env.set_waypoints(start, waypoints[0])
+        self._rust_env.set_waypoints(
+            start, waypoints[0], self._segment_length(start, waypoints[0])
+        )
         self._route_remaining = waypoints[1:]
         self._route_waypoint_count = len(waypoints)
         self._config["waypoint_route"] = {"start": start, "waypoints": waypoints}
@@ -351,7 +381,7 @@ class VoxelEnv(RustGymnasiumEnv):
         start, goal = selected
         self._route_remaining = []
         self._route_waypoint_count = 1
-        self._rust_env.set_waypoints(start, goal)
+        self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
         self._config["waypoints"] = {"start": start, "goal": goal}
 
     def _reset_task_state(self, reset_result):
@@ -443,7 +473,11 @@ class VoxelEnv(RustGymnasiumEnv):
         waypoint_reached = success
         if success and self._route_remaining:
             next_goal = self._route_remaining.pop(0)
-            observation = self._obs_to_numpy(self._rust_env.set_goal(next_goal))
+            observation = self._obs_to_numpy(
+                self._rust_env.set_goal(
+                    next_goal, self._segment_length(cursor, next_goal)
+                )
+            )
             fallback = next_goal
             current_distance = goal_distance(self._task.goal, cursor, fallback)
             terminated = False

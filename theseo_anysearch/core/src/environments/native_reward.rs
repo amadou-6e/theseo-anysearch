@@ -25,6 +25,8 @@ pub struct RewardContextV1 {
     pub previous_goal_distance: f64,
     pub goal_distance: f64,
     pub standard_reward: f64,
+    pub segment_step: u64,
+    pub segment_length: u64,
 }
 
 #[repr(C)]

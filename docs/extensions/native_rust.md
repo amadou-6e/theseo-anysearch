@@ -37,7 +37,10 @@ Every library exports `anysearch_extension_abi_version` and
 
 Rewards use fixed-layout C-compatible context/result structs because this call is
 made on every environment step. A result contains add/replace mode, a finite
-reward, and up to eight named components. Metrics receive UTF-8 JSON and return a
+reward, and up to eight named components. The reward context includes both the
+episode-wide `step` and the current route segment's `segment_step` and
+`segment_length`; `segment_step` resets when a new waypoint becomes active.
+Metrics receive UTF-8 JSON and return a
 JSON object because metric calls are infrequent and benefit from a flexible
 context. Returned names get the normal `training_` or `evaluation_` prefix.
 

@@ -29,3 +29,4 @@ Tune reports, checkpoint/resume behavior, pruning artifacts, and explicit stop b
 - `evaluation_metrics.ppo_asha.py` emits `evaluation_navigation_score`, combining success rate with normalized goal progress so ASHA can distinguish policies before the first finish.
 - `training_metrics.ppo_asha.py` emits `training_reward_per_episode_step` and `training_episodes_per_1000_env_steps`, demonstrating metrics derived from standard training results and sampled environment steps.
 - [`waypoint_route_decay/experiment.yaml`](waypoint_route_decay/experiment.yaml) tests a multi-waypoint empty-grid curriculum with an episode-global sparse countdown reward implemented as a native Rust extension.
+- [`waypoint_route_segment_reward/experiment.yaml`](waypoint_route_segment_reward/experiment.yaml) combines inverse-success sampling, five-iteration retention evaluation, segmented episodes, and a native countdown reward whose `2 * segment_length` budget resets at every waypoint.

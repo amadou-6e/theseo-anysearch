@@ -6,6 +6,8 @@ import math
 from typing import TypeAlias
 
 import numpy as np
+
+from theseo_anysearch.environments.action_spaces import action_step_distance
 from pydantic import BaseModel, ConfigDict
 
 Waypoint: TypeAlias = tuple[int, int, int]
@@ -21,18 +23,6 @@ class WaypointRoute(BaseModel):
     @property
     def goal(self) -> Waypoint:
         return self.waypoints[-1]
-
-
-def action_step_distance(start: Waypoint, goal: Waypoint, action_mode: str) -> int:
-    """Return the exact empty-grid shortest path in configured action steps."""
-    deltas = [abs(goal[index] - start[index]) for index in range(3)]
-    if action_mode == "discrete_6":
-        return sum(deltas)
-    if action_mode == "discrete_18":
-        return max(max(deltas), math.ceil(sum(deltas) / 2))
-    if action_mode in {"discrete_26", "vector_3"}:
-        return max(deltas)
-    raise ValueError(f"unsupported action mode for waypoint route: {action_mode!r}")
 
 
 def segment_lengths(total_distance: int, segment_distance: int) -> tuple[int, ...]:

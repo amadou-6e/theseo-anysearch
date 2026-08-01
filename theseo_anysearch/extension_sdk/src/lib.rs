@@ -28,6 +28,8 @@ pub struct RewardContextV1 {
     pub previous_goal_distance: f64,
     pub goal_distance: f64,
     pub standard_reward: f64,
+    pub segment_step: u64,
+    pub segment_length: u64,
 }
 
 #[repr(C)]
@@ -63,6 +65,8 @@ pub struct RewardContext {
     pub previous_goal_distance: f64,
     pub goal_distance: f64,
     pub standard_reward: f64,
+    pub segment_step: u64,
+    pub segment_length: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,6 +131,8 @@ impl From<&RewardContextV1> for RewardContext {
             previous_goal_distance: value.previous_goal_distance,
             goal_distance: value.goal_distance,
             standard_reward: value.standard_reward,
+            segment_step: value.segment_step,
+            segment_length: value.segment_length,
         }
     }
 }
@@ -221,6 +227,8 @@ mod tests {
             previous_goal_distance: 7.0,
             goal_distance: 7.0,
             standard_reward: -0.01,
+            segment_step: 3,
+            segment_length: 7,
         };
         let mut result: RewardResultV1 = unsafe { std::mem::zeroed() };
 

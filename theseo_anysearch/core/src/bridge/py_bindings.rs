@@ -1098,13 +1098,24 @@ impl PyVoxelEnv {
 
     /// Fix start and goal positions for all subsequent episodes.
     /// Overrides random surface-cell selection.
-    pub fn set_waypoints(&mut self, start: (u16, u16, u16), goal: (u16, u16, u16)) {
-        self.inner.set_waypoints(start, goal);
+    #[pyo3(signature = (start, goal, segment_length=None))]
+    pub fn set_waypoints(
+        &mut self,
+        start: (u16, u16, u16),
+        goal: (u16, u16, u16),
+        segment_length: Option<u32>,
+    ) {
+        self.inner.set_waypoints_with_segment_length(start, goal, segment_length.unwrap_or(0));
     }
 
     /// Replace the active goal while preserving the current episode state.
-    pub fn set_goal(&mut self, goal: (u16, u16, u16)) -> PyVoxelObservation {
-        let obs = self.inner.set_active_goal(goal);
+    #[pyo3(signature = (goal, segment_length=None))]
+    pub fn set_goal(
+        &mut self,
+        goal: (u16, u16, u16),
+        segment_length: Option<u32>,
+    ) -> PyVoxelObservation {
+        let obs = self.inner.set_active_goal_with_segment_length(goal, segment_length.unwrap_or(0));
         self.to_py_observation(obs)
     }
 

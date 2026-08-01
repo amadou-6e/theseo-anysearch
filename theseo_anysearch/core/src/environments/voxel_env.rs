@@ -149,6 +149,8 @@ pub struct VoxelEnv {
     trail_mode: bool,
     max_steps: u32,
     steps: u32,
+    segment_steps: u32,
+    segment_length: u32,
     /// Side length of the cubic grid (coords in [1, grid_size]³). Default 32.
     pub grid_size: u16,
     // --- Navigation state ---
@@ -197,6 +199,8 @@ impl VoxelEnv {
             trail_mode: false,
             max_steps,
             steps: 0,
+            segment_steps: 0,
+            segment_length: 0,
             grid_size: 32,
             cursor: (1, 1, 1),
             fixed_start: None,
@@ -328,8 +332,19 @@ impl VoxelEnv {
     pub fn last_construction_overshoot(&self) -> usize { self.last_construction_overshoot }
     /// Fix start and goal positions (overrides random selection on reset).
     pub fn set_waypoints(&mut self, start: Coord, goal: Coord) {
+        self.set_waypoints_with_segment_length(start, goal, 0);
+    }
+
+    pub fn set_waypoints_with_segment_length(
+        &mut self,
+        start: Coord,
+        goal: Coord,
+        segment_length: u32,
+    ) {
         self.fixed_start = Some(start);
         self.fixed_goal = Some(goal);
+        self.segment_steps = 0;
+        self.segment_length = segment_length;
     }
 
     /// Clear fixed waypoints so random selection resumes.
@@ -361,7 +376,17 @@ impl VoxelEnv {
 
     /// Replace the active goal without resetting cursor, trail, or step count.
     pub fn set_active_goal(&mut self, goal: Coord) -> VoxelObservation {
+        self.set_active_goal_with_segment_length(goal, 0)
+    }
+
+    pub fn set_active_goal_with_segment_length(
+        &mut self,
+        goal: Coord,
+        segment_length: u32,
+    ) -> VoxelObservation {
         self.active_goal = Some(goal);
+        self.segment_steps = 0;
+        self.segment_length = segment_length;
         self.prev_goal_dist_l2 = l2(self.cursor, goal);
         let _ = self.world.set_block(
             goal,
@@ -529,6 +554,7 @@ impl Environment for VoxelEnv {
 
     fn reset(&mut self, seed: u64) -> Self::Observation {
         self.steps = 0;
+        self.segment_steps = 0;
         self.consecutive_collisions = 0;
         self.last_reward_breakdown.clear();
         self.last_collision = false;
@@ -624,6 +650,7 @@ impl Environment for VoxelEnv {
     fn step(&mut self, action: Self::Action) -> StepResult<Self::Observation> {
         let is_collision = matches!(action, VoxelAction::Collision);
         self.steps += 1;
+        self.segment_steps += 1;
         if is_collision {
             self.consecutive_collisions += 1;
         } else {
@@ -751,6 +778,8 @@ impl Environment for VoxelEnv {
             previous_goal_distance: f64::from(self.prev_goal_dist_l2),
             goal_distance: f64::from(new_l2),
             standard_reward: f64::from(standard_reward),
+            segment_step: u64::from(self.segment_steps),
+            segment_length: u64::from(self.segment_length),
         };
         let reward = if let Some(extension) = &self.native_reward {
             match extension.compute(&context, &breakdown) {
