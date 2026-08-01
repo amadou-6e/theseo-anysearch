@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import WaypointCurriculumConfig
+from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample_route
 
 Waypoint = tuple[int, int, int]
 
@@ -23,6 +24,7 @@ class WaypointTransition(BaseModel):
     to_stage: int
     start: Waypoint
     goal: Waypoint
+    waypoints: tuple[Waypoint, ...] = ()
     trigger: str
 
 
@@ -41,6 +43,7 @@ class WaypointCurriculumState(BaseModel):
     stage: int = 0
     start: Waypoint
     goal: Waypoint
+    waypoints: tuple[Waypoint, ...] = ()
     successes_in_stage: int = 0
     transitions: list[WaypointTransition] = Field(default_factory=list)
     stage_evaluations: dict[int, WaypointStageEvaluation] = Field(default_factory=dict)
@@ -54,17 +57,32 @@ def waypoint_distance(start: Waypoint, goal: Waypoint) -> float:
 class WaypointCurriculum:
     """Decide curriculum transitions from deterministic evaluation results."""
 
-    def __init__(self, config: WaypointCurriculumConfig) -> None:
-        if config.initial_start is None or config.initial_goal is None:
-            raise ValueError("waypoint curriculum requires an initial waypoint pair")
+    def __init__(self, config: WaypointCurriculumConfig, env_config: dict[str, Any] | None = None) -> None:
+        if config.initial_start is None:
+            raise ValueError("waypoint curriculum requires an initial start")
         self.config = config
-        self.state = WaypointCurriculumState(
-            start=config.initial_start,
-            goal=config.initial_goal,
-        )
+        self._initial_route: WaypointRoute | None = None
+        if config.completion_mode == "continue_route":
+            if env_config is None:
+                raise ValueError("continue_route curriculum requires environment settings")
+            self._initial_route = self._sample_route(env_config, stage=0)
+            self.state = WaypointCurriculumState(
+                start=self._initial_route.start,
+                goal=self._initial_route.goal,
+                waypoints=self._initial_route.waypoints,
+            )
+        else:
+            if config.initial_goal is None:
+                raise ValueError("waypoint curriculum requires an initial waypoint pair")
+            self.state = WaypointCurriculumState(start=config.initial_start, goal=config.initial_goal)
 
-    def stages(self) -> list[tuple[Waypoint, Waypoint]]:
+    def stages(self) -> list[Any]:
         """Return the initial stage followed by every visited stage."""
+        if self._initial_route is not None:
+            return [self._initial_route.model_dump(mode="python")] + [
+                {"start": transition.start, "waypoints": transition.waypoints}
+                for transition in self.state.transitions
+            ]
         initial = (self.config.initial_start, self.config.initial_goal)
         assert initial[0] is not None and initial[1] is not None
         return [(initial[0], initial[1])] + [
@@ -170,6 +188,53 @@ class WaypointCurriculum:
             maximum,
         )
 
+    def _sample_route(self, env_config: dict[str, Any], stage: int) -> WaypointRoute:
+        self._require_empty_geometry(env_config)
+        difficulty = self.config.difficulty
+        assert difficulty.initial_distance is not None
+        assert self.config.route_length is not None
+        segment_distance = int(min(
+            difficulty.initial_distance + difficulty.distance_increment * stage,
+            difficulty.maximum_distance or math.inf,
+        ))
+        return sample_route(
+            start=self.config.initial_start,
+            total_distance=self.config.route_length.resolve(int(env_config.get("max_steps", 200))),
+            segment_distance=segment_distance,
+            grid_size=int(env_config.get("grid_size", 32)),
+            action_mode=str(env_config.get("action_mode", "discrete_26")),
+            seed=self.config.seed + stage,
+        )
+
+    def sample_stage(self, env_config: dict[str, Any]) -> WaypointRoute | tuple[Waypoint, Waypoint]:
+        if self.config.completion_mode == "continue_route":
+            return self._sample_route(env_config, self.state.stage + 1)
+        return self.sample(env_config)
+
+    def advance_stage(
+        self,
+        iteration: int,
+        stage: WaypointRoute | tuple[Waypoint, Waypoint],
+    ) -> WaypointTransition:
+        if not isinstance(stage, WaypointRoute):
+            return self.advance(iteration, *stage)
+        previous_stage = self.state.stage
+        transition = WaypointTransition(
+            iteration=iteration,
+            from_stage=previous_stage,
+            to_stage=previous_stage + 1,
+            start=stage.start,
+            goal=stage.goal,
+            waypoints=stage.waypoints,
+            trigger=self.config.advance.mode,
+        )
+        self.state.stage += 1
+        self.state.start = stage.start
+        self.state.goal = stage.goal
+        self.state.waypoints = stage.waypoints
+        self.state.successes_in_stage = 0
+        self.state.transitions.append(transition)
+        return transition
     def sample(self, env_config: dict[str, Any]) -> tuple[Waypoint, Waypoint]:
         """Sample the next valid pair using the configured difficulty strategy."""
         if self.config.difficulty.mode == "monotonic_distance":
