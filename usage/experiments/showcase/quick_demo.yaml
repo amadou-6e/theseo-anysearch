@@ -11,7 +11,10 @@ env:
   max_steps: 50
 
   rewards:
-    custom: quick_demo
+    custom:
+      name: quick_demo
+      parameters:
+        diagonal_penalty_per_extra_axis: -0.005
 
   geometry:
     stl_path: usage/geometries/cube.stl

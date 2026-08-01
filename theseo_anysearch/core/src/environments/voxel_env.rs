@@ -1,6 +1,6 @@
 use crate::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
 
-use super::native_reward::{NativeRewardExtension, RewardContextV1, ABI_VERSION};
+use super::native_reward::{NativeRewardExtension, RewardContextV2, ABI_VERSION};
 use super::traits::{Environment, StepResult};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -283,8 +283,17 @@ impl VoxelEnv {
         self
     }
 
-    pub fn with_native_reward(mut self, path: &Path, name: &str) -> Result<Self, String> {
-        self.native_reward = Some(NativeRewardExtension::load(path, name)?);
+    pub fn with_native_reward(
+        mut self,
+        path: &Path,
+        name: &str,
+        parameters_json: String,
+    ) -> Result<Self, String> {
+        self.native_reward = Some(NativeRewardExtension::load(
+            path,
+            name,
+            parameters_json,
+        )?);
         Ok(self)
     }
 
@@ -709,9 +718,9 @@ impl Environment for VoxelEnv {
             .is_some_and(|limit| self.consecutive_collisions >= limit);
         let terminated = (goal_reached && self.terminate_on_success) || collision_terminated;
         let truncated = self.steps >= self.max_steps && !terminated;
-        let context = RewardContextV1 {
+        let context = RewardContextV2 {
             abi_version: ABI_VERSION,
-            struct_size: std::mem::size_of::<RewardContextV1>() as u32,
+            struct_size: std::mem::size_of::<RewardContextV2>() as u32,
             step: u64::from(self.steps),
             action_index: self.pending_action_index,
             previous_cursor: coord_to_i32(self.pending_previous_cursor),
@@ -727,9 +736,11 @@ impl Environment for VoxelEnv {
             previous_goal_distance: f64::from(self.prev_goal_dist_l2),
             goal_distance: f64::from(new_l2),
             standard_reward: f64::from(standard_reward),
+            parameters_json: std::ptr::null(),
+            parameters_json_len: 0,
         };
         let reward = if let Some(extension) = &self.native_reward {
-            match extension.compute(&context, &breakdown) {
+            match extension.compute(context, &breakdown) {
                 Ok((reward, native_breakdown)) => {
                     breakdown = native_breakdown;
                     reward

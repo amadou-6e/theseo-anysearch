@@ -2,7 +2,7 @@ mod rewards;
 
 use std::ptr;
 
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 const REWARD: u64 = 1;
 const TRAINING_METRICS: u64 = 2;
 const EVALUATION_METRICS: u64 = 4;

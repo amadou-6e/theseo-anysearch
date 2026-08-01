@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 anysearch-extension-macros = { path = "macros" }
+serde_json = "1"

@@ -22,7 +22,12 @@ def test_compile_load_execute_in_core_and_archive_native_extension(tmp_path: Pat
     experiment = tmp_path.joinpath("experiment")
     extension = experiment.joinpath("extension")
     shutil.copytree(source, extension)
-    experiment.joinpath("experiment.yaml").write_text("experiment: {}\nenv:\n  rewards:\n    custom: native_collision\n", encoding="utf-8")
+    experiment.joinpath("experiment.yaml").write_text(
+        "experiment: {}\nenv:\n  rewards:\n    custom:\n"
+        "      name: native_collision\n      parameters:\n"
+        "        collision_penalty: -0.125\n",
+        encoding="utf-8",
+    )
 
     manifest_path = compile_native_extension(experiment)
     loaded = NativeExtension.load(manifest_path)
@@ -36,12 +41,31 @@ def test_compile_load_execute_in_core_and_archive_native_extension(tmp_path: Pat
         reward_overrides={
             "native_extension_manifest": str(manifest_path),
             "custom_reward": "native_collision",
+            "custom_reward_parameters": {"collision_penalty": -0.125},
         },
     )
     env.reset(seed=0)
     _, reward, _, _, info = env.step(ACTION_MINUS_X)
-    assert info["reward_breakdown"]["native_collision"] == pytest.approx(-0.02)
+    assert info["reward_breakdown"]["native_collision"] == pytest.approx(-0.125)
     assert reward == pytest.approx(sum(info["reward_breakdown"].values()))
+
+    second_env = make_radial_test_env(
+        tmp_path.joinpath("second_env"),
+        start=(1, 1, 1),
+        goal=(3, 1, 1),
+        reward_overrides={
+            "native_extension_manifest": str(manifest_path),
+            "custom_reward": "native_collision",
+            "custom_reward_parameters": {"collision_penalty": -0.5},
+        },
+    )
+    second_env.reset(seed=0)
+    _, second_reward, _, _, second_info = second_env.step(ACTION_MINUS_X)
+    assert second_info["reward_breakdown"]["native_collision"] == pytest.approx(-0.5)
+    assert second_reward == pytest.approx(
+        sum(second_info["reward_breakdown"].values())
+    )
+    assert info["reward_breakdown"]["native_collision"] == pytest.approx(-0.125)
 
     archived = copy_native_extension(
         experiment.joinpath("experiment.yaml"), tmp_path.joinpath("run")

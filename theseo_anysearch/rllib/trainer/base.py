@@ -345,7 +345,7 @@ class Trainer(ABC):
         reward_source = self._output_dir.joinpath("rewards.py")
         reward_provider = load_reward_provider(
             reward_source if reward_source.is_file() else None,
-            config.env.rewards.custom,
+            config.env.rewards.custom.name if config.env.rewards.custom else None,
         )
         write_reward_manifest(reward_provider, self._output_dir)
         from theseo_anysearch.experiments.native_extensions import NativeExtension

@@ -911,7 +911,12 @@ class TuneRunner:
         )
 
         reward_source = discover_reward_source(
-            self._config_path, self._config.env.rewards.custom
+            self._config_path,
+            (
+                self._config.env.rewards.custom.name
+                if self._config.env.rewards.custom
+                else None
+            ),
         )
         reward_source_content = (
             reward_source.read_text(encoding="utf-8")

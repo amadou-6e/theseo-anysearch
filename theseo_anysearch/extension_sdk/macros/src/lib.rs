@@ -15,7 +15,7 @@ pub fn anysearch_reward(arguments: TokenStream, item: TokenStream) -> TokenStrea
 
     let function = parse_macro_input!(item as ItemFn);
     let function_name = &function.sig.ident;
-    let export_name = format_ident!("anysearch_reward_{}_v1", function_name);
+    let export_name = format_ident!("anysearch_reward_{}_v2", function_name);
 
     quote! {
         #function
@@ -23,10 +23,10 @@ pub fn anysearch_reward(arguments: TokenStream, item: TokenStream) -> TokenStrea
         #[doc(hidden)]
         #[no_mangle]
         pub unsafe extern "C" fn #export_name(
-            context: *const ::anysearch_extension::RewardContextV1,
-            result: *mut ::anysearch_extension::RewardResultV1,
+            context: *const ::anysearch_extension::RewardContextV2,
+            result: *mut ::anysearch_extension::RewardResultV2,
         ) -> i32 {
-            ::anysearch_extension::export_reward_v1(context, result, #function_name)
+            ::anysearch_extension::export_reward_v2(context, result, #function_name)
         }
     }
     .into()
