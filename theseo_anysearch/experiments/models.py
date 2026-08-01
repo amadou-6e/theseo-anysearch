@@ -250,7 +250,9 @@ class TuneConfig(BaseModel):
     # FileNotFoundError that Ray raises when it cannot create those files.
     # Both default to the system temp dir; override only if you see that error.
     ray_storage_dir: Path | None = None  # where Ray Tune writes driver_artifacts & search state
-    ray_temp_dir: Path | None = None     # where Ray writes session temp files (actor logs, etc.)
+    ray_temp_dir: Path | None = None
+    ray_address: str | None = None
+    shutdown_ray_on_complete: bool | None = None     # where Ray writes session temp files (actor logs, etc.)
 
 
 # ---------------------------------------------------------------------------
