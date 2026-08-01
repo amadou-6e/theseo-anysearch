@@ -41,3 +41,12 @@ anysearch = "theseo_anysearch.cli.main:app"
 
 [tool.setuptools.packages.find]
 include = ["theseo_anysearch*"]
+
+[tool.setuptools.package-data]
+theseo_anysearch = [
+  "extension_sdk/Cargo.toml",
+  "extension_sdk/Cargo.lock",
+  "extension_sdk/src/*.rs",
+  "extension_sdk/macros/Cargo.toml",
+  "extension_sdk/macros/src/*.rs",
+]

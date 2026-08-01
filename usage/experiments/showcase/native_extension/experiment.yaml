@@ -1,0 +1,52 @@
+description: >
+  Demonstrates a runnable empty-grid PPO experiment using an experiment-local
+  compiled Rust reward and training/evaluation metric extension.
+
+experiment:
+  name: native-extension-demo
+  output_dir: runtime/native_extension_demo
+  seed: 42
+
+env:
+  waypoints_file: usage/experiments/showcase/native_extension/waypoints.json
+  max_steps: 50
+  seed: 42
+  agent_count: 1
+  trail_mode: false
+  geometry:
+    grid_size: 32
+  observation:
+    mode: box
+    box_radius: 1
+  action:
+    mode: discrete_18
+  rewards:
+    custom: native_collision
+    step_cost: -0.01
+    collision_cost: 0.0
+    goal_reward: 1.0
+    distance_shaping: 0.05
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  require_gpu: false
+  num_env_runners: 1
+  trajectory_every: 1
+
+evaluation:
+  episodes: 2
+  seed: 42
+  num_env_runners: 1
+
+algorithm_config:
+  lr: 0.001
+  train_batch_size: 512
+  minibatch_size: 128
+  num_sgd_iter: 4
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu

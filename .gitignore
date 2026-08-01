@@ -41,6 +41,7 @@ experiments/mlflow.db
 
 # Rust / Cargo
 theseo_anysearch/core/target/
+theseo_anysearch/extension_sdk/target/
 
 # Maturin build output
 *.pyi
@@ -73,3 +74,6 @@ usage/maps/
 # Secrets / env files
 .env
 *.env
+
+# Experiment-local Rust extension build outputs
+**/extension/target/

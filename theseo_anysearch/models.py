@@ -190,6 +190,7 @@ class RewardConfig(BaseModel):
     invalid_action_cost: float = 0.0
     construction_residual_weight: float = Field(default=0.0, ge=0.0)
     construction_overshoot_weight: float = Field(default=0.0, ge=0.0)
+    custom: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     @model_validator(mode="after")
     def validate_zone_rewards(self) -> "RewardConfig":
@@ -338,6 +339,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "invalid_action_cost": self.rewards__invalid_action_cost,
             "construction_residual_weight": self.rewards__construction_residual_weight,
             "construction_overshoot_weight": self.rewards__construction_overshoot_weight,
+            "custom_reward": self.rewards__custom,
             "task": self.task.model_dump(mode="json"),
         }
 

@@ -1,11 +1,12 @@
 description: >
-  Runs a 20-trial PPO curriculum search on an empty grid. Each stage is an
+  Runs a 20-trial PPO curriculum search on an empty grid with a native sparse
+  countdown reward. Each stage is an
   ordered route whose exact optimal action-step length is 75% of max_steps.
   Segment distance increases by two only when evaluation advances the stage;
   the final segment carries any residual needed to preserve exact route length.
 
 experiment:
-  name: ppo-empty-grid-discrete18-waypoint-route-curriculum
+  name: ppo-empty-grid-discrete18-waypoint-route-decay
   output_dir: runtime/tune
   seed: 42
 
@@ -25,11 +26,15 @@ env:
   action:
     mode: discrete_18
   rewards:
-    step_cost: -0.05
-    collision_cost: -0.1
-    goal_reward: 1.0
-    distance_shaping: 0.05
+    step_cost: 0.0
+    collision_cost: 0.0
+    goal_reward: 150.0
+    distance_shaping: 0.0
     distance_reward_mode: progress
+    invalid_action_cost: 0.0
+    construction_residual_weight: 0.0
+    construction_overshoot_weight: 0.0
+    custom: time_decayed_goal
   waypoint_curriculum:
     enabled: true
     completion_mode: continue_route
