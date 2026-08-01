@@ -142,6 +142,7 @@ pub struct VoxelEnv {
     /// Fixed obstacle geometry — restored on every reset.
     geometry: Vec<Coord>,
     geometry_len: usize,
+    agent_filled_count: usize,
     /// Cells 6-adjacent to geometry but not in geometry — valid start/goal positions.
     surface_cells: Vec<Coord>,
     /// When true, movement actions auto-fill the destination cell.
@@ -191,6 +192,7 @@ impl VoxelEnv {
             world,
             geometry: Vec::new(),
             geometry_len: 0,
+            agent_filled_count: 0,
             surface_cells: Vec::new(),
             trail_mode: false,
             max_steps,
@@ -386,14 +388,7 @@ impl VoxelEnv {
     }
 
     fn agent_filled(&self) -> usize {
-        self.world
-            .iter_filled()
-            .filter(|&&coord| {
-                self.world
-                    .get_block(coord)
-                    .is_some_and(|block| block.active && block.reward_weight > 0.0)
-            })
-            .count()
+        self.agent_filled_count
     }
 
     /// Replace geometry in-place without reinstantiating the env.
@@ -402,6 +397,7 @@ impl VoxelEnv {
     /// after set_geometry() to start a new episode.
     pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
         self.world.clear();
+        self.agent_filled_count = 0;
         for &coord in &geometry {
             let _ = self.world.set_block(
                 coord,
@@ -545,6 +541,7 @@ impl Environment for VoxelEnv {
         self.last_construction_residual = 0;
         self.last_construction_overshoot = 0;
         self.world.clear();
+        self.agent_filled_count = 0;
         for &coord in &self.geometry {
             let _ = self.world.set_block(
                 coord,
@@ -635,10 +632,22 @@ impl Environment for VoxelEnv {
 
         match action {
             VoxelAction::Place(coord) => {
+                let was_agent_filled = self.world.get_block(coord).is_some_and(|block| {
+                    block.active && block.reward_weight > 0.0
+                });
                 let _ = self.world.set_block(coord, Block::default());
+                if !was_agent_filled {
+                    self.agent_filled_count += 1;
+                }
             }
             VoxelAction::Remove(coord) => {
+                let was_agent_filled = self.world.get_block(coord).is_some_and(|block| {
+                    block.active && block.reward_weight > 0.0
+                });
                 let _ = self.world.remove_block(coord);
+                if was_agent_filled {
+                    self.agent_filled_count = self.agent_filled_count.saturating_sub(1);
+                }
             }
             VoxelAction::Noop | VoxelAction::Collision => {}
         };
@@ -668,21 +677,18 @@ impl Environment for VoxelEnv {
             self.reward_config.zone_reward(new_l2, self.grid_size)
         };
 
-        let filled: HashSet<Coord> = self
-            .world
-            .iter_filled()
-            .copied()
-            .filter(|coord| {
+        let (residual, overshoot) = if self.construction_target.is_empty() {
+            (0, 0)
+        } else {
+            let filled: HashSet<Coord> = self.world.iter_filled().copied().filter(|coord| {
                 self.world.get_block(*coord).is_some_and(|block| {
                     block.active && block.reward_weight > 0.0
                 })
-            })
-            .collect();
-        let residual = self.construction_target.difference(&filled).count();
-        let overshoot = if self.construction_target.is_empty() {
-            0
-        } else {
-            filled.difference(&self.construction_target).count()
+            }).collect();
+            (
+                self.construction_target.difference(&filled).count(),
+                filled.difference(&self.construction_target).count(),
+            )
         };
         let mut breakdown = HashMap::from([
             ("step_cost".to_owned(), step_cost),
