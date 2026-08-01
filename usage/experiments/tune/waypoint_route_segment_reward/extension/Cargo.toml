@@ -1,5 +1,5 @@
 [package]
-name = "anysearch_waypoint_route_decay"
+name = "anysearch_waypoint_route_segment_reward"
 version = "0.1.0"
 edition = "2021"
 
