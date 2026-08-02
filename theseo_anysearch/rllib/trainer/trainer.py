@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from abc import abstractmethod
 from pathlib import Path
@@ -11,6 +10,12 @@ from typing import ClassVar
 
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.trainer.base import BaseTrainer
+from theseo_anysearch.rllib.trainer.checkpointing import (
+    CheckpointManager,
+    CheckpointState,
+)
+from theseo_anysearch.rllib.trainer.evaluation_coordinator import EvaluationCoordinator
+from theseo_anysearch.rllib.trainer.metrics import TrainingMetricCoordinator
 from theseo_anysearch.rllib.trainer.reporting import _TensorBoardRunWriter
 from theseo_anysearch.rllib.trainer.results import RllibTrainResult, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import (
@@ -22,18 +27,19 @@ from theseo_anysearch.rllib.trainer.runtime import (
 
 
 class Trainer(BaseTrainer):
+    """Coordinate one configured RLlib training run.
+
+    Parameters
+    ----------
+    config : Settings
+        Validated experiment settings.
+
+    Notes
+    -----
+    Subclasses provide algorithm construction. Evaluation, metrics,
+    reporting, runtime setup, and checkpoint persistence are delegated to
+    focused collaborators.
     """
-    Project-level wrapper around a Ray RLlib Algorithm.
-
-    Subclasses implement _build_algorithm() to construct and return a
-    configured ray.rllib.algorithms.Algorithm instance.  This base class
-    handles the iteration loop, checkpointing, restore, and resume on top
-    of whatever RLlib trainer is provided.
-
-    For unit tests, _build_algorithm() can return any object that exposes
-    .train() → dict, .save(path: str) → Any, .restore(path: str) → None.
-    """
-
     algorithm_name: ClassVar[str | None] = None
     _registry: ClassVar[dict[str, type["Trainer"]]] = {}
 
@@ -48,6 +54,7 @@ class Trainer(BaseTrainer):
         self._iteration: int = 0
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
+        self._checkpoints = CheckpointManager(self._output_dir)
         from theseo_anysearch.experiments.custom_metrics import (
             load_metric_providers,
             write_metric_manifest,
@@ -121,10 +128,22 @@ class Trainer(BaseTrainer):
     # ------------------------------------------------------------------
 
     def on_iteration_end(self, result: TrainResult) -> None:
-        """Called after every training iteration. Override to add callbacks."""
+        """Handle a completed training iteration.
+
+        Parameters
+        ----------
+        result : TrainResult
+            Completed normalized training result.
+        """
 
     def _env_config_dict(self) -> dict:
-        """Build the env config dict passed to VoxelEnv / MultiVoxelEnv."""
+        """Build the runtime environment configuration.
+
+        Returns
+        -------
+        dict
+            Configuration passed to the registered environment.
+        """
         env = self._config.env
         runtime = env.to_runtime_dict()
         runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
@@ -148,9 +167,12 @@ class Trainer(BaseTrainer):
     # ------------------------------------------------------------------
 
     def train(self) -> list[TrainResult]:
-        """
-        Run the training loop for config.training.iterations steps.
-        Returns a list of TrainResult, one per iteration.
+        """Run the configured training loop.
+
+        Returns
+        -------
+        list[TrainResult]
+            One normalized result per completed training iteration.
         """
         import warnings
 
@@ -169,28 +191,24 @@ class Trainer(BaseTrainer):
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
-        evaluation_episodes = evaluation.episodes
         _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
         _env_cfg = self._env_config_dict()
 
         from theseo_anysearch.experiments.output import OutputStore
-        from theseo_anysearch.experiments.trajectory import EpisodeRunMetrics
-        from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
         from theseo_anysearch.experiments.custom_metrics import (
             CustomMetricError,
-            EvaluationContext,
-            TrainingContext,
-            compute_custom_metrics,
-            merge_custom_metrics,
         )
 
+        training_metrics = TrainingMetricCoordinator(
+            self._metric_providers,
+            self._native_extension,
+            _env_cfg,
+        )
         _store = OutputStore(self._output_dir)
         from theseo_anysearch.rllib.trainer.early_stop import (
             EarlyStopState,
             TrainingEarlyStopController,
-            heuristic_action_accuracy,
-            heuristic_action_distance,
         )
         early_stop_config = training.early_stop
         early_stop_state = (
@@ -209,8 +227,23 @@ class Trainer(BaseTrainer):
 
             _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
             _traj_writer = _Writer(_store, traj_every, best_traj)
-            _run_id = self._output_dir.name
-            _exp_name = self._output_dir.parent.name
+
+        evaluation_coordinator = EvaluationCoordinator(
+            evaluation=evaluation,
+            early_stop_config=early_stop_config,
+            early_stop_controller=early_stop_controller,
+            metric_providers=self._metric_providers,
+            native_extension=self._native_extension,
+            env_config=_env_cfg,
+            output_dir=self._output_dir,
+            output_store=_store,
+            tensorboard_writer=tb_writer,
+            trajectory_writer=_traj_writer,
+            checkpoint=self.checkpoint,
+            multi_agent=_is_multi,
+            experiment_name=self._output_dir.parent.name,
+            run_id=self._output_dir.name,
+        )
 
         try:
             for i in range(self._iteration, training.iterations):
@@ -248,237 +281,17 @@ class Trainer(BaseTrainer):
                 early_stop_triggered = False
                 early_stop_decision = None
                 try:
-                    _log_trainer_stage(
-                        f"Collecting {evaluation_episodes} deterministic evaluation "
-                        f"episodes for iteration {self._iteration}"
-                    )
-                    _append_trainer_stage_log(
-                        self._output_dir,
-                        f"Collecting deterministic evaluation batch for iteration "
-                        f"{self._iteration}",
-                    )
-                    evaluation_seed = evaluation.seed
-                    from theseo_anysearch.rllib.trainer.parallel_evaluation import (
-                        collect_rllib_evaluation_episodes,
-                    )
-
-                    episodes = collect_rllib_evaluation_episodes(
+                    evaluation_outcome = evaluation_coordinator.evaluate(
                         self._algo,
-                        _env_cfg,
-                        evaluation_episodes,
-                        seed=evaluation_seed,
-                        multi_agent=_is_multi,
-                        num_envs_per_env_runner=evaluation.num_envs_per_env_runner,
-                    )
-                    metrics_factory = (
-                        EpisodeRunMetrics.from_multi_voxel_episodes
-                        if _is_multi
-                        else EpisodeRunMetrics.from_voxel_episodes
-                    )
-                    metrics = metrics_factory(episodes)
-
-                    evaluation_reward_mean = sum(
-                        episode.total_reward for episode in episodes
-                    ) / len(episodes)
-                    evaluation_len_mean = sum(
-                        len(episode.steps) for episode in episodes
-                    ) / len(episodes)
-                    evaluation_factory = (
-                        EvaluationMetrics.from_multi_voxel_episodes
-                        if _is_multi
-                        else EvaluationMetrics.from_voxel_episodes
-                    )
-                    success_metrics = evaluation_factory(
-                        episodes,
-                        _env_cfg,
-                        min_success_rate=evaluation.min_success_rate,
-                    )
-                    standardized = success_metrics.scalar_metrics()
-                    evaluation_context = EvaluationContext(
-                        iteration=self._iteration,
-                        episodes=tuple(episodes),
-                        standard_metrics={
-                            **result.standard_metrics(), **standardized,
-                            **metrics.as_scalar_dict(),
-                            "evaluation_reward_mean": evaluation_reward_mean,
-                            "evaluation_len_mean": evaluation_len_mean,
-                        },
-                        env_config=dict(_env_cfg),
-                        final_infos=tuple(
-                            dict(getattr(episode, "final_info", None) or {})
-                            for episode in episodes
-                        ),
-                    )
-                    evaluation_reserved = (
-                        set(result.standard_metrics()) | set(standardized)
-                        | set(metrics.as_scalar_dict())
-                        | {"evaluation_reward_mean", "evaluation_len_mean"}
-                    )
-                    from theseo_anysearch.experiments.native_extensions import (
-                        CAP_EVALUATION_METRICS,
-                        validate_native_metrics,
-                    )
-
-                    native_has_evaluation = (
-                        self._native_extension is not None
-                        and self._native_extension.capabilities & CAP_EVALUATION_METRICS
-                    )
-                    native_raw = (
-                        self._native_extension.compute_metrics(
-                            "evaluation",
-                            {
-                                "iteration": evaluation_context.iteration,
-                                "standard_metrics": evaluation_context.standard_metrics,
-                                "env_config": evaluation_context.env_config,
-                                "final_infos": evaluation_context.final_infos,
-                            },
-                        )
-                        if native_has_evaluation else {}
-                    )
-                    python_evaluation_custom = compute_custom_metrics(
-                        self._metric_providers.evaluation, evaluation_context,
-                        reserved_names=evaluation_reserved,
-                    )
-                    native_evaluation_custom = (
-                        validate_native_metrics(
-                            "evaluation", native_raw,
-                            reserved_names=evaluation_reserved,
-                        )
-                        if native_has_evaluation else {}
-                    )
-                    evaluation_custom = merge_custom_metrics(
-                        python_evaluation_custom, native_evaluation_custom
-                    )
-                    heuristic_accuracy = None
-                    heuristic_distance = None
-                    heuristic_compared_states = 0
-                    if early_stop_config.enabled and early_stop_config.mode in {
-                        "heuristic_accuracy", "heuristic_distance"
-                    }:
-                        from theseo_anysearch.experiments.trajectory import collect_heuristic_episode
-
-                        heuristic_episodes = [
-                            collect_heuristic_episode(
-                                _env_cfg,
-                                early_stop_config.heuristic_type,
-                                weight=early_stop_config.heuristic_weight,
-                                seed=evaluation_seed + episode_index,
-                            )
-                            for episode_index in range(evaluation_episodes)
-                        ]
-                        if early_stop_config.mode == "heuristic_accuracy":
-                            heuristic_accuracy, heuristic_compared_states = heuristic_action_accuracy(
-                                episodes, heuristic_episodes
-                            )
-                        else:
-                            heuristic_distance, heuristic_compared_states = heuristic_action_distance(
-                                episodes,
-                                heuristic_episodes,
-                                metric=early_stop_config.heuristic_distance_metric,
-                            )
-                    early_stop_decision = early_stop_controller.evaluate(
                         self._iteration,
-                        reward_mean=evaluation_reward_mean,
-                        goal_finishes=metrics.finish_count,
-                        heuristic_accuracy=heuristic_accuracy,
-                        heuristic_distance=heuristic_distance,
+                        result,
+                        is_last_iteration=_is_last_iter,
                     )
-                    early_stop_triggered = early_stop_decision.triggered
-                    if early_stop_config.enabled:
-                        _store.write_json(
-                            "early_stop_state.json",
-                            early_stop_controller.state.model_dump(),
-                        )
-                    result = result.model_copy(
-                        update={
-                            "evaluation_episodes": len(episodes),
-                            "evaluation_goals_reached": metrics.finish_count,
-                            "evaluation_success_rate": metrics.finish_rate,
-                            "evaluation_status": success_metrics.status,
-
-                            "extra": {
-                                **result.extra,
-                                "evaluation_reward_mean": evaluation_reward_mean,
-                                "evaluation_len_mean": evaluation_len_mean,
-                                **standardized,
-                                **metrics.as_scalar_dict(),
-                                **evaluation_custom,
-                                "evaluation_heuristic_accuracy": heuristic_accuracy,
-                                "evaluation_heuristic_distance": heuristic_distance,
-                                "evaluation_heuristic_compared_states": heuristic_compared_states,
-                                "early_stop_consecutive_matches": early_stop_decision.consecutive_matches,
-                                "early_stop_triggered": early_stop_triggered,
-                            },
-                        }
-                    )
-                    scalar_metrics = {
-                        **metrics.as_scalar_dict(),
-                        **success_metrics.tensorboard_metrics(),
-                        **{
-                            f"eval/custom/{key.removeprefix('evaluation_')}": value
-                            for key, value in evaluation_custom.items()
-                        },
-
-                        "eval/reward_mean": evaluation_reward_mean,
-                        "eval/episode_len_mean": evaluation_len_mean,
-                    }
-                    tb_writer.log_scalars(self._iteration, scalar_metrics)
-                    _store.write_json(
-                        f"evaluation/iter_{self._iteration:06d}.json",
-                        {
-                            "iteration": self._iteration,
-                            "seed_start": evaluation_seed,
-                            "episode_count": len(episodes),
-                            "num_env_runners": evaluation.num_env_runners,
-                            "num_envs_per_env_runner": evaluation.num_envs_per_env_runner,
-                            "max_evaluation_concurrency": min(
-                                evaluation_episodes,
-                                max(evaluation.num_env_runners, 1)
-                                * evaluation.num_envs_per_env_runner,
-                            ),
-                            "goals_reached": metrics.finish_count,
-                            "success_rate": metrics.finish_rate,
-                            "reward_mean": evaluation_reward_mean,
-                            "episode_len_mean": evaluation_len_mean,
-                            "status": result.evaluation_status,
-                            "minimum_success_rate": evaluation.min_success_rate,
-                            "summary": success_metrics.model_dump(),
-
-                            "metrics": scalar_metrics,
-                            "early_stop": (
-                                early_stop_decision.model_dump()
-                                if early_stop_config.enabled
-                                else None
-                            ),
-                            "episodes": [
-                                {
-                                    "seed": evaluation_seed + episode_index,
-                                    "success": bool(episode.success),
-                                    "total_reward": float(episode.total_reward),
-                                    "steps": len(episode.steps),
-                                }
-                                for episode_index, episode in enumerate(episodes)
-                            ],
-                        },
-                    )
-
-                    if _traj_writer is not None:
-                        for episode in episodes:
-                            _traj_writer.record(episode)
-                        written = _traj_writer.on_iteration_end(
-                            self._iteration,
-                            evaluation_reward_mean,
-                            _exp_name,
-                            _run_id,
-                            force=_is_last_iter or early_stop_triggered,
-                        )
-                        if "trajectories/best.json" in written:
-                            self.checkpoint()
-                            _checkpointed_for_best = True
-                    _append_trainer_stage_log(
-                        self._output_dir,
-                        f"Evaluation batch completed for iteration {self._iteration}: "
-                        f"{metrics.finish_count} goals reached",
+                    result = evaluation_outcome.result
+                    early_stop_triggered = evaluation_outcome.early_stop_triggered
+                    early_stop_decision = evaluation_outcome.early_stop_decision
+                    _checkpointed_for_best = (
+                        evaluation_outcome.checkpointed_for_best
                     )
                 except CustomMetricError:
                     raise
@@ -488,62 +301,14 @@ class Trainer(BaseTrainer):
                         stacklevel=2,
                     )
 
-                training_context = TrainingContext(
-                    iteration=self._iteration,
-                    standard_metrics=result.standard_metrics(),
-                    rllib_result=rllib_result,
-                    environment_steps_total=result.environment_steps_total,
-                    duration_s=elapsed,
-                    env_config=dict(_env_cfg),
+                result, training_scalars = training_metrics.apply(
+                    self._iteration,
+                    result,
+                    rllib_result,
+                    elapsed,
                 )
-                from theseo_anysearch.experiments.native_extensions import (
-                    CAP_TRAINING_METRICS,
-                    validate_native_metrics,
-                )
-
-                native_has_training = (
-                    self._native_extension is not None
-                    and self._native_extension.capabilities & CAP_TRAINING_METRICS
-                )
-                native_raw = (
-                    self._native_extension.compute_metrics(
-                        "training",
-                        {
-                            "iteration": training_context.iteration,
-                            "standard_metrics": training_context.standard_metrics,
-                            "environment_steps_total": training_context.environment_steps_total,
-                            "duration_s": training_context.duration_s,
-                            "env_config": training_context.env_config,
-                        },
-                    )
-                    if native_has_training else {}
-                )
-                training_reserved = set(result.standard_metrics())
-                python_training_custom = compute_custom_metrics(
-                    self._metric_providers.training, training_context,
-                    reserved_names=training_reserved,
-                )
-                native_training_custom = (
-                    validate_native_metrics(
-                        "training", native_raw,
-                        reserved_names=training_reserved,
-                    )
-                    if native_has_training else {}
-                )
-                training_custom = merge_custom_metrics(
-                    python_training_custom, native_training_custom
-                )
-                if training_custom:
-                    result = result.model_copy(
-                        update={"extra": {**result.extra, **training_custom}}
-                    )
-                    tb_writer.log_scalars(
-                        self._iteration,
-                        {
-                            f"train/custom/{key.removeprefix('training_')}": value
-                            for key, value in training_custom.items()
-                        },
-                    )
+                if training_scalars:
+                    tb_writer.log_scalars(self._iteration, training_scalars)
                 results.append(result)
                 tb_writer.log_iteration(result)
                 self.on_iteration_end(result)
@@ -571,68 +336,46 @@ class Trainer(BaseTrainer):
         return results
 
     def checkpoint(self) -> Path:
-        """
-        Save a project checkpoint for the current iteration.
-        Calls algo.save() for RLlib state, then writes state.json + latest.json.
-        Returns the checkpoint directory path.
-        """
-        ckpt_dir = self._output_dir / "checkpoints" / f"iter_{self._iteration:06d}"
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        """Save RLlib and project state for the current iteration.
 
-        # RLlib legacy save() may return a subdirectory path (e.g. ckpt_dir/checkpoint_000001).
-        # Store the returned path so restore() uses the exact location.
-        rllib_path = str(ckpt_dir)
-        if self._algo is not None:
-            returned = self._algo.save(str(ckpt_dir))
-            if isinstance(returned, str) and returned:
-                rllib_path = returned
-
-        self._write_state(ckpt_dir, rllib_path=rllib_path)
-        self._write_latest_pointer(ckpt_dir)
-        return ckpt_dir
+        Returns
+        -------
+        pathlib.Path
+            Created project checkpoint directory.
+        """
+        return self._checkpoints.save(
+            self._algo,
+            CheckpointState(
+                iteration=self._iteration,
+                episodes_total=self._episodes_total,
+                rllib_path="",
+            ),
+        )
 
     def restore(self, checkpoint_dir: Path) -> None:
-        """Restore algorithm weights and project state from a checkpoint directory."""
+        """Restore algorithm weights and project state.
+
+        Parameters
+        ----------
+        checkpoint_dir : pathlib.Path
+            Project checkpoint directory to restore.
+        """
         if self._algo is None:
             self._algo = self._build_algorithm()
-
-        state_file = checkpoint_dir / "state.json"
-        rllib_path = str(checkpoint_dir)
-        if state_file.exists():
-            state = json.loads(state_file.read_text())
-            self._iteration = state["iteration"]
-            self._episodes_total = state.get("episodes_total", 0)
-            rllib_path = state.get("rllib_path", str(checkpoint_dir))
-
-        self._algo.restore(rllib_path)
+        state = self._checkpoints.restore(self._algo, checkpoint_dir)
+        self._iteration = state.iteration
+        self._episodes_total = state.episodes_total
 
     def resume(self) -> bool:
+        """Restore the latest checkpoint when available.
+
+        Returns
+        -------
+        bool
+            True when a checkpoint was restored, otherwise False.
         """
-        Restore from the latest checkpoint if one exists.
-        Returns True when a checkpoint was found and loaded, False otherwise.
-        """
-        latest_ptr = self._output_dir / "checkpoints" / "latest.json"
-        if not latest_ptr.exists():
+        checkpoint_dir = self._checkpoints.latest()
+        if checkpoint_dir is None:
             return False
-        info = json.loads(latest_ptr.read_text())
-        self.restore(Path(info["path"]))
+        self.restore(checkpoint_dir)
         return True
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
-    def _write_state(self,
-                     checkpoint_dir: Path,
-                     rllib_path: str | None = None) -> None:
-        state = {
-            "iteration": self._iteration,
-            "episodes_total": self._episodes_total,
-            "rllib_path": rllib_path or str(checkpoint_dir),
-        }
-        (checkpoint_dir / "state.json").write_text(json.dumps(state, indent=2))
-
-    def _write_latest_pointer(self, checkpoint_dir: Path) -> None:
-        ptr = {"path": str(checkpoint_dir), "iteration": self._iteration}
-        (self._output_dir / "checkpoints" / "latest.json").write_text(
-            json.dumps(ptr, indent=2))
