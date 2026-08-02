@@ -40,3 +40,15 @@ python -m pytest -m integration -q
 ```
 
 The GitHub Actions workflow intentionally does not run either command.
+## Automated job structure
+
+The workflow validates and builds before running five test groups in parallel:
+
+1. `Validate test contract` compiles Python and checks marker registration.
+2. `Build Rust bindings` checks all Rust targets and uploads one wheel artifact.
+3. Core/CLI, environment/heuristic, experiment/benchmarking, RLlib, and garden
+   jobs download that same wheel and run their non-Ray tests independently.
+4. `Non-Ray test suite` provides one aggregate result suitable for branch
+   protection.
+
+The parallel groups are path-disjoint, so each selected test runs once.
