@@ -78,8 +78,6 @@ jobs:
     needs: build-rust
     runs-on: windows-latest
     timeout-minutes: 15
-    env:
-      COLUMNS: 200
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-non-ray-tests
