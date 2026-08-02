@@ -12,4 +12,4 @@ These configurations prioritize quick feedback over final policy quality.
 
 ## Custom reward example
 
-`quick_demo.yaml` selects `custom.name: quick_demo` and configures `diagonal_penalty_per_extra_axis` under `custom.parameters`. The name resolves the identically named function in `rewards.py`, where the value is read through `context.parameters`. The module adds a small non-positive diagonal-movement penalty to the standard YAML reward and records it as `diagonal_move_penalty` in the reward breakdown.
+`quick_demo.yaml` selects `provider.name: quick_demo` and configures `diagonal_penalty_per_extra_axis` under `provider.parameters`. The name resolves the identically named function in `rewards.py`, where the value is read through `context.parameters`. The module adds a small non-positive diagonal-movement penalty to the standard YAML reward and records it as `diagonal_move_penalty` in the reward breakdown.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict
 
-from theseo_anysearch.models import TrainingConfig
+from theseo_anysearch.settings import TrainingConfig
 
 
 class TrainerConfig(TrainingConfig):

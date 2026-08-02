@@ -6,7 +6,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
-from theseo_anysearch.models import Settings
+from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.trainer.base import BaseTrainer
 from theseo_anysearch.rllib.trainer.checkpointing import (
     CheckpointManager,
@@ -67,7 +67,7 @@ class Trainer(BaseTrainer):
         reward_source = self._output_dir.joinpath("rewards.py")
         reward_provider = load_reward_provider(
             reward_source if reward_source.is_file() else None,
-            config.env.rewards.custom.name if config.env.rewards.custom else None,
+            config.env.rewards.provider.name if config.env.rewards.provider else None,
         )
         write_reward_manifest(reward_provider, self._output_dir)
         from theseo_anysearch.experiments.native_extensions import NativeExtension

@@ -6,7 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from theseo_anysearch.models import (
+from theseo_anysearch.settings.compatibility import _deep_merge
+from theseo_anysearch.settings import (
     AlgorithmConfig,
     AnyscaleConfig,
     EnvConfig,

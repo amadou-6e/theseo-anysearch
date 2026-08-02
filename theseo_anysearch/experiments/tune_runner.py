@@ -913,8 +913,8 @@ class TuneRunner:
         reward_source = discover_reward_source(
             self._config_path,
             (
-                self._config.env.rewards.custom.name
-                if self._config.env.rewards.custom
+                self._config.env.rewards.provider.name
+                if self._config.env.rewards.provider
                 else None
             ),
         )

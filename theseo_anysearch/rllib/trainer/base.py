@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from theseo_anysearch.models import Settings
+    from theseo_anysearch.settings import Settings
     from theseo_anysearch.rllib.trainer.results import TrainResult
 
 
