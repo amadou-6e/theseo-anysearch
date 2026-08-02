@@ -1,0 +1,59 @@
+name: Non-Ray tests
+
+on:
+  pull_request:
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  group: non-ray-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python 3.12 / Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: theseo_anysearch/core
+
+      - name: Install project and test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable ".[dev]" maturin
+
+      - name: Build and install Rust environment bindings
+        shell: pwsh
+        run: |
+          python -m maturin build --release --manifest-path theseo_anysearch/core/Cargo.toml --out dist
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          python -m pip install $wheel.FullName
+
+      - name: Collect non-Ray suite
+        run: python -m pytest --collect-only -m "not ray and not integration" -q
+
+      - name: Run non-Ray suite
+        run: python -m pytest -m "not ray and not integration" -q

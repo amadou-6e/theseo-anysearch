@@ -41,6 +41,29 @@ pytest_tmpdir.cleanup_dead_symlinks = _safe_cleanup_dead_symlinks
 _TEMP_ROOT = Path.cwd().joinpath("pytest_tmp_root")
 
 
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Mark every test stored below a ``test_integration`` directory.
+
+    This makes the directory naming convention enforceable and prevents a new
+    integration module from silently entering the lightweight CI suite merely
+    because its author omitted a module-level marker.
+
+    Parameters
+    ----------
+    config : pytest.Config
+        Active pytest configuration. Required by the pytest hook contract.
+    items : list[pytest.Item]
+        Collected tests whose markers may be augmented in place.
+    """
+    del config
+    for item in items:
+        if "test_integration" in Path(str(item.path)).parts:
+            item.add_marker(pytest.mark.integration)
+
+
 class LocalTmpPathFactory:
     """Lightweight tmp-path factory rooted inside the repository workspace.
 

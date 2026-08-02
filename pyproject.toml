@@ -54,3 +54,7 @@ theseo_anysearch = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["pytest_tmp_root", "runtime", "experiments", "mlruns", ".worktrees", "build", "dist"]
+markers = [
+  "integration: exercises multiple runtime components or external processes",
+  "ray: starts or requires a real Ray runtime and is excluded from fast CI",
+]
