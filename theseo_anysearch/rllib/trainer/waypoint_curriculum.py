@@ -130,7 +130,12 @@ class WaypointCurriculum:
         stages = self.stages()
         latest = len(stages) - 1
         context_stages = []
-        for index, (start, goal) in enumerate(stages):
+        for index, stage in enumerate(stages):
+            if isinstance(stage, dict):
+                start = stage["start"]
+                goal = stage["waypoints"][-1]
+            else:
+                start, goal = stage
             evaluation = self.state.stage_evaluations.get(index)
             attempts = evaluation.attempts if evaluation is not None else 0
             successes = evaluation.successes if evaluation is not None else 0

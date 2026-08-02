@@ -30,14 +30,6 @@ env:
     mode: discrete_18
 
   rewards:
-    step_cost: 0.0
-    collision_cost: 0.0
-    goal_reward: 0.0
-    distance_shaping: 0.0
-    distance_reward_mode: progress
-    invalid_action_cost: 0.0
-    construction_residual_weight: 0.0
-    construction_overshoot_weight: 0.0
     custom:
       name: segment_countdown_goal
       parameters:

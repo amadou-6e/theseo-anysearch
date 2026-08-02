@@ -128,6 +128,30 @@ def test_curriculum_uses_only_latest_stage_evaluation_results():
     assert curriculum.sampling_probabilities() == pytest.approx([1 / 3, 2 / 3])
 
 
+def test_segmented_route_curriculum_builds_sampling_context_from_route_endpoints():
+    curriculum = WaypointCurriculum(
+        WaypointCurriculumConfig.model_validate({
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [16, 16, 16],
+            "route_length": {"mode": "fixed", "distance": 12},
+            "difficulty": {
+                "mode": "segment_distance",
+                "initial_distance": 2,
+                "distance_increment": 1,
+                "maximum_distance": 4,
+            },
+            "training_sampling": {"strategy": "inverse_success"},
+        }),
+        {
+            "grid_size": 32,
+            "max_steps": 20,
+            "action_mode": "discrete_18",
+        },
+    )
+
+    assert curriculum.sampling_probabilities() == [1.0]
+
 def test_broadcast_sends_normalized_stage_probabilities_to_environments():
     curriculum = WaypointCurriculum(
         WaypointCurriculumConfig(
