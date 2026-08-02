@@ -136,4 +136,3 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             ),
             "task": self.task.model_dump(mode="json"),
         }
-

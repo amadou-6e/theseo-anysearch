@@ -58,5 +58,3 @@ class RewardConfig(BaseModel):
         if self.zone_reward_min >= 0.0:
             raise ValueError("zone_reward_min must stay negative")
         return self
-
-

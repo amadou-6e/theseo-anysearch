@@ -15,7 +15,7 @@ import pytest
 ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer  # noqa: E402
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer  # noqa: E402
 from theseo_anysearch.settings import load_settings  # noqa: E402
 
 

@@ -14,7 +14,7 @@ import pytest
 ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ANYSEARCH = str(Path(REPO_ROOT, ".venv", "Scripts", "anysearch.exe"))
 
 RAY_CLI_YAML = textwrap.dedent("""    experiment:

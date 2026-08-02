@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ANYSEARCH = str(Path(REPO_ROOT, ".venv", "Scripts", "anysearch.exe"))
 
 # ---------------------------------------------------------------------------

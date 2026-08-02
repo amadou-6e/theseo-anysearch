@@ -50,3 +50,7 @@ theseo_anysearch = [
   "extension_sdk/macros/Cargo.toml",
   "extension_sdk/macros/src/*.rs",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["pytest_tmp_root", "runtime", "experiments", "mlruns", ".worktrees", "build", "dist"]

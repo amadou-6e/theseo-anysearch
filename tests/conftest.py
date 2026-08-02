@@ -217,7 +217,7 @@ MINIMAL_YAML = textwrap.dedent("""\
     env:
       stl_path: /tmp/test.stl
       scale: 1.0
-      agent_count: 2
+      agent_count: 1
       max_steps: 100
       seed: 7
 
@@ -346,7 +346,7 @@ def fake_ppo_trainer(trainer_settings: Any) -> "PPOTrainer":  # noqa: F821
     """
     A PPOTrainer wired with a FakeAlgorithm so no Ray installation is needed.
     """
-    from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
     class _FakePPOTrainer(PPOTrainer):
         def _build_algorithm(self) -> FakeAlgorithm:

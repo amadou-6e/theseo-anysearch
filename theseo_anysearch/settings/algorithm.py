@@ -73,5 +73,3 @@ class AlgorithmEnvCompatibilityMixin:
                 "Use env.agent_count=1 or switch to training.algorithm='multi_agent_voxel_ppo'."
             )
         return self
-
-

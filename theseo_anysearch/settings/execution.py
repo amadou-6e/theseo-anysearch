@@ -19,5 +19,3 @@ class AnyscaleConfig(BaseModel):
     cluster_env: str = Field(description="Anyscale cluster environment name.")
     compute_config: str = Field(description="Anyscale compute configuration name.")
     project: str = Field(description="Anyscale project identifier.")
-
-

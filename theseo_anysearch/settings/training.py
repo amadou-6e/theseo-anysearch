@@ -98,4 +98,3 @@ class TrainingConfig(BaseModel):
     output_dir: Path = Field(default=Path("runtime/"), description="Base directory for training artifacts.")
     video_every: int = Field(10, ge=1, description="Iterations between rendered videos.")
     early_stop: TrainingEarlyStopConfig = Field(default_factory=TrainingEarlyStopConfig, description="Evaluation-based training stop condition.")
-

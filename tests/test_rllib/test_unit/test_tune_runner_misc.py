@@ -45,29 +45,29 @@ class TestDetectNumGpusOverride:
     """Verify explicit GPU override behavior in trainer setup."""
 
     def test_override_returns_fractional(self):
-        from theseo_anysearch.rllib.trainer.base import _detect_num_gpus
+        from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 
         assert _detect_num_gpus(require_gpu=True, num_gpus=0.5) == pytest.approx(0.5)
 
     def test_override_zero_skips_torch(self):
-        from theseo_anysearch.rllib.trainer.base import _detect_num_gpus
+        from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 
         with patch("torch.cuda.device_count", return_value=0):
             assert _detect_num_gpus(require_gpu=False, num_gpus=0.0) == pytest.approx(0.0)
 
     def test_override_none_falls_through_to_torch(self):
-        from theseo_anysearch.rllib.trainer.base import _detect_num_gpus
+        from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 
         with patch("torch.cuda.device_count", return_value=2):
             assert _detect_num_gpus(require_gpu=False, num_gpus=None) == 2
 
     def test_override_one_does_not_raise_without_cuda(self):
-        from theseo_anysearch.rllib.trainer.base import _detect_num_gpus
+        from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 
         assert _detect_num_gpus(require_gpu=True, num_gpus=1.0) == pytest.approx(1.0)
 
     def test_require_gpu_without_override_raises_if_no_cuda(self):
-        from theseo_anysearch.rllib.trainer.base import _detect_num_gpus
+        from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 
         with patch("torch.cuda.device_count", return_value=0):
             with pytest.raises(AssertionError, match="require_gpu"):

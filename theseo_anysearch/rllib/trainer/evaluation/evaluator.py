@@ -38,6 +38,27 @@ class EvaluationMetrics(BaseModel):
         *,
         min_success_rate: float,
     ) -> "EvaluationMetrics":
+        """Aggregate deterministic voxel episodes into evaluation metrics.
+
+        Parameters
+        ----------
+        episodes : list[Any]
+            Completed deterministic evaluation episodes.
+        env_config : dict[str, Any]
+            Runtime environment configuration.
+        min_success_rate : float
+            Required success rate used to assign evaluation status.
+
+        Returns
+        -------
+        EvaluationMetrics
+            Serializable aggregate evaluation metrics.
+
+        Raises
+        ------
+        ValueError
+            If no episodes are supplied.
+        """
         if not episodes:
             raise ValueError("evaluation metrics require at least one episode")
 

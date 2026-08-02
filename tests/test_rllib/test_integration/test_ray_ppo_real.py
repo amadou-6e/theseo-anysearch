@@ -9,7 +9,7 @@ import pytest
 from theseo_anysearch.models import AnyscaleConfig, EnvConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.models.models import VoxelEncoderConfig
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
 
 pytestmark = pytest.mark.ray

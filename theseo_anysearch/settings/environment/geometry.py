@@ -19,4 +19,3 @@ class GeometryConfig(BaseModel):
     scale_variants_per_map: int = Field(default=4, ge=1, description="Scale variants generated for each source geometry.")
     padding: int = Field(default=2, ge=0, description="Empty voxel padding around imported geometry.")
     pool: dict[str, Any] | None = Field(None, description="Geometry-pool generation and augmentation settings.")
-

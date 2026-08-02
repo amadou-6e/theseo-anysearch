@@ -9,4 +9,3 @@ class ActionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     mode: Literal["discrete_6", "discrete_18", "discrete_26", "vector_3"] = Field("discrete_26", description="Movement action space exposed to the policy.")
-

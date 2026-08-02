@@ -9,8 +9,9 @@ from typing import Any
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
-from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
-from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
+from theseo_anysearch.rllib.trainer.trainer import Trainer
+from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.evaluation.parallel import configure_rllib_evaluation
 
 
 # TODO! instead of private functions, create ustils file
@@ -98,6 +99,18 @@ class VoxelEnvPathHelper:
 
     @staticmethod
     def ray_root(output_dir: str) -> str:
+        """Return the Ray runtime directory for a training run.
+
+        Parameters
+        ----------
+        output_dir : str
+            Training output directory.
+
+        Returns
+        -------
+        str
+            Absolute Ray runtime directory.
+        """
         import os
         import tempfile
         from pathlib import Path
@@ -105,11 +118,11 @@ class VoxelEnvPathHelper:
         # Use the system temp dir for Ray's internal files (logs, spilled objects)
         # to avoid exceeding Windows MAX_PATH when output_dir is deeply nested
         # (e.g. under pytest's tmp_path hierarchy).
-        candidate = Path(output_dir) / "ray"
+        candidate = Path(output_dir, "ray")
         # Ray appends ~120 chars (session dir + spilled-objects hash) to this path.
         # Windows MAX_PATH is 260, so trigger the fallback when base exceeds 130 chars.
         if len(str(candidate.resolve())) > 130:
-            ray_root = Path(tempfile.gettempdir()) / f"anysearch_ray_{os.getpid()}"
+            ray_root = Path(tempfile.gettempdir(), f"anysearch_ray_{os.getpid()}")
         else:
             ray_root = candidate
         ray_root.mkdir(parents=True, exist_ok=True)
@@ -153,10 +166,34 @@ class PPOTrainer(Trainer):
 
     @classmethod
     def from_settings(cls, config: Settings) -> "PPOTrainer":
+        """Construct the algorithm adapter from project settings.
+
+        Parameters
+        ----------
+        config : Settings
+            Validated experiment settings.
+
+        Returns
+        -------
+        Trainer
+            Configured algorithm adapter.
+        """
         return cls(config)
 
     @staticmethod
     def build_algorithm_from_settings(config: Settings) -> Any:
+        """Build the configured RLlib algorithm.
+
+        Parameters
+        ----------
+        config : Settings
+            Validated experiment settings.
+
+        Returns
+        -------
+        Any
+            Built RLlib algorithm instance.
+        """
         from ray.rllib.algorithms.ppo import PPOConfig as RllibPPOConfig
 
         _log_stage("Starting PPO algorithm build")
@@ -268,6 +305,103 @@ class PPOTrainer(Trainer):
             "RLlib algorithm build completed",
         )
         return algo
+
+    def _build_algorithm(self) -> Any:
+        return self.build_algorithm_from_settings(self._config)
+
+class MultiAgentVoxelPPOTrainer(Trainer):
+    """
+    Multi-agent PPO trainer for MultiVoxelEnv (PettingZoo parallel API).
+
+    All agents share a single "shared_policy". Uses RLlib's legacy API stack
+    with ParallelPettingZooEnv to wrap the PettingZoo environment.
+    """
+
+    algorithm_name = "multi_agent_voxel_ppo"
+
+    @staticmethod
+    def build_algorithm_from_settings(config: Settings) -> Any:
+        """Build the configured multi-agent RLlib algorithm.
+
+        Parameters
+        ----------
+        config : Settings
+            Validated experiment settings.
+
+        Returns
+        -------
+        Any
+            Built multi-agent RLlib algorithm instance.
+        """
+        from ray.rllib.algorithms.ppo import PPOConfig as RllibPPOConfig
+        from ray.rllib.env.wrappers.pettingzoo_env import ParallelPettingZooEnv
+        from ray.rllib.policy.policy import PolicySpec
+        from ray.tune.registry import register_env
+
+        from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
+
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners
+            + config.evaluation.num_env_runners,
+        )
+
+        env_cfg = config.env
+        algo_cfg = config.algorithm_config
+        if not isinstance(algo_cfg, PPOConfig):
+            algo_cfg = PPOConfig(**algo_cfg.model_dump())
+
+        env_config = env_cfg.to_runtime_dict()
+
+        env_id = "multi_voxel_ppo_env"
+        register_env(
+            env_id,
+            lambda cfg: ParallelPettingZooEnv(MultiVoxelEnv(cfg or env_config)),
+        )
+
+        # Build a temp env to introspect spaces for the policy spec.
+        _tmp = MultiVoxelEnv(env_config)
+        obs_space = _tmp.observation_space("agent_0")
+        act_space = _tmp.action_space("agent_0")
+
+        minibatch_size = algo_cfg.minibatch_size or min(128, algo_cfg.train_batch_size)
+
+        rllib_config = (
+            RllibPPOConfig()
+            .api_stack(
+                enable_rl_module_and_learner=False,
+                enable_env_runner_and_connector_v2=False,
+            )
+            .environment(env=env_id, env_config=env_config)
+            .multi_agent(
+                policies={
+                    "shared_policy": PolicySpec(
+                        observation_space=obs_space,
+                        action_space=act_space,
+                    )
+                },
+                policy_mapping_fn=lambda agent_id, episode=None, worker=None, **kw: "shared_policy",
+            )
+            .training(
+                lr=algo_cfg.lr,
+                gamma=algo_cfg.gamma,
+                train_batch_size=algo_cfg.train_batch_size,
+                minibatch_size=minibatch_size,
+                clip_param=algo_cfg.clip_param,
+                num_epochs=algo_cfg.num_sgd_iter,
+                lambda_=algo_cfg.lambda_,
+                kl_coeff=algo_cfg.kl_coeff,
+            )
+            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus))
+            .framework("torch")
+        )
+        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+        )
+
+        return rllib_config.build_algo()
 
     def _build_algorithm(self) -> Any:
         return self.build_algorithm_from_settings(self._config)

@@ -166,7 +166,7 @@ def test_resource_report_exposes_compute_and_architecture_cost() -> None:
 
 
 def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
-    from theseo_anysearch.rllib.trainer.base import TrainResult
+    from theseo_anysearch.rllib.trainer.results import TrainResult
 
     current = TrainResult.from_rllib(
         1,

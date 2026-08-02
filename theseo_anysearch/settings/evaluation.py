@@ -12,5 +12,3 @@ class EvaluationConfig(BaseModel):
     min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0, description="Success-rate threshold used by evaluation gates.")
     num_env_runners: int = Field(default=0, ge=0, description="Dedicated RLlib evaluation workers.")
     num_envs_per_env_runner: int = Field(default=1, ge=1, description="Vectorized environments hosted by each evaluation worker.")
-
-

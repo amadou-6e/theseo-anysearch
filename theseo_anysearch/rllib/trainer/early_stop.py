@@ -52,6 +52,26 @@ class TrainingEarlyStopController:
         heuristic_accuracy: float | None = None,
         heuristic_distance: float | None = None,
     ) -> EarlyStopDecision:
+        """Evaluate whether configured training termination criteria are met.
+
+        Parameters
+        ----------
+        iteration : int
+            Current training iteration.
+        reward_mean : float
+            Mean deterministic evaluation reward.
+        goal_finishes : int
+            Number of successful evaluation episodes.
+        heuristic_accuracy : float | None
+            Optional action agreement with the configured heuristic.
+        heuristic_distance : float | None
+            Optional action distance from the configured heuristic.
+
+        Returns
+        -------
+        EarlyStopDecision
+            Current threshold and consecutive-evaluation decision.
+        """
         if not self.config.enabled:
             return EarlyStopDecision(triggered=False, iteration=iteration)
 

@@ -1,0 +1,1 @@
+"""Curriculum stage-advancement boundary."""

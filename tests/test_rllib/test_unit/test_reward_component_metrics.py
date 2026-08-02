@@ -1,7 +1,7 @@
 """Tests for reward-component evaluation reporting."""
 
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
-from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
+from theseo_anysearch.rllib.trainer.evaluation.evaluator import EvaluationMetrics
 
 
 def test_reward_breakdown_is_flattened_for_reporters():

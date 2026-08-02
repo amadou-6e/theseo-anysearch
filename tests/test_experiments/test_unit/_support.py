@@ -93,7 +93,7 @@ def patch_build(runner_mod, fake_algo_cls=FakeAlgo):
         ``(fake_build, original_build)`` patch pair for ``_build_trainer``.
     """
 
-    from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
     class _FakePPO(PPOTrainer):
         """Minimal PPO trainer wrapper that returns a fake algorithm."""
