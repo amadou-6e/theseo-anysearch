@@ -5,7 +5,7 @@ use crate::environments::{Environment, StepResult};
 use crate::voxel::{
     actions::{
         ActionExtensionSpec, ActionHistoryEntryV2, ConfiguredOutcome, ConfiguredPredicate,
-        PendingMutations,
+        PendingMutations, OFFSETS_26,
     },
     common::ABI_VERSION,
     outcomes::{
@@ -16,34 +16,6 @@ use crate::voxel::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-const ACTION_OFFSETS_26: [(i32, i32, i32); 26] = [
-    (-1, -1, -1),
-    (-1, -1, 0),
-    (-1, -1, 1),
-    (-1, 0, -1),
-    (-1, 0, 0),
-    (-1, 0, 1),
-    (-1, 1, -1),
-    (-1, 1, 0),
-    (-1, 1, 1),
-    (0, -1, -1),
-    (0, -1, 0),
-    (0, -1, 1),
-    (0, 0, -1),
-    (0, 0, 1),
-    (0, 1, -1),
-    (0, 1, 0),
-    (0, 1, 1),
-    (1, -1, -1),
-    (1, -1, 0),
-    (1, -1, 1),
-    (1, 0, -1),
-    (1, 0, 0),
-    (1, 0, 1),
-    (1, 1, -1),
-    (1, 1, 0),
-    (1, 1, 1),
-];
 // ---------------------------------------------------------------------------
 // Action / Observation types
 // ---------------------------------------------------------------------------

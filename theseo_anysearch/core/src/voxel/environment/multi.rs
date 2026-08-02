@@ -7,36 +7,11 @@
 //! Episode ends when steps_remaining reaches 0, or all agents have reached
 //! their goals (when geometry/goals are configured).
 
+use crate::voxel::actions::OFFSETS_26;
 use crate::voxel::rewards::RewardConfig;
 use crate::world::{Coord, WorldState};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
-
-// ---------------------------------------------------------------------------
-// 26-neighbor offset table (Discrete(26) action space)
-// ---------------------------------------------------------------------------
-
-pub(crate) const OFFSETS_26: [(i32, i32, i32); 26] = {
-    let mut arr = [(0i32, 0i32, 0i32); 26];
-    let mut i = 0usize;
-    let mut dx = -1i32;
-    while dx <= 1 {
-        let mut dy = -1i32;
-        while dy <= 1 {
-            let mut dz = -1i32;
-            while dz <= 1 {
-                if !(dx == 0 && dy == 0 && dz == 0) {
-                    arr[i] = (dx, dy, dz);
-                    i += 1;
-                }
-                dz += 1;
-            }
-            dy += 1;
-        }
-        dx += 1;
-    }
-    arr
-};
 
 // ---------------------------------------------------------------------------
 // Per-agent state

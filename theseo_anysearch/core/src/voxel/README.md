@@ -17,7 +17,7 @@ voxel/
 |       |-- action_pipeline.rs # Predicate checks, action execution, and masking
 |       |-- lifecycle.rs   # Reset, step, reward, and termination lifecycle
 |       `-- tests.rs       # Single-agent behavioral tests
-|-- actions/               # Action history and predicate/outcome pipeline state
+|-- actions/               # Shared offsets, history, and predicate/outcome pipeline state
 |-- common/                # Library, ABI version, name, and parameter validation
 |-- predicates/            # Predicate ABI, native loader, context, and built-ins
 |-- outcomes/              # Outcome ABI, native loader, context, and built-ins

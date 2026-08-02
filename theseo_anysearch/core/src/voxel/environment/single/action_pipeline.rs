@@ -73,7 +73,7 @@ impl VoxelEnv {
         let cursor = coord_to_i32(self.cursor);
         let valid_action = (0..=26).contains(&action_index);
         let destination = if (0..26).contains(&action_index) {
-            let offset = ACTION_OFFSETS_26[action_index as usize];
+            let offset = OFFSETS_26[action_index as usize];
             [
                 cursor[0] + offset.0,
                 cursor[1] + offset.1,

@@ -137,17 +137,24 @@ impl Environment for VoxelEnv {
             VoxelAction::Noop | VoxelAction::Collision => {}
         };
 
-        let accepted_targets = if self.success_targets.is_empty() {
-            self.active_goal.iter().copied().collect::<Vec<_>>()
+        let (new_l2, has_accepted_target) = if self.success_targets.is_empty() {
+            (
+                self.active_goal
+                    .map(|goal| l2(self.cursor, goal))
+                    .unwrap_or(0.0),
+                self.active_goal.is_some(),
+            )
         } else {
-            self.success_targets.clone()
+            (
+                self.success_targets
+                    .iter()
+                    .map(|goal| l2(self.cursor, *goal))
+                    .reduce(f32::min)
+                    .unwrap_or(0.0),
+                true,
+            )
         };
-        let new_l2 = accepted_targets
-            .iter()
-            .map(|goal| l2(self.cursor, *goal))
-            .reduce(f32::min)
-            .unwrap_or(0.0);
-        let goal_reached = !accepted_targets.is_empty() && new_l2 <= self.goal_tolerance;
+        let goal_reached = has_accepted_target && new_l2 <= self.goal_tolerance;
         let goal_distance = self.active_goal.map(|goal| manhattan(self.cursor, goal));
         let step_cost = reward_components::step_cost::compute(&self.reward_config);
         let distance_reward = reward_components::distance::compute(
