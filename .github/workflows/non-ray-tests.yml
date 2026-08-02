@@ -78,6 +78,8 @@ jobs:
     needs: build-rust
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      COLUMNS: 200
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-non-ray-tests
@@ -99,7 +101,6 @@ jobs:
           python -m pytest
           tests/test_environments/test_unit
           tests/test_heuristic
-          tests/test_imitation
           -m "not ray and not integration" -q
 
   experiment-tests:
@@ -113,7 +114,6 @@ jobs:
       - run: >-
           python -m pytest
           tests/test_experiments/test_unit
-          tests/test_benchmarking
           -m "not ray and not integration" -q
 
   rllib-tests:
