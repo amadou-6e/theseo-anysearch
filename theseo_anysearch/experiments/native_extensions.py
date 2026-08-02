@@ -100,7 +100,8 @@ def _selected_reward_name(experiment_dir: Path) -> str | None:
     if config_path is None:
         return None
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    selected = ((raw.get("env") or {}).get("rewards") or {}).get("custom")
+    rewards = (raw.get("env") or {}).get("rewards") or {}
+    selected = rewards.get("provider", rewards.get("custom"))
     if isinstance(selected, str) or selected is None:
         return selected
     if isinstance(selected, dict):
@@ -159,7 +160,7 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     if "reward" in capabilities:
         if reward_name is None:
             raise NativeExtensionError(
-                "A reward-capable extension requires env.rewards.custom in YAML"
+                "A reward-capable extension requires env.rewards.provider in YAML"
             )
         probe.validate_reward(reward_name)
         rewards = (reward_name,)

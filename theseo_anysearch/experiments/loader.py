@@ -8,13 +8,13 @@ from typing import Union
 import yaml
 
 from theseo_anysearch.experiments.models import ExperimentConfig, SweepConfig
-from theseo_anysearch.models import (
+from theseo_anysearch.settings import (
     AlgorithmConfig,
     ModelConfig,
 )
 from theseo_anysearch.rllib.algorithms.models import get_algorithm_config_class
 from theseo_anysearch.rllib.models.models import get_model_config_class
-from theseo_anysearch.settings import _deep_merge
+from theseo_anysearch.settings.loading import _deep_merge
 
 
 def _resolve_typed_configs(raw: dict) -> dict:

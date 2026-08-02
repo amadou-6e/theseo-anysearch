@@ -353,8 +353,8 @@ class ExperimentRunner:
                 self._config_path,
                 run_dir,
                 (
-                    self._config.env.rewards.custom.name
-                    if self._config.env.rewards.custom
+                    self._config.env.rewards.provider.name
+                    if self._config.env.rewards.provider
                     else None
                 ),
             )
