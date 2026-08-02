@@ -1,7 +1,7 @@
 # Native Rust extension example
 
 This folder demonstrates an experiment-local compiled reward and metric extension.
-The YAML selects `custom: native_collision`; `rewards.rs` defines that reward with
+The YAML selects `provider: native_collision`; `rewards.rs` defines that reward with
 `#[anysearch_reward]`. The generated ABI wrapper adds its collision penalty, while
 the library publishes one training and evaluation metric proving the native hooks ran.
 

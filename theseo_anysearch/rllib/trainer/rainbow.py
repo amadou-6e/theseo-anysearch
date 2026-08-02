@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
-from theseo_anysearch.models import Settings
+from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.algorithms.models import RainbowConfig
 from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus
 from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation

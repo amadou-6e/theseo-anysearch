@@ -28,7 +28,7 @@ env:
 | `invalid_action_cost` | `0.0` | Additional term for an invalid action. |
 | `construction_residual_weight` | `0.0` | Weight for remaining construction work. |
 | `construction_overshoot_weight` | `0.0` | Weight for construction beyond the requested target. |
-| `custom` | `null` | Name of a function in `rewards.py` or `rewards.rs`. |
+| `provider` | `null` | Name of a function in `rewards.py` or `rewards.rs`. |
 
 Progress shaping is:
 
@@ -40,20 +40,20 @@ A move toward the goal therefore receives a less negative or more positive resul
 
 Legacy reward fields such as `env.step_cost` and `env.goal_reward` remain loadable during migration. Do not combine them with `env.rewards` in the same configuration.
 
-## Named custom rewards
+## Named reward providers
 
 Select a reward by name in YAML:
 
 ```yaml
 env:
   rewards:
-    custom:
+    provider:
       name: collision_aware
       parameters:
         collision_penalty: -0.02
 ```
 
-The scalar form `custom: collision_aware` remains valid shorthand for a reward
+The scalar form `provider: collision_aware` remains valid shorthand for a reward
 without parameters. Parameter values must be JSON-compatible and are available as
 `context.parameters` in both Python and Rust. Each reward interprets and validates
 its own parameter names and values.
@@ -95,7 +95,7 @@ is loaded once by the Rust core and called directly inside `VoxelEnv::step`; the
 per-step reward does not pass through Python. Python remains the fallback when
 the compiled extension does not supply a reward capability.
 
-`mode="add"` retains built-in components and appends custom components.
+`mode="add"` retains built-in components and appends provider components.
 `mode="replace"` discards built-in components. Rust owns and validates the final
 named breakdown, and Python exposes it unchanged through Gymnasium `info`.
 

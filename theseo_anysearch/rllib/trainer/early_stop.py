@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from theseo_anysearch.models import TrainingEarlyStopConfig
+from theseo_anysearch.settings import TrainingEarlyStopConfig
 
 
 class EarlyStopState(BaseModel):

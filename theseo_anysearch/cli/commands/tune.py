@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import typer
 
-from theseo_anysearch.models import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
+from theseo_anysearch.settings import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 
 app = typer.Typer(help="[deprecated] Use: anysearch run <dir> --tag <tag>")

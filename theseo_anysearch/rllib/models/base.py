@@ -10,7 +10,7 @@ Examples
 Build the RLlib model configuration for a standard fully connected model::
 
     from theseo_anysearch.rllib.models.base import build_rllib_model_dict
-    from theseo_anysearch.models import ModelConfig
+    from theseo_anysearch.settings import ModelConfig
 
     cfg = ModelConfig(hidden_sizes=[256, 256], activation="relu")
     model = build_rllib_model_dict(cfg)
@@ -18,7 +18,7 @@ Build the RLlib model configuration for a standard fully connected model::
 Build the RLlib model configuration for a registered custom CNN model::
 
     from theseo_anysearch.rllib.models.base import build_rllib_model_dict
-    from theseo_anysearch.models import ModelConfig
+    from theseo_anysearch.settings import ModelConfig
 
     cfg = ModelConfig(
         custom_model="voxel_box_3d_cnn",

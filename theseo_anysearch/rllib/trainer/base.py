@@ -13,7 +13,7 @@ from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from theseo_anysearch.models import Settings
+from theseo_anysearch.settings import Settings
 
 
 def _log_trainer_stage(message: str) -> None:
@@ -345,7 +345,7 @@ class Trainer(ABC):
         reward_source = self._output_dir.joinpath("rewards.py")
         reward_provider = load_reward_provider(
             reward_source if reward_source.is_file() else None,
-            config.env.rewards.custom.name if config.env.rewards.custom else None,
+            config.env.rewards.provider.name if config.env.rewards.provider else None,
         )
         write_reward_manifest(reward_provider, self._output_dir)
         from theseo_anysearch.experiments.native_extensions import NativeExtension
