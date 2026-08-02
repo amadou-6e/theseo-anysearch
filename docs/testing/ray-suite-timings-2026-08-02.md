@@ -128,3 +128,20 @@ This run also exposed and fixed archived-run output rebasing: resume and repeat
 loaded `run_dir/experiment.yaml`, which incorrectly changed the output root to
 the run directory. Both commands now restore the original root represented by
 `<output>/<experiment>/<run_id>` before constructing `ExperimentRunner`.
+## Hosted CI validation
+
+The first `Ray CLI Test Suite` GitHub Actions run completed successfully on a
+Windows hosted runner. The workflow retained its JUnit report as the
+`ray-cli-test-timings` artifact.
+
+| CI phase | Duration |
+|---|---:|
+| Complete job | 9m 19s |
+| Python environment setup | 2m 19s |
+| Rust build and wheel installation | 5m 18s |
+| Five Ray CLI tests | 59s |
+| Timing artifact upload | 1s |
+
+The 20-minute job timeout therefore leaves more than a two-times margin on the
+first uncached hosted measurement. Build and dependency setup, not the Ray
+tests, dominate the CI runtime.
