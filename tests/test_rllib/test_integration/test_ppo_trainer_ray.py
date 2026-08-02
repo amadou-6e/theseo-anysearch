@@ -17,8 +17,8 @@ import pytest
 ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
-from theseo_anysearch.rllib.trainer.base import TrainResult
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _build_rllib_ppo
+from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _build_rllib_ppo
 
 RAY_TEST_YAML = """env:
     stl_path: {stl_path}

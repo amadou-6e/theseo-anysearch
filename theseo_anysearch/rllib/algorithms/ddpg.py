@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from theseo_anysearch.rllib.trainer.base import Trainer
+from theseo_anysearch.rllib.trainer.trainer import Trainer
 
 
 class DDPGTrainer(Trainer):

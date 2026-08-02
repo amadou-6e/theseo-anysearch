@@ -15,7 +15,7 @@ from theseo_anysearch.experiments.trajectory import (
 from tests.test_environments.test_integration._voxel_validity_support import (
     make_radial_test_env,
 )
-from theseo_anysearch.heuristic.voxel_astar import (
+from theseo_anysearch.heuristic import (
     VoxelAStarOracle,
     VoxelDijkstraHeuristic,
     VoxelReplanningAStarHeuristic,

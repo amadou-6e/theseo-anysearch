@@ -268,7 +268,7 @@ def bench_rllib_timers(env_cfg: dict) -> None:
         Settings, EnvConfig, TrainingConfig, AnyscaleConfig, ModelConfig
     )
     from theseo_anysearch.rllib.algorithms.models import PPOConfig
-    from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
     settings = Settings(
         env=EnvConfig(**{k: v for k, v in env_cfg.items()

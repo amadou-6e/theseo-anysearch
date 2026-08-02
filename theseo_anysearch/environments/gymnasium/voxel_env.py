@@ -461,7 +461,7 @@ class VoxelEnv(RustGymnasiumEnv):
         return build_action_space(self._config.get("action_mode", "discrete_26"))
 
     def _obs_to_numpy(self, rust_obs: Any) -> dict:
-        self._obs_log_count += 1
+        self._obs_log_count = getattr(self, "_obs_log_count", 0) + 1
         if self._obs_log_count <= 5:
             self._log_env_stage(
                 f"obs_to_numpy start index={self._obs_log_count} mode={self._obs_mode}"

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import typer
 
-from theseo_anysearch.models import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
+from theseo_anysearch.settings import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 
 app = typer.Typer(help="[deprecated] Use: anysearch run <dir> --tag <tag>")
@@ -461,7 +461,7 @@ def _real_trainable(
 
     from theseo_anysearch.experiments.tracking import MLflowTracker
     from theseo_anysearch.experiments.models import MLflowConfig
-    from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
     # ray.train.get_context() is deprecated in Ray 2.54 when used from Tune.
     # Use ray.tune.get_context() instead.

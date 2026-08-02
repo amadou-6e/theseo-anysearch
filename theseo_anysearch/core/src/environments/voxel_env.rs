@@ -555,7 +555,11 @@ impl VoxelEnv {
         };
         self.pending_action_feasible = feasible;
         if !feasible {
-            return VoxelAction::Collision;
+            return if self.pending_invalid_action {
+                VoxelAction::Noop
+            } else {
+                VoxelAction::Collision
+            };
         }
         let history = self.action_history.as_slice();
         let context = OutcomeContextV2 {

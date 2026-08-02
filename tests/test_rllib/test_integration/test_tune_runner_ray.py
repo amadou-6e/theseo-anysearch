@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.ray]
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ class TestTrainableReportTarget:
         import ray.train as _real_train
 
         from theseo_anysearch.experiments.tune_runner import _experiment_trainable
-        from theseo_anysearch.rllib.trainer.base import TrainResult
+        from theseo_anysearch.rllib.trainer.results import TrainResult
         from theseo_anysearch.experiments.models import (
             ExperimentConfig, ExperimentMeta, TuneConfig,
         )
@@ -385,7 +385,7 @@ class TestTrainableReportTarget:
         import ray.tune as _real_tune
 
         from theseo_anysearch.experiments.tune_runner import _experiment_trainable
-        from theseo_anysearch.rllib.trainer.base import TrainResult
+        from theseo_anysearch.rllib.trainer.results import TrainResult
         from theseo_anysearch.experiments.models import ExperimentConfig, ExperimentMeta, TuneConfig
         from theseo_anysearch.models import (
             AlgorithmConfig, AnyscaleConfig, EnvConfig, ModelConfig, TrainingConfig,

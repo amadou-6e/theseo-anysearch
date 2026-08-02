@@ -153,7 +153,7 @@ class TestExperimentRunnerFailure:
 
     def test_failed_run_status_is_failed(self, experiment_config: ExperimentConfig):
         import theseo_anysearch.experiments.runner as runner_mod
-        from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+        from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
         class _BrokenAlgo:
             """Raise during train to exercise failure handling."""
@@ -201,7 +201,7 @@ class TestExperimentRunnerFailure:
 
     def test_failed_run_end_time_set(self, experiment_config: ExperimentConfig):
         import theseo_anysearch.experiments.runner as runner_mod
-        from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+        from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
 
         class _BrokenAlgo:
             """Raise during train to ensure end time is written."""

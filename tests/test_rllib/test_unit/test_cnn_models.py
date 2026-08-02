@@ -496,6 +496,7 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         mock_obs = MagicMock()
         mock_obs.steps_remaining = 5
         mock_obs.filled = 3
+        mock_obs.cursor_pos = (5, 5, 5)
 
         result = env._obs_to_numpy(mock_obs)
         assert "local_grid" in result
@@ -514,6 +515,7 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         mock_obs = MM()
         mock_obs.steps_remaining = 1
         mock_obs.filled = 0
+        mock_obs.cursor_pos = (1, 1, 1)
         with pytest.raises(ValueError, match="hierarchical_box"):
             env._obs_to_numpy(mock_obs)
 

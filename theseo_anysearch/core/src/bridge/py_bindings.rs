@@ -934,7 +934,7 @@ impl PyVoxelEnv {
                         custom_reward_parameters_json=None,
                         native_action_path=None,
                         action_predicates_json="[{\"name\":\"valid_action\"},{\"name\":\"bounds\"},{\"name\":\"unoccupied\"}]".to_string(),
-                        action_outcomes_json="[{\"name\":\"cursor_movement\"}]".to_string(),
+                        action_outcomes_json=None,
                         action_history_length=16,
                         box_radius=None))]
     pub fn new(
@@ -963,7 +963,7 @@ impl PyVoxelEnv {
         custom_reward_parameters_json: Option<String>,
         native_action_path: Option<String>,
         action_predicates_json: String,
-        action_outcomes_json: String,
+        action_outcomes_json: Option<String>,
         action_history_length: usize,
         box_radius: Option<u32>,
     ) -> PyResult<Self> {
@@ -1016,6 +1016,13 @@ impl PyVoxelEnv {
             }
         };
         let mut env = env;
+        let action_outcomes_json = action_outcomes_json.unwrap_or_else(|| {
+            if trail_mode {
+                "[{\"name\":\"cursor_movement\"},{\"name\":\"trail_placement\"}]".to_owned()
+            } else {
+                "[{\"name\":\"cursor_movement\"}]".to_owned()
+            }
+        });
         env.configure_action_pipeline(
             &action_predicates_json,
             &action_outcomes_json,

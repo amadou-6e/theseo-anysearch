@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
+from theseo_anysearch.rllib.trainer.evaluation.evaluator import EvaluationMetrics
 from theseo_anysearch.experiments.trajectory import (
     MultiVoxelEpisodeData,
     MultiVoxelStepData,

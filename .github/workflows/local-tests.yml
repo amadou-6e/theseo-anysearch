@@ -1,0 +1,184 @@
+name: Local Test Suite
+
+on:
+  pull_request:
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate test contract
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Compile Python sources
+        run: python -m compileall -q theseo_anysearch tests
+      - name: Validate pytest markers
+        run: >-
+          python -c "import tomllib; from pathlib import Path;
+          data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'));
+          markers = data['tool']['pytest']['ini_options']['markers'];
+          assert any(item.startswith('ray:') for item in markers);
+          assert any(item.startswith('integration:') for item in markers)"
+
+  build-rust:
+    name: Build Rust bindings
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: theseo_anysearch/core
+      - name: Install Maturin
+        run: python -m pip install maturin
+      - name: Check all Rust targets
+        run: cargo check --manifest-path theseo_anysearch/core/Cargo.toml --all-targets
+      - name: Build Python wheel
+        run: >-
+          python -m maturin build --release
+          --manifest-path theseo_anysearch/core/Cargo.toml
+          --out dist
+      - name: Upload Rust wheel
+        uses: actions/upload-artifact@v6
+        with:
+          name: theseo-core-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  core-tests:
+    name: Core and CLI tests
+    needs: build-rust
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      TERMINAL_WIDTH: 240
+      _TYPER_FORCE_DISABLE_TERMINAL: 1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-local-tests
+      - run: >-
+          python -m pytest
+          tests/test_cli/test_unit
+          tests/test_settings/test_unit
+          -m "not ray and not integration" -q
+
+  environment-tests:
+    name: Environment and heuristic tests
+    needs: build-rust
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-local-tests
+      - run: >-
+          python -m pytest
+          tests/test_environments/test_unit
+          tests/test_heuristic
+          -m "not ray and not integration" -q
+
+  experiment-tests:
+    name: Experiment and benchmarking tests
+    needs: build-rust
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      TERMINAL_WIDTH: 240
+      _TYPER_FORCE_DISABLE_TERMINAL: 1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-local-tests
+      - run: >-
+          python -m pytest
+          tests/test_experiments/test_unit
+          -m "not ray and not integration" -q
+
+  rllib-tests:
+    name: RLlib unit tests
+    needs: build-rust
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-local-tests
+      - run: >-
+          python -m pytest tests/test_rllib/test_unit
+          -m "not ray and not integration" -q
+
+  garden-tests:
+    name: Garden tests
+    needs: build-rust
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-local-tests
+      - run: >-
+          python -m pytest tests/test_garden/test_unit
+          -m "not ray and not integration" -q
+
+  local-test-gate:
+    name: Local Test Suite
+    if: always()
+    needs:
+      - validate
+      - build-rust
+      - core-tests
+      - environment-tests
+      - experiment-tests
+      - rllib-tests
+      - garden-tests
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every stage to pass
+        shell: pwsh
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          RUST_RESULT: ${{ needs.build-rust.result }}
+          CORE_RESULT: ${{ needs.core-tests.result }}
+          ENVIRONMENT_RESULT: ${{ needs.environment-tests.result }}
+          EXPERIMENT_RESULT: ${{ needs.experiment-tests.result }}
+          RLLIB_RESULT: ${{ needs.rllib-tests.result }}
+          GARDEN_RESULT: ${{ needs.garden-tests.result }}
+        run: |
+          $results = @(
+            $env:VALIDATE_RESULT,
+            $env:RUST_RESULT,
+            $env:CORE_RESULT,
+            $env:ENVIRONMENT_RESULT,
+            $env:EXPERIMENT_RESULT,
+            $env:RLLIB_RESULT,
+            $env:GARDEN_RESULT
+          )
+          if ($results | Where-Object { $_ -ne "success" }) {
+            Write-Error "One or more local test stages failed: $($results -join ', ')"
+            exit 1
+          }

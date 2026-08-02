@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
-from theseo_anysearch.models import Settings
+from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.algorithms.models import SACConfig
-from theseo_anysearch.rllib.trainer.base import Trainer, _detect_num_gpus, _resolve_pool_dir
-from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
-from theseo_anysearch.rllib.trainer.ppo import _ensure_ray_runtime
+from theseo_anysearch.rllib.trainer.trainer import Trainer
+from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.evaluation.parallel import configure_rllib_evaluation
+from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
 
 
 class SACTrainer(Trainer):
@@ -25,10 +26,34 @@ class SACTrainer(Trainer):
 
     @classmethod
     def from_settings(cls, config: Settings) -> "SACTrainer":
+        """Construct the algorithm adapter from project settings.
+
+        Parameters
+        ----------
+        config : Settings
+            Validated experiment settings.
+
+        Returns
+        -------
+        Trainer
+            Configured algorithm adapter.
+        """
         return cls(config)
 
     @staticmethod
     def build_algorithm_from_settings(config: Settings) -> Any:
+        """Build the configured RLlib algorithm.
+
+        Parameters
+        ----------
+        config : Settings
+            Validated experiment settings.
+
+        Returns
+        -------
+        Any
+            Built RLlib algorithm instance.
+        """
         from ray.rllib.algorithms.sac import SACConfig as RllibSACConfig
 
         _ensure_ray_runtime(
