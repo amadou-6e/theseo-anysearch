@@ -2,10 +2,12 @@
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic.base import BaseVoxelHeuristic
-from theseo_anysearch.heuristic.voxel.astar import VoxelAStarOracle
+from theseo_anysearch.heuristic.voxel.astar import (
+    VoxelAStarOracle,
+    VoxelReplanningAStarHeuristic,
+    VoxelWeightedAStarHeuristic,
+)
 from theseo_anysearch.heuristic.voxel.dijkstra import VoxelDijkstraHeuristic
-from theseo_anysearch.heuristic.voxel.replanning_astar import VoxelReplanningAStarHeuristic
-from theseo_anysearch.heuristic.voxel.weighted_astar import VoxelWeightedAStarHeuristic
 
 
 def build_voxel_heuristic(

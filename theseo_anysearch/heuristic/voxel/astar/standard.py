@@ -1,4 +1,4 @@
-"""A* search for the 26-neighbor voxel environment."""
+"""Standard A* search for the 26-neighbor voxel environment."""
 
 import networkx as nx
 

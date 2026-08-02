@@ -8,10 +8,11 @@ heuristic/
 ├── models.py              # Immutable plan and replay results
 ├── base.py                # Voxel graph construction and replay mechanics
 └── voxel/
-    ├── astar.py
+    ├── astar/
+    │   ├── standard.py
+    │   ├── weighted.py
+    │   └── replanning.py
     ├── dijkstra.py
-    ├── weighted_astar.py
-    ├── replanning_astar.py
     └── factory.py         # Stable YAML-name dispatch
 ```
 

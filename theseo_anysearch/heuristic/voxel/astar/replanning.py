@@ -1,7 +1,7 @@
 """A* replanning for environments whose traversability changes each step."""
 
 from theseo_anysearch.heuristic.models import VoxelOraclePlan, VoxelOracleReplay
-from theseo_anysearch.heuristic.voxel.astar import VoxelAStarOracle
+from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
 
 
 class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
@@ -42,9 +42,7 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
                     positions=tuple(actual_positions),
                     rewards=tuple(rewards),
                     action_indices=tuple(action_indices),
-                    mismatch=(
-                        f"Step {len(rewards)}: expected {expected}, got {actual}"
-                    ),
+                    mismatch=f"Step {len(rewards)}: expected {expected}, got {actual}",
                 )
             goal_reached = bool(info.get("goal_reached", actual == goal))
 
