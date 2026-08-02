@@ -217,7 +217,7 @@ MINIMAL_YAML = textwrap.dedent("""\
     env:
       stl_path: /tmp/test.stl
       scale: 1.0
-      agent_count: 2
+      agent_count: 1
       max_steps: 100
       seed: 7
 

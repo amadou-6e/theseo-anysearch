@@ -28,7 +28,7 @@ class TestLoadSettings:
     """Tests LoadSettings."""
     def test_loads_minimal_yaml(self, minimal_yaml: Path):
         s = load_settings(minimal_yaml)
-        assert s.env.agent_count == 2
+        assert s.env.agent_count == 1
         assert s.training.iterations == 5
         assert s.anyscale.project == "test-project"
 
