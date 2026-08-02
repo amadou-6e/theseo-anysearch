@@ -222,7 +222,7 @@ def _experiment_trainable(
     from theseo_anysearch.experiments.loader import _resolve_typed_configs
     from theseo_anysearch.experiments.models import ExperimentConfig, MLflowConfig
     from theseo_anysearch.experiments.tracking import MLflowTracker
-    from theseo_anysearch.rllib.trainer.base import TrainResult
+    from theseo_anysearch.rllib.trainer.results import TrainResult
 
     # ------------------------------------------------------------------ #
     # Trial identity                                                        #

@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from theseo_anysearch.experiments.output import OutputStore
     from theseo_anysearch.experiments.tracking import MLflowTracker
     from theseo_anysearch.rllib.trainer import Trainer
-    from theseo_anysearch.rllib.trainer.base import TrainResult
+    from theseo_anysearch.rllib.trainer.results import TrainResult
 
 
 class RunInfo(BaseModel):

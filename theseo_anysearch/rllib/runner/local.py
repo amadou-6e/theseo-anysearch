@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from theseo_anysearch.rllib.runner.base import Runner
-from theseo_anysearch.rllib.trainer.base import Trainer
+from theseo_anysearch.rllib.trainer.trainer import Trainer
 
 
 class LocalRunner(Runner):
