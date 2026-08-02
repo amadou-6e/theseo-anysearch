@@ -1,5 +1,5 @@
 pub mod dto;
-pub mod py_bindings;
+pub mod python;
 
 pub use dto::{EnvConfig, GeometrySubmission};
-pub use py_bindings::run_submission_poc;
+pub use python::run_submission_poc;
