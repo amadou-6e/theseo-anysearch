@@ -10,7 +10,7 @@ returns the built RLlib algorithm.
 - base.py defines the algorithm configuration contract.
 - ppo.py, dqn.py, rainbow.py, sac.py, td3.py, and ddpg.py contain
   single-algorithm adapters.
-- multi_voxel_ppo.py contains the multi-agent PPO adapter.
+- ppo.py contains both the single-agent and shared-policy multi-agent PPO adapters.
 
 Algorithm adapters may configure models, rollout workers, evaluation workers,
 resources, and the registered environment. They must not own the training

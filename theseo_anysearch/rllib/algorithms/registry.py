@@ -13,7 +13,7 @@ _TRAINER_TYPES = {
     "ddpg": ("theseo_anysearch.rllib.algorithms.ddpg", "DDPGTrainer"),
     "dqn": ("theseo_anysearch.rllib.algorithms.dqn", "DQNTrainer"),
     "multi_agent_voxel_ppo": (
-        "theseo_anysearch.rllib.algorithms.multi_voxel_ppo",
+        "theseo_anysearch.rllib.algorithms.ppo",
         "MultiAgentVoxelPPOTrainer",
     ),
     "ppo": ("theseo_anysearch.rllib.algorithms.ppo", "PPOTrainer"),

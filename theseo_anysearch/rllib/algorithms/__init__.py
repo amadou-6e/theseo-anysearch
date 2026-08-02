@@ -9,7 +9,7 @@ _EXPORTS = {
     "DDPGTrainer": ("theseo_anysearch.rllib.algorithms.ddpg", "DDPGTrainer"),
     "DQNTrainer": ("theseo_anysearch.rllib.algorithms.dqn", "DQNTrainer"),
     "MultiAgentVoxelPPOTrainer": (
-        "theseo_anysearch.rllib.algorithms.multi_voxel_ppo",
+        "theseo_anysearch.rllib.algorithms.ppo",
         "MultiAgentVoxelPPOTrainer",
     ),
     "PPOTrainer": ("theseo_anysearch.rllib.algorithms.ppo", "PPOTrainer"),
