@@ -59,3 +59,7 @@ The first dated Ray-suite timing baseline is recorded in
 [`ray-suite-timings-2026-08-02.md`](ray-suite-timings-2026-08-02.md). It includes
 the reproduction command, machine details, per-module durations, and known
 fixture failures that currently make several measurements lower bounds.
+
+The separate `Ray CLI Test Suite` GitHub Actions workflow runs the five modern
+end-to-end CLI tests on pull requests to `develop`. It uploads JUnit timing data
+as the `ray-cli-test-timings` artifact even when a test fails.
