@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     _PolicyAdapter,
     _collect_worker_episodes,
     _stack_observations,

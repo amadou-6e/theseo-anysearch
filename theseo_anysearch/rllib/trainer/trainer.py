@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any
@@ -13,14 +12,15 @@ from theseo_anysearch.rllib.trainer.checkpointing import (
     CheckpointManager,
     CheckpointState,
 )
-from theseo_anysearch.rllib.trainer.evaluation_coordinator import EvaluationCoordinator
-from theseo_anysearch.rllib.trainer.metrics import TrainingMetricCoordinator
-from theseo_anysearch.rllib.trainer.reporting import _TensorBoardRunWriter
+from theseo_anysearch.rllib.trainer.evaluation.coordinator import EvaluationCoordinator
+from theseo_anysearch.rllib.trainer.lifecycle import TrainingLifecycle
+from theseo_anysearch.rllib.trainer.reporting.metrics import TrainingMetricCoordinator
+from theseo_anysearch.rllib.trainer.reporting.trajectories import TrajectoryReporter
+from theseo_anysearch.rllib.trainer.reporting.tensorboard import _TensorBoardRunWriter
 from theseo_anysearch.rllib.trainer.results import RllibTrainResult, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import (
     _append_trainer_stage_log,
     _detect_num_gpus,
-    _log_trainer_stage,
     _resolve_pool_dir,
 )
 
@@ -48,6 +48,7 @@ class Trainer(BaseTrainer):
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
         self._checkpoints = CheckpointManager(self._output_dir)
+        self._lifecycle = TrainingLifecycle(self._output_dir)
         from theseo_anysearch.experiments.custom_metrics import (
             load_metric_providers,
             write_metric_manifest,
@@ -167,12 +168,10 @@ class Trainer(BaseTrainer):
         """
         import warnings
 
-        if self._algo is None:
-            _log_trainer_stage("Building algorithm instance")
-            _append_trainer_stage_log(self._output_dir, "Building algorithm instance")
-            self._algo = self._build_algorithm()
-            _log_trainer_stage("Algorithm instance ready")
-            _append_trainer_stage_log(self._output_dir, "Algorithm instance ready")
+        self._algo = self._lifecycle.ensure_algorithm(
+            self._algo,
+            self._build_algorithm,
+        )
 
         training = self._config.training
         evaluation = self._config.evaluation
@@ -182,7 +181,6 @@ class Trainer(BaseTrainer):
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every
         best_traj = training.best_trajectory
-        _traj_writer = None
         _is_multi = training.algorithm == "multi_agent_voxel_ppo"
         _env_cfg = self._env_config_dict()
 
@@ -210,15 +208,13 @@ class Trainer(BaseTrainer):
         early_stop_controller = TrainingEarlyStopController(
             early_stop_config, early_stop_state
         )
-        if traj_every or best_traj or early_stop_config.enabled:
-            from theseo_anysearch.experiments.trajectory import (
-                MultiTrajectoryWriter,
-                TrajectoryWriter,
-            )
-
-            _Writer = MultiTrajectoryWriter if _is_multi else TrajectoryWriter
-            _traj_writer = _Writer(_store, traj_every, best_traj)
-
+        trajectory_reporter = TrajectoryReporter.create(
+            _store,
+            trajectory_every=traj_every,
+            best_trajectory=best_traj,
+            multi_agent=_is_multi,
+            enabled=early_stop_config.enabled,
+        )
         evaluation_coordinator = EvaluationCoordinator(
             evaluation=evaluation,
             early_stop_config=early_stop_config,
@@ -229,8 +225,7 @@ class Trainer(BaseTrainer):
             output_dir=self._output_dir,
             output_store=_store,
             tensorboard_writer=tb_writer,
-            trajectory_writer=_traj_writer,
-            checkpoint=self.checkpoint,
+            trajectory_reporter=trajectory_reporter,
             multi_agent=_is_multi,
             experiment_name=self._output_dir.parent.name,
             run_id=self._output_dir.name,
@@ -238,24 +233,13 @@ class Trainer(BaseTrainer):
 
         try:
             for i in range(self._iteration, training.iterations):
-                _log_trainer_stage(
-                    f"Starting train iteration {i + 1}/{training.iterations}"
+                execution = self._lifecycle.run_iteration(
+                    self._algo,
+                    i + 1,
+                    training.iterations,
                 )
-                _append_trainer_stage_log(
-                    self._output_dir,
-                    f"Starting train iteration {i + 1}/{training.iterations}",
-                )
-                t0 = time.perf_counter()
-                rllib_result = self._algo.train()
-                elapsed = time.perf_counter() - t0
-                _log_trainer_stage(
-                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s"
-                )
-                _append_trainer_stage_log(
-                    self._output_dir,
-                    f"Finished train iteration {i + 1}/{training.iterations} in {elapsed:.2f}s",
-                )
-
+                rllib_result = execution.result
+                elapsed = execution.duration_s
                 self._iteration = i + 1
                 parsed = RllibTrainResult.from_raw(rllib_result)
                 self._episodes_total = parsed.parse_episodes_total(
@@ -281,9 +265,9 @@ class Trainer(BaseTrainer):
                     result = evaluation_outcome.result
                     early_stop_triggered = evaluation_outcome.early_stop_triggered
                     early_stop_decision = evaluation_outcome.early_stop_decision
-                    _checkpointed_for_best = (
-                        evaluation_outcome.checkpointed_for_best
-                    )
+                    if evaluation_outcome.best_trajectory_written:
+                        self.checkpoint()
+                        _checkpointed_for_best = True
                 except CustomMetricError:
                     raise
                 except Exception as exc:

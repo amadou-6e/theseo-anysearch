@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,8 +25,8 @@ class EvaluationOutcome(BaseModel):
         Whether evaluation activated the configured early-stop condition.
     early_stop_decision : Any
         Detailed early-stop decision, when evaluated.
-    checkpointed_for_best : bool
-        Whether recording a new best trajectory created a checkpoint.
+    best_trajectory_written : bool
+        Whether evaluation wrote a new best trajectory.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
@@ -34,7 +34,7 @@ class EvaluationOutcome(BaseModel):
     result: TrainResult
     early_stop_triggered: bool
     early_stop_decision: Any
-    checkpointed_for_best: bool
+    best_trajectory_written: bool
 
 
 class EvaluationCoordinator:
@@ -60,10 +60,8 @@ class EvaluationCoordinator:
         Artifact output store.
     tensorboard_writer : Any
         Run-local TensorBoard writer.
-    trajectory_writer : Any
-        Optional trajectory writer.
-    checkpoint : Callable[[], pathlib.Path]
-        Callback used when a new best trajectory is recorded.
+    trajectory_reporter : Any
+        Optional trajectory artifact reporter.
     multi_agent : bool
         Whether evaluation targets a multi-agent policy.
     experiment_name : str
@@ -84,8 +82,7 @@ class EvaluationCoordinator:
         output_dir: Path,
         output_store: Any,
         tensorboard_writer: Any,
-        trajectory_writer: Any,
-        checkpoint: Callable[[], Path],
+        trajectory_reporter: Any,
         multi_agent: bool,
         experiment_name: str,
         run_id: str,
@@ -99,8 +96,7 @@ class EvaluationCoordinator:
         self._output_dir = output_dir
         self._store = output_store
         self._tensorboard = tensorboard_writer
-        self._trajectory_writer = trajectory_writer
-        self._checkpoint = checkpoint
+        self._trajectory_reporter = trajectory_reporter
         self._multi_agent = multi_agent
         self._experiment_name = experiment_name
         self._run_id = run_id
@@ -142,7 +138,7 @@ class EvaluationCoordinator:
             heuristic_action_accuracy,
             heuristic_action_distance,
         )
-        from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
+        from theseo_anysearch.rllib.trainer.evaluation.evaluator import EvaluationMetrics
 
         evaluation = self._evaluation
         evaluation_episodes = evaluation.episodes
@@ -151,12 +147,12 @@ class EvaluationCoordinator:
         _env_cfg = self._env_config
         _store: OutputStore = self._store
         tb_writer = self._tensorboard
-        _traj_writer = self._trajectory_writer
+        trajectory_reporter = self._trajectory_reporter
         _is_multi = self._multi_agent
         _is_last_iter = is_last_iteration
         _exp_name = self._experiment_name
         _run_id = self._run_id
-        _checkpointed_for_best = False
+        best_trajectory_written = False
         early_stop_triggered = False
         early_stop_decision = None
         algorithm = algorithm
@@ -171,7 +167,7 @@ class EvaluationCoordinator:
             f"{iteration}",
         )
         evaluation_seed = evaluation.seed
-        from theseo_anysearch.rllib.trainer.parallel_evaluation import (
+        from theseo_anysearch.rllib.trainer.evaluation.parallel import (
             collect_rllib_evaluation_episodes,
         )
 
@@ -375,19 +371,15 @@ class EvaluationCoordinator:
             },
         )
 
-        if _traj_writer is not None:
-            for episode in episodes:
-                _traj_writer.record(episode)
-            written = _traj_writer.on_iteration_end(
-                iteration,
-                evaluation_reward_mean,
-                _exp_name,
-                _run_id,
+        if trajectory_reporter is not None:
+            best_trajectory_written = trajectory_reporter.record(
+                episodes,
+                iteration=iteration,
+                reward_mean=evaluation_reward_mean,
+                experiment_name=_exp_name,
+                run_id=_run_id,
                 force=_is_last_iter or early_stop_triggered,
             )
-            if "trajectories/best.json" in written:
-                self._checkpoint()
-                _checkpointed_for_best = True
         _append_trainer_stage_log(
             self._output_dir,
             f"Evaluation batch completed for iteration {iteration}: "
@@ -397,5 +389,5 @@ class EvaluationCoordinator:
             result=result,
             early_stop_triggered=early_stop_triggered,
             early_stop_decision=early_stop_decision,
-            checkpointed_for_best=_checkpointed_for_best,
+            best_trajectory_written=best_trajectory_written,
         )

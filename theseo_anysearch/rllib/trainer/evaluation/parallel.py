@@ -19,6 +19,22 @@ class _PolicyAdapter:
         policy_id: str = "default_policy",
         explore: bool = False,
     ) -> Any:
+        """Compute one action through the adapted RLlib policy.
+
+        Parameters
+        ----------
+        observation : Any
+            Environment observation.
+        policy_id : str
+            RLlib policy identifier.
+        explore : bool
+            Whether policy inference may explore.
+
+        Returns
+        -------
+        Any
+            Policy action.
+        """
         policy = self._env_runner.get_policy(policy_id)
         observation = self._preprocess_observation(
             policy, observation, env_id="0"
@@ -32,6 +48,22 @@ class _PolicyAdapter:
         policy_id: str = "default_policy",
         explore: bool = False,
     ) -> Any:
+        """Compute a batch of actions through the adapted RLlib policy.
+
+        Parameters
+        ----------
+        observations : list[Any]
+            Environment observations to batch.
+        policy_id : str
+            RLlib policy identifier.
+        explore : bool
+            Whether policy inference may explore.
+
+        Returns
+        -------
+        Any
+            Batched policy actions.
+        """
         policy = self._env_runner.get_policy(policy_id)
         processed = [
             self._preprocess_observation(policy, observation, env_id=str(index))

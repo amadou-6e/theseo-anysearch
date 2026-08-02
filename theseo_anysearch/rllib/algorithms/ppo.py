@@ -11,7 +11,7 @@ from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 from theseo_anysearch.rllib.trainer.trainer import Trainer
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
-from theseo_anysearch.rllib.trainer.parallel_evaluation import configure_rllib_evaluation
+from theseo_anysearch.rllib.trainer.evaluation.parallel import configure_rllib_evaluation
 
 
 # TODO! instead of private functions, create ustils file

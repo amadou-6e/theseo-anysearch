@@ -3,31 +3,62 @@
 The trainer package owns the lifecycle of one configured training run. It does
 not define algorithm-specific hyperparameters or construct RLlib algorithms.
 
-## Modules
+## Structure
 
-- base.py defines the small abstract BaseTrainer lifecycle contract.
-- trainer.py implements training, evaluation, checkpointing, resume, custom
-  metrics, custom rewards, trajectory recording, and early stopping.
-- results.py exposes normalized RLlib and project training result models.
-- checkpointing.py owns checkpoint state, persistence, restore, and resume lookup.
-- evaluation_coordinator.py owns deterministic evaluation, evaluation artifacts, heuristic comparisons, and evaluation-driven early stopping.
-- metrics.py computes and merges Python and native training metrics.
-- reporting.py owns run-local TensorBoard output.
-- runtime.py contains Ray and shared runtime helpers.
-- evaluation.py evaluates policies and curriculum stages.
-- parallel_evaluation.py configures and executes vectorized evaluation.
-- early_stop.py evaluates configured training termination conditions.
+    trainer/
+    ├── trainer.py
+    ├── lifecycle.py
+    ├── checkpointing.py
+    ├── evaluation/
+    │   ├── coordinator.py
+    │   ├── evaluator.py
+    │   ├── retention.py
+    │   ├── generalization.py
+    │   └── parallel.py
+    ├── curriculum/
+    │   ├── controller.py
+    │   ├── advancement.py
+    │   └── sampling.py
+    ├── reporting/
+    │   ├── tensorboard.py
+    │   ├── metrics.py
+    │   └── trajectories.py
+    ├── results.py
+    └── runtime.py
 
+## Ownership
+
+- trainer.py coordinates collaborators and exposes the public training lifecycle.
+- lifecycle.py builds the algorithm and executes timed training iterations.
+- checkpointing.py persists and restores RLlib and project state.
+- evaluation/coordinator.py runs evaluation and combines its outcomes.
+- evaluation/evaluator.py defines normalized success and evaluation metrics.
+- evaluation/parallel.py performs vectorized deterministic policy evaluation.
+- evaluation/retention.py owns evaluation of previously visited curriculum stages.
+- evaluation/generalization.py owns evaluation of unseen curriculum cases.
+- curriculum/controller.py owns curriculum state coordination.
+- curriculum/advancement.py owns stage-advancement decisions.
+- curriculum/sampling.py owns training-stage sampling.
+- reporting/tensorboard.py writes run-local TensorBoard events.
+- reporting/metrics.py computes Python and native training metrics.
+- reporting/trajectories.py records periodic and best trajectory artifacts.
+- results.py contains normalized RLlib and project result models.
+- runtime.py contains shared Ray and runtime helpers.
+
+The current develop baseline has no curriculum, retention, or generalization
+runtime implementation to relocate. Their modules establish ownership without
+inventing unused behavior. Curriculum code should enter through these modules
+when its branch is merged.
 
 ## Dependency direction
 
     runner/tune -> trainer -> algorithms -> RLlib
-                        |
-                        +-> evaluation and reporting
+                       |
+                       +-> evaluation, curriculum, and reporting
 
-A runner selects where a job executes. A trainer controls one job. An algorithm
-adapter constructs the RLlib algorithm used by that job. Tune coordinates
-multiple jobs.
+A runner selects where a job executes. A trainer coordinates one job. An
+algorithm adapter constructs its RLlib algorithm. Tune coordinates multiple
+jobs.
 
 ## Documentation
 
