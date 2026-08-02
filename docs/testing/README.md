@@ -1,7 +1,7 @@
 # Testing
 
-The automated pull-request workflow runs tests that do not start or require a
-Ray runtime:
+The automated pull-request workflow runs the Local Test Suite, which does not
+start or require a Ray runtime:
 
 ```powershell
 python -m pytest -m "not ray and not integration" -q
@@ -33,7 +33,7 @@ Run the real-Ray suite explicitly on a machine with the required resources:
 python -m pytest -m ray -q
 ```
 
-Run all integration tests, including non-Ray integrations, with:
+Run all integration tests, including integrations that do not require Ray, with:
 
 ```powershell
 python -m pytest -m integration -q
@@ -47,8 +47,8 @@ The workflow validates and builds before running five test groups in parallel:
 1. `Validate test contract` compiles Python and checks marker registration.
 2. `Build Rust bindings` checks all Rust targets and uploads one wheel artifact.
 3. Core/CLI, environment/heuristic, experiment/benchmarking, RLlib, and garden
-   jobs download that same wheel and run their non-Ray tests independently.
-4. `Non-Ray test suite` provides one aggregate result suitable for branch
+   jobs download that same wheel and run their local tests independently.
+4. `Local Test Suite` provides one aggregate result suitable for branch
    protection.
 
 The parallel groups are path-disjoint, so each selected test runs once.

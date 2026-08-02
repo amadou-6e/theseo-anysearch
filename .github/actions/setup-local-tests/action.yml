@@ -1,4 +1,4 @@
-name: Set up non-Ray tests
+name: Set up local tests
 description: Install Python dependencies and the shared theseo_core wheel.
 
 runs:
