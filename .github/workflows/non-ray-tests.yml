@@ -78,6 +78,9 @@ jobs:
     needs: build-rust
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      TERMINAL_WIDTH: 240
+      _TYPER_FORCE_DISABLE_TERMINAL: 1
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-non-ray-tests
@@ -106,6 +109,9 @@ jobs:
     needs: build-rust
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      TERMINAL_WIDTH: 240
+      _TYPER_FORCE_DISABLE_TERMINAL: 1
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-non-ray-tests

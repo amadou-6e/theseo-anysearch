@@ -19,15 +19,7 @@ from typer.testing import CliRunner
 
 from theseo_anysearch.cli.main import app
 
-
-class DeterministicCliRunner(CliRunner):
-    """Render CLI help at a stable width on local and CI terminals."""
-
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("terminal_width", 240)
-        return super().invoke(*args, **kwargs)
-
-runner = DeterministicCliRunner()
+runner = CliRunner()
 
 
 # ---------------------------------------------------------------------------
