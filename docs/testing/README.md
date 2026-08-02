@@ -52,3 +52,10 @@ The workflow validates and builds before running five test groups in parallel:
    protection.
 
 The parallel groups are path-disjoint, so each selected test runs once.
+
+## Ray suite timing
+
+The first dated Ray-suite timing baseline is recorded in
+[`ray-suite-timings-2026-08-02.md`](ray-suite-timings-2026-08-02.md). It includes
+the reproduction command, machine details, per-module durations, and known
+fixture failures that currently make several measurements lower bounds.
