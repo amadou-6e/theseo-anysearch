@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from theseo_anysearch.models import Settings
@@ -76,36 +76,6 @@ class BaseTrainer(ABC):
         bool
             True when state was restored, otherwise False.
         """
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve legacy imports from trainer.base lazily.
-
-    Parameters
-    ----------
-    name : str
-        Requested compatibility export.
-
-    Returns
-    -------
-    Any
-        Object provided by its new owning module.
-
-    Raises
-    ------
-    AttributeError
-        If name is not a supported compatibility export.
-    """
-    if name in {"Trainer", "_detect_num_gpus", "_resolve_pool_dir"}:
-        from theseo_anysearch.rllib.trainer import trainer
-        from theseo_anysearch.rllib.trainer import runtime
-
-        return getattr(trainer if name == "Trainer" else runtime, name)
-    if name in {"RllibTrainResult", "TrainResult"}:
-        from theseo_anysearch.rllib.trainer import results
-
-        return getattr(results, name)
-    raise AttributeError(name)
 
 
 __all__ = ["BaseTrainer"]

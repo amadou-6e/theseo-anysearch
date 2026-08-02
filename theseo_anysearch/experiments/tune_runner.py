@@ -197,7 +197,7 @@ def _experiment_trainable(
     native_extension_bundle: dict[str, Any] | None = None,
 ) -> None:
     """
-    Generic Ray Tune function trainable for any algorithm in Trainer._registry.
+    Generic Ray Tune function trainable for any algorithm in the built-in algorithm registry.
 
     Parameters
     ----------
@@ -809,7 +809,7 @@ class TuneRunner:
     Drives a Ray Tune hyperparameter sweep for an ExperimentConfig that
     carries a non-None tune_config.
 
-    Supports any algorithm registered in Trainer._registry
+    Supports any algorithm registered in the built-in algorithm registry
     (ppo, multi_agent_voxel_ppo, sac, …).  The search space is expressed
     using the same YAML format as ``anysearch tune --config``.
 

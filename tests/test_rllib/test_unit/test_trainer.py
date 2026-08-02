@@ -13,8 +13,10 @@ import pytest
 
 from unittest.mock import patch
 
-from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_num_gpus
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _set_rllib_storage_path
+from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
+from theseo_anysearch.rllib.trainer.trainer import Trainer
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
 
 
@@ -554,30 +556,32 @@ class TestResume:
 
 class TestTrainerRegistry:
     """Tests TrainerRegistry."""
-    def setup_method(self):
-        import theseo_anysearch.rllib.trainer  # noqa: F401 — triggers all registrations
-
     def test_all_discrete_algorithms_registered(self):
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
+
+        available = registered_algorithms()
         for name in ("ppo", "sac", "dqn", "rainbow"):
-            assert name in Trainer._registry, f"'{name}' not in Trainer._registry"
+            assert name in available, f"'{name}' not in the algorithm registry"
 
     def test_all_continuous_stubs_registered(self):
-        for name in ("td3", "ddpg"):
-            assert name in Trainer._registry, f"'{name}' not in Trainer._registry"
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
 
+        available = registered_algorithms()
+        for name in ("td3", "ddpg"):
+            assert name in available, f"'{name}' not in the algorithm registry"
     def test_from_settings_dispatches_to_ppo(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+        from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
         trainer = Trainer.from_settings(trainer_settings)
         assert isinstance(trainer, PPOTrainer)
 
     def test_td3_raises_not_implemented(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.td3 import TD3Trainer
+        from theseo_anysearch.rllib.algorithms.td3 import TD3Trainer
         trainer = TD3Trainer(trainer_settings)
         with pytest.raises(NotImplementedError, match="Box"):
             trainer._build_algorithm()
 
     def test_ddpg_raises_not_implemented(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.ddpg import DDPGTrainer
+        from theseo_anysearch.rllib.algorithms.ddpg import DDPGTrainer
         trainer = DDPGTrainer(trainer_settings)
         with pytest.raises(NotImplementedError, match="Box"):
             trainer._build_algorithm()

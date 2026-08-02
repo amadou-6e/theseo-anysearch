@@ -18,8 +18,6 @@ not define algorithm-specific hyperparameters or construct RLlib algorithms.
 - parallel_evaluation.py configures and executes vectorized evaluation.
 - early_stop.py evaluates configured training termination conditions.
 
-The algorithm-named modules in this package are compatibility imports. New code
-must import algorithm adapters from theseo_anysearch.rllib.algorithms.
 
 ## Dependency direction
 

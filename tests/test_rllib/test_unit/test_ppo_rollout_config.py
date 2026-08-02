@@ -7,7 +7,7 @@ import pytest
 
 
 def test_configure_rllib_env_runners_propagates_vectorization_and_resources():
-    from theseo_anysearch.rllib.trainer.ppo import _configure_rllib_env_runners
+    from theseo_anysearch.rllib.algorithms.ppo import _configure_rllib_env_runners
 
     rllib_config = MagicMock()
     configured = MagicMock()
@@ -31,7 +31,7 @@ def test_configure_rllib_env_runners_propagates_vectorization_and_resources():
 def test_installed_rllib_config_retains_vectorization_and_cpu_inference():
     pytest.importorskip("ray")
     from ray.rllib.algorithms.ppo import PPOConfig
-    from theseo_anysearch.rllib.trainer.ppo import _configure_rllib_env_runners
+    from theseo_anysearch.rllib.algorithms.ppo import _configure_rllib_env_runners
 
     training = SimpleNamespace(
         num_env_runners=2,

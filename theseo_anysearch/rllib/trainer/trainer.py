@@ -6,7 +6,6 @@ import time
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any
-from typing import ClassVar
 
 from theseo_anysearch.models import Settings
 from theseo_anysearch.rllib.trainer.base import BaseTrainer
@@ -40,13 +39,7 @@ class Trainer(BaseTrainer):
     reporting, runtime setup, and checkpoint persistence are delegated to
     focused collaborators.
     """
-    algorithm_name: ClassVar[str | None] = None
-    _registry: ClassVar[dict[str, type["Trainer"]]] = {}
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        if cls.algorithm_name:
-            cls._registry[cls.algorithm_name] = cls
+    algorithm_name: str | None = None
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -105,11 +98,9 @@ class Trainer(BaseTrainer):
         if cls is not Trainer:
             return cls(config)
 
-        trainer_cls = cls._registry.get(config.training.algorithm.lower())
-        if trainer_cls is None:
-            raise NotImplementedError(
-                f"No Trainer registered for algorithm '{config.training.algorithm}'."
-            )
+        from theseo_anysearch.rllib.algorithms.registry import get_trainer_class
+
+        trainer_cls = get_trainer_class(config.training.algorithm)
         return trainer_cls(config)
 
     # ------------------------------------------------------------------
