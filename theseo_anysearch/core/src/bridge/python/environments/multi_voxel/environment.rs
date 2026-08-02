@@ -4,7 +4,7 @@ use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
 #[pyclass]
 pub struct PyMultiVoxelEnv {
-    inner: crate::environments::multi_voxel_env::MultiAgentVoxelEnv,
+    inner: crate::voxel::MultiAgentVoxelEnv,
 }
 
 #[pymethods]
@@ -31,18 +31,15 @@ impl PyMultiVoxelEnv {
         zone_reward_max: f32,
         zone_reward_curve: String,
     ) -> PyResult<Self> {
-        let distance_reward_mode = crate::environments::voxel_env::DistanceRewardMode::from_name(
-            distance_reward_mode.as_str(),
-        )
-        .ok_or_else(|| {
-            PyValueError::new_err("distance_reward_mode must be 'progress' or 'zone'")
-        })?;
+        let distance_reward_mode =
+            crate::voxel::DistanceRewardMode::from_name(distance_reward_mode.as_str()).ok_or_else(
+                || PyValueError::new_err("distance_reward_mode must be 'progress' or 'zone'"),
+            )?;
         let zone_reward_curve =
-            crate::environments::voxel_env::ZoneRewardCurve::from_name(zone_reward_curve.as_str())
-                .ok_or_else(|| {
-                    PyValueError::new_err("zone_reward_curve must be 'linear' or 'exponential'")
-                })?;
-        let reward_config = crate::environments::voxel_env::RewardConfig {
+            crate::voxel::ZoneRewardCurve::from_name(zone_reward_curve.as_str()).ok_or_else(
+                || PyValueError::new_err("zone_reward_curve must be 'linear' or 'exponential'"),
+            )?;
+        let reward_config = crate::voxel::RewardConfig {
             step_cost,
             goal_reward,
             distance_shaping,
@@ -55,7 +52,7 @@ impl PyMultiVoxelEnv {
             zone_reward_max,
             zone_reward_curve,
         };
-        let inner = crate::environments::multi_voxel_env::MultiAgentVoxelEnv::new(
+        let inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
             trail_mode,

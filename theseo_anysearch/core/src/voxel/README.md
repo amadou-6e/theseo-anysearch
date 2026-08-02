@@ -1,30 +1,54 @@
-# Voxel behavior architecture
+# Voxel architecture
 
-The `voxel` module owns behavior contracts that depend on voxel-specific state:
-cursors, integer coordinates, filled cells, action offsets, collision state, trails,
-and voxel observations. Other environment families should define their own predicates,
-outcomes, rewards, and metrics instead of depending on these contracts.
+The `voxel` module owns the complete voxel environment family. This includes its
+environment state and lifecycle as well as every behavior contract that depends on
+integer voxel coordinates, filled cells, action offsets, collision state, trails, or
+voxel observations.
 
 ## Layout
 
 ```text
 voxel/
-|-- actions/       # Action history and ordered predicate/outcome pipeline state
-|-- common/        # Library, ABI version, name, and JSON parameter validation
-|-- predicates/    # Predicate ABI, native loader, context, and built-ins
-|-- outcomes/      # Outcome ABI, native loader, context, and built-ins
-|-- rewards/       # Reward ABI, configuration, breakdown, loader, and built-ins
-`-- metrics/       # Training/evaluation metric ABI, context, loader, and result
+|-- environment/
+|   |-- geometry.rs        # Shared surface-cell and distance helpers
+|   |-- multi.rs           # Multi-agent voxel environment
+|   `-- single/
+|       |-- mod.rs         # Single-agent state and configuration
+|       |-- action_pipeline.rs # Predicate checks, action execution, and masking
+|       |-- lifecycle.rs   # Reset, step, reward, and termination lifecycle
+|       `-- tests.rs       # Single-agent behavioral tests
+|-- actions/               # Action history and predicate/outcome pipeline state
+|-- common/                # Library, ABI version, name, and parameter validation
+|-- predicates/            # Predicate ABI, native loader, context, and built-ins
+|-- outcomes/              # Outcome ABI, native loader, context, and built-ins
+|-- rewards/               # Reward ABI, configuration, breakdown, and built-ins
+`-- metrics/               # Training/evaluation metric ABI, context, and result
 ```
 
-`VoxelEnv` owns environment state and step ordering. It delegates feasibility to the
-predicate pipeline, successful action effects to the outcome pipeline, and custom reward
-execution to the reward module. Built-in and native implementations share the same contexts.
+`VoxelEnv` owns single-agent environment state and step ordering. It delegates action
+feasibility to the predicate pipeline, successful action effects to the outcome pipeline,
+and custom reward execution to the reward module. `MultiAgentVoxelEnv` shares the voxel
+geometry helpers and reward configuration without living in the generic environment module.
+
+`core/src/environments` now contains only environment-family-neutral traits and the distinct
+surface environment. New voxel functionality belongs under this module, not under
+`environments`.
 
 Training and evaluation metrics are voxel-owned data contracts but are not executed during
 `VoxelEnv::step`. The experiment/RLlib layer determines when a training or evaluation result
 exists and supplies its serialized context. This keeps trainer scheduling out of the environment
 while retaining a Rust implementation of the native metric ABI.
+
+## Public API
+
+The crate exports the voxel family from `crate::voxel`:
+
+- `VoxelEnv`, `VoxelAction`, and `VoxelObservation`;
+- `MultiAgentVoxelEnv`, `AgentEntry`, and `MultiStepResult`;
+- `RewardConfig`, `DistanceRewardMode`, and `ZoneRewardCurve`.
+
+Python bridge modules import these public voxel exports. Internal environment files are not
+compatibility shims and are not re-exported through `crate::environments`.
 
 ## Compatibility contract
 
@@ -48,6 +72,7 @@ A non-voxel environment should create its own ownership root, for example:
 
 ```text
 continuous/
+|-- environment/
 |-- predicates/
 |-- outcomes/
 |-- rewards/
@@ -55,4 +80,4 @@ continuous/
 ```
 
 Only infrastructure proven to be environment-independent across multiple families should move
-to a shared runtime module.
+to a shared module.

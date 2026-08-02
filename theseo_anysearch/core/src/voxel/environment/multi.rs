@@ -7,89 +7,10 @@
 //! Episode ends when steps_remaining reaches 0, or all agents have reached
 //! their goals (when geometry/goals are configured).
 
+use crate::voxel::rewards::RewardConfig;
 use crate::world::{Coord, WorldState};
-use crate::environments::voxel_env::RewardConfig;
 
-// ---------------------------------------------------------------------------
-// Shared helpers (mirror of voxel_env.rs private helpers)
-// ---------------------------------------------------------------------------
-
-pub(crate) const DIRS_6: [(i32, i32, i32); 6] = [
-    (1, 0, 0), (-1, 0, 0),
-    (0, 1, 0), (0, -1, 0),
-    (0, 0, 1), (0, 0, -1),
-];
-
-fn l2(a: Coord, b: Coord) -> f32 {
-    let dx = a.0 as f32 - b.0 as f32;
-    let dy = a.1 as f32 - b.1 as f32;
-    let dz = a.2 as f32 - b.2 as f32;
-    (dx * dx + dy * dy + dz * dz).sqrt()
-}
-
-pub fn manhattan(a: Coord, b: Coord) -> u32 {
-    let dx = (a.0 as i32 - b.0 as i32).unsigned_abs();
-    let dy = (a.1 as i32 - b.1 as i32).unsigned_abs();
-    let dz = (a.2 as i32 - b.2 as i32).unsigned_abs();
-    dx + dy + dz
-}
-
-pub fn compute_surface_cells(geometry: &[Coord], grid_size: u16) -> Vec<Coord> {
-    use std::collections::HashSet;
-    let geo_set: HashSet<Coord> = geometry.iter().copied().collect();
-    let reachable = reachable_from_boundary(&geo_set, grid_size);
-
-    let g = grid_size as i32;
-    let mut surface: HashSet<Coord> = HashSet::new();
-    for &(gx, gy, gz) in geometry {
-        for (dx, dy, dz) in DIRS_6 {
-            let nx = gx as i32 + dx;
-            let ny = gy as i32 + dy;
-            let nz = gz as i32 + dz;
-            if nx >= 1 && ny >= 1 && nz >= 1 && nx <= g && ny <= g && nz <= g {
-                let nc = (nx as u16, ny as u16, nz as u16);
-                if !geo_set.contains(&nc) && reachable.contains(&nc) {
-                    surface.insert(nc);
-                }
-            }
-        }
-    }
-    let mut cells: Vec<Coord> = surface.into_iter().collect();
-    cells.sort();
-    cells
-}
-
-fn reachable_from_boundary(geo_set: &std::collections::HashSet<Coord>, grid_size: u16) -> std::collections::HashSet<Coord> {
-    use std::collections::{HashSet, VecDeque};
-    let mut reachable: HashSet<Coord> = HashSet::new();
-    let mut queue: VecDeque<Coord> = VecDeque::new();
-    let g = grid_size as i32;
-    for u in 1u16..=grid_size {
-        for v in 1u16..=grid_size {
-            for &w in &[1u16, grid_size] {
-                for &c in &[(u, v, w), (u, w, v), (w, u, v)] {
-                    if !geo_set.contains(&c) && reachable.insert(c) {
-                        queue.push_back(c);
-                    }
-                }
-            }
-        }
-    }
-    while let Some((x, y, z)) = queue.pop_front() {
-        for (dx, dy, dz) in DIRS_6 {
-            let nx = x as i32 + dx;
-            let ny = y as i32 + dy;
-            let nz = z as i32 + dz;
-            if nx >= 1 && ny >= 1 && nz >= 1 && nx <= g && ny <= g && nz <= g {
-                let nc = (nx as u16, ny as u16, nz as u16);
-                if !geo_set.contains(&nc) && reachable.insert(nc) {
-                    queue.push_back(nc);
-                }
-            }
-        }
-    }
-    reachable
-}
+use super::geometry::{compute_surface_cells, l2, manhattan};
 
 // ---------------------------------------------------------------------------
 // 26-neighbor offset table (Discrete(26) action space)
@@ -173,7 +94,12 @@ impl MultiAgentVoxelEnv {
         let geometry_len = geometry.len();
         let surface_cells = compute_surface_cells(&geometry, grid_size);
         let agents = (0..agent_count)
-            .map(|_| AgentEntry { cursor: (1, 1, 1), goal: None, prev_l2: 0.0, goal_reached: false })
+            .map(|_| AgentEntry {
+                cursor: (1, 1, 1),
+                goal: None,
+                prev_l2: 0.0,
+                goal_reached: false,
+            })
             .collect();
         Self {
             world,
@@ -190,7 +116,9 @@ impl MultiAgentVoxelEnv {
         }
     }
 
-    pub fn agent_count(&self) -> usize { self.agent_count }
+    pub fn agent_count(&self) -> usize {
+        self.agent_count
+    }
 
     /// Replace geometry in-place without reinstantiating the env.
     /// Clears all filled cells (geometry + trail), fills the new geometry, and
@@ -224,7 +152,9 @@ impl MultiAgentVoxelEnv {
             let (start, goal) = if n_surface >= 2 {
                 // Spread agents across surface cells using offset seeds.
                 let seed_i = seed.wrapping_add(i as u64 * 7919);
-                let seed_g = seed_i.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let seed_g = seed_i
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let idx_s = (seed_i as usize).wrapping_mul(2654435761) % n_surface;
                 let idx_g_raw = (seed_g as usize).wrapping_mul(2654435761) % n_surface;
                 let idx_g = if idx_g_raw == idx_s {
@@ -234,7 +164,11 @@ impl MultiAgentVoxelEnv {
                 };
                 let s = self.surface_cells[idx_s];
                 let g = self.surface_cells[idx_g];
-                let (s, g) = if (seed + i as u64) % 2 == 0 { (s, g) } else { (g, s) };
+                let (s, g) = if (seed + i as u64) % 2 == 0 {
+                    (s, g)
+                } else {
+                    (g, s)
+                };
                 (s, Some(g))
             } else {
                 // No geometry — spread agents across the grid with fixed pattern.
@@ -251,7 +185,9 @@ impl MultiAgentVoxelEnv {
         }
 
         let cursors: Vec<Coord> = self.agents.iter().map(|a| a.cursor).collect();
-        let goal_distances: Vec<Option<u32>> = self.agents.iter()
+        let goal_distances: Vec<Option<u32>> = self
+            .agents
+            .iter()
             .map(|a| a.goal.map(|g| manhattan(a.cursor, g)))
             .collect();
 
@@ -302,11 +238,9 @@ impl MultiAgentVoxelEnv {
             // Goal reward + distance shaping.
             if let Some(goal) = agent.goal {
                 let new_l2 = l2(agent.cursor, goal);
-                step_reward += self.reward_config.base_step_reward(
-                    agent.prev_l2,
-                    new_l2,
-                    self.grid_size,
-                );
+                step_reward +=
+                    self.reward_config
+                        .base_step_reward(agent.prev_l2, new_l2, self.grid_size);
                 agent.prev_l2 = new_l2;
 
                 if agent.cursor == goal {
@@ -322,11 +256,17 @@ impl MultiAgentVoxelEnv {
 
         // Done when all agents with goals have reached them, or steps exhausted.
         let any_have_goal = self.agents.iter().any(|a| a.goal.is_some());
-        let goals_done = any_have_goal && self.agents.iter().all(|a| a.goal.is_none() || a.goal_reached);
+        let goals_done = any_have_goal
+            && self
+                .agents
+                .iter()
+                .all(|a| a.goal.is_none() || a.goal_reached);
         let all_done = goals_done || self.steps >= self.max_steps;
 
         let cursors: Vec<Coord> = self.agents.iter().map(|a| a.cursor).collect();
-        let goal_distances: Vec<Option<u32>> = self.agents.iter()
+        let goal_distances: Vec<Option<u32>> = self
+            .agents
+            .iter()
             .map(|a| a.goal.map(|g| manhattan(a.cursor, g)))
             .collect();
 

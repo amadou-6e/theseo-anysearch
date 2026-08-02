@@ -1,4 +1,4 @@
-use crate::environments::voxel_env::{DistanceRewardMode, RewardConfig, ZoneRewardCurve};
+use crate::voxel::{DistanceRewardMode, RewardConfig, ZoneRewardCurve};
 
 pub(crate) fn reward_config(
     step_cost: f32,

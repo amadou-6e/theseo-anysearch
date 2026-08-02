@@ -3,7 +3,8 @@ use std::path::Path;
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
-    environments::{Environment, VoxelEnv},
+    environments::Environment,
+    voxel::VoxelEnv,
     world::{World, WorldState, BLOCK_KIND_BOUNDARY},
 };
 
@@ -20,10 +21,7 @@ pub struct PyVoxelEnv {
 }
 
 impl PyVoxelEnv {
-    fn to_py_observation(
-        &self,
-        obs: crate::environments::voxel_env::VoxelObservation,
-    ) -> PyVoxelObservation {
+    fn to_py_observation(&self, obs: crate::voxel::VoxelObservation) -> PyVoxelObservation {
         let goal_direction = self.inner.active_goal().map(|(gx, gy, gz)| {
             let (cx, cy, cz) = self.inner.cursor();
             let inv = 1.0f32 / f32::from(self.inner.grid_size.saturating_sub(1).max(1));
@@ -362,7 +360,7 @@ impl PyVoxelEnv {
 mod tests {
     use super::*;
     use crate::{
-        environments::VoxelEnv,
+        voxel::VoxelEnv,
         world::{Block, Coord, World, WorldState},
     };
 
@@ -388,7 +386,7 @@ mod tests {
 
     #[test]
     fn action_26_is_noop_not_collision() {
-        let reward_config = crate::environments::voxel_env::RewardConfig {
+        let reward_config = crate::voxel::RewardConfig {
             collision_cost: -1.0,
             ..Default::default()
         };

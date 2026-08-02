@@ -2,7 +2,8 @@ use pyo3::prelude::*;
 
 use crate::{
     bridge::dto::{EnvConfig, GeometrySubmission},
-    environments::{Environment, SurfaceAction, SurfaceEnv, VoxelAction, VoxelEnv},
+    environments::{Environment, SurfaceAction, SurfaceEnv},
+    voxel::{VoxelAction, VoxelEnv},
     world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
         Block, BlockUpdate, World, WorldState,
