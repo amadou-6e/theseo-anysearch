@@ -33,6 +33,25 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+def _restore_archived_output_root(experiment: Any, run_dir: Path) -> Any:
+    """Restore the output root after loading a run-local YAML snapshot.
+
+    Parameters
+    ----------
+    experiment : Any
+        Loaded experiment model from ``run_dir/experiment.yaml``.
+    run_dir : Path
+        Located run directory in ``<output>/<experiment>/<run_id>`` form.
+
+    Returns
+    -------
+    Any
+        A copied experiment whose output root points to ``<output>``.
+    """
+    metadata = experiment.experiment.model_copy(
+        update={"output_dir": run_dir.parent.parent}
+    )
+    return experiment.model_copy(update={"experiment": metadata})
 
 @app.command("compile")
 def compile_extension(
@@ -732,6 +751,7 @@ def resume(
     if not isinstance(experiment, ExperimentConfig):
         typer.echo("Sweep resume is not yet supported.", err=True)
         raise typer.Exit(1)
+    experiment = _restore_archived_output_root(experiment, run_dir)
 
     runner = ExperimentRunner(experiment)
     typer.echo(f"Resuming {ref} ...")
@@ -774,6 +794,7 @@ def repeat(
     if not isinstance(experiment, ExperimentConfig):
         typer.echo("Sweep repeats are not yet supported.", err=True)
         raise typer.Exit(1)
+    experiment = _restore_archived_output_root(experiment, run_dir)
 
     runner = ExperimentRunner(experiment, src_yaml)
     typer.echo(f"Repeating {ref} as a new run ...")

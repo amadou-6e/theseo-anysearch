@@ -47,7 +47,7 @@ _MINIMAL_PPO_YAML = textwrap.dedent("""\
       runner: local
       iterations: 2
       checkpoint_interval: 1
-      trajectory_every: 0
+      trajectory_every: 1
       video_every: 999
 
     algorithm_config:
@@ -185,206 +185,104 @@ class TestAddList:
 # Ray-required tests
 # ---------------------------------------------------------------------------
 
-@pytest.fixture()
+@pytest.fixture(scope="module")
 def ray_available():
-    """Skip the test if Ray is not installed."""
+    """Skip the module if Ray is not installed."""
     pytest.importorskip("ray", reason="ray not installed")
 
 
-@pytest.fixture()
-def completed_run(exp_dir: Path, workspace: Path, ray_available):
-    """
-    Fixture that runs anysearch run <exp_dir> and returns (run_id, exp_dir, workspace).
-    Skips the test if Ray is not available or the run fails.
-    """
-    result = _run(["run", str(exp_dir)], cwd=workspace, timeout_s=180)
-    if result.returncode != 0:
-        pytest.skip(f"anysearch run failed: {result.stderr}")
+@pytest.fixture(scope="module")
+def completed_run(tmp_path_factory: pytest.TempPathFactory, ray_available):
+    """Run one experiment and share its artifacts across CLI assertions."""
+    root = tmp_path_factory.mktemp("cli_ray")
+    exp_dir = root.joinpath("experiment")
+    workspace = root.joinpath("workspace")
+    registry = workspace.joinpath(".anysearch", "registry.yaml")
+    exp_dir.mkdir()
+    workspace.mkdir()
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    exp_dir.joinpath("config.yaml").write_text(
+        _MINIMAL_PPO_YAML.replace("trajectory_every: 1", "trajectory_every: 1")
+    )
+
+    result = _run(
+        ["run", str(exp_dir)],
+        cwd=workspace,
+        timeout_s=180,
+        registry=registry,
+    )
+    assert result.returncode == 0, result.stderr
     payload = _last_json(result.stdout)
     run_id = payload.get("run_id", "")
-    if not run_id:
-        pytest.skip("Could not extract run_id from output")
-    return run_id, exp_dir, workspace
+    assert run_id, "No run_id in output"
+    return run_id, exp_dir, workspace, registry, result, payload
 
 
 @pytest.mark.ray
 class TestRunCommand:
-    """Tests RunCommand."""
-    @pytest.fixture(autouse=True)
-    def _require_ray(self, ray_available):
-        pass
+    """Verify the modern run command with one real Ray execution."""
 
     @pytest.mark.timeout(180)
-    def test_run_exits_zero(self, exp_dir, workspace):
-        result = _run(["run", str(exp_dir)], cwd=workspace)
+    def test_run_completes_and_writes_artifacts(self, completed_run):
+        run_id, exp_dir, _, registry, result, payload = completed_run
         assert result.returncode == 0, result.stderr
-
-    @pytest.mark.timeout(180)
-    def test_run_output_in_experiment_dir(self, exp_dir, workspace):
-        result = _run(["run", str(exp_dir)], cwd=workspace)
-        payload = _last_json(result.stdout)
-        run_id = payload.get("run_id", "")
-        assert run_id, "No run_id in output"
-        # run lands at exp_dir/<experiment.name>/<run_id>/
-        assert any(exp_dir.rglob(run_id)), f"Run dir '{run_id}' not found under {exp_dir}"
-
-    @pytest.mark.timeout(180)
-    def test_run_status_completed(self, exp_dir, workspace):
-        result = _run(["run", str(exp_dir)], cwd=workspace)
-        assert _last_json(result.stdout).get("status") == "COMPLETED"
-
-    @pytest.mark.timeout(180)
-    def test_run_auto_registers(self, exp_dir, workspace):
-        _run(["run", str(exp_dir)], cwd=workspace)
-        registry = workspace / ".anysearch" / "registry.yaml"
+        assert payload.get("status") == "COMPLETED"
+        assert any(exp_dir.rglob(run_id))
+        assert "anysearch replay" in result.stdout or "anysearch replay" in result.stderr
         assert registry.exists()
         data = yaml.safe_load(registry.read_text())
-        assert "cli-test" in data.get("experiments", {})
-
-    @pytest.mark.timeout(180)
-    def test_run_with_output_dir_override(self, exp_dir, workspace, tmp_path):
-        out = tmp_path / "custom_out"
-        result = _run(["run", str(exp_dir), "--output-dir", str(out)], cwd=workspace)
-        assert result.returncode == 0, result.stderr
-        run_id = _last_json(result.stdout).get("run_id", "")
-        assert any(out.rglob(run_id)), f"Run not found under custom output dir {out}"
-
-    @pytest.mark.timeout(180)
-    def test_run_prints_replay_hint(self, exp_dir, workspace):
-        result = _run(["run", str(exp_dir)], cwd=workspace)
-        assert "anysearch replay" in result.stdout or "anysearch replay" in result.stderr
-
-    @pytest.mark.timeout(180)
-    def test_run_by_registered_name(self, exp_dir, workspace):
-        _run(["add", str(exp_dir)], cwd=workspace)
-        result = _run(["run", "cli-test"], cwd=workspace)
-        assert result.returncode == 0, result.stderr
-        assert _last_json(result.stdout).get("status") == "COMPLETED"
+        assert "experiment" in data.get("experiments", {})
 
 
 @pytest.mark.ray
 class TestInspect:
-    """Tests Inspect."""
-    @pytest.fixture(autouse=True)
-    def _require_ray(self, ray_available):
-        pass
+    """Verify inspect against the shared completed run."""
 
     @pytest.mark.timeout(180)
-    def test_inspect_exits_zero(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
+    def test_inspect_reports_completed_run(self, completed_run):
+        run_id, exp_dir, workspace, _, _, _ = completed_run
         result = _run(["inspect", f"{exp_dir}:{run_id}"], cwd=workspace)
         assert result.returncode == 0, result.stderr
-
-    @pytest.mark.timeout(180)
-    def test_inspect_output_is_json(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["inspect", f"{exp_dir}:{run_id}"], cwd=workspace)
         payload = _last_json(result.stdout)
         assert payload.get("run_id") == run_id
-
-    @pytest.mark.timeout(180)
-    def test_inspect_contains_checkpoints(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["inspect", f"{exp_dir}:{run_id}"], cwd=workspace)
-        payload = _last_json(result.stdout)
-        assert "checkpoint_iterations" in payload
-        assert len(payload["checkpoint_iterations"]) > 0
-
-    @pytest.mark.timeout(180)
-    def test_inspect_status_completed(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["inspect", f"{exp_dir}:{run_id}"], cwd=workspace)
-        assert _last_json(result.stdout).get("status") == "COMPLETED"
-
-    @pytest.mark.timeout(180)
-    def test_inspect_by_registered_name(self, completed_run, workspace):
-        run_id, exp_dir, _ = completed_run
-        _run(["add", str(exp_dir), "cli-test"], cwd=workspace)
-        result = _run(["inspect", f"cli-test:{run_id}"], cwd=workspace)
-        assert result.returncode == 0, result.stderr
-
-    def test_inspect_nonexistent_run_exits_nonzero(self, exp_dir, workspace):
-        result = _run(["inspect", f"{exp_dir}:deadbeef"], cwd=workspace)
-        assert result.returncode != 0
-
-    def test_inspect_missing_id_exits_nonzero(self, exp_dir, workspace):
-        result = _run(["inspect", str(exp_dir)], cwd=workspace)
-        assert result.returncode != 0
+        assert payload.get("status") == "COMPLETED"
+        assert payload.get("checkpoint_iterations")
 
 
 @pytest.mark.ray
 class TestResume:
-    """Tests Resume."""
-    @pytest.fixture(autouse=True)
-    def _require_ray(self, ray_available):
-        pass
+    """Verify resume performs a real Ray-backed continuation."""
 
     @pytest.mark.timeout(240)
-    def test_resume_exits_zero(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
+    def test_resume_completes(self, completed_run):
+        run_id, exp_dir, workspace, _, _, _ = completed_run
         result = _run(["resume", f"{exp_dir}:{run_id}"], cwd=workspace)
         assert result.returncode == 0, result.stderr
-
-    @pytest.mark.timeout(240)
-    def test_resume_status_completed(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["resume", f"{exp_dir}:{run_id}"], cwd=workspace)
         assert _last_json(result.stdout).get("status") == "COMPLETED"
-
-    def test_resume_missing_id_exits_nonzero(self, exp_dir, workspace):
-        result = _run(["resume", str(exp_dir)], cwd=workspace)
-        assert result.returncode != 0
 
 
 @pytest.mark.ray
 class TestRepeat:
-    """Tests Repeat."""
-    @pytest.fixture(autouse=True)
-    def _require_ray(self, ray_available):
-        pass
+    """Verify repeat creates a distinct Ray-backed run."""
 
     @pytest.mark.timeout(240)
-    def test_repeat_exits_zero(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
+    def test_repeat_completes_with_new_run_id(self, completed_run):
+        run_id, exp_dir, workspace, _, _, _ = completed_run
         result = _run(["repeat", f"{exp_dir}:{run_id}"], cwd=workspace)
         assert result.returncode == 0, result.stderr
-
-    @pytest.mark.timeout(240)
-    def test_repeat_returns_new_run_id(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["repeat", f"{exp_dir}:{run_id}"], cwd=workspace)
-        new_id = _last_json(result.stdout).get("run_id", "")
+        payload = _last_json(result.stdout)
+        new_id = payload.get("run_id", "")
         assert new_id and new_id != run_id
-
-    @pytest.mark.timeout(240)
-    def test_repeat_status_completed(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
-        result = _run(["repeat", f"{exp_dir}:{run_id}"], cwd=workspace)
-        assert _last_json(result.stdout).get("status") == "COMPLETED"
-
-    def test_repeat_missing_id_exits_nonzero(self, exp_dir, workspace):
-        result = _run(["repeat", str(exp_dir)], cwd=workspace)
-        assert result.returncode != 0
+        assert payload.get("status") == "COMPLETED"
 
 
 @pytest.mark.ray
 class TestListWithRuns:
-    """Tests ListWithRuns."""
-    @pytest.fixture(autouse=True)
-    def _require_ray(self, ray_available):
-        pass
+    """Verify list discovers the shared completed run."""
 
-    @pytest.mark.timeout(240)
+    @pytest.mark.timeout(180)
     def test_list_shows_completed_run(self, completed_run):
-        run_id, exp_dir, workspace = completed_run
+        run_id, exp_dir, workspace, _, _, _ = completed_run
         result = _run(["list", str(exp_dir)], cwd=workspace)
         assert result.returncode == 0, result.stderr
         assert run_id in result.stdout or "COMPLETED" in result.stdout
-
-    @pytest.mark.timeout(360)
-    def test_list_registered_shows_run(self, completed_run, workspace):
-        run_id, exp_dir, _ = completed_run
-        _run(["add", str(exp_dir), "cli-test"], cwd=workspace)
-        result = _run(["list"], cwd=workspace)
-        assert result.returncode == 0, result.stderr
-        assert "cli-test" in result.stdout

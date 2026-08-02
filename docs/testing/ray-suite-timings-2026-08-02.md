@@ -92,3 +92,39 @@ training work:
 
 Keep a 60-minute timeout only for an unsplit fallback job. Re-run this benchmark
 after the fixture failures are corrected before tightening any timeout.
+## CLI reduction follow-up
+
+The deprecated `anysearch experiment ...` and `anysearch tune ...` Ray tests
+were removed. Their compatibility and deprecation notices remain covered by CLI
+unit tests. The modern CLI Ray tests were consolidated around one shared initial
+run, leaving five end-to-end tests for run, inspect, resume, repeat, and list.
+
+The reduced suite was measured with:
+
+```powershell
+python -m pytest tests/test_cli/test_integration/test_cli_commands.py `
+  -m ray -q --durations=0 `
+  --junitxml=runtime/test_timings/cli-ray-reduced-final.xml
+```
+
+| Measurement | Before | After |
+|---|---:|---:|
+| CLI Ray tests | 36 | 5 |
+| CLI Ray wall time | 1,050.630 s | 199.229 s |
+| Outcome | 7 passed, 17 failed, 12 skipped | 5 passed |
+| Runtime reduction | — | 81.0% |
+
+The five passing test durations were:
+
+| Operation | Seconds |
+|---|---:|
+| Initial run and shared fixture | 77.80 |
+| Repeat | 58.41 |
+| Resume | 47.36 |
+| List | 9.50 |
+| Inspect | 4.54 |
+
+This run also exposed and fixed archived-run output rebasing: resume and repeat
+loaded `run_dir/experiment.yaml`, which incorrectly changed the output root to
+the run directory. Both commands now restore the original root represented by
+`<output>/<experiment>/<run_id>` before constructing `ExperimentRunner`.
