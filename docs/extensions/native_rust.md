@@ -16,7 +16,7 @@ anysearch compile path/to/experiment
 ```
 
 The command resolves the bundled SDK, generates `Cargo.lock`, builds a release
-library, validates ABI v1,
+library, validates ABI version 2,
 and stores a source-hashed artifact beneath the ignored `.anysearch/` directory.
 A subsequent command reuses the artifact when its sources and binary hash still
 match. Use `--force` to rebuild it.
@@ -102,13 +102,37 @@ pub fn avoid_repeated_collision(context: &PredicateContext) -> PredicateResult {
 }
 
 #[anysearch_outcome]
-pub fn mark_destination(context: &OutcomeContext) -> OutcomeResult {
-    let mut mutations = OutcomeMutations::default();
+pub fn mark_destination(
+    context: &OutcomeContext,
+    mutations: &mut OutcomeMutations,
+) -> OutcomeResult {
     mutations.place_voxel(context.destination);
-    OutcomeResult::applied(mutations)
+    OutcomeResult::applied()
 }
 ```
 
 A custom export with the selected name supersedes the built-in of the same name. The
 extension must advertise predicate bit `8` and outcome bit `16` in
 `anysearch_extension_capabilities`. Compile it with `anysearch compile` as usual.
+## Core ownership
+
+The Rust core keeps voxel-specific extension contracts under
+`theseo_anysearch/core/src/voxel/`:
+
+- `predicates/` owns feasibility contexts, built-ins, and native loading;
+- `outcomes/` owns validated post-action mutations and native loading;
+- `rewards/` owns built-in reward configuration, named breakdowns, and native loading;
+- `metrics/` owns the native metric function contract;
+- `actions/` owns ordered predicate/outcome pipeline state;
+- `common/` contains validation shared only by these voxel behaviors.
+
+This placement is deliberate. Cursor coordinates, filled cells, trail placement, collision
+state, and voxel observations are not universal environment concepts. A future surface,
+continuous, or graph environment can define a different set of contracts without inheriting
+the voxel API.
+
+Internal module movement does not change compiled extensions. Compatibility is determined by
+the exported symbol names, capability flags, ABI version, and `#[repr(C)]` layouts. Training
+and evaluation metric scheduling remains in the experiment layer because only that layer owns
+complete trainer and evaluator results; the voxel metric module owns the native invocation
+contract, not evaluation scheduling.

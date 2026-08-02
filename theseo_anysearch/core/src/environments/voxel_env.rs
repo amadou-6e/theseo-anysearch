@@ -1,149 +1,23 @@
 use crate::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
+pub use crate::voxel::rewards::{DistanceRewardMode, RewardConfig, ZoneRewardCurve};
 
-use super::native_action::{
-    ActionHistoryEntryV2, NativeOutcomeExtension, NativePredicateExtension, OutcomeContextV2,
-    OutcomeResultV2, PredicateContextV2,
+use crate::voxel::{
+    actions::{
+        ActionExtensionSpec, ActionHistoryEntryV2, ConfiguredOutcome, ConfiguredPredicate,
+        PendingMutations,
+    },
+    common::ABI_VERSION,
+    outcomes::{
+        builtins as outcome_builtins, NativeOutcomeExtension, OutcomeContextV2, OutcomeResultV2,
+    },
+    predicates::{builtins as predicate_builtins, NativePredicateExtension, PredicateContextV2},
+    rewards::{
+        builtins as reward_components, NativeRewardExtension, RewardContextV2,
+    },
 };
-use super::native_reward::{NativeRewardExtension, RewardContextV2, ABI_VERSION};
 use super::traits::{Environment, StepResult};
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-
-// ---------------------------------------------------------------------------
-// Reward configuration — passed from Python, computed in Rust
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug)]
-pub struct RewardConfig {
-    /// Per-step penalty (typically negative, e.g. -0.05).
-    pub step_cost: f32,
-    /// Bonus awarded when cursor reaches the goal position.
-    pub goal_reward: f32,
-    /// Coefficient for potential-based L2 distance shaping toward goal.
-    /// Each step: shaping = distance_shaping * (prev_l2 - new_l2).
-    /// Set to 0.0 to disable.
-    pub distance_shaping: f32,
-    /// Extra penalty subtracted when a movement is blocked (boundary hit or
-    /// occupied cell).  Positive value = bigger penalty.  Default 0.0.
-    pub collision_cost: f32,
-    pub invalid_action_cost: f32,
-    pub construction_residual_weight: f32,
-    pub construction_overshoot_weight: f32,
-    /// Distance reward strategy. "progress" preserves potential shaping.
-    /// "zone" gives a negative per-step reward based on absolute goal distance.
-    pub distance_reward_mode: DistanceRewardMode,
-    /// Most negative zone reward, applied at maximum possible goal distance.
-    pub zone_reward_min: f32,
-    /// Least negative zone reward, applied at the goal distance.
-    pub zone_reward_max: f32,
-    /// Interpolation curve used by zone reward mode.
-    pub zone_reward_curve: ZoneRewardCurve,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DistanceRewardMode {
-    Progress,
-    Zone,
-}
-
-impl DistanceRewardMode {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "progress" => Some(Self::Progress),
-            "zone" => Some(Self::Zone),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ZoneRewardCurve {
-    Linear,
-    Exponential,
-}
-
-impl ZoneRewardCurve {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "linear" => Some(Self::Linear),
-            "exponential" => Some(Self::Exponential),
-            _ => None,
-        }
-    }
-}
-
-impl RewardConfig {
-    pub fn base_step_reward(&self, previous_l2: f32, current_l2: f32, grid_size: u16) -> f32 {
-        match self.distance_reward_mode {
-            DistanceRewardMode::Progress => {
-                self.step_cost + self.distance_shaping * (previous_l2 - current_l2)
-            }
-            DistanceRewardMode::Zone => self.zone_reward(current_l2, grid_size),
-        }
-    }
-
-    fn zone_reward(&self, distance_l2: f32, grid_size: u16) -> f32 {
-        let max_l2 = (3.0f32).sqrt() * f32::from(grid_size.saturating_sub(1).max(1));
-        let normalized = (distance_l2 / max_l2).clamp(0.0, 1.0);
-        let curved = match self.zone_reward_curve {
-            ZoneRewardCurve::Linear => normalized,
-            ZoneRewardCurve::Exponential => {
-                let steepness = 3.0f32;
-                (steepness * normalized).exp_m1() / steepness.exp_m1()
-            }
-        };
-        self.zone_reward_max + (self.zone_reward_min - self.zone_reward_max) * curved
-    }
-}
-
-impl Default for RewardConfig {
-    fn default() -> Self {
-        Self {
-            step_cost: -0.01,
-            goal_reward: 1.0,
-            distance_shaping: 0.1,
-            collision_cost: 0.0,
-            invalid_action_cost: 0.0,
-            construction_residual_weight: 0.0,
-            construction_overshoot_weight: 0.0,
-            distance_reward_mode: DistanceRewardMode::Progress,
-            zone_reward_min: -1.0,
-            zone_reward_max: -0.01,
-            zone_reward_curve: ZoneRewardCurve::Linear,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ActionExtensionSpec {
-    pub name: String,
-    #[serde(default)]
-    pub parameters: serde_json::Map<String, serde_json::Value>,
-}
-
-enum ConfiguredPredicate {
-    ValidAction,
-    Bounds,
-    Unoccupied,
-    Native(NativePredicateExtension),
-}
-
-enum ConfiguredOutcome {
-    CursorMovement,
-    TrailPlacement,
-    Place,
-    Remove,
-    Native(NativeOutcomeExtension),
-}
-
-#[derive(Default)]
-struct PendingMutations {
-    cursor: Option<Coord>,
-    place: Option<Coord>,
-    remove: Option<Coord>,
-}
-
 const ACTION_OFFSETS_26: [(i32, i32, i32); 26] = [
     (-1, -1, -1),
     (-1, -1, 0),
@@ -517,9 +391,13 @@ impl VoxelEnv {
             self.predicate_context(action_index, destination, valid_action, in_bounds, blocked);
         for predicate in &self.action_predicates {
             let feasible = match predicate {
-                ConfiguredPredicate::ValidAction => valid_action,
-                ConfiguredPredicate::Bounds => in_bounds,
-                ConfiguredPredicate::Unoccupied => action_index == 26 || !blocked,
+                ConfiguredPredicate::ValidAction => {
+                    predicate_builtins::valid_action::evaluate(valid_action)
+                }
+                ConfiguredPredicate::Bounds => predicate_builtins::bounds::evaluate(in_bounds),
+                ConfiguredPredicate::Unoccupied => {
+                    predicate_builtins::unoccupied::evaluate(action_index, blocked)
+                }
                 ConfiguredPredicate::Native(extension) => {
                     extension.evaluate(PredicateContextV2 { ..context })?
                 }
@@ -580,21 +458,18 @@ impl VoxelEnv {
         let mut mutations = PendingMutations::default();
         for outcome in &self.action_outcomes {
             let result = match outcome {
-                ConfiguredOutcome::CursorMovement => OutcomeResultV2 {
-                    set_cursor: 1,
-                    cursor: destination,
-                    ..OutcomeResultV2::default()
-                },
-                ConfiguredOutcome::TrailPlacement | ConfiguredOutcome::Place => OutcomeResultV2 {
-                    place_voxel: u8::from(action_index != 26),
-                    place_coord: destination,
-                    ..OutcomeResultV2::default()
-                },
-                ConfiguredOutcome::Remove => OutcomeResultV2 {
-                    remove_voxel: 1,
-                    remove_coord: coord_to_i32(previous),
-                    ..OutcomeResultV2::default()
-                },
+                ConfiguredOutcome::CursorMovement => {
+                    outcome_builtins::cursor_movement::apply(destination)
+                }
+                ConfiguredOutcome::TrailPlacement => {
+                    outcome_builtins::trail_placement::apply(action_index, destination)
+                }
+                ConfiguredOutcome::Place => {
+                    outcome_builtins::place::apply(action_index, destination)
+                }
+                ConfiguredOutcome::Remove => {
+                    outcome_builtins::remove::apply(coord_to_i32(previous))
+                }
                 ConfiguredOutcome::Native(extension) => {
                     match extension.evaluate(OutcomeContextV2 { ..context }) {
                         Ok(result) => result,
@@ -1020,19 +895,14 @@ impl Environment for VoxelEnv {
             .unwrap_or(0.0);
         let goal_reached = !accepted_targets.is_empty() && new_l2 <= self.goal_tolerance;
         let goal_distance = self.active_goal.map(|goal| manhattan(self.cursor, goal));
-        let step_cost = if self.reward_config.distance_reward_mode == DistanceRewardMode::Progress {
-            self.reward_config.step_cost
-        } else {
-            0.0
-        };
-        let distance_reward = if self.active_goal.is_none() {
-            0.0
-        } else if self.reward_config.distance_reward_mode == DistanceRewardMode::Progress {
-            self.reward_config.distance_shaping * (self.prev_goal_dist_l2 - new_l2)
-        } else {
-            self.reward_config.zone_reward(new_l2, self.grid_size)
-        };
-
+        let step_cost = reward_components::step_cost::compute(&self.reward_config);
+        let distance_reward = reward_components::distance::compute(
+            &self.reward_config,
+            self.active_goal.is_some(),
+            self.prev_goal_dist_l2,
+            new_l2,
+            self.grid_size,
+        );
         let (residual, overshoot) = if self.construction_target.is_empty() {
             (0, 0)
         } else {
@@ -1052,39 +922,30 @@ impl Environment for VoxelEnv {
             )
         };
         let mut breakdown = HashMap::from([
-            ("step_cost".to_owned(), step_cost),
-            ("distance_progress".to_owned(), distance_reward),
+            (reward_components::step_cost::NAME.to_owned(), step_cost),
+            (reward_components::distance::NAME.to_owned(), distance_reward),
             (
-                "success".to_owned(),
-                if goal_reached {
-                    self.reward_config.goal_reward
-                } else {
-                    0.0
-                },
+                reward_components::goal::NAME.to_owned(),
+                reward_components::goal::compute(&self.reward_config, goal_reached),
             ),
             (
-                "invalid_action".to_owned(),
-                if self.pending_invalid_action {
-                    self.reward_config.invalid_action_cost
-                } else {
-                    0.0
-                },
+                reward_components::invalid_action::NAME.to_owned(),
+                reward_components::invalid_action::compute(
+                    &self.reward_config,
+                    self.pending_invalid_action,
+                ),
             ),
             (
-                "collision".to_owned(),
-                if is_collision {
-                    self.reward_config.collision_cost
-                } else {
-                    0.0
-                },
+                reward_components::collision::NAME.to_owned(),
+                reward_components::collision::compute(&self.reward_config, is_collision),
             ),
             (
-                "construction_residual".to_owned(),
-                -(residual as f32) * self.reward_config.construction_residual_weight,
+                reward_components::construction::RESIDUAL_NAME.to_owned(),
+                reward_components::construction::residual(&self.reward_config, residual),
             ),
             (
-                "construction_overshoot".to_owned(),
-                -(overshoot as f32) * self.reward_config.construction_overshoot_weight,
+                reward_components::construction::OVERSHOOT_NAME.to_owned(),
+                reward_components::construction::overshoot(&self.reward_config, overshoot),
             ),
         ]);
         let standard_reward: f32 = breakdown.values().sum();
