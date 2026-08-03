@@ -19,7 +19,7 @@ Compile and run the one-agent hunter demonstration:
 
 ```powershell
 anysearch compile usage/experiments/showcase/hunter
-anysearch train usage/experiments/showcase/hunter/experiment.yaml
+anysearch run usage/experiments/showcase/hunter/experiment.yaml
 
 # Deterministic extension check
 python usage/experiments/showcase/hunter/validate.py

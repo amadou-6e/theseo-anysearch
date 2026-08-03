@@ -19,7 +19,7 @@ env:
     grid_size: 32
   observation:
     mode: box
-    box_radius: 1
+    box_radius: 2
   action:
     mode: discrete_26
     behavior: cursor_navigation

@@ -140,12 +140,16 @@ class Trainer(BaseTrainer):
         runtime = env.to_runtime_dict()
         runtime["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         native_manifest = self._output_dir.joinpath("native_extension", "extension.json")
-        from theseo_anysearch.experiments.native_extensions import CAP_REWARD
+        from theseo_anysearch.experiments.native_extensions import (
+            CAP_OUTCOME,
+            CAP_PREDICATE,
+            CAP_REWARD,
+        )
 
         if (
             native_manifest.is_file()
             and self._native_extension is not None
-            and self._native_extension.capabilities & CAP_REWARD
+            and self._native_extension.capabilities & (CAP_REWARD | CAP_PREDICATE | CAP_OUTCOME)
         ):
             runtime["native_extension_manifest"] = str(native_manifest.resolve())
         else:
