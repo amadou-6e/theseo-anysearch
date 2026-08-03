@@ -33,7 +33,7 @@ env:
     custom:
       name: segment_countdown_goal
       parameters:
-        budget_multiplier: 2.0
+        additional_budget: 10.0
         minimum_reward: 1.0
 
   waypoint_curriculum:

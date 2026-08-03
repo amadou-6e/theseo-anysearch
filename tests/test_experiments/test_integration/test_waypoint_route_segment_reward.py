@@ -33,7 +33,7 @@ def test_native_countdown_reward_resets_for_each_waypoint_segment() -> None:
             "construction_overshoot_weight": 0.0,
             "custom_reward": "segment_countdown_goal",
             "custom_reward_parameters": {
-                "budget_multiplier": 2.0,
+                "additional_budget": 10.0,
                 "minimum_reward": 1.0,
             },
             "native_extension_manifest": str(manifest),
@@ -50,17 +50,17 @@ def test_native_countdown_reward_resets_for_each_waypoint_segment() -> None:
         assert not info["waypoint_reached"]
 
         _, reward, terminated, truncated, info = env.step(positive_x)
-        assert reward == pytest.approx(2.0)
+        assert reward == pytest.approx(10.0)
         assert not terminated
         assert not truncated
         assert info["waypoint_reached"]
         assert not info["goal_reached"]
         assert info["reward_breakdown"] == {
-            "segment_countdown_goal": pytest.approx(2.0)
+            "segment_countdown_goal": pytest.approx(10.0)
         }
 
         _, reward, terminated, truncated, info = env.step(positive_x)
-        assert reward == pytest.approx(1.0)
+        assert reward == pytest.approx(10.0)
         assert terminated
         assert not truncated
         assert info["goal_reached"]
