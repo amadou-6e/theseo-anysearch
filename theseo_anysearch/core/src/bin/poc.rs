@@ -1,7 +1,8 @@
 use theseo_core::{
     bridge::{run_submission_poc, EnvConfig, GeometrySubmission},
-    environments::{Environment, VoxelAction, VoxelEnv},
-    world::{
+    environments::Environment,
+    voxel::{VoxelAction, VoxelEnv},
+    voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
         Block, BlockUpdate, World, WorldState,
     },
@@ -51,9 +52,7 @@ endsolid tri
         origin: (100, 100, 100),
         scale: 1.0,
     };
-    let env_cfg = EnvConfig {
-        max_steps: 12,
-    };
+    let env_cfg = EnvConfig { max_steps: 12 };
     let bridge_summary = run_submission_poc(&submission, &env_cfg).expect("bridge poc should work");
 
     println!(

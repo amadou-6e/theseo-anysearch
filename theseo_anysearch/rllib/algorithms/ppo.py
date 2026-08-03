@@ -181,7 +181,9 @@ class PPOTrainer(Trainer):
         return cls(config)
 
     @staticmethod
-    def build_algorithm_from_settings(config: Settings) -> Any:
+    def build_algorithm_from_settings(
+        config: Settings, env_config: dict | None = None
+    ) -> Any:
         """Build the configured RLlib algorithm.
 
         Parameters
@@ -213,7 +215,7 @@ class PPOTrainer(Trainer):
         if not isinstance(algo_cfg, PPOConfig):
             algo_cfg = PPOConfig(**algo_cfg.model_dump())
 
-        env_config = env.to_runtime_dict()
+        env_config = env_config or env.to_runtime_dict()
         env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         env_config["debug_log_path"] = str(
             Path(config.training.output_dir, "env_debug.log")
@@ -307,7 +309,9 @@ class PPOTrainer(Trainer):
         return algo
 
     def _build_algorithm(self) -> Any:
-        return self.build_algorithm_from_settings(self._config)
+        return self.build_algorithm_from_settings(
+            self._config, self._env_config_dict()
+        )
 
 class MultiAgentVoxelPPOTrainer(Trainer):
     """

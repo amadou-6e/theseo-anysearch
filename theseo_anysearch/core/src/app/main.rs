@@ -8,7 +8,7 @@ use crate::{
     app::ui::panels,
     camera::Camera,
     renderer::{self, RenderInput, RenderSettings, RenderStats},
-    world::{Coord, WorldState, WORLD_CENTER},
+    voxel::world::{Coord, WorldState, WORLD_CENTER},
 };
 
 pub fn run() -> eframe::Result<()> {

@@ -1,4 +1,4 @@
-use crate::world::Coord;
+use crate::voxel::world::Coord;
 
 #[derive(Clone, Debug)]
 pub struct GeometrySubmission {

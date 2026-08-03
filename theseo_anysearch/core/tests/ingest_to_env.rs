@@ -1,5 +1,6 @@
-use theseo_core::environments::{Environment, SurfaceAction, SurfaceEnv};
-use theseo_core::world::ingest::{parse_ascii_stl, voxelize_mesh};
+use theseo_core::environments::Environment;
+use theseo_core::surface::{SurfaceAction, SurfaceEnv};
+use theseo_core::voxel::world::ingest::{parse_ascii_stl, voxelize_mesh};
 
 const CUBE_STL: &str = r#"solid cube
   facet normal 0 0 -1

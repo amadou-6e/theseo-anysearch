@@ -9,7 +9,7 @@ from typing import Any
 
 from theseo_anysearch.settings.compatibility import _deep_merge
 from theseo_anysearch.settings.algorithm import AlgorithmConfig, AlgorithmEnvCompatibilityMixin, ModelConfig
-from theseo_anysearch.settings.environment import ActionConfig, EnvConfig, GeometryConfig, NestedFieldAccessMixin, ObservationConfig, RewardConfig, RewardSelector
+from theseo_anysearch.settings.environment import ActionConfig, ActionExtensionSelector, EnvConfig, GeometryConfig, NestedFieldAccessMixin, ObservationConfig, RewardConfig, RewardSelector
 from theseo_anysearch.settings.evaluation import EvaluationConfig
 from theseo_anysearch.settings.execution import AnyscaleConfig
 from theseo_anysearch.settings.root import Settings
@@ -29,7 +29,7 @@ def load_experiment(path: Path) -> Any:
 
 
 __all__ = [
-    "ActionConfig", "AlgorithmConfig", "AlgorithmEnvCompatibilityMixin",
+    "ActionConfig", "ActionExtensionSelector", "AlgorithmConfig", "AlgorithmEnvCompatibilityMixin",
     "AnyscaleConfig", "EnvConfig", "EvaluationConfig", "GeometryConfig",
     "ModelConfig", "NestedFieldAccessMixin", "ObservationConfig", "RewardConfig",
     "RewardSelector", "Settings", "TrainingConfig", "TrainingEarlyStopConfig",

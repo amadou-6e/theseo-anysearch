@@ -3,7 +3,7 @@ extern crate self as anysearch_extension;
 use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-pub use anysearch_extension_macros::anysearch_reward;
+pub use anysearch_extension_macros::{anysearch_outcome, anysearch_predicate, anysearch_reward};
 
 pub const ABI_VERSION: u32 = 2;
 pub const MAX_REWARD_COMPONENTS: usize = 8;
@@ -206,6 +206,263 @@ pub unsafe fn export_reward_v2(
     0
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct ActionHistoryEntryV2 {
+    pub action_index: i32,
+    pub previous_cursor: [i32; 3],
+    pub cursor: [i32; 3],
+    pub feasible: u8,
+    pub collision: u8,
+}
+
+#[repr(C)]
+pub struct PredicateContextV2 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub step: u64,
+    pub grid_size: u16,
+    pub action_index: i32,
+    pub cursor: [i32; 3],
+    pub destination: [i32; 3],
+    pub goal: [i32; 3],
+    pub has_goal: u8,
+    pub valid_action: u8,
+    pub destination_in_bounds: u8,
+    pub destination_blocked: u8,
+    pub observation_filled: usize,
+    pub observation_steps_remaining: u32,
+    pub observation_goal_distance: u32,
+    pub has_observation_goal_distance: u8,
+    pub history: *const ActionHistoryEntryV2,
+    pub history_len: usize,
+    pub parameters_json: *const u8,
+    pub parameters_json_len: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PredicateResultV2 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub feasible: u8,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActionHistoryEntry {
+    pub action_index: i32,
+    pub previous_cursor: [i32; 3],
+    pub cursor: [i32; 3],
+    pub feasible: bool,
+    pub collision: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PredicateContext {
+    pub step: u64,
+    pub grid_size: u16,
+    pub action_index: i32,
+    pub cursor: [i32; 3],
+    pub destination: [i32; 3],
+    pub goal: Option<[i32; 3]>,
+    pub valid_action: bool,
+    pub destination_in_bounds: bool,
+    pub destination_blocked: bool,
+    pub observation_filled: usize,
+    pub observation_steps_remaining: u32,
+    pub observation_goal_distance: Option<u32>,
+    pub history: Vec<ActionHistoryEntry>,
+    pub parameters: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PredicateResult {
+    pub feasible: bool,
+}
+impl PredicateResult {
+    pub fn allow() -> Self {
+        Self { feasible: true }
+    }
+    pub fn deny() -> Self {
+        Self { feasible: false }
+    }
+}
+
+#[repr(C)]
+pub struct OutcomeContextV2 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub step: u64,
+    pub grid_size: u16,
+    pub action_index: i32,
+    pub cursor: [i32; 3],
+    pub destination: [i32; 3],
+    pub goal: [i32; 3],
+    pub has_goal: u8,
+    pub history: *const ActionHistoryEntryV2,
+    pub history_len: usize,
+    pub parameters_json: *const u8,
+    pub parameters_json_len: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OutcomeResultV2 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub set_cursor: u8,
+    pub cursor: [i32; 3],
+    pub place_voxel: u8,
+    pub place_coord: [i32; 3],
+    pub remove_voxel: u8,
+    pub remove_coord: [i32; 3],
+}
+
+#[derive(Clone, Debug)]
+pub struct OutcomeContext {
+    pub step: u64,
+    pub grid_size: u16,
+    pub action_index: i32,
+    pub cursor: [i32; 3],
+    pub destination: [i32; 3],
+    pub goal: Option<[i32; 3]>,
+    pub history: Vec<ActionHistoryEntry>,
+    pub parameters: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct OutcomeMutations {
+    pub cursor: Option<[i32; 3]>,
+    pub place: Option<[i32; 3]>,
+    pub remove: Option<[i32; 3]>,
+}
+impl OutcomeMutations {
+    pub fn set_cursor(&mut self, coord: [i32; 3]) {
+        self.cursor = Some(coord);
+    }
+    pub fn place_voxel(&mut self, coord: [i32; 3]) {
+        self.place = Some(coord);
+    }
+    pub fn remove_voxel(&mut self, coord: [i32; 3]) {
+        self.remove = Some(coord);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OutcomeResult;
+impl OutcomeResult {
+    pub fn applied() -> Self {
+        Self
+    }
+}
+
+fn parameters(pointer: *const u8, length: usize) -> serde_json::Map<String, serde_json::Value> {
+    if pointer.is_null() || length == 0 {
+        return serde_json::Map::new();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    serde_json::from_slice(bytes)
+        .expect("AnySearch supplied invalid action extension parameter JSON")
+}
+fn history(pointer: *const ActionHistoryEntryV2, length: usize) -> Vec<ActionHistoryEntry> {
+    if pointer.is_null() || length == 0 {
+        return Vec::new();
+    }
+    unsafe { std::slice::from_raw_parts(pointer, length) }
+        .iter()
+        .map(|entry| ActionHistoryEntry {
+            action_index: entry.action_index,
+            previous_cursor: entry.previous_cursor,
+            cursor: entry.cursor,
+            feasible: entry.feasible != 0,
+            collision: entry.collision != 0,
+        })
+        .collect()
+}
+
+pub unsafe fn export_predicate_v2(
+    context: *const PredicateContextV2,
+    result: *mut PredicateResultV2,
+    function: fn(&PredicateContext) -> PredicateResult,
+) -> i32 {
+    if context.is_null() || result.is_null() {
+        return 1;
+    }
+    let raw = &*context;
+    if raw.abi_version != ABI_VERSION
+        || raw.struct_size as usize != std::mem::size_of::<PredicateContextV2>()
+    {
+        return 2;
+    }
+    let context = PredicateContext {
+        step: raw.step,
+        grid_size: raw.grid_size,
+        action_index: raw.action_index,
+        cursor: raw.cursor,
+        destination: raw.destination,
+        goal: (raw.has_goal != 0).then_some(raw.goal),
+        valid_action: raw.valid_action != 0,
+        destination_in_bounds: raw.destination_in_bounds != 0,
+        destination_blocked: raw.destination_blocked != 0,
+        observation_filled: raw.observation_filled,
+        observation_steps_remaining: raw.observation_steps_remaining,
+        observation_goal_distance: (raw.has_observation_goal_distance != 0)
+            .then_some(raw.observation_goal_distance),
+        history: history(raw.history, raw.history_len),
+        parameters: parameters(raw.parameters_json, raw.parameters_json_len),
+    };
+    let computed = match catch_unwind(AssertUnwindSafe(|| function(&context))) {
+        Ok(value) => value,
+        Err(_) => return 3,
+    };
+    *result = PredicateResultV2 {
+        abi_version: ABI_VERSION,
+        struct_size: std::mem::size_of::<PredicateResultV2>() as u32,
+        feasible: u8::from(computed.feasible),
+    };
+    0
+}
+
+pub unsafe fn export_outcome_v2(
+    context: *const OutcomeContextV2,
+    result: *mut OutcomeResultV2,
+    function: fn(&OutcomeContext, &mut OutcomeMutations) -> OutcomeResult,
+) -> i32 {
+    if context.is_null() || result.is_null() {
+        return 1;
+    }
+    let raw = &*context;
+    if raw.abi_version != ABI_VERSION
+        || raw.struct_size as usize != std::mem::size_of::<OutcomeContextV2>()
+    {
+        return 2;
+    }
+    let context = OutcomeContext {
+        step: raw.step,
+        grid_size: raw.grid_size,
+        action_index: raw.action_index,
+        cursor: raw.cursor,
+        destination: raw.destination,
+        goal: (raw.has_goal != 0).then_some(raw.goal),
+        history: history(raw.history, raw.history_len),
+        parameters: parameters(raw.parameters_json, raw.parameters_json_len),
+    };
+    let mut mutations = OutcomeMutations::default();
+    if catch_unwind(AssertUnwindSafe(|| function(&context, &mut mutations))).is_err() {
+        return 3;
+    }
+    *result = OutcomeResultV2 {
+        abi_version: ABI_VERSION,
+        struct_size: std::mem::size_of::<OutcomeResultV2>() as u32,
+        set_cursor: u8::from(mutations.cursor.is_some()),
+        cursor: mutations.cursor.unwrap_or([0; 3]),
+        place_voxel: u8::from(mutations.place.is_some()),
+        place_coord: mutations.place.unwrap_or([0; 3]),
+        remove_voxel: u8::from(mutations.remove.is_some()),
+        remove_coord: mutations.remove.unwrap_or([0; 3]),
+    };
+    0
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +473,102 @@ mod tests {
         RewardResult::add(penalty).with_component("collision_penalty", penalty)
     }
 
+    #[anysearch_predicate]
+    fn deny_blocked(context: &PredicateContext) -> PredicateResult {
+        if context.destination_blocked {
+            PredicateResult::deny()
+        } else {
+            PredicateResult::allow()
+        }
+    }
+
+    #[anysearch_outcome]
+    fn place_destination(
+        context: &OutcomeContext,
+        mutations: &mut OutcomeMutations,
+    ) -> OutcomeResult {
+        mutations.set_cursor(context.destination);
+        mutations.place_voxel(context.destination);
+        OutcomeResult::applied()
+    }
+
+    #[test]
+    fn predicate_and_outcome_attributes_export_v2_symbols() {
+        let raw_history = [ActionHistoryEntryV2 {
+            action_index: 2,
+            feasible: 0,
+            collision: 1,
+            ..Default::default()
+        }];
+        let predicate_context = PredicateContextV2 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<PredicateContextV2>() as u32,
+            step: 4,
+            grid_size: 8,
+            action_index: 2,
+            cursor: [2, 2, 2],
+            destination: [3, 2, 2],
+            goal: [6, 6, 6],
+            has_goal: 1,
+            valid_action: 1,
+            destination_in_bounds: 1,
+            destination_blocked: 1,
+            observation_filled: 3,
+            observation_steps_remaining: 6,
+            observation_goal_distance: 11,
+            has_observation_goal_distance: 1,
+            history: raw_history.as_ptr(),
+            history_len: raw_history.len(),
+            parameters_json: std::ptr::null(),
+            parameters_json_len: 0,
+        };
+        let mut predicate_result = PredicateResultV2 {
+            abi_version: 0,
+            struct_size: 0,
+            feasible: 1,
+        };
+        assert_eq!(
+            unsafe {
+                anysearch_predicate_deny_blocked_v2(&predicate_context, &mut predicate_result)
+            },
+            0
+        );
+        assert_eq!(predicate_result.feasible, 0);
+
+        let outcome_context = OutcomeContextV2 {
+            abi_version: ABI_VERSION,
+            struct_size: std::mem::size_of::<OutcomeContextV2>() as u32,
+            step: 4,
+            grid_size: 8,
+            action_index: 2,
+            cursor: [2, 2, 2],
+            destination: [3, 2, 2],
+            goal: [6, 6, 6],
+            has_goal: 1,
+            history: raw_history.as_ptr(),
+            history_len: raw_history.len(),
+            parameters_json: std::ptr::null(),
+            parameters_json_len: 0,
+        };
+        let mut outcome_result = OutcomeResultV2 {
+            abi_version: 0,
+            struct_size: 0,
+            set_cursor: 0,
+            cursor: [0; 3],
+            place_voxel: 0,
+            place_coord: [0; 3],
+            remove_voxel: 0,
+            remove_coord: [0; 3],
+        };
+        assert_eq!(
+            unsafe {
+                anysearch_outcome_place_destination_v2(&outcome_context, &mut outcome_result)
+            },
+            0
+        );
+        assert_eq!(outcome_result.cursor, [3, 2, 2]);
+        assert_eq!(outcome_result.place_coord, [3, 2, 2]);
+    }
     #[test]
     fn attribute_generates_and_encodes_v2_export() {
         let parameters = br#"{"scale":2.5}"#;

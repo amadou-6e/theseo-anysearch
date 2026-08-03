@@ -176,7 +176,7 @@ def replay(
     # holds the name.  When an unknown ref is given, _SoftGroup.parse_args has
     # moved it to ctx.args so Click takes the invoke_without_command path and
     # calls only this callback.
-    protected = getattr(ctx, "_protected_args", ctx.protected_args)
+    protected = getattr(ctx, "_protected_args", ())
     if protected:
         # Known subcommand — let Click dispatch it.
         return

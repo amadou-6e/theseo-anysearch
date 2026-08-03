@@ -1,3 +1,5 @@
+mod outcomes;
+mod predicates;
 mod rewards;
 
 use std::ptr;
@@ -6,6 +8,8 @@ const ABI_VERSION: u32 = 2;
 const REWARD: u64 = 1;
 const TRAINING_METRICS: u64 = 2;
 const EVALUATION_METRICS: u64 = 4;
+const PREDICATE: u64 = 8;
+const OUTCOME: u64 = 16;
 
 #[no_mangle]
 pub extern "C" fn anysearch_extension_abi_version() -> u32 {
@@ -13,7 +17,7 @@ pub extern "C" fn anysearch_extension_abi_version() -> u32 {
 }
 #[no_mangle]
 pub extern "C" fn anysearch_extension_capabilities() -> u64 {
-    REWARD | TRAINING_METRICS | EVALUATION_METRICS
+    REWARD | TRAINING_METRICS | EVALUATION_METRICS | PREDICATE | OUTCOME
 }
 
 unsafe fn write_json(output: *mut u8, capacity: usize, length: *mut usize, value: &[u8]) -> i32 {

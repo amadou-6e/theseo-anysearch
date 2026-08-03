@@ -3,7 +3,7 @@ use egui::{Slider, Ui};
 use crate::{
     camera::Camera,
     renderer::{RenderSettings, RenderStats},
-    world::{Coord, WorldState, WORLD_SIZE},
+    voxel::world::{Coord, WorldState, WORLD_SIZE},
 };
 
 #[derive(Default)]

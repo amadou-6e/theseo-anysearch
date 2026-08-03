@@ -93,6 +93,9 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
 
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
+        action_predicates, action_outcomes = self.action.resolved_pipeline(
+            trail_mode=self.trail_mode
+        )
         return {
             "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
@@ -112,6 +115,14 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "ray_max_len": self.observation__ray_max_len,
             "include_voxel_count": self.observation__include_voxel_count,
             "action_mode": self.action__mode,
+            "action_behavior": self.action.behavior,
+            "action_predicates": [
+                item.model_dump(mode="json") for item in action_predicates
+            ],
+            "action_outcomes": [
+                item.model_dump(mode="json") for item in action_outcomes
+            ],
+            "action_history_length": self.action.history_length,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,
