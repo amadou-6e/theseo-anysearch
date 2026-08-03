@@ -4,8 +4,7 @@ pub mod camera;
 pub mod environments;
 pub mod renderer;
 pub mod rendering;
-pub mod sampling;
+pub mod surface;
 pub mod voxel;
-pub mod world;
 
 pub use bridge::python::theseo_core;

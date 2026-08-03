@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::{
-    api::{WorldError, World},
+    api::{World, WorldError},
     block::{Block, BlockUpdate},
 };
 
@@ -109,7 +109,10 @@ impl World for WorldState {
         if !Self::in_bounds(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
-        let block = self.filled.get_mut(&coord).ok_or(WorldError::NotFound(coord))?;
+        let block = self
+            .filled
+            .get_mut(&coord)
+            .ok_or(WorldError::NotFound(coord))?;
         update.apply_to(block);
         Ok(())
     }
@@ -128,7 +131,7 @@ impl Default for WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{Block, BlockUpdate, World, WorldError};
+    use crate::voxel::world::{Block, BlockUpdate, World, WorldError};
 
     #[test]
     fn set_block_inserts() {
@@ -165,7 +168,13 @@ mod tests {
         let mut world = WorldState::new();
         world.set_block((1, 2, 3), Block::default()).unwrap();
         world
-            .update_block((1, 2, 3), BlockUpdate { kind: Some(7), ..Default::default() })
+            .update_block(
+                (1, 2, 3),
+                BlockUpdate {
+                    kind: Some(7),
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(world.get_block((1, 2, 3)).unwrap().kind, 7);
     }
@@ -173,7 +182,9 @@ mod tests {
     #[test]
     fn update_block_not_found() {
         let mut world = WorldState::new();
-        let err = world.update_block((1, 2, 3), BlockUpdate::default()).unwrap_err();
+        let err = world
+            .update_block((1, 2, 3), BlockUpdate::default())
+            .unwrap_err();
         assert!(matches!(err, WorldError::NotFound(_)));
     }
 

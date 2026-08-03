@@ -1,8 +1,9 @@
 use pyo3::prelude::*;
 
 use crate::{
-    environments::{Environment, SurfaceAction, SurfaceEnv},
-    world::{
+    environments::Environment,
+    surface::{SurfaceAction, SurfaceEnv},
+    voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
         Coord,
     },
@@ -66,7 +67,7 @@ impl PySurfaceEnv {
     }
 }
 
-fn py_surface_obs(obs: crate::environments::SurfaceObservation) -> PySurfaceObservation {
+fn py_surface_obs(obs: crate::surface::SurfaceObservation) -> PySurfaceObservation {
     PySurfaceObservation {
         steps_remaining: obs.steps_remaining,
         reached_agents: obs.reached_agents,

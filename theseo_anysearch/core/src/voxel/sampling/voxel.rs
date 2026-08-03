@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, path::Path};
 
-use crate::world::{
+use crate::voxel::world::{
     ingest::{parse_ascii_stl, voxelize_mesh, voxelize_mesh_f32},
     Block, World, WorldState,
 };
@@ -129,7 +129,7 @@ impl VoxelSampler {
 
     fn replace_placements(
         &mut self,
-        placements: Vec<crate::world::ingest::BlockPlacement>,
+        placements: Vec<crate::voxel::world::ingest::BlockPlacement>,
     ) -> usize {
         self.world = WorldState::new();
         let mut count = 0;

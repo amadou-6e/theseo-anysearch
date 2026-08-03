@@ -3,14 +3,15 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::{
-    environments::{Environment, SurfaceAction, SurfaceEnv},
-    world::ingest::{parse_ascii_stl, voxelize_mesh},
+    environments::Environment,
+    surface::{SurfaceAction, SurfaceEnv},
+    voxel::world::ingest::{parse_ascii_stl, voxelize_mesh},
 };
 
 #[derive(Clone, Serialize)]
 pub(crate) struct EpisodeStep {
     pub(crate) step: u32,
-    pub(crate) agents: Vec<crate::environments::AgentState>,
+    pub(crate) agents: Vec<crate::surface::AgentState>,
     pub(crate) reached_agents: usize,
     pub(crate) new_paints: Vec<PaintVoxel>,
 }

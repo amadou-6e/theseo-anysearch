@@ -1,5 +1,5 @@
-use theseo_core::world::{World, WorldState};
-use theseo_core::world::ingest::{parse_ascii_stl, voxelize_mesh};
+use theseo_core::voxel::world::{World, WorldState};
+use theseo_core::voxel::world::ingest::{parse_ascii_stl, voxelize_mesh};
 
 const TRIANGLE_STL: &str = r#"solid tri
   facet normal 0 0 1

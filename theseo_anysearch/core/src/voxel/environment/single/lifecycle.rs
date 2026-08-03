@@ -28,7 +28,7 @@ impl Environment for VoxelEnv {
             let _ = self.world.set_block(
                 coord,
                 Block {
-                    kind: crate::world::BLOCK_KIND_OCCUPIED,
+                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
                     active: true,
                     reward_weight: 0.0,
                 },

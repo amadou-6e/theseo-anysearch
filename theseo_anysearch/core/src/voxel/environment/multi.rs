@@ -9,7 +9,7 @@
 
 use crate::voxel::actions::OFFSETS_26;
 use crate::voxel::rewards::RewardConfig;
-use crate::world::{Coord, WorldState};
+use crate::voxel::world::{Coord, WorldState};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
 

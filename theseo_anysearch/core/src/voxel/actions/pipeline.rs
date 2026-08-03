@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::world::Coord;
+use crate::voxel::world::Coord;
 
 use crate::voxel::{outcomes::NativeOutcomeExtension, predicates::NativePredicateExtension};
 

@@ -3,11 +3,11 @@ use std::path::Path;
 use pyo3::prelude::*;
 
 use crate::{
-    rendering::{
+    voxel::rendering::{
         render_episode_gif, run_episode_trace, EpisodeStep, EpisodeTrace, EpochSummary,
         TrainingSummary,
     },
-    world::ingest::{parse_ascii_stl, voxelize_mesh},
+    voxel::world::ingest::{parse_ascii_stl, voxelize_mesh},
 };
 
 #[pyfunction]

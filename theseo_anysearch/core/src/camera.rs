@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec2, Vec3};
 
-use crate::world::WORLD_CENTER;
+use crate::voxel::world::WORLD_CENTER;
 
 #[derive(Clone, Debug)]
 pub struct Camera {
@@ -17,7 +17,11 @@ pub struct Camera {
 
 impl Camera {
     pub fn new_default() -> Self {
-        let target = Vec3::new(WORLD_CENTER.0 as f32, WORLD_CENTER.1 as f32, WORLD_CENTER.2 as f32);
+        let target = Vec3::new(
+            WORLD_CENTER.0 as f32,
+            WORLD_CENTER.1 as f32,
+            WORLD_CENTER.2 as f32,
+        );
         let position = Vec3::new(500.0, 500.0, -200.0);
         let mut camera = Self {
             position,
@@ -43,7 +47,12 @@ impl Camera {
     }
 
     pub fn projection_matrix(&self, aspect_ratio: f32) -> Mat4 {
-        Mat4::perspective_rh(self.fov_y_deg.to_radians(), aspect_ratio.max(0.01), self.near, self.far)
+        Mat4::perspective_rh(
+            self.fov_y_deg.to_radians(),
+            aspect_ratio.max(0.01),
+            self.near,
+            self.far,
+        )
     }
 
     pub fn orbit(&mut self, delta: Vec2) {
@@ -124,7 +133,10 @@ mod tests {
         let camera = Camera::new_default();
         let mut camera2 = camera.clone();
         camera2.fov_y_deg = 90.0;
-        assert_ne!(camera.projection_matrix(1.0), camera2.projection_matrix(1.0));
+        assert_ne!(
+            camera.projection_matrix(1.0),
+            camera2.projection_matrix(1.0)
+        );
     }
 
     #[test]

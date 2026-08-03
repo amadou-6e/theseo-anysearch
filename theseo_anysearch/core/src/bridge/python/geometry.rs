@@ -2,12 +2,13 @@ use pyo3::prelude::*;
 
 use crate::{
     bridge::dto::{EnvConfig, GeometrySubmission},
-    environments::{Environment, SurfaceAction, SurfaceEnv},
-    voxel::{VoxelAction, VoxelEnv},
-    world::{
+    environments::Environment,
+    surface::{SurfaceAction, SurfaceEnv},
+    voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
         Block, BlockUpdate, World, WorldState,
     },
+    voxel::{VoxelAction, VoxelEnv},
 };
 
 pub fn run_submission_poc(

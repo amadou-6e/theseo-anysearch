@@ -1,5 +1,5 @@
 use super::{Block, BlockUpdate};
-use crate::world::state::Coord;
+use crate::voxel::world::state::Coord;
 
 #[derive(Debug, Clone)]
 pub enum WorldError {
@@ -16,7 +16,7 @@ pub trait World {
 
 #[cfg(test)]
 mod tests {
-    use crate::world::WorldState;
+    use crate::voxel::world::WorldState;
 
     #[test]
     fn in_bounds_true() {

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use pyo3::prelude::*;
 
-use crate::sampling::VoxelSampler;
+use crate::voxel::sampling::VoxelSampler;
 
 use super::errors;
 

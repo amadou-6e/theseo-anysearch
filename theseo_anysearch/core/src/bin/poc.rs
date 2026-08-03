@@ -2,7 +2,7 @@ use theseo_core::{
     bridge::{run_submission_poc, EnvConfig, GeometrySubmission},
     environments::Environment,
     voxel::{VoxelAction, VoxelEnv},
-    world::{
+    voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
         Block, BlockUpdate, World, WorldState,
     },

@@ -18,6 +18,9 @@ voxel/
 |       |-- lifecycle.rs   # Reset, step, reward, and termination lifecycle
 |       `-- tests.rs       # Single-agent behavioral tests
 |-- actions/               # Shared offsets, history, and predicate/outcome pipeline state
+|-- world/                 # Sparse voxel state, blocks, STL parsing, and voxelization
+|-- sampling/              # Reusable STL-to-voxel geometry sampler
+|-- rendering/             # Voxel episode traces and training-video generation
 |-- common/                # Library, ABI version, name, and parameter validation
 |-- predicates/            # Predicate ABI, native loader, context, and built-ins
 |-- outcomes/              # Outcome ABI, native loader, context, and built-ins
@@ -45,7 +48,9 @@ The crate exports the voxel family from `crate::voxel`:
 
 - `VoxelEnv`, `VoxelAction`, and `VoxelObservation`;
 - `MultiAgentVoxelEnv`, `AgentEntry`, and `MultiStepResult`;
-- `RewardConfig`, `DistanceRewardMode`, and `ZoneRewardCurve`.
+- RewardConfig, DistanceRewardMode, and ZoneRewardCurve;
+- world storage and geometry-ingestion APIs;
+- sampling::VoxelSampler.
 
 Python bridge modules import these public voxel exports. Internal environment files are not
 compatibility shims and are not re-exported through `crate::environments`.

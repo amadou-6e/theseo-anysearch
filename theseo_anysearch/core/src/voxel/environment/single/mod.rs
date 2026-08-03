@@ -1,5 +1,5 @@
 use crate::voxel::rewards::RewardConfig;
-use crate::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
+use crate::voxel::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
 
 use crate::environments::{Environment, StepResult};
 use crate::voxel::{
@@ -159,7 +159,7 @@ impl VoxelEnv {
             let _ = self.world.set_block(
                 coord,
                 Block {
-                    kind: crate::world::BLOCK_KIND_OCCUPIED,
+                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
                     active: true,
                     reward_weight: 0.0,
                 },
@@ -306,7 +306,7 @@ impl VoxelEnv {
             let _ = self.world.set_block(
                 coord,
                 Block {
-                    kind: crate::world::BLOCK_KIND_OCCUPIED,
+                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
                     active: true,
                     reward_weight: 0.0,
                 },

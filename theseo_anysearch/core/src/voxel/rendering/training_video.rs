@@ -5,8 +5,8 @@ use image::{
     Delay, Frame, Rgba, RgbaImage,
 };
 
-use super::{
-    episode::EpisodeTrace,
+use super::episode::EpisodeTrace;
+use crate::rendering::{
     projection::{map_coord, project, project_with_depth, CameraAngles},
     raster::{draw_square, draw_voxel_cube},
 };

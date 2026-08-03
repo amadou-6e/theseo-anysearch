@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::world::{Block, Coord, WorldState, WORLD_SIZE};
+use crate::voxel::world::{Block, Coord, WorldState, WORLD_SIZE};
 
 use super::StlMesh;
 
@@ -11,12 +11,20 @@ pub struct BlockPlacement {
 }
 
 pub fn voxelize_mesh(mesh: &StlMesh, origin: Coord, scale: f32) -> Vec<BlockPlacement> {
-    voxelize_mesh_f32(mesh, (origin.0 as f32, origin.1 as f32, origin.2 as f32), scale)
+    voxelize_mesh_f32(
+        mesh,
+        (origin.0 as f32, origin.1 as f32, origin.2 as f32),
+        scale,
+    )
 }
 
 /// Like `voxelize_mesh` but accepts a floating-point origin, allowing sub-voxel
 /// placement adjustments (e.g. for padding-aware, normalised STL loading).
-pub fn voxelize_mesh_f32(mesh: &StlMesh, origin: (f32, f32, f32), scale: f32) -> Vec<BlockPlacement> {
+pub fn voxelize_mesh_f32(
+    mesh: &StlMesh,
+    origin: (f32, f32, f32),
+    scale: f32,
+) -> Vec<BlockPlacement> {
     let mut coords = HashSet::new();
 
     for tri in &mesh.triangles {
@@ -47,9 +55,24 @@ fn solid_fill(surface: HashSet<Coord>) -> HashSet<Coord> {
         return surface;
     }
 
-    let min_x = surface.iter().map(|c| c.0).min().unwrap_or(0).saturating_sub(1);
-    let min_y = surface.iter().map(|c| c.1).min().unwrap_or(0).saturating_sub(1);
-    let min_z = surface.iter().map(|c| c.2).min().unwrap_or(0).saturating_sub(1);
+    let min_x = surface
+        .iter()
+        .map(|c| c.0)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(1);
+    let min_y = surface
+        .iter()
+        .map(|c| c.1)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(1);
+    let min_z = surface
+        .iter()
+        .map(|c| c.2)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(1);
     let max_x = surface
         .iter()
         .map(|c| c.0)
@@ -312,7 +335,7 @@ fn insert_point(coords: &mut HashSet<Coord>, origin: (f32, f32, f32), scale: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::ingest::parse_ascii_stl;
+    use crate::voxel::world::ingest::parse_ascii_stl;
 
     const TRIANGLE_STL: &str = "vertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\n";
 

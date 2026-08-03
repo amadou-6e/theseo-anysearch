@@ -4,8 +4,8 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
     environments::Environment,
+    voxel::world::{World, WorldState, BLOCK_KIND_BOUNDARY},
     voxel::VoxelEnv,
-    world::{World, WorldState, BLOCK_KIND_BOUNDARY},
 };
 
 use super::{
@@ -360,8 +360,8 @@ impl PyVoxelEnv {
 mod tests {
     use super::*;
     use crate::{
+        voxel::world::{Block, Coord, World, WorldState},
         voxel::VoxelEnv,
-        world::{Block, Coord, World, WorldState},
     };
 
     fn env_at_cursor(cursor: (u16, u16, u16)) -> PyVoxelEnv {

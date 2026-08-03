@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use serde::Serialize;
 
-use crate::world::Coord;
+use crate::voxel::world::Coord;
 
-use super::traits::{Environment, StepResult};
+use crate::environments::{Environment, StepResult};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AgentState {
@@ -69,12 +69,17 @@ impl SurfaceEnv {
         }
     }
 
-    pub fn from_filled_surface(filled_coords: &[Coord], agent_count: usize, max_steps: u32) -> Self {
+    pub fn from_filled_surface(
+        filled_coords: &[Coord],
+        agent_count: usize,
+        max_steps: u32,
+    ) -> Self {
         let geometry: HashSet<Coord> = filled_coords.iter().copied().collect();
         let (bounds_min, bounds_max) = compute_bounds(filled_coords, 100);
         let dims = dims_from_bounds(bounds_min, bounds_max);
         let exterior_mask = build_exterior_mask(&geometry, bounds_min, bounds_max, dims);
-        let start_surface = extract_exterior_shell(&geometry, bounds_min, bounds_max, dims, &exterior_mask);
+        let start_surface =
+            extract_exterior_shell(&geometry, bounds_min, bounds_max, dims, &exterior_mask);
         Self {
             geometry,
             start_surface,
@@ -208,7 +213,8 @@ impl Environment for SurfaceEnv {
         }
 
         let observation = self.as_observation();
-        let done = self.steps >= self.max_steps || observation.reached_agents == observation.total_agents;
+        let done =
+            self.steps >= self.max_steps || observation.reached_agents == observation.total_agents;
         StepResult {
             observation,
             reward,
@@ -255,12 +261,42 @@ fn compute_bounds(coords: &[Coord], margin: u16) -> (Coord, Coord) {
     if coords.is_empty() {
         return ((0, 0, 0), (0, 0, 0));
     }
-    let min_x = coords.iter().map(|c| c.0).min().unwrap_or(0).saturating_sub(margin);
-    let min_y = coords.iter().map(|c| c.1).min().unwrap_or(0).saturating_sub(margin);
-    let min_z = coords.iter().map(|c| c.2).min().unwrap_or(0).saturating_sub(margin);
-    let max_x = coords.iter().map(|c| c.0).max().unwrap_or(0).saturating_add(margin);
-    let max_y = coords.iter().map(|c| c.1).max().unwrap_or(0).saturating_add(margin);
-    let max_z = coords.iter().map(|c| c.2).max().unwrap_or(0).saturating_add(margin);
+    let min_x = coords
+        .iter()
+        .map(|c| c.0)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(margin);
+    let min_y = coords
+        .iter()
+        .map(|c| c.1)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(margin);
+    let min_z = coords
+        .iter()
+        .map(|c| c.2)
+        .min()
+        .unwrap_or(0)
+        .saturating_sub(margin);
+    let max_x = coords
+        .iter()
+        .map(|c| c.0)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(margin);
+    let max_y = coords
+        .iter()
+        .map(|c| c.1)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(margin);
+    let max_z = coords
+        .iter()
+        .map(|c| c.2)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(margin);
     ((min_x, min_y, min_z), (max_x, max_y, max_z))
 }
 
