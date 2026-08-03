@@ -1,17 +1,17 @@
 description: >
-  Runs one fixed-parameter PPO curriculum training job on an obstacle-free grid
+  Runs one fixed-parameter DQN curriculum training job on an obstacle-free grid
   using inverse-success stage sampling and segmented route episodes. A native
   sparse reward gives each reached segment a fresh countdown budget equal to
   twice that segment's exact shortest action-step length.
 
 experiment:
-  name: dqn-empty-grid-discrete18-segment-reward-initial1-training
+  name: dqn-empty-grid-discrete18-segment-reward-initial1-steps1000-valid
   output_dir: runtime/train
   seed: 42
 
 env:
   agent_count: 1
-  max_steps: 200
+  max_steps: 1000
   seed: 42
   trail_mode: true
 
@@ -42,8 +42,8 @@ env:
     initial_start: [16, 16, 16]
     seed: 42
     route_length:
-      mode: fraction
-      fraction: 0.75
+      mode: fixed
+      distance: 150
     difficulty:
       mode: segment_distance
       initial_distance: 1
@@ -64,7 +64,7 @@ training:
   checkpoint_interval: 10
   require_gpu: true
   num_gpus: 0.3333333333333333
-  num_env_runners: 6
+  num_env_runners: 3
   num_envs_per_env_runner: 4
   num_gpus_per_env_runner: 0.0
   trajectory_every: 10

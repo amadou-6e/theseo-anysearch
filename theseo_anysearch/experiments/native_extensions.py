@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import math
 import platform
 import shutil
 import subprocess
@@ -22,6 +23,18 @@ CAP_EVALUATION_METRICS = 4
 CAP_PREDICATE = 8
 CAP_OUTCOME = 16
 METRIC_BUFFER_SIZE = 65536
+
+
+def _native_json_safe(value: Any) -> Any:
+    """Replace non-finite floats before serializing a native metric context."""
+
+    if isinstance(value, Mapping):
+        return {str(key): _native_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_native_json_safe(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 class NativeExtensionError(RuntimeError):
@@ -350,7 +363,12 @@ class NativeExtension:
         flag = CAP_TRAINING_METRICS if scope == "training" else CAP_EVALUATION_METRICS
         if not self.capabilities & flag:
             return {}
-        payload = json.dumps(context, separators=(",", ":"), default=str).encode()
+        payload = json.dumps(
+            _native_json_safe(context),
+            separators=(",", ":"),
+            default=str,
+            allow_nan=False,
+        ).encode()
         output = ctypes.create_string_buffer(METRIC_BUFFER_SIZE)
         length = ctypes.c_size_t()
         function = getattr(self._library, f"anysearch_compute_{scope}_metrics_v1")
