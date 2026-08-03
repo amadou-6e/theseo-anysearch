@@ -8,7 +8,7 @@ experiment:
 
 env:
   agent_count: 2
-  max_steps: 400             # longer episodes — vertical routing takes more steps
+  max_steps: 96              # sum of the three 32-voxel side lengths
 
   geometry:
     stl_path: usage/geometries/ramp_spiral.stl

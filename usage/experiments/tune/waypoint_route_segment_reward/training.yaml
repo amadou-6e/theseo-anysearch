@@ -5,13 +5,13 @@ description: >
   twice that segment's exact shortest action-step length.
 
 experiment:
-  name: ppo-empty-grid-discrete18-segment-reward-initial1-steps1000-valid
+  name: ppo-empty-grid-discrete18-segment-reward-initial1-steps96
   output_dir: runtime/train
   seed: 42
 
 env:
   agent_count: 1
-  max_steps: 1000
+  max_steps: 96
   seed: 42
   trail_mode: true
 
@@ -43,7 +43,7 @@ env:
     seed: 42
     route_length:
       mode: fixed
-      distance: 150
+      distance: 96
     difficulty:
       mode: segment_distance
       initial_distance: 1

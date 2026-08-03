@@ -8,7 +8,7 @@ experiment:
 
 env:
   waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
-  max_steps: 50
+  max_steps: 96
   seed: 42
   agent_count: 1
   trail_mode: false

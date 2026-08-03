@@ -27,7 +27,7 @@ experiment:
 
 env:
   agent_count: 4
-  max_steps: 400                # longer episodes — geometry is more complex at high res
+  max_steps: 192                # sum of the three 64-voxel side lengths
   trail_mode: true
 
   geometry:

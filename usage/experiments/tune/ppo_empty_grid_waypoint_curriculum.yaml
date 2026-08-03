@@ -10,7 +10,7 @@ experiment:
 
 env:
   agent_count: 1
-  max_steps: 200
+  max_steps: 96
   seed: 42
   trail_mode: true
 

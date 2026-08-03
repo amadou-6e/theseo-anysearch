@@ -2,11 +2,11 @@
 
 This 20-trial Tune experiment uses an obstacle-free `discrete_18` waypoint route curriculum and a compiled Rust reward named `time_decayed_goal`.
 
-The YAML sets `goal_reward: 150.0`, matching the 150-step route length. The extension replaces every built-in reward:
+The YAML sets `goal_reward: 72.0`, matching the 72-step route length (`0.75 * 96`). The extension replaces every built-in reward:
 
 ```text
 non-goal step: 0
-waypoint reached at episode step t: max(1, 150 - t)
+waypoint reached at episode step t: max(1, 72 - t)
 ```
 
 The countdown is episode-global and does not reset at intermediate waypoints. This rewards completing every waypoint while preferring faster progress through the entire route. Step, collision, invalid-action, distance-shaping, and construction rewards are all zero.
