@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from typing import Any
@@ -123,6 +124,9 @@ class MultiVoxelEnv(RustParallelEnv):
         return cls.ray_env_id
 
     def _init_possible_agents(self, config: dict) -> list[str]:
+        agents = config.get("agents")
+        if agents:
+            return [str(agent["id"]) for agent in agents]
         n = config.get("agent_count", 2)
         return [f"agent_{i}" for i in range(n)]
 
@@ -144,6 +148,21 @@ class MultiVoxelEnv(RustParallelEnv):
                         for bz in range(zmin, zmax + 1):
                             geometry.append((bx, by, bz))
 
+        native_action_path = None
+        native_manifest_path = config.get("native_extension_manifest")
+        if native_manifest_path:
+            from pathlib import Path
+            from theseo_anysearch.experiments.native_extensions import NativeExtensionManifest
+
+            manifest_path = Path(native_manifest_path)
+            manifest = NativeExtensionManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if {"predicate", "outcome"} & set(manifest.capabilities):
+                native_action_path = str(
+                    manifest_path.parent.joinpath(manifest.library).resolve()
+                )
+
         return theseo_core.PyMultiVoxelEnv(
             agent_count=config.get("agent_count", 2),
             max_steps=config.get("max_steps", 200),
@@ -158,6 +177,13 @@ class MultiVoxelEnv(RustParallelEnv):
             zone_reward_min=config.get("zone_reward_min", -1.0),
             zone_reward_max=config.get("zone_reward_max", -0.01),
             zone_reward_curve=config.get("zone_reward_curve", "linear"),
+            agents_json=json.dumps(config.get("agents")) if config.get("agents") else None,
+            hunter_and_hunted_json=(
+                json.dumps(config.get("hunter_and_hunted"))
+                if config.get("hunter_and_hunted")
+                else None
+            ),
+            native_action_path=native_action_path,
         )
 
     def _has_goal(self) -> bool:
@@ -199,6 +225,9 @@ class MultiVoxelEnv(RustParallelEnv):
             "face_neighbors": spaces.Box(0.0, 1.0, (6,),    np.float32),
             "local_grid":     spaces.Box(0.0, 1.0, (n**3,), np.float32),
             "ray_cast":       spaces.Box(0.0, 1.0, (27,),   np.float32),
+            "other_agent_vectors": spaces.Box(
+                -1.0, 1.0, (3 * (len(self.possible_agents) - 1),), np.float32
+            ),
         }
         if self._has_goal():
             base["goal_distance"]  = spaces.Box(0.0, 1.0,  (1,), np.float32)
@@ -206,7 +235,10 @@ class MultiVoxelEnv(RustParallelEnv):
         return spaces.Dict(base)
 
     def _action_space(self, agent: str) -> gymnasium.Space:
-        return build_action_space(self._config.get("action_mode", "discrete_26"))
+        agents = self._config.get("agents") or []
+        selected = next((item for item in agents if item["id"] == agent), None)
+        mode = selected["action_mode"] if selected else self._config.get("action_mode", "discrete_26")
+        return build_action_space(mode)
 
     def _fanout_obs(self, rust_obs: Any) -> dict:
         grid_size = self._config.get("grid_size", 32)
@@ -229,6 +261,15 @@ class MultiVoxelEnv(RustParallelEnv):
                     ),
                     "ray_cast":       np.array(
                         self._rust_env.ray_cast(i, ray_max_len), dtype=np.float32
+                    ),
+                    "other_agent_vectors": np.array(
+                        [
+                            component / norm
+                            for other_index, (ox, oy, oz) in enumerate(rust_obs.cursors)
+                            if other_index != i
+                            for component in (ox - cx, oy - cy, oz - cz)
+                        ],
+                        dtype=np.float32,
                     ),
                 }
                 if self._has_goal() and i < len(goal_positions) and goal_positions[i] is not None:
@@ -253,8 +294,15 @@ class MultiVoxelEnv(RustParallelEnv):
         return result
 
     def _encode_actions(self, actions: dict) -> list[int]:
-        mode = self._config.get("action_mode", "discrete_26")
-        return [encode_action(actions.get(agent, 0), mode) for agent in self.possible_agents]
+        configured = {
+            item["id"]: item["action_mode"]
+            for item in (self._config.get("agents") or [])
+        }
+        default = self._config.get("action_mode", "discrete_26")
+        return [
+            encode_action(actions.get(agent, 0), configured.get(agent, default))
+            for agent in self.possible_agents
+        ]
 
     def _fanout_rewards(self, result: Any) -> dict:
         return {
