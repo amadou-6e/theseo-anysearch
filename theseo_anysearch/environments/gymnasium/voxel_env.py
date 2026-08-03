@@ -78,6 +78,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._configured_route: dict[str, Any] | None = config.get("waypoint_route")
         self._route_remaining: list[tuple[int, int, int]] = []
         self._route_waypoint_count = 0
+        self._route_waypoints_reached = 0
         self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
         self._curriculum_stage_probabilities: list[float] = []
         pool_config = (config.get("geometry_pool") or {})
@@ -355,6 +356,9 @@ class VoxelEnv(RustGymnasiumEnv):
             return
         start, goal = self._pending_waypoints
         self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
+        self._route_remaining = []
+        self._route_waypoint_count = 1
+        self._route_waypoints_reached = 0
         self._config["waypoints"] = {"start": start, "goal": goal}
         self._pending_waypoints = None
 
@@ -375,6 +379,7 @@ class VoxelEnv(RustGymnasiumEnv):
         )
         self._route_remaining = waypoints[1:]
         self._route_waypoint_count = len(waypoints)
+        self._route_waypoints_reached = 0
         self._config["waypoint_route"] = {"start": start, "waypoints": waypoints}
 
     def _apply_pending_route(self) -> None:
@@ -412,6 +417,7 @@ class VoxelEnv(RustGymnasiumEnv):
         start, goal = selected
         self._route_remaining = []
         self._route_waypoint_count = 1
+        self._route_waypoints_reached = 0
         self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
         self._config["waypoints"] = {"start": start, "goal": goal}
 
@@ -503,6 +509,8 @@ class VoxelEnv(RustGymnasiumEnv):
 
         final_success = success and not self._route_remaining
         waypoint_reached = success
+        if waypoint_reached:
+            self._route_waypoints_reached += 1
         if success and self._route_remaining:
             next_goal = self._route_remaining.pop(0)
             observation = self._obs_to_numpy(
@@ -524,6 +532,12 @@ class VoxelEnv(RustGymnasiumEnv):
             "goal_reached": final_success,
             "waypoint_reached": waypoint_reached,
             "route_waypoints_total": self._route_waypoint_count,
+            "route_waypoints_reached": self._route_waypoints_reached,
+            "route_waypoint_completion_fraction": (
+                self._route_waypoints_reached / self._route_waypoint_count
+                if self._route_waypoint_count
+                else 0.0
+            ),
             "route_waypoints_remaining": len(self._route_remaining),
             "termination_reason": reason,
             "reward_breakdown": breakdown,

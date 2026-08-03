@@ -100,6 +100,8 @@ def test_environment_continues_at_intermediate_waypoint():
         assert not truncated
         assert info["waypoint_reached"] is True
         assert info["goal_reached"] is False
+        assert info["route_waypoints_reached"] == 1
+        assert info["route_waypoint_completion_fraction"] == 0.5
         assert info["route_waypoints_remaining"] == 0
         assert observation["goal_direction"][0] > 0
 
@@ -107,5 +109,7 @@ def test_environment_continues_at_intermediate_waypoint():
         assert terminated
         assert not truncated
         assert info["goal_reached"] is True
+        assert info["route_waypoints_reached"] == 2
+        assert info["route_waypoint_completion_fraction"] == 1.0
     finally:
         env.close()
