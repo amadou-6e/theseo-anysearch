@@ -20,8 +20,18 @@ env:
     box_radius: 1
   action:
     mode: discrete_18
+    behavior: cursor_navigation
+    predicates:
+      - valid_action
+      - bounds
+      - unoccupied
+      - avoid_repeated_collision
+    outcomes:
+      - cursor_movement
+      - mark_destination
+    history_length: 8
   rewards:
-    custom:
+    provider:
       name: native_collision
       parameters:
         collision_penalty: -0.02

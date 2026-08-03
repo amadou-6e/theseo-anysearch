@@ -151,8 +151,9 @@ class VoxelEnv(RustGymnasiumEnv):
                             geometry.append((bx, by, bz))
 
         native_reward_path = None
+        native_action_path = None
         native_manifest_path = config.get("native_extension_manifest")
-        if native_manifest_path and config.get("custom_reward"):
+        if native_manifest_path:
             from theseo_anysearch.experiments.native_extensions import (
                 NativeExtensionManifest,
             )
@@ -161,10 +162,26 @@ class VoxelEnv(RustGymnasiumEnv):
             manifest = NativeExtensionManifest.model_validate_json(
                 manifest_path.read_text(encoding="utf-8")
             )
-            if "reward" in manifest.capabilities:
-                native_reward_path = str(
-                    manifest_path.parent.joinpath(manifest.library).resolve()
-                )
+            library_path = str(
+                manifest_path.parent.joinpath(manifest.library).resolve()
+            )
+            if "reward" in manifest.capabilities and config.get("custom_reward"):
+                native_reward_path = library_path
+            if {"predicate", "outcome"} & set(manifest.capabilities):
+                native_action_path = library_path
+        action_predicates = config.get("action_predicates")
+        if action_predicates is None:
+            action_predicates = [
+                {"name": "valid_action"},
+                {"name": "bounds"},
+                {"name": "unoccupied"},
+            ]
+        action_outcomes = config.get("action_outcomes")
+        if action_outcomes is None:
+            action_outcomes = [{"name": "cursor_movement"}]
+            if config.get("trail_mode", True):
+                action_outcomes.append({"name": "trail_placement"})
+
         env = theseo_core.PyVoxelEnv(
             max_steps=config.get("max_steps", 200),
             trail_mode=config.get("trail_mode", True),
@@ -193,6 +210,14 @@ class VoxelEnv(RustGymnasiumEnv):
                 separators=(",", ":"),
                 sort_keys=True,
             ),
+            native_action_path=native_action_path,
+            action_predicates_json=json.dumps(
+                action_predicates, separators=(",", ":")
+            ),
+            action_outcomes_json=json.dumps(
+                action_outcomes, separators=(",", ":")
+            ),
+            action_history_length=int(config.get("action_history_length", 16)),
             box_radius=(
                 config.get("box_radius", 2)
                 if config.get("obs_mode", "scalar") == "box"
@@ -515,6 +540,19 @@ class VoxelEnv(RustGymnasiumEnv):
         }
         return observation, reward, terminated, truncated, info
 
+    def action_mask(self) -> np.ndarray:
+        """Return the configured action-space mask from Rust predicates."""
+        raw_mask = self._rust_env.action_mask()
+        canonical = (
+            np.frombuffer(raw_mask, dtype=np.uint8).astype(np.int8)
+            if isinstance(raw_mask, (bytes, bytearray))
+            else np.asarray(raw_mask, dtype=np.int8)
+        )
+        mode = self._config.get("action_mode", "discrete_26")
+        if mode == "vector_3":
+            return canonical
+        indices = [encode_action(index, mode) for index in range(self.action_space.n)]
+        return canonical[indices]
     def _encode_action(self, action: Any) -> Any:
         return encode_action(action, self._config.get("action_mode", "discrete_26"))
 
@@ -590,7 +628,7 @@ class VoxelEnv(RustGymnasiumEnv):
         return build_action_space(self._config.get("action_mode", "discrete_26"))
 
     def _obs_to_numpy(self, rust_obs: Any) -> dict:
-        self._obs_log_count += 1
+        self._obs_log_count = getattr(self, "_obs_log_count", 0) + 1
         if self._obs_log_count <= 5:
             self._log_env_stage(
                 f"obs_to_numpy start index={self._obs_log_count} mode={self._obs_mode}"

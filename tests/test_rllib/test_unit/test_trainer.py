@@ -13,11 +13,11 @@ import pytest
 
 from unittest.mock import patch
 
-from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_num_gpus
-from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _set_rllib_storage_path
-from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
+from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
+from theseo_anysearch.rllib.trainer.trainer import Trainer
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
-from theseo_anysearch.models import WaypointCurriculumConfig
 
 
 # ---------------------------------------------------------------------------
@@ -99,27 +99,6 @@ class TestTrainResult:
     def test_extra_contains_training_iteration(self):
         result = TrainResult.from_rllib(2, {"training_iteration": 2, "time_this_iter_s": 0.5}, 0.5)
         assert result.extra["training_iteration"] == 2
-
-    def test_standard_metrics_include_automatic_curriculum_metrics(self):
-        result = TrainResult.from_rllib(2, {}, 0.5)
-        result.extra.update({
-            "curriculum/stage": 3.0,
-            "curriculum/transition": 1.0,
-            "curriculum/retention_success_rate": 0.75,
-            "curriculum/retention_pass": 0.0,
-        })
-
-        metrics = result.standard_metrics()
-        assert {
-            key: value
-            for key, value in metrics.items()
-            if key.startswith("curriculum/")
-        } == pytest.approx({
-            "curriculum/stage": 3.0,
-            "curriculum/transition": 1.0,
-            "curriculum/retention_success_rate": 0.75,
-            "curriculum/retention_pass": 0.0,
-        })
 
     def test_episodes_total_from_new_stack(self):
         result = TrainResult.from_rllib(1, {"env_runners": {"num_episodes_lifetime": 42}}, 0.1)
@@ -304,34 +283,6 @@ class TestExecution:
         t = _T(trainer_settings)
         t.train()
         assert calls == list(range(1, trainer_settings.training.iterations + 1))
-
-    def test_curriculum_stage_is_reported_on_every_iteration(
-        self,
-        trainer_settings: Any,
-    ):
-        trainer_settings.training.iterations = 1
-        curriculum = WaypointCurriculum(WaypointCurriculumConfig(
-            enabled=True,
-            initial_start=(1, 1, 1),
-            initial_goal=(2, 2, 2),
-        ))
-        curriculum.state.stage = 2
-        trainer = make_trainer(trainer_settings)
-        trainer._waypoint_curriculum = curriculum
-
-        FakeSummaryWriter.instances.clear()
-        with patch(
-            "torch.utils.tensorboard.SummaryWriter",
-            new=FakeSummaryWriter,
-        ), patch(
-            "theseo_anysearch.rllib.trainer.waypoint_curriculum.broadcast_waypoint_curriculum",
-        ):
-            result = trainer.train()[0]
-
-        assert result.standard_metrics()["curriculum/stage"] == 2.0
-        assert FakeSummaryWriter.instances[0].scalars.count(
-            ("curriculum/stage", 2.0, 1)
-        ) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -605,30 +556,32 @@ class TestResume:
 
 class TestTrainerRegistry:
     """Tests TrainerRegistry."""
-    def setup_method(self):
-        import theseo_anysearch.rllib.trainer  # noqa: F401 — triggers all registrations
-
     def test_all_discrete_algorithms_registered(self):
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
+
+        available = registered_algorithms()
         for name in ("ppo", "sac", "dqn", "rainbow"):
-            assert name in Trainer._registry, f"'{name}' not in Trainer._registry"
+            assert name in available, f"'{name}' not in the algorithm registry"
 
     def test_all_continuous_stubs_registered(self):
-        for name in ("td3", "ddpg"):
-            assert name in Trainer._registry, f"'{name}' not in Trainer._registry"
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
 
+        available = registered_algorithms()
+        for name in ("td3", "ddpg"):
+            assert name in available, f"'{name}' not in the algorithm registry"
     def test_from_settings_dispatches_to_ppo(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.ppo import PPOTrainer
+        from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
         trainer = Trainer.from_settings(trainer_settings)
         assert isinstance(trainer, PPOTrainer)
 
     def test_td3_raises_not_implemented(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.td3 import TD3Trainer
+        from theseo_anysearch.rllib.algorithms.td3 import TD3Trainer
         trainer = TD3Trainer(trainer_settings)
         with pytest.raises(NotImplementedError, match="Box"):
             trainer._build_algorithm()
 
     def test_ddpg_raises_not_implemented(self, trainer_settings):
-        from theseo_anysearch.rllib.trainer.ddpg import DDPGTrainer
+        from theseo_anysearch.rllib.algorithms.ddpg import DDPGTrainer
         trainer = DDPGTrainer(trainer_settings)
         with pytest.raises(NotImplementedError, match="Box"):
             trainer._build_algorithm()

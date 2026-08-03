@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from theseo_anysearch.models import (
+from theseo_anysearch.settings import (
     AlgorithmEnvCompatibilityMixin,
     AlgorithmConfig,
     AnyscaleConfig,

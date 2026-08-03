@@ -107,7 +107,7 @@ class TestVoxelEnvObsModesIntegration:
     def test_cursor_pos_changes_after_step(self):
         env = self.make(obs_mode="box")
         obs0, _ = env.reset()
-        obs1, *_ = env.step(2)
+        obs1, *_ = env.step(21)
         assert not np.array_equal(obs0["cursor_pos"], obs1["cursor_pos"])
 
     def test_direct_cursor_pos_after_reset(self):

@@ -518,6 +518,8 @@ struct VoxelReplayApp {
     playing: bool,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
+    /// Whether geometry is drawn after agents and therefore occludes them.
+    occlude_agent: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -552,6 +554,7 @@ impl VoxelReplayApp {
         }).collect();
         Self {
             camera: Camera::default(),
+            occlude_agent: true,
             trajectories,
             geo_voxels,
             iter_idx: 0,
@@ -565,6 +568,7 @@ impl VoxelReplayApp {
     fn new_tune(trials: Vec<TrialEntry>) -> Self {
         let mut app = Self {
             camera: Camera::default(),
+            occlude_agent: true,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
@@ -831,6 +835,7 @@ impl eframe::App for VoxelReplayApp {
             if ui.button(play_label).clicked() { ev.toggle_play = true; }
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
+            ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
             ui.separator();
 
             // Reward curve

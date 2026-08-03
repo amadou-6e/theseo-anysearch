@@ -1,0 +1,214 @@
+use pyo3::{exceptions::PyValueError, prelude::*};
+
+use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
+
+#[pyclass]
+pub struct PyMultiVoxelEnv {
+    inner: crate::voxel::MultiAgentVoxelEnv,
+}
+
+#[pymethods]
+impl PyMultiVoxelEnv {
+    #[new]
+    #[pyo3(signature = (agent_count, max_steps, trail_mode=true, geometry=None,
+                        grid_size=32, step_cost=-0.01, goal_reward=1.0,
+                        distance_shaping=0.0, collision_cost=0.0,
+                        distance_reward_mode="progress".to_string(),
+                        zone_reward_min=-1.0, zone_reward_max=-0.01,
+                        zone_reward_curve="linear".to_string()))]
+    pub fn new(
+        agent_count: usize,
+        max_steps: u32,
+        trail_mode: bool,
+        geometry: Option<Vec<(u16, u16, u16)>>,
+        grid_size: u16,
+        step_cost: f32,
+        goal_reward: f32,
+        distance_shaping: f32,
+        collision_cost: f32,
+        distance_reward_mode: String,
+        zone_reward_min: f32,
+        zone_reward_max: f32,
+        zone_reward_curve: String,
+    ) -> PyResult<Self> {
+        let distance_reward_mode =
+            crate::voxel::DistanceRewardMode::from_name(distance_reward_mode.as_str()).ok_or_else(
+                || PyValueError::new_err("distance_reward_mode must be 'progress' or 'zone'"),
+            )?;
+        let zone_reward_curve =
+            crate::voxel::ZoneRewardCurve::from_name(zone_reward_curve.as_str()).ok_or_else(
+                || PyValueError::new_err("zone_reward_curve must be 'linear' or 'exponential'"),
+            )?;
+        let reward_config = crate::voxel::RewardConfig {
+            step_cost,
+            goal_reward,
+            distance_shaping,
+            collision_cost,
+            invalid_action_cost: 0.0,
+            construction_residual_weight: 0.0,
+            construction_overshoot_weight: 0.0,
+            distance_reward_mode,
+            zone_reward_min,
+            zone_reward_max,
+            zone_reward_curve,
+        };
+        let inner = crate::voxel::MultiAgentVoxelEnv::new(
+            agent_count,
+            max_steps,
+            trail_mode,
+            geometry.unwrap_or_default(),
+            reward_config,
+            grid_size,
+        );
+        Ok(Self { inner })
+    }
+
+    pub fn reset(&mut self, seed: u64) -> PyMultiVoxelObs {
+        let (steps_remaining, voxel_count, cursors, goal_distances) = self.inner.reset(seed);
+        PyMultiVoxelObs {
+            steps_remaining,
+            voxel_count,
+            cursors,
+            goal_distances,
+        }
+    }
+
+    /// `actions` must be a list of length == agent_count; each value is 0..25.
+    pub fn step(&mut self, actions: Vec<i32>) -> PyMultiVoxelStepResult {
+        let r = self.inner.step_all(&actions);
+        PyMultiVoxelStepResult {
+            observation: PyMultiVoxelObs {
+                steps_remaining: r.steps_remaining,
+                voxel_count: r.voxel_count,
+                cursors: r.cursors,
+                goal_distances: r.goal_distances,
+            },
+            rewards: r.rewards,
+            done: r.done,
+        }
+    }
+
+    pub fn agent_count(&self) -> usize {
+        self.inner.agent_count()
+    }
+
+    /// Returns all currently filled voxel coordinates (geometry + agent trail).
+    pub fn filled_voxels(&self) -> Vec<(u16, u16, u16)> {
+        self.inner.world.iter_filled().copied().collect()
+    }
+
+    /// Returns each agent's current cursor position.
+    pub fn cursor_positions(&self) -> Vec<(u16, u16, u16)> {
+        self.inner.agents.iter().map(|a| a.cursor).collect()
+    }
+
+    /// Returns each agent's current goal position, or None if unset.
+    pub fn goal_positions(&self) -> Vec<Option<(u16, u16, u16)>> {
+        self.inner.agents.iter().map(|a| a.goal).collect()
+    }
+
+    /// Replace geometry in-place without reinstantiating the env.
+    /// Each element of `filled_cells` is (x, y, z) in [1, grid_size]Â³.
+    /// Clears all filled cells (geometry + trail) and recomputes surface cells.
+    /// Call reset() afterwards to start a fresh episode on the new geometry.
+    pub fn set_geometry(&mut self, filled_cells: Vec<(u16, u16, u16)>) {
+        self.inner.set_geometry(filled_cells);
+    }
+
+    /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
+    /// 1.0 = that neighbor cell is filled or outside the configured grid.
+    pub fn face_neighbors(&self, agent_idx: usize) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
+        let dirs: [(i32, i32, i32); 6] = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ];
+        dirs.iter()
+            .map(|&(dx, dy, dz)| {
+                let x = cx as i32 + dx;
+                let y = cy as i32 + dy;
+                let z = cz as i32 + dz;
+                if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
+                    self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                } else {
+                    1.0
+                }
+            })
+            .collect()
+    }
+
+    /// Flattened (2*radius+1)Â³ binary box observation centred on agent `agent_idx`'s cursor.
+    /// 1.0 = filled or outside the configured grid. Ordered x-outer, y-mid, z-inner.
+    pub fn box_obs(&self, agent_idx: usize, radius: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
+        let r = radius as i32;
+        let side = (2 * r + 1) as usize;
+        let mut result = Vec::with_capacity(side * side * side);
+        for dx in -r..=r {
+            for dy in -r..=r {
+                for dz in -r..=r {
+                    let x = cx as i32 + dx;
+                    let y = cy as i32 + dy;
+                    let z = cz as i32 + dz;
+                    let filled = if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
+                        self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                    } else {
+                        1.0
+                    };
+                    result.push(filled);
+                }
+            }
+        }
+        result
+    }
+
+    /// 27-element ray-cast observation from agent `agent_idx`'s cursor, one value per
+    /// direction (dx,dy,dz) âˆˆ {-1,0,+1}Â³ sorted lexicographically on (dx+1,dy+1,dz+1).
+    ///
+    /// Encoding (distance, not proximity):
+    ///   0.0                        â€” filled cell immediately adjacent (d=1) or self filled (0,0,0)
+    ///   (d-1) as f32 / max_len     â€” hit at step d (d âˆˆ 2..=max_len); larger = farther
+    ///   1.0                        â€” no hit within max_len, or self empty for (0,0,0)
+    pub fn ray_cast(&self, agent_idx: usize, max_len: u32) -> Vec<f32> {
+        let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
+        let g = i32::from(self.inner.grid_size);
+        let mut result = Vec::with_capacity(27);
+        for dx in -1i32..=1 {
+            for dy in -1i32..=1 {
+                for dz in -1i32..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        let filled = self.inner.world.is_filled((cx, cy, cz));
+                        result.push(if filled { 0.0 } else { 1.0 });
+                    } else {
+                        let mut value = 1.0f32;
+                        for step in 1..=max_len {
+                            let nx = cx as i32 + dx * step as i32;
+                            let ny = cy as i32 + dy * step as i32;
+                            let nz = cz as i32 + dz * step as i32;
+                            if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
+                                value = (step - 1) as f32 / max_len as f32;
+                                break;
+                            }
+                            if self
+                                .inner
+                                .world
+                                .is_filled((nx as u16, ny as u16, nz as u16))
+                            {
+                                value = (step - 1) as f32 / max_len as f32;
+                                break;
+                            }
+                        }
+                        result.push(value);
+                    }
+                }
+            }
+        }
+        result
+    }
+}

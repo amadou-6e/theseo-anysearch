@@ -30,7 +30,7 @@ class RustGymnasiumEnv(gymnasium.Env, ABC):
 
     def _log_env_stage(self, message: str) -> None:
         """Append a timestamped environment stage marker when debug logging is enabled."""
-        if not self._debug_log_path:
+        if not getattr(self, "_debug_log_path", None):
             return
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_path = Path(str(self._debug_log_path))

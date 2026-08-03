@@ -3,7 +3,10 @@ use std::time::Instant;
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke};
 use glam::{Vec3, Vec4};
 
-use crate::{camera::Camera, world::{Coord, WorldState, WORLD_CENTER}};
+use crate::{
+    camera::Camera,
+    voxel::world::{Coord, WorldState, WORLD_CENTER},
+};
 
 #[derive(Clone, Debug)]
 pub struct RenderSettings {
@@ -56,11 +59,23 @@ struct FaceDraw {
 
 const FACES: [([(i32, i32, i32); 4], (i32, i32, i32), f32); 6] = [
     ([(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)], (1, 0, 0), 1.0),
-    ([(0, 0, 1), (0, 1, 1), (0, 1, 0), (0, 0, 0)], (-1, 0, 0), 0.75),
+    (
+        [(0, 0, 1), (0, 1, 1), (0, 1, 0), (0, 0, 0)],
+        (-1, 0, 0),
+        0.75,
+    ),
     ([(0, 1, 1), (1, 1, 1), (1, 1, 0), (0, 1, 0)], (0, 1, 0), 1.2),
-    ([(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)], (0, -1, 0), 0.65),
+    (
+        [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)],
+        (0, -1, 0),
+        0.65,
+    ),
     ([(1, 0, 1), (1, 1, 1), (0, 1, 1), (0, 0, 1)], (0, 0, 1), 0.9),
-    ([(0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)], (0, 0, -1), 0.8),
+    (
+        [(0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)],
+        (0, 0, -1),
+        0.8,
+    ),
 ];
 
 pub fn render_world(
@@ -108,7 +123,11 @@ pub fn render_world(
             let mut projected_depth = [0.0_f32; 4];
             let mut failed = false;
             for (i, (ox, oy, oz)) in corners.into_iter().enumerate() {
-                let p = Vec3::new(x as f32 + ox as f32, y as f32 + oy as f32, z as f32 + oz as f32);
+                let p = Vec3::new(
+                    x as f32 + ox as f32,
+                    y as f32 + oy as f32,
+                    z as f32 + oz as f32,
+                );
                 if let Some((screen, ndc_depth)) = project_to_screen_with_depth(p, rect, &mvp) {
                     projected[i] = screen;
                     projected_depth[i] = ndc_depth;
@@ -141,7 +160,11 @@ pub fn render_world(
         } else {
             Stroke::NONE
         };
-        painter.add(Shape::convex_polygon(face.points.to_vec(), face.color, stroke));
+        painter.add(Shape::convex_polygon(
+            face.points.to_vec(),
+            face.color,
+            stroke,
+        ));
     }
 
     if let Some(selected) = input.selected {
@@ -181,14 +204,20 @@ fn draw_grid(painter: &Painter, rect: Rect, mvp: &glam::Mat4) {
     for x in (min..=max).step_by(5) {
         let p0 = Vec3::new(x as f32, y, min as f32);
         let p1 = Vec3::new(x as f32, y, max as f32);
-        if let (Some(s0), Some(s1)) = (project_to_screen(p0, rect, mvp), project_to_screen(p1, rect, mvp)) {
+        if let (Some(s0), Some(s1)) = (
+            project_to_screen(p0, rect, mvp),
+            project_to_screen(p1, rect, mvp),
+        ) {
             lines.push((s0, s1));
         }
     }
     for z in (min..=max).step_by(5) {
         let p0 = Vec3::new(min as f32, y, z as f32);
         let p1 = Vec3::new(max as f32, y, z as f32);
-        if let (Some(s0), Some(s1)) = (project_to_screen(p0, rect, mvp), project_to_screen(p1, rect, mvp)) {
+        if let (Some(s0), Some(s1)) = (
+            project_to_screen(p0, rect, mvp),
+            project_to_screen(p1, rect, mvp),
+        ) {
             lines.push((s0, s1));
         }
     }
@@ -211,9 +240,18 @@ fn draw_selected_outline(painter: &Painter, rect: Rect, mvp: &glam::Mat4, voxel:
     ];
 
     let edges: [(usize, usize); 12] = [
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ];
 
     for (a, b) in edges {

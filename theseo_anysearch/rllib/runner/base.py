@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from theseo_anysearch.rllib.trainer.base import Trainer
+from theseo_anysearch.rllib.trainer.trainer import Trainer
 
 
 class Runner(ABC):

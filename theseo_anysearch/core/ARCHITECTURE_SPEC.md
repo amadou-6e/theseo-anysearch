@@ -1,5 +1,8 @@
 # Voxel Renderer Architecture Spec (PoC)
 
+> **Status:** Historical PoC document. For the current ownership layout, see
+> src/voxel/README.md, src/surface/README.md, and src/environments/README.md.
+
 ## Goals
 
 1. Split the application into clear folders for `app`, `ui`, and `world`.

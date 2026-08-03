@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Slider, Stroke, Vec2};
-use theseo_core::environments::{AgentState, Environment as _, SurfaceAction, SurfaceEnv};
-use theseo_core::world::ingest::{parse_ascii_stl, voxelize_mesh};
+use theseo_core::environments::Environment as _;
+use theseo_core::surface::{AgentState, SurfaceAction, SurfaceEnv};
+use theseo_core::voxel::world::ingest::{parse_ascii_stl, voxelize_mesh};
 
 #[derive(Clone)]
 struct EpisodeStep {

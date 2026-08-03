@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict
 
-from theseo_anysearch.models import AlgorithmConfig
+from theseo_anysearch.settings import AlgorithmConfig
 
 
 class PPOConfig(AlgorithmConfig):

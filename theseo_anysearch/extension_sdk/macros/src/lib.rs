@@ -31,3 +31,56 @@ pub fn anysearch_reward(arguments: TokenStream, item: TokenStream) -> TokenStrea
     }
     .into()
 }
+#[proc_macro_attribute]
+pub fn anysearch_predicate(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    if !arguments.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "anysearch_predicate does not accept arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let function = parse_macro_input!(item as ItemFn);
+    let function_name = &function.sig.ident;
+    let export_name = format_ident!("anysearch_predicate_{}_v2", function_name);
+    quote! {
+        #function
+        #[doc(hidden)]
+        #[no_mangle]
+        pub unsafe extern "C" fn #export_name(
+            context: *const ::anysearch_extension::PredicateContextV2,
+            result: *mut ::anysearch_extension::PredicateResultV2,
+        ) -> i32 {
+            ::anysearch_extension::export_predicate_v2(context, result, #function_name)
+        }
+    }
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn anysearch_outcome(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    if !arguments.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "anysearch_outcome does not accept arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let function = parse_macro_input!(item as ItemFn);
+    let function_name = &function.sig.ident;
+    let export_name = format_ident!("anysearch_outcome_{}_v2", function_name);
+    quote! {
+        #function
+        #[doc(hidden)]
+        #[no_mangle]
+        pub unsafe extern "C" fn #export_name(
+            context: *const ::anysearch_extension::OutcomeContextV2,
+            result: *mut ::anysearch_extension::OutcomeResultV2,
+        ) -> i32 {
+            ::anysearch_extension::export_outcome_v2(context, result, #function_name)
+        }
+    }
+    .into()
+}

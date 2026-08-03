@@ -590,7 +590,7 @@ class TestRealTrainableReport:
         (tmp_path / "geo.stl").write_bytes(b"")
 
         with patch("ray.tune", mock_tune), \
-             patch("theseo_anysearch.rllib.trainer.ppo.PPOTrainer", mock_trainer_cls):
+             patch("theseo_anysearch.rllib.algorithms.ppo.PPOTrainer", mock_trainer_cls):
             from theseo_anysearch.cli.commands.tune import _real_trainable
             _real_trainable(
                 config=self._minimal_config(),
@@ -609,7 +609,7 @@ class TestRealTrainableReport:
         return mock_tune
 
     def _make_result(self, reward=1.0):
-        from theseo_anysearch.rllib.trainer.base import TrainResult
+        from theseo_anysearch.rllib.trainer.results import TrainResult
         return TrainResult(
             iteration=1,
             episode_reward_mean=reward,
@@ -661,7 +661,7 @@ class TestRealTrainableReport:
         (tmp_path / "geo.stl").write_bytes(b"")
 
         with patch("ray.tune", mock_tune), \
-             patch("theseo_anysearch.rllib.trainer.ppo.PPOTrainer", mock_trainer_cls):
+             patch("theseo_anysearch.rllib.algorithms.ppo.PPOTrainer", mock_trainer_cls):
             from theseo_anysearch.cli.commands.tune import _real_trainable
             _real_trainable(
                 config=self._minimal_config(),

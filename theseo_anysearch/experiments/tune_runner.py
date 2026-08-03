@@ -251,7 +251,7 @@ def _experiment_trainable(
     native_extension_bundle: dict[str, Any] | None = None,
 ) -> None:
     """
-    Generic Ray Tune function trainable for any algorithm in Trainer._registry.
+    Generic Ray Tune function trainable for any algorithm in the built-in algorithm registry.
 
     Parameters
     ----------
@@ -276,7 +276,7 @@ def _experiment_trainable(
     from theseo_anysearch.experiments.loader import _resolve_typed_configs
     from theseo_anysearch.experiments.models import ExperimentConfig, MLflowConfig
     from theseo_anysearch.experiments.tracking import MLflowTracker
-    from theseo_anysearch.rllib.trainer.base import TrainResult
+    from theseo_anysearch.rllib.trainer.results import TrainResult
 
     # ------------------------------------------------------------------ #
     # Trial identity                                                        #
@@ -878,7 +878,7 @@ class TuneRunner:
     Drives a Ray Tune hyperparameter sweep for an ExperimentConfig that
     carries a non-None tune_config.
 
-    Supports any algorithm registered in Trainer._registry
+    Supports any algorithm registered in the built-in algorithm registry
     (ppo, multi_agent_voxel_ppo, sac, …).  The search space is expressed
     using the same YAML format as ``anysearch tune --config``.
 
@@ -1007,8 +1007,8 @@ class TuneRunner:
         reward_source = discover_reward_source(
             self._config_path,
             (
-                self._config.env.rewards.custom.name
-                if self._config.env.rewards.custom
+                self._config.env.rewards.provider.name
+                if self._config.env.rewards.provider
                 else None
             ),
         )

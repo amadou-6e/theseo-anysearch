@@ -18,8 +18,8 @@ import pytest
 ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
-from theseo_anysearch.rllib.trainer.base import TrainResult
-from theseo_anysearch.rllib.trainer.sac import SACTrainer
+from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.algorithms.sac import SACTrainer
 
 
 RAY_SAC_YAML = textwrap.dedent("""\

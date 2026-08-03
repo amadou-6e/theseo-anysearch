@@ -19,6 +19,8 @@ ABI_VERSION = 2
 CAP_REWARD = 1
 CAP_TRAINING_METRICS = 2
 CAP_EVALUATION_METRICS = 4
+CAP_PREDICATE = 8
+CAP_OUTCOME = 16
 METRIC_BUFFER_SIZE = 65536
 
 
@@ -37,6 +39,8 @@ class NativeExtensionManifest(BaseModel):
     library: str
     capabilities: tuple[str, ...]
     rewards: tuple[str, ...] = ()
+    predicates: tuple[str, ...] = ()
+    outcomes: tuple[str, ...] = ()
     platform: str
     machine: str
 
@@ -100,7 +104,8 @@ def _selected_reward_name(experiment_dir: Path) -> str | None:
     if config_path is None:
         return None
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    selected = ((raw.get("env") or {}).get("rewards") or {}).get("custom")
+    rewards = (raw.get("env") or {}).get("rewards") or {}
+    selected = rewards.get("provider", rewards.get("custom"))
     if isinstance(selected, str) or selected is None:
         return selected
     if isinstance(selected, dict):
@@ -108,6 +113,23 @@ def _selected_reward_name(experiment_dir: Path) -> str | None:
         return str(name) if name is not None else None
     return None
 
+def _selected_action_names(experiment_dir: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    import yaml
+
+    candidates = [experiment_dir.joinpath("experiment.yaml"), experiment_dir.joinpath("config.yaml")]
+    candidates.extend(sorted(experiment_dir.glob("*.yaml")))
+    config_path = next((path for path in candidates if path.is_file()), None)
+    if config_path is None:
+        return (), ()
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    action = ((raw.get("env") or {}).get("action") or {})
+
+    def names(value: Any) -> tuple[str, ...]:
+        if not value:
+            return ()
+        return tuple(str(item if isinstance(item, str) else item["name"]) for item in value)
+
+    return names(action.get("predicates")), names(action.get("outcomes"))
 def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Path:
     """Compile ``extension/`` and return its stable manifest path."""
     root = experiment_dir.resolve()
@@ -125,15 +147,26 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     )
     source_sha = _source_digest(extension_dir)
     reward_name = _selected_reward_name(root)
+    predicate_names, outcome_names = _selected_action_names(root)
     build_dir = root.joinpath(".anysearch", "build", source_sha)
     stable_manifest = root.joinpath(".anysearch", "extension.json")
     if stable_manifest.is_file() and not force:
         current = NativeExtensionManifest.model_validate_json(stable_manifest.read_text(encoding="utf-8"))
         candidate = stable_manifest.parent.joinpath(current.library)
         expected_rewards = (reward_name,) if "reward" in current.capabilities and reward_name else ()
+        built_in_predicates = {"valid_action", "bounds", "unoccupied"}
+        built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+        expected_predicates = tuple(
+            name for name in predicate_names if name not in built_in_predicates
+        )
+        expected_outcomes = tuple(
+            name for name in outcome_names if name not in built_in_outcomes
+        )
         if (
             current.source_sha256 == source_sha
             and current.rewards == expected_rewards
+            and current.predicates == expected_predicates
+            and current.outcomes == expected_outcomes
             and candidate.is_file()
         ):
             loaded = NativeExtension.load(stable_manifest)
@@ -159,14 +192,26 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     if "reward" in capabilities:
         if reward_name is None:
             raise NativeExtensionError(
-                "A reward-capable extension requires env.rewards.custom in YAML"
+                "A reward-capable extension requires env.rewards.provider in YAML"
             )
         probe.validate_reward(reward_name)
         rewards = (reward_name,)
+    built_in_predicates = {"valid_action", "bounds", "unoccupied"}
+    built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+    predicates = tuple(name for name in predicate_names if probe.has_predicate(name))
+    outcomes = tuple(name for name in outcome_names if probe.has_outcome(name))
+    missing_predicates = set(predicate_names) - set(predicates) - built_in_predicates
+    missing_outcomes = set(outcome_names) - set(outcomes) - built_in_outcomes
+    if missing_predicates or missing_outcomes:
+        raise NativeExtensionError(
+            f"Missing native action exports: predicates={sorted(missing_predicates)}, "
+            f"outcomes={sorted(missing_outcomes)}"
+        )
     manifest = NativeExtensionManifest(
         abi_version=ABI_VERSION, source_sha256=source_sha,
         binary_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
         library=relative, capabilities=capabilities, rewards=rewards,
+        predicates=predicates, outcomes=outcomes,
         platform=sys.platform, machine=platform.machine(),
     )
     stable_content = manifest.model_dump_json(indent=2)
@@ -189,6 +234,20 @@ def discover_native_manifest(config_path: Path | None) -> Path | None:
     if "reward" in manifest.capabilities and manifest.rewards != ((selected_reward,) if selected_reward else ()):
         raise NativeExtensionError(
             "Selected YAML reward changed; run "
+            f"'anysearch compile {config_path.parent}'"
+        )
+    selected_predicates, selected_outcomes = _selected_action_names(config_path.parent)
+    built_in_predicates = {"valid_action", "bounds", "unoccupied"}
+    built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+    expected_predicates = tuple(
+        name for name in selected_predicates if name not in built_in_predicates
+    )
+    expected_outcomes = tuple(
+        name for name in selected_outcomes if name not in built_in_outcomes
+    )
+    if manifest.predicates != expected_predicates or manifest.outcomes != expected_outcomes:
+        raise NativeExtensionError(
+            "Selected YAML action extensions changed; run "
             f"'anysearch compile {config_path.parent}'"
         )
     extension_dir = config_path.parent.joinpath("extension")
@@ -229,7 +288,8 @@ class NativeExtension:
     @property
     def capability_names(self) -> tuple[str, ...]:
         pairs = ((CAP_REWARD, "reward"), (CAP_TRAINING_METRICS, "training_metrics"),
-                 (CAP_EVALUATION_METRICS, "evaluation_metrics"))
+                 (CAP_EVALUATION_METRICS, "evaluation_metrics"),
+                 (CAP_PREDICATE, "predicate"), (CAP_OUTCOME, "outcome"))
         return tuple(name for flag, name in pairs if self.capabilities & flag)
 
     def validate_reward(self, name: str) -> None:
@@ -243,6 +303,11 @@ class NativeExtension:
                 f"Native extension does not export selected reward {name!r} ({symbol})"
             ) from exc
 
+    def has_predicate(self, name: str) -> bool:
+        return hasattr(self._library, f"anysearch_predicate_{name}_v2")
+
+    def has_outcome(self, name: str) -> bool:
+        return hasattr(self._library, f"anysearch_outcome_{name}_v2")
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":
         library = ctypes.CDLL(str(path))

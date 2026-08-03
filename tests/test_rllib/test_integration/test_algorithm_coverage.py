@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.ray]
 
 # ---------------------------------------------------------------------------
 # Per-algorithm YAML templates
@@ -487,21 +487,19 @@ class TestTrainerRegistry:
     STUB_ALGORITHMS = ["td3", "ddpg"]  # Box action space only — not usable with voxel env
 
     def test_tunable_algorithms_are_registered(self):
-        from theseo_anysearch.rllib.trainer.base import Trainer
-        for algo in self.TUNABLE_ALGORITHMS:
-            assert algo in Trainer._registry, (
-                f"Algorithm '{algo}' not in Trainer._registry. "
-                "Was its trainer module imported?"
-            )
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
+
+        available = registered_algorithms()
+        for algorithm in self.TUNABLE_ALGORITHMS:
+            assert algorithm in available
 
     def test_stub_algorithms_are_registered(self):
-        """TD3 and DDPG register themselves even though they raise NotImplementedError."""
-        from theseo_anysearch.rllib.trainer.base import Trainer
-        for algo in self.STUB_ALGORITHMS:
-            assert algo in Trainer._registry, (
-                f"Stub algorithm '{algo}' not in Trainer._registry."
-            )
+        """TD3 and DDPG remain YAML-selectable adapter stubs."""
+        from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
 
+        available = registered_algorithms()
+        for algorithm in self.STUB_ALGORITHMS:
+            assert algorithm in available
     def test_algorithm_config_classes_resolve_for_all_active(self):
         """get_algorithm_config_class returns a concrete subclass for each active algo."""
         from theseo_anysearch.rllib.algorithms.models import (

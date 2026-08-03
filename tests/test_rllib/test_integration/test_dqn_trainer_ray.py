@@ -18,9 +18,9 @@ import pytest
 ray = pytest.importorskip("ray", reason="ray not installed")
 pytestmark = pytest.mark.ray
 
-from theseo_anysearch.rllib.trainer.base import TrainResult
-from theseo_anysearch.rllib.trainer.dqn import DQNTrainer
-from theseo_anysearch.rllib.trainer.rainbow import RainbowTrainer
+from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.algorithms.dqn import DQNTrainer
+from theseo_anysearch.rllib.algorithms.rainbow import RainbowTrainer
 
 
 RAY_DQN_YAML = textwrap.dedent("""\

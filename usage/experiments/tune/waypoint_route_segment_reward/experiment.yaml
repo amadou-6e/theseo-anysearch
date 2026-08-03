@@ -46,7 +46,7 @@ env:
       fraction: 0.75
     difficulty:
       mode: segment_distance
-      initial_distance: 2
+      initial_distance: 1
       distance_increment: 2
       maximum_distance: 20
       sampling_attempts: 512
