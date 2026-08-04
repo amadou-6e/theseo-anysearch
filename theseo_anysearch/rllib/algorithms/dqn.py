@@ -19,6 +19,31 @@ from theseo_anysearch.rllib.algorithms.ppo import (
 )
 
 
+def _dqn_replay_buffer_config(algo_cfg: DQNConfig) -> dict[str, Any]:
+    """Build a modern DQN replay buffer configuration from public settings."""
+    replay_type = (
+        "EpisodeReplayBuffer"
+        if algo_cfg.replay_buffer_type == "uniform"
+        else "PrioritizedEpisodeReplayBuffer"
+    )
+    replay = {
+        "type": replay_type,
+        "capacity": algo_cfg.replay_buffer_capacity,
+    }
+    if algo_cfg.replay_buffer_type == "prioritized":
+        replay["alpha"] = getattr(algo_cfg, "prioritized_replay_alpha", 0.6)
+        replay["beta"] = getattr(algo_cfg, "prioritized_replay_beta", 0.4)
+    return replay
+
+
+def _learner_gpu_allocation(config: Settings) -> float:
+    """Resolve the GPU allocation assigned to each Learner."""
+    configured = config.training.num_gpus_per_learner
+    return _detect_num_gpus(
+        config.training.require_gpu,
+        num_gpus=(configured if configured is not None else config.training.num_gpus),
+    )
+
 class DQNTrainer(Trainer):
     """
     DQN trainer backed by RLlib's RLModule, Learner, and EnvRunner stack.
@@ -65,7 +90,11 @@ class DQNTrainer(Trainer):
         _ensure_ray_runtime(
             str(config.training.output_dir),
             config.training.num_env_runners
-            + config.evaluation.num_env_runners,
+            + config.evaluation.num_env_runners
+            + (
+                config.training.num_learners
+                * config.training.num_cpus_per_learner
+            ),
         )
 
         env = config.env
@@ -99,18 +128,14 @@ class DQNTrainer(Trainer):
                 dueling=algo_cfg.dueling,
                 double_q=algo_cfg.double_q,
                 noisy=algo_cfg.noisy,
-                replay_buffer_config={
-                    "type": "PrioritizedEpisodeReplayBuffer",
-                    "capacity": algo_cfg.replay_buffer_capacity,
-                },
+                replay_buffer_config=_dqn_replay_buffer_config(algo_cfg),
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
             )
             .rl_module(model_config=rllib_model)
             .learners(
-                num_learners=0,
-                num_gpus_per_learner=_detect_num_gpus(
-                    config.training.require_gpu, num_gpus=config.training.num_gpus
-                ),
+                num_learners=config.training.num_learners,
+                num_cpus_per_learner=config.training.num_cpus_per_learner,
+                num_gpus_per_learner=_learner_gpu_allocation(config),
             )
             .framework("torch")
         )

@@ -66,6 +66,12 @@ class TrainingConfig(BaseModel):
         Whether training must fail if no GPU is available.
     num_gpus : float | None
         Explicit RLlib GPU allocation override.
+    num_learners : int
+        Number of remote Learner actors; zero keeps learning on the driver.
+    num_cpus_per_learner : int
+        CPU allocation for each remote Learner actor.
+    num_gpus_per_learner : float | None
+        GPU allocation per Learner; defaults to training.num_gpus.
     num_env_runners : int
         Number of rollout workers or env runners.
     num_envs_per_env_runner : int
@@ -92,6 +98,9 @@ class TrainingConfig(BaseModel):
     checkpoint_interval: int = Field(10, ge=1, description="Training iterations between checkpoints.")
     require_gpu: bool = Field(False, description="Fail startup when no compatible GPU is available.")
     num_gpus: float | None = Field(None, ge=0.0, description="Explicit RLlib GPU allocation override.")
+    num_learners: int = Field(default=0, ge=0, description="Remote Learner actors; zero learns in the driver process.")
+    num_cpus_per_learner: int = Field(default=1, ge=0, description="CPU allocation assigned to each remote Learner.")
+    num_gpus_per_learner: float | None = Field(default=None, ge=0.0, description="GPU allocation per Learner; defaults to training.num_gpus.")
     num_env_runners: int = Field(0, ge=0, description="Rollout workers; zero samples inline.")
     num_envs_per_env_runner: int = Field(default=1, ge=1, description="Vectorized environments hosted by each rollout worker.")
     num_gpus_per_env_runner: float = Field(default=0.0, ge=0.0, description="GPU allocation assigned to each rollout worker.")

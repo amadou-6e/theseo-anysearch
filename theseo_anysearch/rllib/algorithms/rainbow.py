@@ -7,8 +7,12 @@ from typing import Any
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.algorithms.models import RainbowConfig
+from theseo_anysearch.rllib.algorithms.dqn import (
+    _dqn_replay_buffer_config,
+    _learner_gpu_allocation,
+)
 from theseo_anysearch.rllib.trainer.trainer import Trainer
-from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.runtime import _resolve_pool_dir
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     bind_anysearch_evaluation_function,
     configure_rllib_evaluation,
@@ -64,7 +68,11 @@ class RainbowTrainer(Trainer):
         _ensure_ray_runtime(
             str(config.training.output_dir),
             config.training.num_env_runners
-            + config.evaluation.num_env_runners,
+            + config.evaluation.num_env_runners
+            + (
+                config.training.num_learners
+                * config.training.num_cpus_per_learner
+            ),
         )
 
         env = config.env
@@ -98,21 +106,14 @@ class RainbowTrainer(Trainer):
                 dueling=algo_cfg.dueling,
                 double_q=algo_cfg.double_q,
                 noisy=algo_cfg.noisy,
-                replay_buffer_config={
-                    "type": "PrioritizedEpisodeReplayBuffer",
-                    "capacity": algo_cfg.replay_buffer_capacity,
-                    "prioritized_replay_alpha": algo_cfg.prioritized_replay_alpha,
-                    "prioritized_replay_beta": algo_cfg.prioritized_replay_beta,
-                },
+                replay_buffer_config=_dqn_replay_buffer_config(algo_cfg),
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
             )
             .rl_module(model_config=rllib_model)
             .learners(
-                num_learners=0,
-                num_gpus_per_learner=_detect_num_gpus(
-                    config.training.require_gpu,
-                    num_gpus=config.training.num_gpus,
-                ),
+                num_learners=config.training.num_learners,
+                num_cpus_per_learner=config.training.num_cpus_per_learner,
+                num_gpus_per_learner=_learner_gpu_allocation(config),
             )
             .framework("torch")
         )
