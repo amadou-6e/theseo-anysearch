@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 
 _TRAINER_TYPES = {
+    "appo": ("theseo_anysearch.rllib.algorithms.appo", "APPOTrainer"),
     "ddpg": ("theseo_anysearch.rllib.algorithms.ddpg", "DDPGTrainer"),
     "dqn": ("theseo_anysearch.rllib.algorithms.dqn", "DQNTrainer"),
     "multi_agent_voxel_ppo": (

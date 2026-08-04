@@ -1,0 +1,131 @@
+"""APPO trainer integration for asynchronous actor-learner training."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+from theseo_anysearch.rllib.algorithms.models import APPOConfig
+from theseo_anysearch.rllib.algorithms.ppo import (
+    _configure_rllib_env_runners,
+    _ensure_ray_runtime,
+)
+from theseo_anysearch.rllib.trainer.evaluation.parallel import (
+    bind_anysearch_evaluation_function,
+    configure_rllib_evaluation,
+)
+from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
+from theseo_anysearch.rllib.trainer.trainer import Trainer
+from theseo_anysearch.settings import Settings
+
+
+class APPOTrainer(Trainer):
+    """Train a voxel policy with RLlib's asynchronous APPO algorithm."""
+
+    algorithm_name = "appo"
+
+    @classmethod
+    def from_settings(cls, config: Settings) -> "APPOTrainer":
+        """Construct an APPO adapter from validated experiment settings."""
+        return cls(config)
+
+    @staticmethod
+    def build_algorithm_from_settings(config: Settings) -> Any:
+        """Build an RLlib APPO algorithm configured for AnySearch."""
+        from ray.rllib.algorithms.appo import APPOConfig as RllibAPPOConfig
+
+        _ensure_ray_runtime(
+            str(config.training.output_dir),
+            config.training.num_env_runners + config.evaluation.num_env_runners,
+        )
+
+        env = config.env
+        algo_cfg = config.algorithm_config
+        if not isinstance(algo_cfg, APPOConfig):
+            algo_cfg = APPOConfig(**algo_cfg.model_dump())
+
+        env_config = env.to_runtime_dict()
+        env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        if env.waypoint_curriculum.enabled:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                WaypointCurriculum,
+            )
+
+            initial_curriculum = WaypointCurriculum(
+                env.waypoint_curriculum,
+                env_config,
+            )
+            initial_state = initial_curriculum.state
+            if initial_state.waypoints:
+                env_config["waypoint_route"] = {
+                    "start": initial_state.start,
+                    "waypoints": initial_state.waypoints,
+                }
+            else:
+                env_config["waypoints"] = {
+                    "start": initial_state.start,
+                    "goal": initial_state.goal,
+                }
+        env_id = VoxelEnv.register_with_ray(env_config=env_config)
+        probe_env = VoxelEnv(env_config)
+        observation_space = probe_env.observation_space
+        action_space = probe_env.action_space
+        probe_env.close()
+
+        from theseo_anysearch.rllib.models import build_rllib_model_dict
+
+        rllib_model = build_rllib_model_dict(config.model_cfg)
+        rllib_config = (
+            RllibAPPOConfig()
+            .api_stack(
+                enable_rl_module_and_learner=False,
+                enable_env_runner_and_connector_v2=False,
+            )
+            .environment(
+                env=env_id,
+                env_config=env_config,
+                observation_space=observation_space,
+                action_space=action_space,
+            )
+            .training(
+                lr=algo_cfg.lr,
+                gamma=algo_cfg.gamma,
+                train_batch_size=algo_cfg.train_batch_size,
+                vtrace=algo_cfg.vtrace,
+                use_gae=algo_cfg.use_gae,
+                lambda_=algo_cfg.lambda_,
+                clip_param=algo_cfg.clip_param,
+                use_kl_loss=algo_cfg.use_kl_loss,
+                kl_coeff=algo_cfg.kl_coeff,
+                kl_target=algo_cfg.kl_target,
+                target_network_update_freq=algo_cfg.target_network_update_freq,
+                circular_buffer_num_batches=algo_cfg.circular_buffer_num_batches,
+                circular_buffer_iterations_per_batch=(
+                    algo_cfg.circular_buffer_iterations_per_batch
+                ),
+                model=rllib_model,
+            )
+            .resources(
+                num_gpus=_detect_num_gpus(
+                    config.training.require_gpu,
+                    num_gpus=config.training.num_gpus,
+                )
+            )
+            .framework("torch")
+        )
+        rllib_config.rollout_fragment_length = algo_cfg.rollout_fragment_length
+        rllib_config = _configure_rllib_env_runners(rllib_config, config.training)
+        rllib_config = configure_rllib_evaluation(
+            rllib_config,
+            num_env_runners=config.evaluation.num_env_runners,
+            parallel_to_training=config.evaluation.parallel_to_training,
+            env_config=env_config,
+            episodes=config.evaluation.episodes,
+            seed=config.evaluation.seed,
+            num_envs_per_env_runner=config.evaluation.num_envs_per_env_runner,
+        )
+        return bind_anysearch_evaluation_function(rllib_config.build_algo())
+
+    def _build_algorithm(self) -> Any:
+        """Build the configured RLlib APPO algorithm."""
+        return self.build_algorithm_from_settings(self._config)

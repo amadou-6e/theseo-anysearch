@@ -18,6 +18,7 @@ These configurations are longer-running policy-training baselines and task-speci
 - [`ppo_maps.yaml`](ppo_maps.yaml) is the discrete 26-action radial-observation baseline on augmented industrial map crops.
 - [`ppo_maps_zones.yaml`](ppo_maps_zones.yaml) replaces progress shaping with always-negative zone-based distance rewards.
 - [`dqn_maps_zones.yaml`](dqn_maps_zones.yaml) applies the same map and zone-reward task to off-policy DQN.
+- APPO curriculum examples live under `../tune/waypoint_route_segment_reward/` because they exercise asynchronous sampling together with curriculum evaluation.
 - [`ppo_maps_vector_zones.yaml`](ppo_maps_vector_zones.yaml) replaces discrete actions with a compact three-component action vector.
 - [`ppo_maps_vector_zones_long.yaml`](ppo_maps_vector_zones_long.yaml) extends that vector-action experiment to 1,000 iterations.
 
