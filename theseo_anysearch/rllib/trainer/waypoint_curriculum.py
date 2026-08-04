@@ -509,7 +509,7 @@ def _broadcast_env_method(
         return
     env_runner_group.foreach_env_runner(
         partial(_call_env_method, method_name=method_name, args=args),
-        local_env_runner=True,
+        local_env_runner=False,
     )
 
 

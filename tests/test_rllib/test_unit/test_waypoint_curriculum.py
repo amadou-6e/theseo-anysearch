@@ -139,7 +139,7 @@ def test_broadcast_queues_waypoints_through_modern_env_runners():
 
     class FakeGroup:
         def foreach_env_runner(self, function, *, local_env_runner):
-            assert local_env_runner is True
+            assert local_env_runner is False
             function(FakeRunner())
 
     class FakeAlgo:
