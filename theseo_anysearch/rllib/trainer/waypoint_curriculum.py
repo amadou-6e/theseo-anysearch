@@ -473,6 +473,13 @@ def _call_env_method(
     vector_env = getattr(env_runner, "env", None)
     if vector_env is None:
         raise RuntimeError("RLlib EnvRunner has no environment")
+    seen: set[int] = set()
+    while not hasattr(vector_env, "call") and hasattr(vector_env, "env"):
+        identity = id(vector_env)
+        if identity in seen:
+            break
+        seen.add(identity)
+        vector_env = vector_env.env
     if hasattr(vector_env, "call"):
         return vector_env.call(method_name, *args)
     environments = getattr(vector_env, "envs", (vector_env,))
