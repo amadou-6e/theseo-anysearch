@@ -72,6 +72,8 @@ class TrainingConfig(BaseModel):
         Number of vectorized environments hosted by each rollout worker.
     num_gpus_per_env_runner : float
         GPU allocation for each rollout worker. Zero keeps rollout inference on CPU.
+    max_requests_in_flight_per_env_runner : int
+        Maximum concurrent sample requests queued for each remote EnvRunner.
     trajectory_every : int
         Iteration interval for periodic trajectory snapshots.
     best_trajectory : bool
@@ -93,6 +95,7 @@ class TrainingConfig(BaseModel):
     num_env_runners: int = Field(0, ge=0, description="Rollout workers; zero samples inline.")
     num_envs_per_env_runner: int = Field(default=1, ge=1, description="Vectorized environments hosted by each rollout worker.")
     num_gpus_per_env_runner: float = Field(default=0.0, ge=0.0, description="GPU allocation assigned to each rollout worker.")
+    max_requests_in_flight_per_env_runner: int = Field(default=2, ge=1, description="Maximum concurrent sample requests per remote EnvRunner.")
     trajectory_every: int = Field(10, ge=1, description="Iterations between trajectory snapshots.")
     best_trajectory: bool = Field(True, description="Retain the best evaluation trajectory.")
     output_dir: Path = Field(default=Path("runtime/"), description="Base directory for training artifacts.")

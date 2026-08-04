@@ -13,12 +13,15 @@ from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     bind_anysearch_evaluation_function,
     configure_rllib_evaluation,
 )
-from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
+from theseo_anysearch.rllib.algorithms.ppo import (
+    _configure_rllib_env_runners,
+    _ensure_ray_runtime,
+)
 
 
 class DQNTrainer(Trainer):
     """
-    DQN trainer backed by ray.rllib.algorithms.dqn.DQN (legacy API stack).
+    DQN trainer backed by RLlib's RLModule, Learner, and EnvRunner stack.
 
     Note: DQNConfig.train_batch_size is the replay buffer sample batch size per
     gradient update, not the on-policy rollout length as in PPO. Use smaller
@@ -74,38 +77,47 @@ class DQNTrainer(Trainer):
         env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
-        from theseo_anysearch.rllib.models import build_rllib_model_dict
+        from theseo_anysearch.rllib.models import (
+            build_rllib_rl_module_model_config,
+        )
         model_cfg = config.model_cfg
-        rllib_model = build_rllib_model_dict(model_cfg)
+        rllib_model = build_rllib_rl_module_model_config(model_cfg)
 
         rllib_config = (
             RllibDQNConfig()
             .api_stack(
-                enable_rl_module_and_learner=False,
-                enable_env_runner_and_connector_v2=False,
+                enable_rl_module_and_learner=True,
+                enable_env_runner_and_connector_v2=True,
             )
             .environment(env=env_id, env_config=env_config)
             .training(
                 lr=algo_cfg.lr,
                 gamma=algo_cfg.gamma,
-                train_batch_size=algo_cfg.train_batch_size,
+                train_batch_size_per_learner=algo_cfg.train_batch_size,
                 n_step=algo_cfg.n_step,
                 num_atoms=algo_cfg.num_atoms,
                 dueling=algo_cfg.dueling,
                 double_q=algo_cfg.double_q,
                 noisy=algo_cfg.noisy,
                 replay_buffer_config={
-                    "type": "MultiAgentReplayBuffer",
+                    "type": "PrioritizedEpisodeReplayBuffer",
                     "capacity": algo_cfg.replay_buffer_capacity,
                 },
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
-                model=rllib_model,
             )
-            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus))
+            .rl_module(model_config=rllib_model)
+            .learners(
+                num_learners=0,
+                num_gpus_per_learner=_detect_num_gpus(
+                    config.training.require_gpu, num_gpus=config.training.num_gpus
+                ),
+            )
             .framework("torch")
         )
 
-        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = _configure_rllib_env_runners(
+            rllib_config, config.training
+        )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
