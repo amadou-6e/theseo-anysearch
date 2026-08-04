@@ -9,7 +9,10 @@ from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.algorithms.models import DQNConfig
 from theseo_anysearch.rllib.trainer.trainer import Trainer
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
-from theseo_anysearch.rllib.trainer.evaluation.parallel import configure_rllib_evaluation
+from theseo_anysearch.rllib.trainer.evaluation.parallel import (
+    bind_anysearch_evaluation_function,
+    configure_rllib_evaluation,
+)
 from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
 
 
@@ -106,8 +109,13 @@ class DQNTrainer(Trainer):
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
+            parallel_to_training=config.evaluation.parallel_to_training,
+            env_config=env_config,
+            episodes=config.evaluation.episodes,
+            seed=config.evaluation.seed,
+            num_envs_per_env_runner=config.evaluation.num_envs_per_env_runner,
         )
-        return rllib_config.build_algo()
+        return bind_anysearch_evaluation_function(rllib_config.build_algo())
 
     def _build_algorithm(self) -> Any:
         return self.build_algorithm_from_settings(self._config)

@@ -104,6 +104,18 @@ class TestEvaluationConfig:
     def test_env_vectorization_defaults_to_one(self):
         assert EvaluationConfig().num_envs_per_env_runner == 1
 
+    def test_parallel_evaluation_requires_dedicated_runner(self):
+        with pytest.raises(ValidationError, match="num_env_runners >= 1"):
+            EvaluationConfig(parallel_to_training=True)
+
+    def test_parallel_evaluation_accepts_dedicated_runner(self):
+        evaluation = EvaluationConfig(
+            parallel_to_training=True,
+            num_env_runners=1,
+        )
+
+        assert evaluation.parallel_to_training is True
+
     def test_env_vectorization_can_be_set(self):
         assert EvaluationConfig(
             num_envs_per_env_runner=4

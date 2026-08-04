@@ -115,15 +115,37 @@ class TestTrainResult:
 
 class FakeAlgo:
     """Minimal duck-typed Algorithm for standalone tests."""
-    def __init__(self, reward_sequence: list[float] | None = None) -> None:
+    def __init__(
+        self,
+        reward_sequence: list[float] | None = None,
+        evaluation_count: int = 1,
+    ) -> None:
         self._step = 0
         self._rewards = reward_sequence or [1.0, 2.0, 3.0, 4.0, 5.0]
+        self._evaluation_count = evaluation_count
+        self.evaluation_episodes: list[VoxelEpisodeData] | None = None
         self.saved_paths: list[str] = []
         self.restored_paths: list[str] = []
 
     def train(self) -> dict[str, Any]:
         r = self._rewards[self._step % len(self._rewards)]
         self._step += 1
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=1,
+            obs_mode="scalar",
+            init_filled=[],
+            steps=[],
+            total_reward=0.0,
+            success=False,
+            start_pos=(1, 1, 1),
+            goal_pos=(2, 2, 2),
+        )
+        self._anysearch_evaluation_episodes = (
+            self.evaluation_episodes
+            if self.evaluation_episodes is not None
+            else [episode for _ in range(self._evaluation_count)]
+        )
         return {
             "episode_reward_mean": r,
             "episode_len_mean": 20.0,
@@ -167,7 +189,7 @@ class FakeSummaryWriter:
 
 def make_trainer(trainer_settings: Any, rewards: list[float] | None = None) -> PPOTrainer:
     """Return a PPOTrainer whose _build_algorithm returns a FakeAlgo."""
-    algo = FakeAlgo(rewards)
+    algo = FakeAlgo(rewards, trainer_settings.evaluation.episodes)
 
     class _T(PPOTrainer):
         def _build_algorithm(self) -> FakeAlgo:
@@ -239,11 +261,9 @@ class TestExecution:
             _episode(False, -1.0, 4),
             _episode(True, 2.0, 2),
         ]
-        with patch(
-            "theseo_anysearch.experiments.trajectory.collect_eval_episodes",
-            return_value=episodes,
-        ):
-            result = make_trainer(trainer_settings).train()[0]
+        trainer = make_trainer(trainer_settings)
+        trainer._fake_algo.evaluation_episodes = episodes
+        result = trainer.train()[0]
 
         output_dir = Path(trainer_settings.training.output_dir)
         summary = json.loads(
@@ -331,7 +351,7 @@ class TestOutputSanity:
         assert Path(writer.log_dir) == Path(trainer_settings.training.output_dir).joinpath("tensorboard")
         assert ("train/episode_reward_mean", 1.0, 1) in writer.scalars
         assert ("train/episode_reward_mean", 4.0, 4) in writer.scalars
-        assert writer.flush_calls == trainer_settings.training.iterations
+        assert writer.flush_calls == trainer_settings.training.iterations * 2
         assert writer.closed is True
 
     def test_train_writes_eval_metrics_under_run_dir(self, trainer_settings: Any):
@@ -375,11 +395,11 @@ class TestOutputSanity:
         with patch(
             "torch.utils.tensorboard.SummaryWriter",
             new=FakeSummaryWriter,
-        ), patch(
-            "theseo_anysearch.experiments.trajectory.collect_eval_episode",
-            return_value=episode,
         ):
             t = make_trainer(trainer_settings)
+            t._fake_algo.evaluation_episodes = [
+                episode for _ in range(trainer_settings.evaluation.episodes)
+            ]
             t.train()
 
         writer = FakeSummaryWriter.instances[0]
@@ -595,7 +615,6 @@ class TestTrainingEarlyStop:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from theseo_anysearch.models import TrainingEarlyStopConfig
-        from theseo_anysearch.experiments import trajectory
 
         episode = VoxelEpisodeData(
             agent_count=1,
@@ -621,11 +640,6 @@ class TestTrainingEarlyStop:
             start_pos=(1, 1, 1),
             goal_pos=(1, 1, 2),
         )
-        monkeypatch.setattr(
-            trajectory,
-            "collect_eval_episodes",
-            lambda algo, env_config, count, seed=None: [episode] * count,
-        )
         trainer_settings.training = trainer_settings.training.model_copy(
             update={
                 "iterations": 10,
@@ -643,6 +657,7 @@ class TestTrainingEarlyStop:
             update={"episodes": 2}
         )
         trainer = make_trainer(trainer_settings)
+        trainer._fake_algo.evaluation_episodes = [episode, episode]
 
         results = trainer.train()
 

@@ -4,6 +4,69 @@ from __future__ import annotations
 
 from functools import partial
 from typing import Any
+import weakref
+
+
+class AnySearchEvaluationFunction:
+    """Bridge AnySearch deterministic episodes into RLlib evaluation scheduling."""
+
+    def __init__(
+        self,
+        *,
+        env_config: dict[str, Any],
+        episodes: int,
+        seed: int,
+        multi_agent: bool,
+        num_envs_per_env_runner: int,
+    ) -> None:
+        self._algorithm_ref: Any = None
+        self._env_config = dict(env_config)
+        self._episodes = episodes
+        self._seed = seed
+        self._multi_agent = multi_agent
+        self._num_envs_per_env_runner = num_envs_per_env_runner
+
+    def bind(self, algorithm: Any) -> None:
+        """Bind the built Algorithm required by RLlib's legacy callback API."""
+        self._algorithm_ref = weakref.ref(algorithm)
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Exclude the runtime-only Algorithm reference from checkpoints."""
+        state = dict(self.__dict__)
+        state["_algorithm_ref"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore serializable callback configuration without runtime binding."""
+        self.__dict__.update(state)
+
+    def __call__(self, *args: Any) -> Any:
+        """Collect episodes using either RLlib custom-evaluation signature."""
+        algorithm = args[0] if args else (
+            self._algorithm_ref() if self._algorithm_ref is not None else None
+        )
+        if algorithm is None:
+            raise RuntimeError("AnySearch evaluation callback is not bound")
+        episodes = collect_rllib_evaluation_episodes(
+            algorithm,
+            self._env_config,
+            self._episodes,
+            seed=self._seed,
+            multi_agent=self._multi_agent,
+            num_envs_per_env_runner=self._num_envs_per_env_runner,
+            sync_weights=False,
+        )
+        algorithm._anysearch_evaluation_episodes = episodes
+        env_steps = sum(len(episode.steps) for episode in episodes)
+        rewards = [float(episode.total_reward) for episode in episodes]
+        metrics = {
+            "episode_reward_mean": sum(rewards) / len(rewards),
+            "episode_len_mean": env_steps / len(episodes),
+            "num_episodes": len(episodes),
+        }
+        if args:
+            return metrics, env_steps, env_steps
+        return metrics
 
 
 class _PolicyAdapter:
@@ -159,6 +222,7 @@ def collect_rllib_evaluation_episodes(
     seed: int,
     multi_agent: bool,
     num_envs_per_env_runner: int = 1,
+    sync_weights: bool = True,
 ) -> list[Any]:
     """Collect a deterministic batch concurrently on RLlib evaluation workers."""
     if count < 1:
@@ -202,11 +266,8 @@ def collect_rllib_evaluation_episodes(
     for episode_index in range(count):
         assignments[episode_index % len(assignments)].append(seed + episode_index)
 
-    weights_source = getattr(algorithm, "env_runner", None)
-    group.sync_weights(
-        from_worker_or_learner_group=weights_source,
-        inference_only=True,
-    )
+    if sync_weights:
+        sync_rllib_evaluation_weights(algorithm)
     functions = [
         partial(
             _collect_worker_episodes,
@@ -236,11 +297,49 @@ def collect_rllib_evaluation_episodes(
     return [episode for _, episode in seeded_episodes]
 
 
-def configure_rllib_evaluation(rllib_config: Any, *, num_env_runners: int) -> Any:
-    """Attach the dedicated RLlib evaluation EnvRunner pool to an algorithm config."""
-    return rllib_config.evaluation(
-        evaluation_interval=None,
-        evaluation_num_env_runners=num_env_runners,
-        evaluation_parallel_to_training=False,
-        evaluation_config={"explore": False},
+def sync_rllib_evaluation_weights(algorithm: Any) -> None:
+    """Copy one stable policy snapshot to dedicated evaluation workers."""
+    group = getattr(algorithm, "eval_env_runner_group", None)
+    if group is None or not group.healthy_env_runner_ids():
+        raise RuntimeError("parallel evaluation requires healthy evaluation workers")
+    group.sync_weights(
+        from_worker_or_learner_group=getattr(algorithm, "env_runner", None),
+        inference_only=True,
     )
+
+
+def configure_rllib_evaluation(
+    rllib_config: Any,
+    *,
+    num_env_runners: int,
+    parallel_to_training: bool = False,
+    env_config: dict[str, Any] | None = None,
+    episodes: int = 1,
+    seed: int = 42,
+    multi_agent: bool = False,
+    num_envs_per_env_runner: int = 1,
+) -> Any:
+    """Attach the dedicated RLlib evaluation EnvRunner pool to an algorithm config."""
+    custom_function = AnySearchEvaluationFunction(
+        env_config=env_config or {},
+        episodes=episodes,
+        seed=seed,
+        multi_agent=multi_agent,
+        num_envs_per_env_runner=num_envs_per_env_runner,
+    )
+    options = {
+        "evaluation_interval": 1,
+        "evaluation_num_env_runners": num_env_runners,
+        "evaluation_parallel_to_training": parallel_to_training,
+        "evaluation_config": {"explore": False},
+        "custom_evaluation_function": custom_function,
+    }
+    return rllib_config.evaluation(**options)
+
+
+def bind_anysearch_evaluation_function(algorithm: Any) -> Any:
+    """Bind a configured custom evaluator after RLlib builds the Algorithm."""
+    function = getattr(algorithm.config, "custom_evaluation_function", None)
+    if isinstance(function, AnySearchEvaluationFunction):
+        function.bind(algorithm)
+    return algorithm
