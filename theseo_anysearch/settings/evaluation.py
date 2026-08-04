@@ -25,6 +25,7 @@ class EvaluationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    frequency: int = Field(default=1, ge=1, description="Run evaluation every N training iterations.")
     episodes: int = Field(default=1, ge=1, description="Number of deterministic evaluation episodes.")
     seed: int = Field(42, description="Base seed for deterministic evaluation episodes.")
     min_success_rate: float = Field(default=0.5, ge=0.0, le=1.0, description="Success-rate threshold used by evaluation gates.")

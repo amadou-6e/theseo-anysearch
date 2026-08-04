@@ -263,35 +263,38 @@ class Trainer(BaseTrainer):
                 )
                 if self._curriculum is not None:
                     result.extra.update(self._curriculum.stage_metric())
+                evaluation_due = self._iteration % evaluation.frequency == 0
                 rllib_evaluation_episodes = getattr(
                     self._algo,
                     "_anysearch_evaluation_episodes",
                     None,
                 )
-                if rllib_evaluation_episodes is None:
+                if evaluation_due and rllib_evaluation_episodes is None:
                     raise RuntimeError(
                         "RLlib evaluation completed without AnySearch "
                         "evaluation episodes"
                     )
-                delattr(self._algo, "_anysearch_evaluation_episodes")
+                if rllib_evaluation_episodes is not None:
+                    delattr(self._algo, "_anysearch_evaluation_episodes")
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
                 early_stop_triggered = False
                 early_stop_decision = None
                 try:
-                    evaluation_outcome = evaluation_coordinator.evaluate(
-                        self._iteration,
-                        result,
-                        is_last_iteration=_is_last_iter,
-                        episodes=rllib_evaluation_episodes,
-                    )
-                    result = evaluation_outcome.result
-                    early_stop_triggered = evaluation_outcome.early_stop_triggered
-                    early_stop_decision = evaluation_outcome.early_stop_decision
-                    if evaluation_outcome.best_trajectory_written:
-                        self.checkpoint()
-                        _checkpointed_for_best = True
+                    if rllib_evaluation_episodes is not None:
+                        evaluation_outcome = evaluation_coordinator.evaluate(
+                            self._iteration,
+                            result,
+                            is_last_iteration=_is_last_iter,
+                            episodes=rllib_evaluation_episodes,
+                        )
+                        result = evaluation_outcome.result
+                        early_stop_triggered = evaluation_outcome.early_stop_triggered
+                        early_stop_decision = evaluation_outcome.early_stop_decision
+                        if evaluation_outcome.best_trajectory_written:
+                            self.checkpoint()
+                            _checkpointed_for_best = True
                     if self._curriculum is not None:
                         curriculum_metrics = self._curriculum.evaluate(
                             self._algo, self._iteration, _env_cfg, _store

@@ -4,7 +4,7 @@ description: >
   sparse reward gives each reached segment a fresh additive countdown budget.
 
 experiment:
-  name: dqn-empty-grid-discrete18-segment-reward-initial1-iterations1000-additive-vectorized
+  name: dqn-empty-grid-discrete18-segment-reward-initial1-iterations1000-large-batch
   output_dir: runtime/train
   seed: 42
 
@@ -73,9 +73,11 @@ training:
 
 evaluation:
   episodes: 10
+  frequency: 5
   seed: 142
   min_success_rate: 0.8
-  num_env_runners: 0
+  num_env_runners: 1
+  parallel_to_training: true
   num_envs_per_env_runner: 4
   waypoint_curriculum:
     enabled: true
@@ -91,13 +93,13 @@ evaluation:
 algorithm_config:
   lr: 3.0e-4
   gamma: 0.99
-  train_batch_size: 64
+  train_batch_size: 1024
   n_step: 1
   num_atoms: 1
   dueling: true
   double_q: true
   noisy: false
-  replay_buffer_capacity: 50000
+  replay_buffer_capacity: 200000
   warmup_steps: 512
 
 model_config:
