@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import ConfigDict
 
 from theseo_anysearch.settings import AlgorithmConfig
@@ -43,6 +45,7 @@ class DQNConfig(AlgorithmConfig):
     double_q: bool = True
     noisy: bool = False
     replay_buffer_capacity: int = 50_000
+    replay_buffer_type: Literal["uniform", "prioritized"] = "uniform"
     warmup_steps: int = 0       # num_steps_sampled_before_learning_starts
 
 
@@ -55,6 +58,7 @@ class RainbowConfig(DQNConfig):
     noisy: bool = True
     v_min: float = -10.0
     v_max: float = 10.0
+    replay_buffer_type: Literal["uniform", "prioritized"] = "prioritized"
     prioritized_replay_alpha: float = 0.6
     prioritized_replay_beta: float = 0.4
 

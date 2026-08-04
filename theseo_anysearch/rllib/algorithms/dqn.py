@@ -13,12 +13,40 @@ from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     bind_anysearch_evaluation_function,
     configure_rllib_evaluation,
 )
-from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
+from theseo_anysearch.rllib.algorithms.ppo import (
+    _configure_rllib_env_runners,
+    _ensure_ray_runtime,
+)
 
+
+def _dqn_replay_buffer_config(algo_cfg: DQNConfig) -> dict[str, Any]:
+    """Build a modern DQN replay buffer configuration from public settings."""
+    replay_type = (
+        "EpisodeReplayBuffer"
+        if algo_cfg.replay_buffer_type == "uniform"
+        else "PrioritizedEpisodeReplayBuffer"
+    )
+    replay = {
+        "type": replay_type,
+        "capacity": algo_cfg.replay_buffer_capacity,
+    }
+    if algo_cfg.replay_buffer_type == "prioritized":
+        replay["alpha"] = getattr(algo_cfg, "prioritized_replay_alpha", 0.6)
+        replay["beta"] = getattr(algo_cfg, "prioritized_replay_beta", 0.4)
+    return replay
+
+
+def _learner_gpu_allocation(config: Settings) -> float:
+    """Resolve the GPU allocation assigned to each Learner."""
+    configured = config.training.num_gpus_per_learner
+    return _detect_num_gpus(
+        config.training.require_gpu,
+        num_gpus=(configured if configured is not None else config.training.num_gpus),
+    )
 
 class DQNTrainer(Trainer):
     """
-    DQN trainer backed by ray.rllib.algorithms.dqn.DQN (legacy API stack).
+    DQN trainer backed by RLlib's RLModule, Learner, and EnvRunner stack.
 
     Note: DQNConfig.train_batch_size is the replay buffer sample batch size per
     gradient update, not the on-policy rollout length as in PPO. Use smaller
@@ -62,7 +90,11 @@ class DQNTrainer(Trainer):
         _ensure_ray_runtime(
             str(config.training.output_dir),
             config.training.num_env_runners
-            + config.evaluation.num_env_runners,
+            + config.evaluation.num_env_runners
+            + (
+                config.training.num_learners
+                * config.training.num_cpus_per_learner
+            ),
         )
 
         env = config.env
@@ -74,38 +106,43 @@ class DQNTrainer(Trainer):
         env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
-        from theseo_anysearch.rllib.models import build_rllib_model_dict
+        from theseo_anysearch.rllib.models import (
+            build_rllib_rl_module_model_config,
+        )
         model_cfg = config.model_cfg
-        rllib_model = build_rllib_model_dict(model_cfg)
+        rllib_model = build_rllib_rl_module_model_config(model_cfg)
 
         rllib_config = (
             RllibDQNConfig()
             .api_stack(
-                enable_rl_module_and_learner=False,
-                enable_env_runner_and_connector_v2=False,
+                enable_rl_module_and_learner=True,
+                enable_env_runner_and_connector_v2=True,
             )
             .environment(env=env_id, env_config=env_config)
             .training(
                 lr=algo_cfg.lr,
                 gamma=algo_cfg.gamma,
-                train_batch_size=algo_cfg.train_batch_size,
+                train_batch_size_per_learner=algo_cfg.train_batch_size,
                 n_step=algo_cfg.n_step,
                 num_atoms=algo_cfg.num_atoms,
                 dueling=algo_cfg.dueling,
                 double_q=algo_cfg.double_q,
                 noisy=algo_cfg.noisy,
-                replay_buffer_config={
-                    "type": "MultiAgentReplayBuffer",
-                    "capacity": algo_cfg.replay_buffer_capacity,
-                },
+                replay_buffer_config=_dqn_replay_buffer_config(algo_cfg),
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
-                model=rllib_model,
             )
-            .resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus))
+            .rl_module(model_config=rllib_model)
+            .learners(
+                num_learners=config.training.num_learners,
+                num_cpus_per_learner=config.training.num_cpus_per_learner,
+                num_gpus_per_learner=_learner_gpu_allocation(config),
+            )
             .framework("torch")
         )
 
-        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = _configure_rllib_env_runners(
+            rllib_config, config.training
+        )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,

@@ -90,6 +90,38 @@ def build_rllib_model_dict(model_cfg: Any) -> dict:
     }
 
 
+def build_rllib_rl_module_model_config(model_cfg: Any) -> Any:
+    """Translate a project model config for RLlib's RLModule stack.
+
+    Parameters
+    ----------
+    model_cfg : Any
+        Validated AnySearch model settings.
+
+    Returns
+    -------
+    DefaultModelConfig
+        RLlib's configuration for its algorithm-specific default RLModule.
+
+    Raises
+    ------
+    ValueError
+        If the configuration references a legacy ``TorchModelV2`` model.
+    """
+    if model_cfg.custom_model:
+        raise ValueError(
+            f"custom model '{model_cfg.custom_model}' still uses TorchModelV2; "
+            "migrate it to RLModule before enabling the new RLlib API stack"
+        )
+
+    from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
+
+    return DefaultModelConfig(
+        fcnet_hiddens=list(model_cfg.hidden_sizes),
+        fcnet_activation=model_cfg.activation,
+    )
+
+
 class BaseVoxelTorchModel(TorchModelV2, nn.Module):
     """Shared ``TorchModelV2`` base for voxel policy/value models.
 

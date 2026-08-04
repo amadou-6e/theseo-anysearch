@@ -16,16 +16,18 @@ def test_configure_rllib_env_runners_propagates_vectorization_and_resources():
         num_env_runners=2,
         num_envs_per_env_runner=4,
         num_gpus_per_env_runner=0.0,
+        max_requests_in_flight_per_env_runner=3,
     )
 
     result = _configure_rllib_env_runners(rllib_config, training)
 
     assert result is configured
-    rllib_config.env_runners.assert_called_once_with(
-        num_env_runners=2,
-        num_envs_per_env_runner=4,
-        num_gpus_per_env_runner=0.0,
-    )
+    kwargs = rllib_config.env_runners.call_args.kwargs
+    assert kwargs["num_env_runners"] == 2
+    assert kwargs["num_envs_per_env_runner"] == 4
+    assert kwargs["num_gpus_per_env_runner"] == 0.0
+    assert kwargs["max_requests_in_flight_per_env_runner"] == 3
+    assert callable(kwargs["env_to_module_connector"])
 
 
 def test_installed_rllib_config_retains_vectorization_and_cpu_inference():
@@ -37,6 +39,7 @@ def test_installed_rllib_config_retains_vectorization_and_cpu_inference():
         num_env_runners=2,
         num_envs_per_env_runner=4,
         num_gpus_per_env_runner=0.0,
+        max_requests_in_flight_per_env_runner=3,
     )
 
     configured = _configure_rllib_env_runners(PPOConfig(), training)
@@ -44,3 +47,4 @@ def test_installed_rllib_config_retains_vectorization_and_cpu_inference():
     assert configured.num_env_runners == 2
     assert configured.num_envs_per_env_runner == 4
     assert configured.num_gpus_per_env_runner == 0.0
+    assert configured.max_requests_in_flight_per_env_runner == 3

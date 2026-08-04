@@ -83,3 +83,18 @@ class TestLoadSettings:
 
         settings = load_settings(path)
         assert settings.anyscale.project == ""
+def test_training_accepts_remote_learner_resources(minimal_yaml: Path) -> None:
+    from theseo_anysearch.settings import load_settings
+
+    content = minimal_yaml.read_text(encoding="utf-8")
+    content = content.replace(
+        "algorithm: ppo",
+        "algorithm: ppo\n  num_learners: 1\n  num_cpus_per_learner: 1\n  num_gpus_per_learner: 0.3333333333333333",
+    )
+    minimal_yaml.write_text(content, encoding="utf-8")
+
+    settings = load_settings(minimal_yaml)
+
+    assert settings.training.num_learners == 1
+    assert settings.training.num_cpus_per_learner == 1
+    assert settings.training.num_gpus_per_learner == pytest.approx(1 / 3)

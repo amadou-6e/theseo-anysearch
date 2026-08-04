@@ -69,11 +69,59 @@ class AnySearchEvaluationFunction:
         return metrics
 
 
+
 class _PolicyAdapter:
-    """Expose a RolloutWorker policy through the Algorithm inference interface."""
+    """Expose either an RLModule or legacy Policy for deterministic inference."""
 
     def __init__(self, env_runner: Any) -> None:
         self._env_runner = env_runner
+
+    def _rl_module(self) -> Any | None:
+        """Return the new-stack inference module when one is available."""
+        module = getattr(self._env_runner, "module", None)
+        if module is None and hasattr(self._env_runner, "get_module"):
+            module = self._env_runner.get_module()
+        return module
+
+    def _module_observations(self, observations: list[Any]) -> list[Any]:
+        """Apply the same structured-observation flattening as Connector V2."""
+        from gymnasium.spaces import flatten
+
+        runner = getattr(self._env_runner, "env_runner", self._env_runner)
+        env = getattr(runner, "env", None)
+        space = getattr(env, "single_observation_space", None)
+        if space is None:
+            return observations
+        return [flatten(space, observation) for observation in observations]
+
+    def _compute_module_actions(self, observations: list[Any]) -> Any:
+        """Run a deterministic batched forward pass through an RLModule."""
+        import torch
+        import tree
+        from ray.rllib.core.columns import Columns
+
+        module = self._rl_module()
+        if module is None:
+            raise RuntimeError("RLModule inference requested without a module")
+        try:
+            device = next(module.parameters()).device
+        except StopIteration:
+            device = torch.device("cpu")
+        stacked = _stack_observations(self._module_observations(observations))
+        tensor_obs = tree.map_structure(
+            lambda value: torch.as_tensor(value, device=device),
+            stacked,
+        )
+        with torch.inference_mode():
+            outputs = module.forward_inference({Columns.OBS: tensor_obs})
+            actions = outputs.get(Columns.ACTIONS)
+            if actions is None:
+                distribution_class = module.get_inference_action_dist_cls()
+                distribution = distribution_class.from_logits(
+                    outputs[Columns.ACTION_DIST_INPUTS]
+                ).to_deterministic()
+                actions = distribution.sample()
+        return actions.detach().cpu().numpy()
 
     def compute_single_action(
         self,
@@ -98,6 +146,9 @@ class _PolicyAdapter:
         Any
             Policy action.
         """
+        if self._rl_module() is not None:
+            return self._compute_module_actions([observation])[0]
+
         policy = self._env_runner.get_policy(policy_id)
         observation = self._preprocess_observation(
             policy, observation, env_id="0"
@@ -127,6 +178,9 @@ class _PolicyAdapter:
         Any
             Batched policy actions.
         """
+        if self._rl_module() is not None:
+            return self._compute_module_actions(observations), [], {}
+
         policy = self._env_runner.get_policy(policy_id)
         processed = [
             self._preprocess_observation(policy, observation, env_id=str(index))
@@ -259,7 +313,7 @@ def collect_rllib_evaluation_episodes(
                     seeds[offset:offset + num_envs_per_env_runner],
                 ))
             return episodes
-        return collect_eval_episodes(algorithm, env_config, count, seed=seed)
+        return collect_eval_episodes(_PolicyAdapter(algorithm), env_config, count, seed=seed)
 
     active_worker_ids = worker_ids[: min(len(worker_ids), count)]
     assignments: list[list[int]] = [[] for _ in active_worker_ids]
@@ -302,8 +356,17 @@ def sync_rllib_evaluation_weights(algorithm: Any) -> None:
     group = getattr(algorithm, "eval_env_runner_group", None)
     if group is None or not group.healthy_env_runner_ids():
         raise RuntimeError("parallel evaluation requires healthy evaluation workers")
+    config = getattr(algorithm, "config", None)
+    uses_learner = bool(
+        getattr(config, "enable_rl_module_and_learner", False)
+    )
+    source = (
+        getattr(algorithm, "learner_group", None)
+        if uses_learner
+        else getattr(algorithm, "env_runner", None)
+    )
     group.sync_weights(
-        from_worker_or_learner_group=getattr(algorithm, "env_runner", None),
+        from_worker_or_learner_group=source,
         inference_only=True,
     )
 
