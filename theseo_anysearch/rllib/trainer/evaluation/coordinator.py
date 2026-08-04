@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict
 from theseo_anysearch.rllib.trainer.results import TrainResult
 from theseo_anysearch.rllib.trainer.runtime import (
     _append_trainer_stage_log,
-    _log_trainer_stage,
 )
 
 
@@ -103,24 +102,24 @@ class EvaluationCoordinator:
 
     def evaluate(
         self,
-        algorithm: Any,
         iteration: int,
         result: TrainResult,
         *,
         is_last_iteration: bool,
+        episodes: list[Any],
     ) -> EvaluationOutcome:
         """Evaluate a policy and enrich its current training result.
 
         Parameters
         ----------
-        algorithm : Any
-            RLlib algorithm or compatible policy implementation.
         iteration : int
             Current training iteration.
         result : TrainResult
             Normalized training result to enrich.
         is_last_iteration : bool
             Whether this is the configured final iteration.
+        episodes : list[Any]
+            Episodes collected by RLlib's custom evaluation function.
 
         Returns
         -------
@@ -155,30 +154,8 @@ class EvaluationCoordinator:
         best_trajectory_written = False
         early_stop_triggered = False
         early_stop_decision = None
-        algorithm = algorithm
         iteration = iteration
-        _log_trainer_stage(
-            f"Collecting {evaluation_episodes} deterministic evaluation "
-            f"episodes for iteration {iteration}"
-        )
-        _append_trainer_stage_log(
-            self._output_dir,
-            f"Collecting deterministic evaluation batch for iteration "
-            f"{iteration}",
-        )
         evaluation_seed = evaluation.seed
-        from theseo_anysearch.rllib.trainer.evaluation.parallel import (
-            collect_rllib_evaluation_episodes,
-        )
-
-        episodes = collect_rllib_evaluation_episodes(
-            algorithm,
-            _env_cfg,
-            evaluation_episodes,
-            seed=evaluation_seed,
-            multi_agent=_is_multi,
-            num_envs_per_env_runner=evaluation.num_envs_per_env_runner,
-        )
         metrics_factory = (
             EpisodeRunMetrics.from_multi_voxel_episodes
             if _is_multi

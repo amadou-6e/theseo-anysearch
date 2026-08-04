@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from theseo_anysearch.settings.environment.curriculum import WaypointAdvanceConfig
 
@@ -34,3 +34,17 @@ class EvaluationConfig(BaseModel):
         default_factory=WaypointCurriculumEvaluationConfig,
         description="Retention evaluation and optional evaluation-gated advancement.",
     )
+    parallel_to_training: bool = Field(
+        default=False,
+        description="Run deterministic evaluation concurrently with the training update.",
+    )
+
+    @model_validator(mode="after")
+    def validate_parallel_evaluation_workers(self) -> "EvaluationConfig":
+        """Require dedicated actors when evaluation overlaps training."""
+        if self.parallel_to_training and self.num_env_runners < 1:
+            raise ValueError(
+                "evaluation.parallel_to_training requires "
+                "evaluation.num_env_runners >= 1"
+            )
+        return self

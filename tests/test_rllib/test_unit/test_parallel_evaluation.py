@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
+    AnySearchEvaluationFunction,
+    AnySearchEvaluationFunction,
     _PolicyAdapter,
     _collect_worker_episodes,
     _stack_observations,
@@ -206,9 +208,53 @@ def test_rllib_evaluation_configuration_creates_dedicated_workers() -> None:
     result = configure_rllib_evaluation(config, num_env_runners=8)
 
     assert result is config
-    assert config.options == {
-        "evaluation_interval": None,
-        "evaluation_num_env_runners": 8,
-        "evaluation_parallel_to_training": False,
-        "evaluation_config": {"explore": False},
-    }
+    assert config.options["evaluation_interval"] == 1
+    assert config.options["evaluation_num_env_runners"] == 8
+    assert config.options["evaluation_parallel_to_training"] is False
+    assert config.options["evaluation_config"] == {"explore": False}
+    assert isinstance(
+        config.options["custom_evaluation_function"],
+        AnySearchEvaluationFunction,
+    )
+
+
+def test_rllib_parallel_evaluation_uses_native_scheduler() -> None:
+    config = _FakeRllibConfig()
+
+    configure_rllib_evaluation(
+        config,
+        num_env_runners=2,
+        parallel_to_training=True,
+        env_config={"max_steps": 96},
+        episodes=10,
+        seed=142,
+        num_envs_per_env_runner=4,
+    )
+
+    assert config.options["evaluation_interval"] == 1
+    assert config.options["evaluation_parallel_to_training"] is True
+    assert isinstance(
+        config.options["custom_evaluation_function"],
+        AnySearchEvaluationFunction,
+    )
+
+
+def test_rllib_parallel_evaluation_uses_native_scheduler() -> None:
+    config = _FakeRllibConfig()
+
+    configure_rllib_evaluation(
+        config,
+        num_env_runners=2,
+        parallel_to_training=True,
+        env_config={"max_steps": 96},
+        episodes=10,
+        seed=142,
+        num_envs_per_env_runner=4,
+    )
+
+    assert config.options["evaluation_interval"] == 1
+    assert config.options["evaluation_parallel_to_training"] is True
+    assert isinstance(
+        config.options["custom_evaluation_function"],
+        AnySearchEvaluationFunction,
+    )
