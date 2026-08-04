@@ -49,6 +49,24 @@ class DQNConfig(AlgorithmConfig):
     warmup_steps: int = 0       # num_steps_sampled_before_learning_starts
 
 
+class APPOConfig(AlgorithmConfig):
+    """APPO-specific asynchronous actor-learner configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rollout_fragment_length: int = 32
+    vtrace: bool = True
+    use_gae: bool = True
+    lambda_: float = 1.0
+    clip_param: float = 0.4
+    use_kl_loss: bool = False
+    kl_coeff: float = 1.0
+    kl_target: float = 0.01
+    target_network_update_freq: int = 2
+    circular_buffer_num_batches: int = 8
+    circular_buffer_iterations_per_batch: int = 2
+
+
 class RainbowConfig(DQNConfig):
     """Rainbow DQN: DQN + distributional Q + noisy nets + PER."""
     model_config = ConfigDict(extra="forbid")
@@ -92,6 +110,7 @@ class DDPGConfig(AlgorithmConfig):
 
 
 ALGORITHM_CONFIGS: dict[str, type[AlgorithmConfig]] = {
+    "appo": APPOConfig,
     "ppo": PPOConfig,
     "sac": SACConfig,
     "dqn": DQNConfig,
