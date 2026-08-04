@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from numbers import Real
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,7 +38,7 @@ class IterationTimings(BaseModel):
 
         def seconds(source: dict[str, Any], key: str) -> float | None:
             value = source.get(key)
-            return float(value) if isinstance(value, (int, float)) else None
+            return float(value) if isinstance(value, Real) else None
 
         return cls(
             rllib_iteration_ema_s=seconds(timers, "training_iteration"),
@@ -46,7 +47,7 @@ class IterationTimings(BaseModel):
                 int(result["num_training_step_calls_per_iteration"])
                 if isinstance(
                     result.get("num_training_step_calls_per_iteration"),
-                    (int, float),
+                    Real,
                 )
                 else None
             ),

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from unittest.mock import patch
@@ -115,7 +116,7 @@ class TestTrainResult:
                 "learner_update_timer": 2.5,
                 "synch_weights": 0.25,
             },
-            "num_training_step_calls_per_iteration": 10,
+            "num_training_step_calls_per_iteration": np.int64(10),
             "env_runners": {
                 "env_step_timer": 0.4,
                 "rlmodule_inference_timer": 0.3,
