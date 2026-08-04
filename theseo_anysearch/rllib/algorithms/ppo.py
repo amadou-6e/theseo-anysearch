@@ -25,6 +25,9 @@ def _configure_rllib_env_runners(rllib_config: Any, training: Any) -> Any:
         num_env_runners=training.num_env_runners,
         num_envs_per_env_runner=training.num_envs_per_env_runner,
         num_gpus_per_env_runner=training.num_gpus_per_env_runner,
+        max_requests_in_flight_per_env_runner=(
+            training.max_requests_in_flight_per_env_runner
+        ),
     )
 
 

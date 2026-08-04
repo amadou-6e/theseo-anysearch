@@ -10,7 +10,10 @@ from theseo_anysearch.rllib.algorithms.models import DQNConfig
 from theseo_anysearch.rllib.trainer.trainer import Trainer
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus, _resolve_pool_dir
 from theseo_anysearch.rllib.trainer.evaluation.parallel import configure_rllib_evaluation
-from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
+from theseo_anysearch.rllib.algorithms.ppo import (
+    _configure_rllib_env_runners,
+    _ensure_ray_runtime,
+)
 
 
 class DQNTrainer(Trainer):
@@ -102,7 +105,10 @@ class DQNTrainer(Trainer):
             .framework("torch")
         )
 
-        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config = _configure_rllib_env_runners(
+            rllib_config,
+            config.training,
+        )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,

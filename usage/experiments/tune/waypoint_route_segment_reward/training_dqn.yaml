@@ -4,7 +4,7 @@ description: >
   sparse reward gives each reached segment a fresh additive countdown budget.
 
 experiment:
-  name: dqn-empty-grid-discrete18-segment-reward-initial1-steps96
+  name: dqn-empty-grid-discrete18-segment-reward-initial1-iterations1000-additive-vectorized
   output_dir: runtime/train
   seed: 42
 
@@ -59,12 +59,13 @@ training:
   algorithm: dqn
   model: fcnet
   runner: local
-  iterations: 100
+  iterations: 1000
   checkpoint_interval: 10
   require_gpu: true
   num_gpus: 0.3333333333333333
-  num_env_runners: 3
+  num_env_runners: 5
   num_envs_per_env_runner: 4
+  max_requests_in_flight_per_env_runner: 2
   num_gpus_per_env_runner: 0.0
   trajectory_every: 10
   best_trajectory: true
