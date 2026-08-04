@@ -30,6 +30,10 @@ return.
 
 ## Evaluation-driven early stopping
 
+RLlib schedules every evaluation batch through the AnySearch custom evaluation
+function, whether evaluation is sequential or parallel. The trainer does not
+run a second, independent evaluation loop.
+
 `training.early_stop` consumes these deterministic evaluation batches. Reward
 and goal-finish conditions use the batch mean reward and completed-goal count.
 Heuristic accuracy compares the policy and configured heuristic on the same

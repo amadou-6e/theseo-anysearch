@@ -208,12 +208,14 @@ def test_rllib_evaluation_configuration_creates_dedicated_workers() -> None:
     result = configure_rllib_evaluation(config, num_env_runners=8)
 
     assert result is config
-    assert config.options == {
-        "evaluation_interval": None,
-        "evaluation_num_env_runners": 8,
-        "evaluation_parallel_to_training": False,
-        "evaluation_config": {"explore": False},
-    }
+    assert config.options["evaluation_interval"] == 1
+    assert config.options["evaluation_num_env_runners"] == 8
+    assert config.options["evaluation_parallel_to_training"] is False
+    assert config.options["evaluation_config"] == {"explore": False}
+    assert isinstance(
+        config.options["custom_evaluation_function"],
+        AnySearchEvaluationFunction,
+    )
 
 
 def test_rllib_parallel_evaluation_uses_native_scheduler() -> None:

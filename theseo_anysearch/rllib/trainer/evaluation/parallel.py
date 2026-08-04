@@ -320,25 +320,20 @@ def configure_rllib_evaluation(
     num_envs_per_env_runner: int = 1,
 ) -> Any:
     """Attach the dedicated RLlib evaluation EnvRunner pool to an algorithm config."""
-    custom_function = (
-        AnySearchEvaluationFunction(
-            env_config=env_config or {},
-            episodes=episodes,
-            seed=seed,
-            multi_agent=multi_agent,
-            num_envs_per_env_runner=num_envs_per_env_runner,
-        )
-        if parallel_to_training
-        else None
+    custom_function = AnySearchEvaluationFunction(
+        env_config=env_config or {},
+        episodes=episodes,
+        seed=seed,
+        multi_agent=multi_agent,
+        num_envs_per_env_runner=num_envs_per_env_runner,
     )
     options = {
-        "evaluation_interval": 1 if parallel_to_training else None,
+        "evaluation_interval": 1,
         "evaluation_num_env_runners": num_env_runners,
         "evaluation_parallel_to_training": parallel_to_training,
         "evaluation_config": {"explore": False},
+        "custom_evaluation_function": custom_function,
     }
-    if custom_function is not None:
-        options["custom_evaluation_function"] = custom_function
     return rllib_config.evaluation(**options)
 
 

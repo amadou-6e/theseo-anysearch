@@ -25,13 +25,9 @@ pytestmark = pytest.mark.ray
 @pytest.mark.timeout(60)
 def test_ppo_trainer_runs_real_ray_with_real_env(tmp_path: Path) -> None:
     """Validate ppo trainer runs real ray with real env."""
-    stl_path = tmp_path.joinpath("toy.stl")
-    stl_path.write_text("solid toy\nendsolid toy\n", encoding="utf-8")
-
     settings = Settings(
         env=EnvConfig(
-            stl_path=stl_path,
-            scale=1.0,
+            geometry=GeometryConfig(boxes=[]),
             agent_count=1,
             max_steps=8,
             seed=0,
