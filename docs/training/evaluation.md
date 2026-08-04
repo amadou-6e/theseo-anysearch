@@ -26,6 +26,7 @@ return.
 | `min_success_rate` | `0.5` | Success-rate threshold used to classify the policy as solved. |
 | `num_env_runners` | `0` | Dedicated RLlib evaluation workers; zero evaluates in the driver. |
 | `num_envs_per_env_runner` | `1` | Evaluation environments batched within each worker or the driver. |
+| `parallel_to_training` | `false` | Let RLlib overlap deterministic evaluation with the training update. |
 
 ## Evaluation-driven early stopping
 
@@ -48,6 +49,7 @@ evaluation:
   min_success_rate: 0.5
   num_env_runners: 4
   num_envs_per_env_runner: 4
+  parallel_to_training: true
 ```
 
 `training.num_env_runners` controls training sampling.
@@ -58,7 +60,14 @@ workers receive synchronized policy weights before every batch. Returned traject
 early stopping, and replay artifacts are produced, so worker completion order
 does not affect results.
 
-A `num_env_runners` value of `0` evaluates inline and still supports vectorization.
+A `num_env_runners` value of `0` evaluates inline and still supports vectorization,
+but cannot be combined with `parallel_to_training: true`.
 The effective concurrency is limited by the episode count and equals at most
 `max(num_env_runners, 1) * num_envs_per_env_runner`. Tune placement groups and local Ray CPU allocation reserve resources for
-both training and evaluation workers. Evaluation does not overlap training.
+both training and evaluation workers. When parallel evaluation is enabled,
+RLlib schedules the AnySearch custom evaluator concurrently and guarantees that
+its workers receive a synchronized policy snapshot. The reported evaluation is
+one policy update behind the training metrics for that iteration; checkpoint
+selection must account for that documented RLlib behavior. AnySearch still
+processes the returned episodes through its normal metrics, trajectory, and
+early-stopping pipeline.

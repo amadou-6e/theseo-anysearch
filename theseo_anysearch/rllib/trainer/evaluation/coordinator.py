@@ -108,6 +108,7 @@ class EvaluationCoordinator:
         result: TrainResult,
         *,
         is_last_iteration: bool,
+        episodes: list[Any] | None = None,
     ) -> EvaluationOutcome:
         """Evaluate a policy and enrich its current training result.
 
@@ -121,6 +122,8 @@ class EvaluationCoordinator:
             Normalized training result to enrich.
         is_last_iteration : bool
             Whether this is the configured final iteration.
+        episodes : list[Any] or None
+            Pre-collected policy-snapshot episodes from parallel evaluation.
 
         Returns
         -------
@@ -157,28 +160,9 @@ class EvaluationCoordinator:
         early_stop_decision = None
         algorithm = algorithm
         iteration = iteration
-        _log_trainer_stage(
-            f"Collecting {evaluation_episodes} deterministic evaluation "
-            f"episodes for iteration {iteration}"
-        )
-        _append_trainer_stage_log(
-            self._output_dir,
-            f"Collecting deterministic evaluation batch for iteration "
-            f"{iteration}",
-        )
         evaluation_seed = evaluation.seed
-        from theseo_anysearch.rllib.trainer.evaluation.parallel import (
-            collect_rllib_evaluation_episodes,
-        )
-
-        episodes = collect_rllib_evaluation_episodes(
-            algorithm,
-            _env_cfg,
-            evaluation_episodes,
-            seed=evaluation_seed,
-            multi_agent=_is_multi,
-            num_envs_per_env_runner=evaluation.num_envs_per_env_runner,
-        )
+        if episodes is None:
+            episodes = self.collect_episodes(algorithm, iteration)
         metrics_factory = (
             EpisodeRunMetrics.from_multi_voxel_episodes
             if _is_multi
@@ -390,4 +374,49 @@ class EvaluationCoordinator:
             early_stop_triggered=early_stop_triggered,
             early_stop_decision=early_stop_decision,
             best_trajectory_written=best_trajectory_written,
+        )
+
+    def collect_episodes(
+        self,
+        algorithm: Any,
+        iteration: int,
+        *,
+        sync_weights: bool = True,
+    ) -> list[Any]:
+        """Collect deterministic episodes from one policy snapshot.
+
+        Parameters
+        ----------
+        algorithm : Any
+            RLlib algorithm owning the evaluation worker group.
+        iteration : int
+            Training iteration associated with the snapshot.
+        sync_weights : bool
+            Whether to synchronize evaluation worker weights before collection.
+
+        Returns
+        -------
+        list[Any]
+            Deterministically seed-ordered evaluation episodes.
+        """
+        from theseo_anysearch.rllib.trainer.evaluation.parallel import (
+            collect_rllib_evaluation_episodes,
+        )
+
+        _log_trainer_stage(
+            f"Collecting {self._evaluation.episodes} deterministic evaluation "
+            f"episodes for iteration {iteration}"
+        )
+        _append_trainer_stage_log(
+            self._output_dir,
+            f"Collecting deterministic evaluation batch for iteration {iteration}",
+        )
+        return collect_rllib_evaluation_episodes(
+            algorithm,
+            self._env_config,
+            self._evaluation.episodes,
+            seed=self._evaluation.seed,
+            multi_agent=self._multi_agent,
+            num_envs_per_env_runner=self._evaluation.num_envs_per_env_runner,
+            sync_weights=sync_weights,
         )

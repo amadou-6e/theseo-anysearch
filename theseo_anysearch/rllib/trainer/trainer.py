@@ -254,6 +254,19 @@ class Trainer(BaseTrainer):
                     rllib_result,
                     elapsed,
                 )
+                parallel_evaluation_episodes = None
+                if evaluation.parallel_to_training:
+                    parallel_evaluation_episodes = getattr(
+                        self._algo,
+                        "_anysearch_evaluation_episodes",
+                        None,
+                    )
+                    if parallel_evaluation_episodes is None:
+                        raise RuntimeError(
+                            "RLlib parallel evaluation completed without "
+                            "AnySearch evaluation episodes"
+                        )
+                    delattr(self._algo, "_anysearch_evaluation_episodes")
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
@@ -265,6 +278,7 @@ class Trainer(BaseTrainer):
                         self._iteration,
                         result,
                         is_last_iteration=_is_last_iter,
+                        episodes=parallel_evaluation_episodes,
                     )
                     result = evaluation_outcome.result
                     early_stop_triggered = evaluation_outcome.early_stop_triggered
