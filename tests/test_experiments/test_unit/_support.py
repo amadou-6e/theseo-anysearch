@@ -14,6 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from theseo_anysearch.experiments.trajectory import VoxelEpisodeData
+
 
 class FakeAlgo:
     """Duck-typed RLlib algorithm used by experiment runner tests."""
@@ -33,6 +35,19 @@ class FakeAlgo:
         """
 
         self._step += 1
+        self._anysearch_evaluation_episodes = [
+            VoxelEpisodeData(
+                agent_count=1,
+                max_steps=1,
+                obs_mode="scalar",
+                init_filled=[],
+                steps=[],
+                total_reward=0.0,
+                success=False,
+                start_pos=(1, 1, 1),
+                goal_pos=(2, 2, 2),
+            )
+        ]
         return {
             "env_runners": {
                 "episode_return_mean": float(self._step),
