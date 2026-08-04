@@ -17,6 +17,10 @@ from theseo_anysearch.rllib.algorithms.ppo import (
     _configure_rllib_env_runners,
     _ensure_ray_runtime,
 )
+from theseo_anysearch.rllib.algorithms.dqn_runtime import (
+    AnySearchDQN,
+    AnySearchDQNTorchLearner,
+)
 
 
 def _dqn_replay_buffer_config(algo_cfg: DQNConfig) -> dict[str, Any]:
@@ -113,7 +117,7 @@ class DQNTrainer(Trainer):
         rllib_model = build_rllib_rl_module_model_config(model_cfg)
 
         rllib_config = (
-            RllibDQNConfig()
+            RllibDQNConfig(algo_class=AnySearchDQN)
             .api_stack(
                 enable_rl_module_and_learner=True,
                 enable_env_runner_and_connector_v2=True,
@@ -136,6 +140,11 @@ class DQNTrainer(Trainer):
                 num_learners=config.training.num_learners,
                 num_cpus_per_learner=config.training.num_cpus_per_learner,
                 num_gpus_per_learner=_learner_gpu_allocation(config),
+                learner_class=AnySearchDQNTorchLearner,
+                learner_config_dict={
+                    "report_td_errors": algo_cfg.replay_buffer_type == "prioritized",
+                    "weight_sync_interval": config.training.weight_sync_interval,
+                },
             )
             .framework("torch")
         )
