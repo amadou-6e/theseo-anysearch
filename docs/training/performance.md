@@ -7,18 +7,24 @@ algorithms.
 
 The RLlib metrics are:
 
-- `rllib_iteration_s` and `rllib_training_step_s`
-- `sampling_s`, `learner_update_s`, and `sync_weights_s`
-- `replay_add_s`, `replay_sample_s`, and `replay_update_priorities_s`
-- `env_step_s` and `inference_s`
-- `env_to_module_connector_s` and `module_to_env_connector_s`
-- `rllib_unaccounted_s`, the measured `Algorithm.train()` wall time not
-  represented by RLlib's `training_step` timer
+- `rllib_iteration_ema_s` and `rllib_training_step_ema_s`
+- `sampling_ema_s`, `learner_update_ema_s`, and `sync_weights_ema_s`
+- `replay_add_ema_s`, `replay_sample_ema_s`, and
+  `replay_update_priorities_ema_s`
+- `env_step_ema_s` and `inference_ema_s`
+- `env_to_module_connector_ema_s` and `module_to_env_connector_ema_s`
+- `training_step_calls`, the number of training-step calls in the iteration
+- `rllib_wall_time_s`, the current measured `Algorithm.train()` wall time
+- `rllib_training_step_estimated_total_s` and
+  `rllib_estimated_residual_s`, estimates formed from the training-step EMA
+  and current call count
+
+RLlib's timer values are exponential moving averages per timed call, not
+additive phase totals. The `_ema_s` suffix makes that distinction explicit.
 
 AnySearch also measures `anysearch_evaluation_s`,
 `anysearch_checkpoint_s`, and `anysearch_reporting_s`. These occur outside
-the measured `Algorithm.train()` interval and therefore are not subtracted
-from `rllib_unaccounted_s`.
+the measured `Algorithm.train()` interval.
 
 Use these measurements together: a high sampling time can be separated from
 environment, inference, and connector costs; learner and replay timings expose

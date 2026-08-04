@@ -12,18 +12,19 @@ class IterationTimings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    rllib_iteration_s: float | None = None
-    rllib_training_step_s: float | None = None
-    sampling_s: float | None = None
-    learner_update_s: float | None = None
-    sync_weights_s: float | None = None
-    replay_add_s: float | None = None
-    replay_sample_s: float | None = None
-    replay_update_priorities_s: float | None = None
-    env_step_s: float | None = None
-    inference_s: float | None = None
-    env_to_module_connector_s: float | None = None
-    module_to_env_connector_s: float | None = None
+    rllib_iteration_ema_s: float | None = None
+    rllib_training_step_ema_s: float | None = None
+    training_step_calls: int | None = None
+    sampling_ema_s: float | None = None
+    learner_update_ema_s: float | None = None
+    sync_weights_ema_s: float | None = None
+    replay_add_ema_s: float | None = None
+    replay_sample_ema_s: float | None = None
+    replay_update_priorities_ema_s: float | None = None
+    env_step_ema_s: float | None = None
+    inference_ema_s: float | None = None
+    env_to_module_connector_ema_s: float | None = None
+    module_to_env_connector_ema_s: float | None = None
     anysearch_evaluation_s: float = 0.0
     anysearch_checkpoint_s: float = 0.0
     anysearch_reporting_s: float = 0.0
@@ -39,22 +40,30 @@ class IterationTimings(BaseModel):
             return float(value) if isinstance(value, (int, float)) else None
 
         return cls(
-            rllib_iteration_s=seconds(timers, "training_iteration"),
-            rllib_training_step_s=seconds(timers, "training_step"),
-            sampling_s=seconds(timers, "env_runner_sampling_timer"),
-            learner_update_s=seconds(timers, "learner_update_timer"),
-            sync_weights_s=seconds(timers, "synch_weights"),
-            replay_add_s=seconds(timers, "replay_buffer_add_data_timer"),
-            replay_sample_s=seconds(timers, "replay_buffer_sampling_timer"),
-            replay_update_priorities_s=seconds(
+            rllib_iteration_ema_s=seconds(timers, "training_iteration"),
+            rllib_training_step_ema_s=seconds(timers, "training_step"),
+            training_step_calls=(
+                int(result["num_training_step_calls_per_iteration"])
+                if isinstance(
+                    result.get("num_training_step_calls_per_iteration"),
+                    (int, float),
+                )
+                else None
+            ),
+            sampling_ema_s=seconds(timers, "env_runner_sampling_timer"),
+            learner_update_ema_s=seconds(timers, "learner_update_timer"),
+            sync_weights_ema_s=seconds(timers, "synch_weights"),
+            replay_add_ema_s=seconds(timers, "replay_buffer_add_data_timer"),
+            replay_sample_ema_s=seconds(timers, "replay_buffer_sampling_timer"),
+            replay_update_priorities_ema_s=seconds(
                 timers, "replay_buffer_update_prios_timer"
             ),
-            env_step_s=seconds(env_runners, "env_step_timer"),
-            inference_s=seconds(env_runners, "rlmodule_inference_timer"),
-            env_to_module_connector_s=seconds(
+            env_step_ema_s=seconds(env_runners, "env_step_timer"),
+            inference_ema_s=seconds(env_runners, "rlmodule_inference_timer"),
+            env_to_module_connector_ema_s=seconds(
                 env_runners, "env_to_module_connector"
             ),
-            module_to_env_connector_s=seconds(
+            module_to_env_connector_ema_s=seconds(
                 env_runners, "module_to_env_connector"
             ),
         )
@@ -63,10 +72,21 @@ class IterationTimings(BaseModel):
         """Return present timing values under stable TensorBoard tags."""
         values = self.model_dump(exclude_none=True)
         scalars = {f"performance/{name}": value for name, value in values.items()}
-        scalars["performance/rllib_unaccounted_s"] = max(
-            elapsed_s - (self.rllib_training_step_s or 0.0),
-            0.0,
-        )
+        scalars["performance/rllib_wall_time_s"] = elapsed_s
+        if (
+            self.rllib_training_step_ema_s is not None
+            and self.training_step_calls is not None
+        ):
+            estimated_total = (
+                self.rllib_training_step_ema_s * self.training_step_calls
+            )
+            scalars["performance/rllib_training_step_estimated_total_s"] = (
+                estimated_total
+            )
+            scalars["performance/rllib_estimated_residual_s"] = max(
+                elapsed_s - estimated_total,
+                0.0,
+            )
         return scalars
 
 

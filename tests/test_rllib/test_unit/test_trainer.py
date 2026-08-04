@@ -115,26 +115,28 @@ class TestTrainResult:
                 "learner_update_timer": 2.5,
                 "synch_weights": 0.25,
             },
+            "num_training_step_calls_per_iteration": 10,
             "env_runners": {
                 "env_step_timer": 0.4,
                 "rlmodule_inference_timer": 0.3,
             },
         }, 5.0)
 
-        assert result.timings.sampling_s == pytest.approx(1.5)
-        assert result.timings.learner_update_s == pytest.approx(2.5)
-        assert result.timings.sync_weights_s == pytest.approx(0.25)
-        assert result.timings.env_step_s == pytest.approx(0.4)
-        assert result.timings.inference_s == pytest.approx(0.3)
+        assert result.timings.sampling_ema_s == pytest.approx(1.5)
+        assert result.timings.learner_update_ema_s == pytest.approx(2.5)
+        assert result.timings.sync_weights_ema_s == pytest.approx(0.25)
+        assert result.timings.env_step_ema_s == pytest.approx(0.4)
+        assert result.timings.inference_ema_s == pytest.approx(0.3)
+        assert result.timings.training_step_calls == 10
 
     def test_missing_timing_fields_are_omitted_from_tensorboard(self):
-        timings = IterationTimings(sampling_s=1.0)
+        timings = IterationTimings(sampling_ema_s=1.0)
 
         scalars = timings.tensorboard_scalars(elapsed_s=2.0)
 
-        assert scalars["performance/sampling_s"] == pytest.approx(1.0)
-        assert "performance/learner_update_s" not in scalars
-        assert scalars["performance/rllib_unaccounted_s"] == pytest.approx(2.0)
+        assert scalars["performance/sampling_ema_s"] == pytest.approx(1.0)
+        assert "performance/learner_update_ema_s" not in scalars
+        assert scalars["performance/rllib_wall_time_s"] == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +386,7 @@ class TestOutputSanity:
             for tag, _, _ in writer.scalars
         )
         assert any(
-            tag == "performance/rllib_unaccounted_s"
+            tag == "performance/rllib_wall_time_s"
             for tag, _, _ in writer.scalars
         )
         assert writer.flush_calls == trainer_settings.training.iterations * 2
