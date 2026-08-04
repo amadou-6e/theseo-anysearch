@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from functools import partial
 from itertools import product
 from typing import Any
 
@@ -459,24 +460,62 @@ class WaypointCurriculum:
             )
 
 
-def broadcast_waypoints(algo: Any, start: Waypoint, goal: Waypoint) -> None:
-    """Queue a waypoint pair on every local and remote RLlib environment."""
+def _call_env_method(
+    env_runner: Any,
+    method_name: str,
+    args: tuple[Any, ...],
+) -> Any:
+    """Invoke one environment method across a legacy or modern EnvRunner."""
+    if hasattr(env_runner, "foreach_env"):
+        return env_runner.foreach_env(
+            lambda env: getattr(env, method_name)(*args)
+        )
+    vector_env = getattr(env_runner, "env", None)
+    if vector_env is None:
+        raise RuntimeError("RLlib EnvRunner has no environment")
+    if hasattr(vector_env, "call"):
+        return vector_env.call(method_name, *args)
+    environments = getattr(vector_env, "envs", (vector_env,))
+    return [getattr(env, method_name)(*args) for env in environments]
+
+
+def _broadcast_env_method(
+    algo: Any,
+    method_name: str,
+    *args: Any,
+) -> None:
+    """Broadcast one method call through the configured RLlib execution stack."""
     env_runner_group = getattr(algo, "env_runner_group", None)
     if env_runner_group is None:
         raise RuntimeError("RLlib algorithm has no environment runner group")
-    env_runner_group.foreach_env(lambda env: env.queue_waypoints(start, goal))
+    modern_stack = bool(
+        getattr(
+            getattr(algo, "config", None),
+            "enable_env_runner_and_connector_v2",
+            False,
+        )
+    )
+    if not modern_stack:
+        env_runner_group.foreach_env(
+            lambda env: getattr(env, method_name)(*args)
+        )
+        return
+    env_runner_group.foreach_env_runner(
+        partial(_call_env_method, method_name=method_name, args=args),
+        local_env_runner=True,
+    )
+
+
+def broadcast_waypoints(algo: Any, start: Waypoint, goal: Waypoint) -> None:
+    """Queue a waypoint pair on every local and remote RLlib environment."""
+    _broadcast_env_method(algo, "queue_waypoints", start, goal)
 
 
 def broadcast_waypoint_curriculum(algo: Any, curriculum: WaypointCurriculum) -> None:
     """Broadcast the current and retained training stages to every environment."""
-    env_runner_group = getattr(algo, "env_runner_group", None)
-    if env_runner_group is None:
-        raise RuntimeError("RLlib algorithm has no environment runner group")
-    stages = curriculum.stages()
-    probabilities = curriculum.sampling_probabilities()
-    env_runner_group.foreach_env(
-        lambda env: env.set_waypoint_curriculum(
-            stages,
-            probabilities,
-        )
+    _broadcast_env_method(
+        algo,
+        "set_waypoint_curriculum",
+        curriculum.stages(),
+        curriculum.sampling_probabilities(),
     )

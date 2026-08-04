@@ -127,6 +127,35 @@ def test_broadcast_queues_waypoints_on_every_environment():
     ]
 
 
+def test_broadcast_queues_waypoints_through_modern_env_runners():
+    calls = []
+
+    class FakeVectorEnv:
+        def call(self, method_name, *args):
+            calls.append((method_name, args))
+
+    class FakeRunner:
+        env = FakeVectorEnv()
+
+    class FakeGroup:
+        def foreach_env_runner(self, function, *, local_env_runner):
+            assert local_env_runner is True
+            function(FakeRunner())
+
+    class FakeAlgo:
+        config = type(
+            "Config",
+            (),
+            {"enable_env_runner_and_connector_v2": True},
+        )()
+        env_runner_group = FakeGroup()
+
+    broadcast_waypoints(FakeAlgo(), (1, 2, 3), (4, 5, 6))
+
+    assert calls == [
+        ("queue_waypoints", ((1, 2, 3), (4, 5, 6))),
+    ]
+
 def test_enabled_curriculum_requires_initial_waypoints():
     with pytest.raises(ValueError, match="initial_start and initial_goal"):
         EnvConfig(waypoint_curriculum={"enabled": True})
