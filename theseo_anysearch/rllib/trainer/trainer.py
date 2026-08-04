@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any
@@ -270,6 +271,7 @@ class Trainer(BaseTrainer):
                 _checkpointed_for_best = False
                 early_stop_triggered = False
                 early_stop_decision = None
+                evaluation_started = time.perf_counter()
                 try:
                     evaluation_outcome = evaluation_coordinator.evaluate(
                         self._iteration,
@@ -281,7 +283,11 @@ class Trainer(BaseTrainer):
                     early_stop_triggered = evaluation_outcome.early_stop_triggered
                     early_stop_decision = evaluation_outcome.early_stop_decision
                     if evaluation_outcome.best_trajectory_written:
+                        checkpoint_started = time.perf_counter()
                         self.checkpoint()
+                        result.timings.anysearch_checkpoint_s += (
+                            time.perf_counter() - checkpoint_started
+                        )
                         _checkpointed_for_best = True
                 except CustomMetricError:
                     raise
@@ -290,7 +296,13 @@ class Trainer(BaseTrainer):
                         f"evaluation collection failed at iter {self._iteration}: {exc}",
                         stacklevel=2,
                     )
+                result.timings.anysearch_evaluation_s = max(
+                    time.perf_counter() - evaluation_started
+                    - result.timings.anysearch_checkpoint_s,
+                    0.0,
+                )
 
+                reporting_started = time.perf_counter()
                 result, training_scalars = training_metrics.apply(
                     self._iteration,
                     result,
@@ -300,18 +312,29 @@ class Trainer(BaseTrainer):
                 if training_scalars:
                     tb_writer.log_scalars(self._iteration, training_scalars)
                 results.append(result)
-                tb_writer.log_iteration(result)
                 self.on_iteration_end(result)
+                result.timings.anysearch_reporting_s = (
+                    time.perf_counter() - reporting_started
+                )
 
                 if (
                     self._iteration % training.checkpoint_interval == 0
                     and not _checkpointed_for_best
                 ):
+                    checkpoint_started = time.perf_counter()
                     self.checkpoint()
+                    result.timings.anysearch_checkpoint_s += (
+                        time.perf_counter() - checkpoint_started
+                    )
                     _checkpointed_for_best = True
                 if early_stop_triggered and early_stop_decision is not None:
                     if not _checkpointed_for_best:
+                        checkpoint_started = time.perf_counter()
                         self.checkpoint()
+                        result.timings.anysearch_checkpoint_s += (
+                            time.perf_counter() - checkpoint_started
+                        )
+                    tb_writer.log_iteration(result)
                     _store.write_json("early_stop.json", early_stop_decision.model_dump())
                     _append_trainer_stage_log(
                         self._output_dir,
@@ -320,6 +343,7 @@ class Trainer(BaseTrainer):
                         f">= {early_stop_decision.threshold}",
                     )
                     break
+                tb_writer.log_iteration(result)
         finally:
             tb_writer.close()
 

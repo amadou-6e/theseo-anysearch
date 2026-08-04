@@ -9,11 +9,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from unittest.mock import patch
 
-from theseo_anysearch.rllib.trainer.results import TrainResult
+from theseo_anysearch.rllib.trainer.results import IterationTimings, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 from theseo_anysearch.rllib.trainer.trainer import Trainer
 from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _set_rllib_storage_path
@@ -107,6 +108,36 @@ class TestTrainResult:
     def test_episode_len_from_new_stack(self):
         result = TrainResult.from_rllib(1, {"env_runners": {"episode_len_mean": 25.0}}, 0.1)
         assert result.episode_len_mean == pytest.approx(25.0)
+
+    def test_extracts_rllib_timing_breakdown(self):
+        result = TrainResult.from_rllib(1, {
+            "timers": {
+                "env_runner_sampling_timer": 1.5,
+                "learner_update_timer": 2.5,
+                "synch_weights": 0.25,
+            },
+            "num_training_step_calls_per_iteration": np.int64(10),
+            "env_runners": {
+                "env_step_timer": 0.4,
+                "rlmodule_inference_timer": 0.3,
+            },
+        }, 5.0)
+
+        assert result.timings.sampling_ema_s == pytest.approx(1.5)
+        assert result.timings.learner_update_ema_s == pytest.approx(2.5)
+        assert result.timings.sync_weights_ema_s == pytest.approx(0.25)
+        assert result.timings.env_step_ema_s == pytest.approx(0.4)
+        assert result.timings.inference_ema_s == pytest.approx(0.3)
+        assert result.timings.training_step_calls == 10
+
+    def test_missing_timing_fields_are_omitted_from_tensorboard(self):
+        timings = IterationTimings(sampling_ema_s=1.0)
+
+        scalars = timings.tensorboard_scalars(elapsed_s=2.0)
+
+        assert scalars["performance/sampling_ema_s"] == pytest.approx(1.0)
+        assert "performance/learner_update_ema_s" not in scalars
+        assert scalars["performance/rllib_wall_time_s"] == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +382,14 @@ class TestOutputSanity:
         assert Path(writer.log_dir) == Path(trainer_settings.training.output_dir).joinpath("tensorboard")
         assert ("train/episode_reward_mean", 1.0, 1) in writer.scalars
         assert ("train/episode_reward_mean", 4.0, 4) in writer.scalars
+        assert any(
+            tag == "performance/anysearch_evaluation_s"
+            for tag, _, _ in writer.scalars
+        )
+        assert any(
+            tag == "performance/rllib_wall_time_s"
+            for tag, _, _ in writer.scalars
+        )
         assert writer.flush_calls == trainer_settings.training.iterations * 2
         assert writer.closed is True
 

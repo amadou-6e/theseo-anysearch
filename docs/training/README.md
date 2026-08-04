@@ -1,5 +1,8 @@
 # Training configuration
 
+See [performance metrics](performance.md) for the per-iteration RLlib and
+AnySearch timing breakdown available in TensorBoard.
+
 The top-level `training` block controls execution of one resolved experiment. Algorithm hyperparameters remain in `algorithm_config`, and neural-network settings remain in `model_config`.
 
 ```yaml

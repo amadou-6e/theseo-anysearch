@@ -62,6 +62,8 @@ class _TensorBoardRunWriter:
             result.elapsed_s,
             result.iteration,
         )
+        for tag, value in result.timings.tensorboard_scalars(result.elapsed_s).items():
+            self._writer.add_scalar(tag, value, result.iteration)
         self._writer.flush()
 
     def log_scalars(self, iteration: int, scalars: Mapping[str, float]) -> None:
