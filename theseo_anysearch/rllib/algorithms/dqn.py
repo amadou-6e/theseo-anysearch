@@ -134,6 +134,7 @@ class DQNTrainer(Trainer):
                 noisy=algo_cfg.noisy,
                 replay_buffer_config=_dqn_replay_buffer_config(algo_cfg),
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
+                training_intensity=algo_cfg.training_intensity,
             )
             .rl_module(model_config=rllib_model)
             .learners(
@@ -151,6 +152,9 @@ class DQNTrainer(Trainer):
 
         rllib_config = _configure_rllib_env_runners(
             rllib_config, config.training
+        )
+        rllib_config = rllib_config.env_runners(
+            rollout_fragment_length=algo_cfg.rollout_fragment_length,
         )
         rllib_config = configure_rllib_evaluation(
             rllib_config,

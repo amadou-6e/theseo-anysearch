@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from ray.rllib.algorithms.dqn import DQN as RllibDQN
 from ray.rllib.algorithms.dqn.torch.dqn_torch_learner import DQNTorchLearner
+from ray.rllib.core import ALL_MODULES
 
 from theseo_anysearch.rllib.algorithms.dqn_runtime import (
     AnySearchDQN,
@@ -51,37 +52,49 @@ def test_prioritized_replay_retains_per_sample_td_errors() -> None:
     learner.metrics.delete.assert_not_called()
 
 
-def test_weight_sync_interval_gates_env_runner_broadcasts() -> None:
-    """An interval of four broadcasts only every fourth training sync."""
+def _algorithm_with_sync_interval(interval: int) -> tuple[AnySearchDQN, Mock, Mock]:
     algorithm = object.__new__(AnySearchDQN)
     sync_weights = Mock()
     algorithm.env_runner_group = SimpleNamespace(sync_weights=sync_weights)
+    learner_update = Mock(
+        return_value=[{"default_policy": {}, ALL_MODULES: {}}]
+    )
+    algorithm.learner_group = SimpleNamespace(update=learner_update)
     config = SimpleNamespace(
-        learner_config_dict={"weight_sync_interval": 4}
+        learner_config_dict={"weight_sync_interval": interval}
     )
 
     with patch.object(RllibDQN, "setup", return_value=None):
         algorithm.setup(config)
+    return algorithm, learner_update, sync_weights
+
+
+def test_weight_sync_interval_counts_learner_updates() -> None:
+    """An interval of four broadcasts after every fourth learner update."""
+    algorithm, learner_update, sync_weights = _algorithm_with_sync_interval(4)
 
     for _ in range(8):
-        algorithm.env_runner_group.sync_weights(source="learner")
+        algorithm.learner_group.update(batch="replay")
 
+    assert learner_update.call_count == 8
     assert sync_weights.call_count == 2
+    assert sync_weights.call_args.kwargs["policies"] == {"default_policy"}
 
 
 def test_weight_sync_interval_one_preserves_default_behavior() -> None:
-    """The default interval forwards every synchronization request."""
-    algorithm = object.__new__(AnySearchDQN)
-    sync_weights = Mock()
-    algorithm.env_runner_group = SimpleNamespace(sync_weights=sync_weights)
-    config = SimpleNamespace(
-        learner_config_dict={"weight_sync_interval": 1}
-    )
-
-    with patch.object(RllibDQN, "setup", return_value=None):
-        algorithm.setup(config)
+    """The default interval broadcasts after every learner update."""
+    algorithm, _, sync_weights = _algorithm_with_sync_interval(1)
 
     for _ in range(3):
-        algorithm.env_runner_group.sync_weights()
+        algorithm.learner_group.update()
 
     assert sync_weights.call_count == 3
+
+
+def test_outer_dqn_sync_is_suppressed() -> None:
+    """RLlib's outer-call synchronization does not duplicate update syncs."""
+    algorithm, _, sync_weights = _algorithm_with_sync_interval(1)
+
+    algorithm.env_runner_group.sync_weights()
+
+    sync_weights.assert_not_called()

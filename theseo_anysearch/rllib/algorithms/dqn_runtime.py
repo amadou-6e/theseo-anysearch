@@ -10,6 +10,7 @@ from ray.rllib.algorithms.dqn.dqn import (
     TD_ERROR_KEY,
 )
 from ray.rllib.algorithms.dqn.torch.dqn_torch_learner import DQNTorchLearner
+from ray.rllib.core import ALL_MODULES
 from ray.rllib.utils.annotations import override
 
 
@@ -36,17 +37,26 @@ class AnySearchDQN(RllibDQN):
         return RllibDQNConfig(algo_class=cls)
 
     def setup(self, config: RllibDQNConfig) -> None:
-        """Initialize RLlib and install the weight synchronization gate."""
+        """Synchronize EnvRunners after a configured number of learner updates."""
         super().setup(config)
         interval = config.learner_config_dict.get("weight_sync_interval", 1)
         original_sync = self.env_runner_group.sync_weights
-        sync_calls = 0
+        original_update = self.learner_group.update
+        learner_updates = 0
 
-        def sync_weights_periodically(*args: Any, **kwargs: Any) -> Any:
-            nonlocal sync_calls
-            sync_calls += 1
-            if sync_calls % interval == 0:
-                return original_sync(*args, **kwargs)
-            return None
+        def update_and_sync(*args: Any, **kwargs: Any) -> Any:
+            nonlocal learner_updates
+            results = original_update(*args, **kwargs)
+            learner_updates += 1
+            if learner_updates % interval == 0:
+                modules = set(results[0]) - {ALL_MODULES}
+                original_sync(
+                    from_worker_or_learner_group=self.learner_group,
+                    policies=modules,
+                    global_vars=None,
+                    inference_only=True,
+                )
+            return results
 
-        self.env_runner_group.sync_weights = sync_weights_periodically
+        self.learner_group.update = update_and_sync
+        self.env_runner_group.sync_weights = lambda *args, **kwargs: None
