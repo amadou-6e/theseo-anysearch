@@ -289,6 +289,8 @@ class TestDQNConfig:
         assert cfg.replay_buffer_capacity == 50_000
         assert cfg.replay_buffer_type == "uniform"
         assert cfg.warmup_steps == 0
+        assert cfg.rollout_fragment_length == "auto"
+        assert cfg.training_intensity is None
 
     def test_field_override(self):
         cfg = self.DQNConfig(n_step=3, num_atoms=51, noisy=True, replay_buffer_capacity=1000)
@@ -296,6 +298,20 @@ class TestDQNConfig:
         assert cfg.num_atoms == 51
         assert cfg.noisy is True
         assert cfg.replay_buffer_capacity == 1000
+
+    def test_batching_controls(self):
+        cfg = self.DQNConfig(
+            rollout_fragment_length=10,
+            training_intensity=42.6667,
+        )
+        assert cfg.rollout_fragment_length == 10
+        assert cfg.training_intensity == pytest.approx(42.6667)
+
+    def test_rejects_non_positive_batching_controls(self):
+        with pytest.raises(ValidationError):
+            self.DQNConfig(rollout_fragment_length=0)
+        with pytest.raises(ValidationError):
+            self.DQNConfig(training_intensity=0)
 
     def test_inherits_base_fields(self):
         cfg = self.DQNConfig(lr=1e-4, gamma=0.95)

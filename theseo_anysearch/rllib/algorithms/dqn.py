@@ -17,6 +17,10 @@ from theseo_anysearch.rllib.algorithms.ppo import (
     _configure_rllib_env_runners,
     _ensure_ray_runtime,
 )
+from theseo_anysearch.rllib.algorithms.dqn_runtime import (
+    AnySearchDQN,
+    AnySearchDQNTorchLearner,
+)
 
 
 def _dqn_replay_buffer_config(algo_cfg: DQNConfig) -> dict[str, Any]:
@@ -133,7 +137,7 @@ class DQNTrainer(Trainer):
         rllib_model = build_rllib_rl_module_model_config(model_cfg)
 
         rllib_config = (
-            RllibDQNConfig()
+            RllibDQNConfig(algo_class=AnySearchDQN)
             .api_stack(
                 enable_rl_module_and_learner=True,
                 enable_env_runner_and_connector_v2=True,
@@ -150,18 +154,27 @@ class DQNTrainer(Trainer):
                 noisy=algo_cfg.noisy,
                 replay_buffer_config=_dqn_replay_buffer_config(algo_cfg),
                 num_steps_sampled_before_learning_starts=algo_cfg.warmup_steps,
+                training_intensity=algo_cfg.training_intensity,
             )
             .rl_module(model_config=rllib_model)
             .learners(
                 num_learners=config.training.num_learners,
                 num_cpus_per_learner=config.training.num_cpus_per_learner,
                 num_gpus_per_learner=_learner_gpu_allocation(config),
+                learner_class=AnySearchDQNTorchLearner,
+                learner_config_dict={
+                    "report_td_errors": algo_cfg.replay_buffer_type == "prioritized",
+                    "weight_sync_interval": config.training.weight_sync_interval,
+                },
             )
             .framework("torch")
         )
 
         rllib_config = _configure_rllib_env_runners(
             rllib_config, config.training
+        )
+        rllib_config = rllib_config.env_runners(
+            rollout_fragment_length=algo_cfg.rollout_fragment_length,
         )
         rllib_config = configure_rllib_evaluation(
             rllib_config,

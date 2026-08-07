@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field, PositiveInt
 
 from theseo_anysearch.settings import AlgorithmConfig
 
@@ -47,6 +47,15 @@ class DQNConfig(AlgorithmConfig):
     replay_buffer_capacity: int = 50_000
     replay_buffer_type: Literal["uniform", "prioritized"] = "uniform"
     warmup_steps: int = 0       # num_steps_sampled_before_learning_starts
+    rollout_fragment_length: PositiveInt | Literal["auto"] = Field(
+        default="auto",
+        description="Steps sampled by each vector environment per request.",
+    )
+    training_intensity: float | None = Field(
+        default=None,
+        gt=0,
+        description="Replay transitions trained per newly sampled transition.",
+    )
 
 
 class APPOConfig(AlgorithmConfig):
