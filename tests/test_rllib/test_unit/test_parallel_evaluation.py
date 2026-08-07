@@ -4,7 +4,6 @@ import numpy as np
 
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     AnySearchEvaluationFunction,
-    AnySearchEvaluationFunction,
     _PolicyAdapter,
     _collect_worker_episodes,
     _stack_observations,
@@ -72,6 +71,25 @@ def test_parallel_collection_distributes_and_restores_seed_order() -> None:
     assert group.synced_from is source
     assert group.received_worker_ids == [11, 12, 13]
 
+
+def test_parallel_collection_syncs_modern_stack_from_learner_group() -> None:
+    group = _FakeEvaluationGroup()
+    learner_group = object()
+    algorithm = SimpleNamespace(
+        config=SimpleNamespace(enable_rl_module_and_learner=True),
+        eval_env_runner_group=group,
+        learner_group=learner_group,
+    )
+
+    collect_rllib_evaluation_episodes(
+        algorithm,
+        {},
+        1,
+        seed=42,
+        multi_agent=False,
+    )
+
+    assert group.synced_from is learner_group
 
 def test_parallel_collection_uses_only_workers_with_assigned_episodes() -> None:
     group = _FakeEvaluationGroup()

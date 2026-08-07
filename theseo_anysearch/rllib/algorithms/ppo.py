@@ -23,13 +23,18 @@ def _build_rllib_ppo(config: Settings) -> Any:
 
 
 def _configure_rllib_env_runners(rllib_config: Any, training: Any) -> Any:
-    """Apply rollout parallelism, vectorization, and inference resources."""
+    """Apply modern EnvRunner parallelism and flatten structured observations."""
+    from ray.rllib.connectors.env_to_module import FlattenObservations
+
     return rllib_config.env_runners(
         num_env_runners=training.num_env_runners,
         num_envs_per_env_runner=training.num_envs_per_env_runner,
         num_gpus_per_env_runner=training.num_gpus_per_env_runner,
         max_requests_in_flight_per_env_runner=(
             training.max_requests_in_flight_per_env_runner
+        ),
+        env_to_module_connector=(
+            lambda env, spaces=None, device=None: FlattenObservations()
         ),
     )
 
@@ -245,7 +250,7 @@ class PPOTrainer(Trainer):
             f"Registered VoxelEnv as {env_id}",
         )
 
-        from theseo_anysearch.rllib.models import build_rllib_model_dict
+        from theseo_anysearch.rllib.models import build_rllib_rl_module_model_config
         model_cfg = config.model_cfg
         _log_stage(
             f"Building RLlib model config type={type(model_cfg).__name__}"
@@ -255,7 +260,7 @@ class PPOTrainer(Trainer):
             "ppo",
             f"Building RLlib model config type={type(model_cfg).__name__}",
         )
-        rllib_model = build_rllib_model_dict(model_cfg)
+        rllib_model = build_rllib_rl_module_model_config(model_cfg)
         minibatch_size = algo_cfg.minibatch_size or min(
             128, algo_cfg.train_batch_size)
 
@@ -276,20 +281,24 @@ class PPOTrainer(Trainer):
             ),
         )
         rllib_config = (RllibPPOConfig().api_stack(
-            enable_rl_module_and_learner=False,
-            enable_env_runner_and_connector_v2=False,
+            enable_rl_module_and_learner=True,
+            enable_env_runner_and_connector_v2=True,
         ).environment(env=env_id, env_config=env_config).training(
             lr=algo_cfg.lr,
             gamma=algo_cfg.gamma,
-            train_batch_size=algo_cfg.train_batch_size,
+            train_batch_size_per_learner=algo_cfg.train_batch_size,
             minibatch_size=minibatch_size,
             clip_param=algo_cfg.clip_param,
             num_epochs=algo_cfg.num_sgd_iter,
             lambda_=algo_cfg.lambda_,
             kl_coeff=algo_cfg.kl_coeff,
             grad_clip=algo_cfg.grad_clip,
-            model=rllib_model,
-        ).resources(num_gpus=_detect_num_gpus(config.training.require_gpu, num_gpus=config.training.num_gpus)).framework("torch"))
+        ).rl_module(model_config=rllib_model).learners(
+            num_learners=0,
+            num_gpus_per_learner=_detect_num_gpus(
+                config.training.require_gpu, num_gpus=config.training.num_gpus
+            ),
+        ).framework("torch"))
 
         rllib_config = _configure_rllib_env_runners(
             rllib_config, config.training

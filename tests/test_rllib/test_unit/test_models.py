@@ -287,6 +287,7 @@ class TestDQNConfig:
         assert cfg.double_q is True
         assert cfg.noisy is False
         assert cfg.replay_buffer_capacity == 50_000
+        assert cfg.replay_buffer_type == "uniform"
         assert cfg.warmup_steps == 0
 
     def test_field_override(self):
@@ -323,6 +324,7 @@ class TestRainbowConfig:
         assert cfg.noisy is True
         assert cfg.v_min == pytest.approx(-10.0)
         assert cfg.v_max == pytest.approx(10.0)
+        assert cfg.replay_buffer_type == "prioritized"
         assert cfg.prioritized_replay_alpha == pytest.approx(0.6)
         assert cfg.prioritized_replay_beta == pytest.approx(0.4)
 
@@ -454,3 +456,23 @@ class TestSettings:
         assert s2.env.seed == s.env.seed
         assert s2.training.algorithm == s.training.algorithm
         assert s2.algorithm_config.lr == pytest.approx(s.algorithm_config.lr)
+def test_dqn_replay_buffer_mapping() -> None:
+    from theseo_anysearch.rllib.algorithms.dqn import _dqn_replay_buffer_config
+    from theseo_anysearch.rllib.algorithms.models import DQNConfig, RainbowConfig
+
+    uniform = _dqn_replay_buffer_config(DQNConfig(replay_buffer_capacity=1234))
+    prioritized = _dqn_replay_buffer_config(
+        RainbowConfig(
+            replay_buffer_capacity=5678,
+            prioritized_replay_alpha=0.7,
+            prioritized_replay_beta=0.5,
+        )
+    )
+
+    assert uniform == {"type": "EpisodeReplayBuffer", "capacity": 1234}
+    assert prioritized == {
+        "type": "PrioritizedEpisodeReplayBuffer",
+        "capacity": 5678,
+        "alpha": 0.7,
+        "beta": 0.5,
+    }

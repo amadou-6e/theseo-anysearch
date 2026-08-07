@@ -2,9 +2,95 @@
 
 from __future__ import annotations
 
+from numbers import Real
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class IterationTimings(BaseModel):
+    """Timing breakdown for one training iteration, in seconds."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rllib_iteration_ema_s: float | None = None
+    rllib_training_step_ema_s: float | None = None
+    training_step_calls: int | None = None
+    sampling_ema_s: float | None = None
+    learner_update_ema_s: float | None = None
+    sync_weights_ema_s: float | None = None
+    replay_add_ema_s: float | None = None
+    replay_sample_ema_s: float | None = None
+    replay_update_priorities_ema_s: float | None = None
+    env_step_ema_s: float | None = None
+    inference_ema_s: float | None = None
+    env_to_module_connector_ema_s: float | None = None
+    module_to_env_connector_ema_s: float | None = None
+    anysearch_evaluation_s: float = 0.0
+    anysearch_checkpoint_s: float = 0.0
+    anysearch_reporting_s: float = 0.0
+
+    @classmethod
+    def from_rllib(cls, result: dict[str, Any]) -> "IterationTimings":
+        """Extract stable timing fields from a raw RLlib result."""
+        timers = result.get("timers") or {}
+        env_runners = result.get("env_runners") or {}
+
+        def seconds(source: dict[str, Any], key: str) -> float | None:
+            value = source.get(key)
+            return float(value) if isinstance(value, Real) else None
+
+        return cls(
+            rllib_iteration_ema_s=seconds(timers, "training_iteration"),
+            rllib_training_step_ema_s=seconds(timers, "training_step"),
+            training_step_calls=(
+                int(result["num_training_step_calls_per_iteration"])
+                if isinstance(
+                    result.get("num_training_step_calls_per_iteration"),
+                    Real,
+                )
+                else None
+            ),
+            sampling_ema_s=seconds(timers, "env_runner_sampling_timer"),
+            learner_update_ema_s=seconds(timers, "learner_update_timer"),
+            sync_weights_ema_s=seconds(timers, "synch_weights"),
+            replay_add_ema_s=seconds(timers, "replay_buffer_add_data_timer"),
+            replay_sample_ema_s=seconds(timers, "replay_buffer_sampling_timer"),
+            replay_update_priorities_ema_s=seconds(
+                timers, "replay_buffer_update_prios_timer"
+            ),
+            env_step_ema_s=seconds(env_runners, "env_step_timer"),
+            inference_ema_s=seconds(env_runners, "rlmodule_inference_timer"),
+            env_to_module_connector_ema_s=seconds(
+                env_runners, "env_to_module_connector"
+            ),
+            module_to_env_connector_ema_s=seconds(
+                env_runners, "module_to_env_connector"
+            ),
+        )
+
+    def tensorboard_scalars(self, elapsed_s: float) -> dict[str, float]:
+        """Return present timing values under stable TensorBoard tags."""
+        values = self.model_dump(exclude_none=True)
+        scalars = {f"performance/{name}": value for name, value in values.items()}
+        scalars["performance/rllib_wall_time_s"] = elapsed_s
+        if (
+            self.rllib_training_step_ema_s is not None
+            and self.training_step_calls is not None
+        ):
+            estimated_total = (
+                self.rllib_training_step_ema_s * self.training_step_calls
+            )
+            scalars["performance/rllib_training_step_estimated_total_s"] = (
+                estimated_total
+            )
+            scalars["performance/rllib_estimated_residual_s"] = max(
+                elapsed_s - estimated_total,
+                0.0,
+            )
+        return scalars
+
+
 class RllibTrainResult(BaseModel):
     """Normalized view over RLlib training results.
 
@@ -32,6 +118,7 @@ class RllibTrainResult(BaseModel):
     training_iteration: int | None = None
     time_this_iter_s: float | None = None
     timesteps_total: int | None = None
+    timers: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, result: dict[str, Any]) -> "RllibTrainResult":
@@ -125,6 +212,7 @@ class TrainResult(BaseModel):
     evaluation_success_rate: float = 0.0
     evaluation_status: str = "not_evaluated"
     extra: dict[str, Any] = Field(default_factory=dict)
+    timings: IterationTimings = Field(default_factory=IterationTimings)
 
     def standard_metrics(self) -> dict[str, float]:
         """Return the shared numeric metric contract for every reporter."""
@@ -166,6 +254,7 @@ class TrainResult(BaseModel):
             episodes_total=parsed.parse_episodes_total(),
             elapsed_s=elapsed_s,
             environment_steps_total=parsed.parse_environment_steps_total(),
+            timings=IterationTimings.from_rllib(rllib_result),
             extra={
                 "training_iteration": parsed.training_iteration or iteration,
                 "time_this_iter_s": parsed.time_this_iter_s,

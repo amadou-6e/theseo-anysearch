@@ -25,8 +25,6 @@ from theseo_anysearch.rllib.algorithms.rainbow import RainbowTrainer
 
 RAY_DQN_YAML = textwrap.dedent("""\
     env:
-      stl_path: /tmp/toy.stl
-      scale: 1.0
       agent_count: 1
       max_steps: 10
       seed: 0
@@ -63,8 +61,6 @@ RAY_DQN_YAML = textwrap.dedent("""\
 
 RAY_RAINBOW_YAML = textwrap.dedent("""\
     env:
-      stl_path: /tmp/toy.stl
-      scale: 1.0
       agent_count: 1
       max_steps: 10
       seed: 0
@@ -157,6 +153,11 @@ class TestDQNTrainerRayBuild:
     def test_algo_has_train_method(self, dqn_trained):
         trainer, _ = dqn_trained
         assert hasattr(trainer._algo, "train")
+
+    def test_algo_uses_modern_rllib_stack(self, dqn_trained):
+        trainer, _ = dqn_trained
+        assert trainer._algo.config.enable_rl_module_and_learner is True
+        assert trainer._algo.config.enable_env_runner_and_connector_v2 is True
 
     def test_algo_has_save_method(self, dqn_trained):
         trainer, _ = dqn_trained
