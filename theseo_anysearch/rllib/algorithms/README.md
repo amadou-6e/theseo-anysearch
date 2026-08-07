@@ -54,6 +54,7 @@ training:
   num_learners: 1
   num_cpus_per_learner: 1
   num_gpus_per_learner: 0.3333333333333333
+  weight_sync_interval: 4
 
 algorithm_config:
   replay_buffer_type: uniform  # uniform or prioritized
@@ -65,3 +66,8 @@ algorithm_config:
 its historical behavior. Rainbow defaults to prioritized replay. When
 `num_gpus_per_learner` is omitted, `training.num_gpus` remains the backward-
 compatible GPU allocation.
+
+Uniform replay omits per-sample TD-error transfer to the driver because no
+priority update consumes it. `training.weight_sync_interval` controls how
+often DQN broadcasts learner weights to EnvRunners; its default of `1`
+preserves synchronization after every DQN training step.
