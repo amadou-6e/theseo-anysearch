@@ -705,8 +705,11 @@ def collect_multi_eval_episode(
             agent_obs = obs[agent_id]
             try:
                 action = int(algo.compute_single_action(agent_obs, policy_id="shared_policy"))
-            except Exception:
-                action = 0
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Policy inference failed for agent {agent_id!r} "
+                    "using policy 'shared_policy'"
+                ) from exc
             actions[agent_id] = action
 
         # Snapshot cursor positions before the step for placement detection.

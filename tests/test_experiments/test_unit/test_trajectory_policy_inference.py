@@ -8,6 +8,7 @@ import pytest
 from theseo_anysearch.experiments.trajectory import (
     collect_eval_episode,
     collect_eval_episodes,
+    collect_multi_eval_episode,
     collect_vectorized_eval_episodes,
 )
 
@@ -133,6 +134,39 @@ def test_collect_eval_episode_surfaces_policy_inference_failure() -> None:
             {"max_steps": 1},
             env=_OneStepEnv(),
         )
+
+
+def test_collect_multi_eval_episode_aborts_on_policy_inference_failure() -> None:
+    class _FailingAlgorithm:
+        def compute_single_action(self, observation: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("policy inference failed")
+
+    class _MultiAgentEnv:
+        possible_agents = ["agent_0", "agent_1"]
+
+        def __init__(self) -> None:
+            self.agents = list(self.possible_agents)
+            self.step_calls = 0
+
+        def reset(self, seed: int | None = None):
+            return {agent_id: _observation() for agent_id in self.agents}, {}
+
+        def step(self, actions: dict[str, int]):
+            self.step_calls += 1
+            raise AssertionError("env.step must not be called after inference failure")
+
+    environment = _MultiAgentEnv()
+
+    with pytest.raises(RuntimeError, match="agent_0.*shared_policy") as exc_info:
+        collect_multi_eval_episode(
+            _FailingAlgorithm(),
+            {"max_steps": 1},
+            env=environment,
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "policy inference failed"
+    assert environment.step_calls == 0
 
 
 def test_collect_eval_episode_does_not_treat_truncation_as_success() -> None:
