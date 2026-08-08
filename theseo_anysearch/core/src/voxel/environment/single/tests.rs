@@ -303,3 +303,42 @@ fn action_history_is_bounded() {
     assert_eq!(env.action_history[0].previous_cursor, [3, 2, 2]);
     assert_eq!(env.action_history[0].cursor, [4, 2, 2]);
 }
+
+#[test]
+fn configure_action_pipeline_fails_when_native_predicate_load_fails() {
+    let mut env = make_env(10);
+    let bad_library = Path::new("this/path/does/not/exist.so");
+    let result = env.configure_action_pipeline(
+        r#"[{"name":"bounds"}]"#,
+        r#"[{"name":"cursor_movement"}]"#,
+        4,
+        Some(bad_library),
+    );
+    assert!(
+        result.is_err(),
+        "construction must fail instead of silently falling back to the builtin predicate"
+    );
+    let message = result.unwrap_err();
+    assert!(message.contains("bounds"), "error should mention the predicate name: {message}");
+}
+
+#[test]
+fn configure_action_pipeline_fails_when_native_outcome_load_fails() {
+    let mut env = make_env(10);
+    let bad_library = Path::new("this/path/does/not/exist.so");
+    let result = env.configure_action_pipeline(
+        "[]",
+        r#"[{"name":"cursor_movement"}]"#,
+        4,
+        Some(bad_library),
+    );
+    assert!(
+        result.is_err(),
+        "construction must fail instead of silently falling back to the builtin outcome"
+    );
+    let message = result.unwrap_err();
+    assert!(
+        message.contains("cursor_movement"),
+        "error should mention the outcome name: {message}"
+    );
+}
