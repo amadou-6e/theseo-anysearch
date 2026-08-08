@@ -241,8 +241,9 @@ class Trainer(BaseTrainer):
                 elapsed = execution.duration_s
                 self._iteration = i + 1
                 parsed = RllibTrainResult.from_raw(rllib_result)
-                self._episodes_total = parsed.parse_episodes_total(
-                ) or self._episodes_total
+                parsed_episodes_total = parsed.parse_episodes_total()
+                if parsed_episodes_total is not None:
+                    self._episodes_total = parsed_episodes_total
 
                 result = TrainResult.from_rllib(
                     self._iteration,
