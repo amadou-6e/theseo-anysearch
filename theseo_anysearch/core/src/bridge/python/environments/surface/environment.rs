@@ -1,7 +1,6 @@
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
-    environments::Environment,
     surface::{SurfaceAction, SurfaceEnv},
     voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
@@ -51,9 +50,9 @@ impl PySurfaceEnv {
     }
 
     /// Reset the environment and return the initial observation.
-    pub fn reset(&mut self, seed: u64) -> PySurfaceObservation {
-        let obs = self.inner.reset(seed);
-        py_surface_obs(obs)
+    pub fn reset(&mut self, seed: u64) -> PyResult<PySurfaceObservation> {
+        let obs = self.inner.reset(seed).map_err(PyValueError::new_err)?;
+        Ok(py_surface_obs(obs))
     }
 
     /// Step the environment (StepAll â€” `action` is ignored).
