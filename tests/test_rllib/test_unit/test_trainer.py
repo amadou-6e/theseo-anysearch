@@ -14,6 +14,9 @@ import pytest
 
 from unittest.mock import patch
 
+from theseo_anysearch.rllib.trainer.evaluation.coordinator import (
+    EvaluationCoordinator,
+)
 from theseo_anysearch.rllib.trainer.results import IterationTimings, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 from theseo_anysearch.rllib.trainer.trainer import Trainer
@@ -253,6 +256,27 @@ class TestExecution:
         assert [r.iteration for r in results] == list(
             range(1, trainer_settings.training.iterations + 1)
         )
+
+    def test_evaluation_failure_propagates_without_completing_iteration(
+        self,
+        trainer_settings: Any,
+    ) -> None:
+        trainer_settings.training.iterations = 1
+        completed_iterations: list[int] = []
+        trainer = make_trainer(trainer_settings)
+        trainer.on_iteration_end = lambda result: completed_iterations.append(
+            result.iteration
+        )
+
+        with patch.object(
+            EvaluationCoordinator,
+            "evaluate",
+            side_effect=RuntimeError("curriculum evaluation failed"),
+        ):
+            with pytest.raises(RuntimeError, match="curriculum evaluation failed"):
+                trainer.train()
+
+        assert completed_iterations == []
 
     def test_evaluation_result_replay_and_checkpoint_share_one_batch(
         self,

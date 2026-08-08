@@ -171,8 +171,6 @@ class Trainer(BaseTrainer):
         list[TrainResult]
             One normalized result per completed training iteration.
         """
-        import warnings
-
         self._algo = self._lifecycle.ensure_algorithm(
             self._algo,
             self._build_algorithm,
@@ -190,10 +188,6 @@ class Trainer(BaseTrainer):
         _env_cfg = self._env_config_dict()
 
         from theseo_anysearch.experiments.output import OutputStore
-        from theseo_anysearch.experiments.custom_metrics import (
-            CustomMetricError,
-        )
-
         training_metrics = TrainingMetricCoordinator(
             self._metric_providers,
             self._native_extension,
@@ -289,18 +283,12 @@ class Trainer(BaseTrainer):
                             time.perf_counter() - checkpoint_started
                         )
                         _checkpointed_for_best = True
-                except CustomMetricError:
-                    raise
-                except Exception as exc:
-                    warnings.warn(
-                        f"evaluation collection failed at iter {self._iteration}: {exc}",
-                        stacklevel=2,
+                finally:
+                    result.timings.anysearch_evaluation_s = max(
+                        time.perf_counter() - evaluation_started
+                        - result.timings.anysearch_checkpoint_s,
+                        0.0,
                     )
-                result.timings.anysearch_evaluation_s = max(
-                    time.perf_counter() - evaluation_started
-                    - result.timings.anysearch_checkpoint_s,
-                    0.0,
-                )
 
                 reporting_started = time.perf_counter()
                 result, training_scalars = training_metrics.apply(
