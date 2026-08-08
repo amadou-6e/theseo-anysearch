@@ -39,11 +39,12 @@ def _selected_metric(
     payload: dict[str, Any],
     metric: str,
     *,
-    fallback: float,
     mode: str,
-) -> float:
+) -> float | None:
     """Resolve and sanitize the actual metric configured for Tune."""
-    value = float(payload.get(metric, fallback))
+    if metric not in payload:
+        return None
+    value = float(payload[metric])
     if math.isfinite(value):
         return value
     return -1e9 if mode == "max" else 1e9
@@ -385,12 +386,10 @@ def _experiment_trainable(
         sanitized = _selected_metric(
             payload,
             metric,
-            fallback=result.episode_reward_mean,
             mode=mode,
         )
-        payload[metric] = sanitized
-        if metric == "episode_reward_mean":
-            payload["episode_reward_mean"] = sanitized
+        if sanitized is not None:
+            payload[metric] = sanitized
 
         tracker.log_metrics(
             {

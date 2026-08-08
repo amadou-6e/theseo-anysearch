@@ -30,16 +30,24 @@ def test_success_rate_is_the_selected_optimization_metric() -> None:
     assert _selected_metric(
         payload,
         "evaluation_success_rate",
-        fallback=8.0,
         mode="max",
     ) == pytest.approx(0.75)
+
+
+def test_unavailable_selected_metric_is_not_fabricated() -> None:
+    payload = {"episode_reward_mean": 8.0}
+
+    assert _selected_metric(
+        payload,
+        "evaluation_navigation_score",
+        mode="max",
+    ) is None
 
 
 def test_non_finite_selected_metric_is_sanitized_by_mode() -> None:
     assert _selected_metric(
         {"evaluation_success_rate": float("nan")},
         "evaluation_success_rate",
-        fallback=0.0,
         mode="max",
     ) == -1e9
 
