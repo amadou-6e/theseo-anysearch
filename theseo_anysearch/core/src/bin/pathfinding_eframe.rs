@@ -33,7 +33,12 @@ fn run_episode_trace(
     epoch: u32,
 ) -> Result<EpisodeTrace, String> {
     let mesh = parse_ascii_stl(stl_ascii).map_err(|e| format!("{e:?}"))?;
-    let placements = voxelize_mesh(&mesh, origin, scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, origin, scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     let filled = placements.iter().map(|p| p.coord).collect::<Vec<_>>();
 
     let mut env = SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps);
