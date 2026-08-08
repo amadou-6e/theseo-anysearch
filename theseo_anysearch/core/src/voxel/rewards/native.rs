@@ -2,12 +2,23 @@ use std::path::Path;
 
 use libloading::{Library, Symbol};
 
-use crate::voxel::common::{load_library, validate_name, validate_parameters};
+use crate::voxel::common::{load_library, validate_name, validate_parameters, ABI_VERSION};
 
 use super::{
     abi::{RewardContextV2, RewardResultV2, MAX_COMPONENTS},
     breakdown::RewardBreakdown,
 };
+
+fn validate_abi(result: &RewardResultV2, name: &str) -> Result<(), String> {
+    if result.abi_version != ABI_VERSION
+        || result.struct_size as usize != std::mem::size_of::<RewardResultV2>()
+    {
+        return Err(format!(
+            "native reward {name:?} returned an incompatible result"
+        ));
+    }
+    Ok(())
+}
 
 type RewardFunctionV2 = unsafe extern "C" fn(*const RewardContextV2, *mut RewardResultV2) -> i32;
 
@@ -53,6 +64,7 @@ impl NativeRewardExtension {
                 self.name
             ));
         }
+        validate_abi(&result, &self.name)?;
         if result.mode > 1 || result.component_count as usize > MAX_COMPONENTS {
             return Err("native reward returned an invalid mode or component count".to_owned());
         }
@@ -104,5 +116,34 @@ impl NativeRewardExtension {
                 breakdown,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_abi_rejects_mismatched_abi_version() {
+        let mut result = RewardResultV2::default();
+        result.abi_version = ABI_VERSION.wrapping_add(1);
+        let error = validate_abi(&result, "test-reward").expect_err("expected an error");
+        assert!(error.contains("test-reward"));
+        assert!(error.contains("incompatible"));
+    }
+
+    #[test]
+    fn validate_abi_rejects_mismatched_struct_size() {
+        let mut result = RewardResultV2::default();
+        result.struct_size = 0;
+        let error = validate_abi(&result, "test-reward").expect_err("expected an error");
+        assert!(error.contains("test-reward"));
+        assert!(error.contains("incompatible"));
+    }
+
+    #[test]
+    fn validate_abi_accepts_matching_result() {
+        let result = RewardResultV2::default();
+        assert!(validate_abi(&result, "test-reward").is_ok());
     }
 }
