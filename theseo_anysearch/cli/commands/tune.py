@@ -589,12 +589,13 @@ def _real_trainable(
             "trial_id": trial_id,
             "evaluation_status": result.evaluation_status,
         }
-        payload[metric] = _selected_metric(
+        sanitized = _selected_metric(
             payload,
             metric,
-            fallback=result.episode_reward_mean,
             mode=mode,
         )
+        if sanitized is not None:
+            payload[metric] = sanitized
         tracker.log_metrics(
             {
                 key: value

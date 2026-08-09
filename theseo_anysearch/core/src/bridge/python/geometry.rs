@@ -16,7 +16,12 @@ pub fn run_submission_poc(
     env_config: &EnvConfig,
 ) -> Result<String, String> {
     let mesh = parse_ascii_stl(&submission.stl_ascii).map_err(|e| format!("{e:?}"))?;
-    let placements = voxelize_mesh(&mesh, submission.origin, submission.scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, submission.origin, submission.scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
 
     let mut world = WorldState::new();
     for placement in &placements {
@@ -99,11 +104,18 @@ pub fn py_surface_env_from_stl(
 ) -> PyResult<String> {
     let mesh = parse_ascii_stl(&stl_ascii)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
-    let placements = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     let filled = placements.iter().map(|p| p.coord).collect::<Vec<_>>();
 
     let mut env = SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps);
-    let mut obs = env.reset(seed);
+    let mut obs = env
+        .reset(seed)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let mut total_reward = 0.0f32;
     let mut steps = 0u32;
 

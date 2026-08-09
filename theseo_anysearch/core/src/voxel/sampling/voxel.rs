@@ -22,8 +22,19 @@ impl VoxelSampler {
     pub fn load_stl(&mut self, path: &Path, scale: f32) -> Result<usize, String> {
         let contents = read_stl(path)?;
         let mesh = parse_ascii_stl(&contents).map_err(|error| format!("{error:?}"))?;
-        let placements = voxelize_mesh(&mesh, (1, 1, 1), scale);
-        Ok(self.replace_placements(placements))
+        let (placements, voxelize_dropped) = voxelize_mesh(&mesh, (1, 1, 1), scale);
+        let (count, replace_dropped) = self.replace_placements(placements);
+        let dropped = voxelize_dropped + replace_dropped;
+        if dropped > 0 {
+            return Err(format!(
+                "{dropped} point(s) from '{}' fell outside the world/grid bounds \
+                 (grid_size={}) and were dropped during voxelization; check the \
+                 STL scale/origin for this grid size",
+                path.display(),
+                self.grid_size,
+            ));
+        }
+        Ok(count)
     }
 
     pub fn load_stl_normalized(
@@ -54,7 +65,19 @@ impl VoxelSampler {
             origin.1 - minimum[1] * scale,
             origin.2 - minimum[2] * scale,
         );
-        Ok(self.replace_placements(voxelize_mesh_f32(&mesh, adjusted_origin, scale)))
+        let (placements, voxelize_dropped) = voxelize_mesh_f32(&mesh, adjusted_origin, scale);
+        let (count, replace_dropped) = self.replace_placements(placements);
+        let dropped = voxelize_dropped + replace_dropped;
+        if dropped > 0 {
+            return Err(format!(
+                "{dropped} point(s) from '{}' fell outside the world/grid bounds \
+                 (grid_size={}) and were dropped during voxelization; check the \
+                 STL scale/origin for this grid size",
+                path.display(),
+                self.grid_size,
+            ));
+        }
+        Ok(count)
     }
 
     pub fn load_geometry_boxes(&mut self, boxes: &[Vec<u16>]) -> Result<usize, String> {
@@ -127,12 +150,17 @@ impl VoxelSampler {
         self.world.iter_filled().count()
     }
 
+    /// Replaces the world contents with `placements`, discarding any that
+    /// fall outside `1..=self.grid_size`. Returns `(placed, dropped)` so
+    /// callers can surface out-of-bounds points instead of silently
+    /// discarding them.
     fn replace_placements(
         &mut self,
         placements: Vec<crate::voxel::world::ingest::BlockPlacement>,
-    ) -> usize {
+    ) -> (usize, usize) {
         self.world = WorldState::new();
         let mut count = 0;
+        let mut dropped = 0;
         for placement in placements {
             let (x, y, z) = placement.coord;
             if (1..=self.grid_size).contains(&x)
@@ -141,9 +169,11 @@ impl VoxelSampler {
             {
                 let _ = self.world.set_block(placement.coord, placement.block);
                 count += 1;
+            } else {
+                dropped += 1;
             }
         }
-        count
+        (count, dropped)
     }
 }
 

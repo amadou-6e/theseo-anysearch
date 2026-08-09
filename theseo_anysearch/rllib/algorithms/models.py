@@ -127,6 +127,9 @@ ALGORITHM_CONFIGS: dict[str, type[AlgorithmConfig]] = {
     "td3": TD3Config,
     "ddpg": DDPGConfig,
     "multi_agent_voxel_ppo": PPOConfig,
+    # Standalone non-RL baseline (e.g. Dijkstra/A* trajectory collection);
+    # has no algorithm-specific fields, so the base AlgorithmConfig applies.
+    "heuristic": AlgorithmConfig,
 }
 
 
@@ -141,6 +144,17 @@ def get_algorithm_config_class(name: str) -> type[AlgorithmConfig]:
     Returns
     -------
     type[AlgorithmConfig]
-        Matching config class, or ``AlgorithmConfig`` when the name is unknown.
+        Matching config class.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a registered algorithm.
     """
-    return ALGORITHM_CONFIGS.get(name.lower(), AlgorithmConfig)
+    try:
+        return ALGORITHM_CONFIGS[name.lower()]
+    except KeyError:
+        valid = sorted(ALGORITHM_CONFIGS)
+        raise ValueError(
+            f"Unknown algorithm: {name!r}. Valid algorithms: {valid}"
+        ) from None

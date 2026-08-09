@@ -29,11 +29,15 @@ impl VoxelEnv {
                 let parameters =
                     serde_json::to_string(&spec.parameters).expect("JSON map serializes");
                 if let Some(path) = native_library {
-                    if let Ok(extension) =
-                        NativePredicateExtension::load(path, &spec.name, parameters.clone())
-                    {
-                        return Ok(ConfiguredPredicate::Native(extension));
-                    }
+                    return NativePredicateExtension::load(path, &spec.name, parameters.clone())
+                        .map(ConfiguredPredicate::Native)
+                        .map_err(|error| {
+                            format!(
+                                "failed to load native predicate {:?} from {}: {error}",
+                                spec.name,
+                                path.display()
+                            )
+                        });
                 }
                 match spec.name.as_str() {
                     "valid_action" => Ok(ConfiguredPredicate::ValidAction),
@@ -49,11 +53,15 @@ impl VoxelEnv {
                 let parameters =
                     serde_json::to_string(&spec.parameters).expect("JSON map serializes");
                 if let Some(path) = native_library {
-                    if let Ok(extension) =
-                        NativeOutcomeExtension::load(path, &spec.name, parameters.clone())
-                    {
-                        return Ok(ConfiguredOutcome::Native(extension));
-                    }
+                    return NativeOutcomeExtension::load(path, &spec.name, parameters.clone())
+                        .map(ConfiguredOutcome::Native)
+                        .map_err(|error| {
+                            format!(
+                                "failed to load native outcome {:?} from {}: {error}",
+                                spec.name,
+                                path.display()
+                            )
+                        });
                 }
                 match spec.name.as_str() {
                     "cursor_movement" => Ok(ConfiguredOutcome::CursorMovement),
@@ -151,6 +159,8 @@ impl VoxelEnv {
                 ConfiguredPredicate::Native(extension) => {
                     extension.evaluate(PredicateContextV2 { ..context })?
                 }
+                #[cfg(test)]
+                ConfiguredPredicate::Failing(message) => Err(message.clone())?,
             };
             if !feasible {
                 return Ok((coord, destination, false));

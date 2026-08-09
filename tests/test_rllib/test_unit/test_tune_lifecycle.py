@@ -30,16 +30,24 @@ def test_success_rate_is_the_selected_optimization_metric() -> None:
     assert _selected_metric(
         payload,
         "evaluation_success_rate",
-        fallback=8.0,
         mode="max",
     ) == pytest.approx(0.75)
+
+
+def test_unavailable_selected_metric_is_not_fabricated() -> None:
+    payload = {"episode_reward_mean": 8.0}
+
+    assert _selected_metric(
+        payload,
+        "evaluation_navigation_score",
+        mode="max",
+    ) is None
 
 
 def test_non_finite_selected_metric_is_sanitized_by_mode() -> None:
     assert _selected_metric(
         {"evaluation_success_rate": float("nan")},
         "evaluation_success_rate",
-        fallback=0.0,
         mode="max",
     ) == -1e9
 
@@ -170,12 +178,24 @@ def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
 
     current = TrainResult.from_rllib(
         1,
-        {"env_runners": {"num_env_steps_sampled_lifetime": 123}},
+        {
+            "env_runners": {
+                "num_env_steps_sampled_lifetime": 123,
+                "episode_return_mean": 1.0,
+                "episode_len_mean": 20.0,
+                "num_episodes_lifetime": 3,
+            }
+        },
         0.1,
     )
     legacy = TrainResult.from_rllib(
         1,
-        {"timesteps_total": 456},
+        {
+            "timesteps_total": 456,
+            "episode_reward_mean": 1.0,
+            "episode_len_mean": 20.0,
+            "episodes_total": 3,
+        },
         0.1,
     )
 

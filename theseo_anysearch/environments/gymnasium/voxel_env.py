@@ -284,20 +284,63 @@ class VoxelEnv(RustGymnasiumEnv):
 
     @staticmethod
     def _load_waypoints(path: str) -> dict | None:
-        """Load waypoints JSON: {"start": [x, y, z], "goal": [x, y, z]}."""
+        """Load waypoints JSON: {"start": [x, y, z], "goal": [x, y, z]}.
+
+        Only called when ``waypoints_file`` is configured (non-empty), so any
+        failure here means the user pointed at a file that is missing,
+        unreadable, or malformed — that is a configuration error and must
+        raise rather than be silently swallowed as "no waypoints configured".
+        """
         resolved = Path(path)
         if not resolved.is_absolute():
             resolved = Path(os.getcwd(), resolved)
-        try:
-            data = json.loads(resolved.read_text())
-            s, g = data["start"], data["goal"]
-            return {"start": s, "goal": g}
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Could not load waypoints from %s: %s", path, exc
+
+        if not resolved.exists():
+            raise FileNotFoundError(
+                f"waypoints_file {path!r} (resolved to {resolved}) does not exist."
             )
-            return None
+
+        try:
+            raw_text = resolved.read_text()
+        except OSError as exc:
+            raise ValueError(
+                f"waypoints_file {path!r} (resolved to {resolved}) could not be read: {exc}"
+            ) from exc
+
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"waypoints_file {path!r} (resolved to {resolved}) is not valid JSON: {exc}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"waypoints_file {path!r} (resolved to {resolved}) must contain a JSON "
+                f"object with 'start' and 'goal' keys, got {type(data).__name__}."
+            )
+
+        missing = [key for key in ("start", "goal") if key not in data]
+        if missing:
+            raise ValueError(
+                f"waypoints_file {path!r} (resolved to {resolved}) is missing required "
+                f"key(s): {', '.join(missing)}. Expected schema: "
+                '{"start": [x, y, z], "goal": [x, y, z]}.'
+            )
+
+        s, g = data["start"], data["goal"]
+        for name, value in (("start", s), ("goal", g)):
+            if (
+                not isinstance(value, (list, tuple))
+                or len(value) != 3
+                or not all(isinstance(v, (int, float)) for v in value)
+            ):
+                raise ValueError(
+                    f"waypoints_file {path!r} (resolved to {resolved}) has an invalid "
+                    f"'{name}' value: {value!r}. Expected a 3-element [x, y, z] coordinate."
+                )
+
+        return {"start": s, "goal": g}
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if self._geo_pool is not None:
