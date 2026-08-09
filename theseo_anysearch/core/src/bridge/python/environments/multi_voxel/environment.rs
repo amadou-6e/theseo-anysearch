@@ -288,11 +288,6 @@ mod tests {
         assert!(check_actions_len(2, 2).is_ok());
         assert!(check_actions_len(0, 0).is_ok());
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     fn make_env() -> PyMultiVoxelEnv {
         PyMultiVoxelEnv::new(
