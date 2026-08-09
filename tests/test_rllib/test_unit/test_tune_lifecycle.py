@@ -178,12 +178,24 @@ def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
 
     current = TrainResult.from_rllib(
         1,
-        {"env_runners": {"num_env_steps_sampled_lifetime": 123}},
+        {
+            "env_runners": {
+                "num_env_steps_sampled_lifetime": 123,
+                "episode_return_mean": 1.0,
+                "episode_len_mean": 20.0,
+                "num_episodes_lifetime": 3,
+            }
+        },
         0.1,
     )
     legacy = TrainResult.from_rllib(
         1,
-        {"timesteps_total": 456},
+        {
+            "timesteps_total": 456,
+            "episode_reward_mean": 1.0,
+            "episode_len_mean": 20.0,
+            "episodes_total": 3,
+        },
         0.1,
     )
 

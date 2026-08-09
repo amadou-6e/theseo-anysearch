@@ -73,47 +73,118 @@ def test_rllib_storage_path_uses_run_directory(tmp_path: Path):
 
 class TestTrainResult:
     """Tests TrainResult."""
+
+    NEW_RESULT = {
+        "env_runners": {
+            "episode_return_mean": 5.0,
+            "episode_len_mean": 20.0,
+            "num_episodes_lifetime": 10,
+            "num_env_steps_sampled_lifetime": 100,
+        }
+    }
+    LEGACY_RESULT = {
+        "episode_reward_mean": 3.0,
+        "episode_len_mean": 15.0,
+        "episodes_total": 6,
+        "timesteps_total": 60,
+    }
+
     def test_new_api_stack_reads_env_runners(self):
-        result = TrainResult.from_rllib(1, {"env_runners": {"episode_return_mean": 5.0, "episode_len_mean": 20.0, "num_episodes_lifetime": 10}}, 0.1)
+        result = TrainResult.from_rllib(1, self.NEW_RESULT, 0.1)
         assert result.episode_reward_mean == pytest.approx(5.0)
 
     def test_legacy_stack_reads_top_level(self):
-        result = TrainResult.from_rllib(1, {"episode_reward_mean": 3.0, "episode_len_mean": 15.0, "episodes_total": 6}, 0.1)
+        result = TrainResult.from_rllib(1, self.LEGACY_RESULT, 0.1)
         assert result.episode_reward_mean == pytest.approx(3.0)
 
     def test_new_api_stack_takes_priority_over_legacy(self):
         result = TrainResult.from_rllib(1, {
-            "env_runners": {"episode_return_mean": 7.0},
+            **self.LEGACY_RESULT,
+            "env_runners": {
+                **self.NEW_RESULT["env_runners"],
+                "episode_return_mean": 7.0,
+            },
             "episode_reward_mean": 1.0,
         }, 0.1)
         assert result.episode_reward_mean == pytest.approx(7.0)
 
-    def test_missing_reward_key_returns_zero(self):
-        result = TrainResult.from_rllib(1, {}, 0.1)
+    @pytest.mark.parametrize(
+        ("field", "payload"),
+        [
+            ("episode reward mean", {**LEGACY_RESULT, "episode_reward_mean": None}),
+            ("episode length mean", {**LEGACY_RESULT, "episode_len_mean": None}),
+            ("episode count", {**LEGACY_RESULT, "episodes_total": None}),
+            ("environment step count", {**LEGACY_RESULT, "timesteps_total": None}),
+        ],
+    )
+    def test_missing_required_metric_raises(self, field, payload):
+        with pytest.raises(ValueError, match=field):
+            TrainResult.from_rllib(1, payload, 0.1)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {
+                "env_runners": {
+                    "episode_return_mean": 0.0,
+                    "episode_len_mean": 0.0,
+                    "num_episodes_lifetime": 0,
+                    "num_env_steps_sampled_lifetime": 0,
+                }
+            },
+            {
+                "episode_reward_mean": 0.0,
+                "episode_len_mean": 0.0,
+                "episodes_total": 0,
+                "timesteps_total": 0,
+            },
+        ],
+    )
+    def test_present_zero_metrics_are_preserved(self, payload):
+        result = TrainResult.from_rllib(1, payload, 0.1)
+
         assert result.episode_reward_mean == pytest.approx(0.0)
+        assert result.episode_len_mean == pytest.approx(0.0)
+        assert result.episodes_total == 0
+        assert result.environment_steps_total == 0
 
     def test_iteration_field_set(self):
-        result = TrainResult.from_rllib(4, {"episode_reward_mean": 1.0}, 0.5)
+        result = TrainResult.from_rllib(4, self.LEGACY_RESULT, 0.5)
         assert result.iteration == 4
 
     def test_elapsed_s_set(self):
-        result = TrainResult.from_rllib(1, {}, 1.234)
+        result = TrainResult.from_rllib(1, self.LEGACY_RESULT, 1.234)
         assert result.elapsed_s == pytest.approx(1.234)
 
     def test_extra_contains_training_iteration(self):
-        result = TrainResult.from_rllib(2, {"training_iteration": 2, "time_this_iter_s": 0.5}, 0.5)
+        result = TrainResult.from_rllib(2, {
+            **self.LEGACY_RESULT,
+            "training_iteration": 2,
+            "time_this_iter_s": 0.5,
+        }, 0.5)
         assert result.extra["training_iteration"] == 2
 
     def test_episodes_total_from_new_stack(self):
-        result = TrainResult.from_rllib(1, {"env_runners": {"num_episodes_lifetime": 42}}, 0.1)
+        result = TrainResult.from_rllib(1, {
+            "env_runners": {
+                **self.NEW_RESULT["env_runners"],
+                "num_episodes_lifetime": 42,
+            }
+        }, 0.1)
         assert result.episodes_total == 42
 
     def test_episode_len_from_new_stack(self):
-        result = TrainResult.from_rllib(1, {"env_runners": {"episode_len_mean": 25.0}}, 0.1)
+        result = TrainResult.from_rllib(1, {
+            "env_runners": {
+                **self.NEW_RESULT["env_runners"],
+                "episode_len_mean": 25.0,
+            }
+        }, 0.1)
         assert result.episode_len_mean == pytest.approx(25.0)
 
     def test_extracts_rllib_timing_breakdown(self):
         result = TrainResult.from_rllib(1, {
+            **self.LEGACY_RESULT,
             "timers": {
                 "env_runner_sampling_timer": 1.5,
                 "learner_update_timer": 2.5,
@@ -184,6 +255,7 @@ class FakeAlgo:
             "episode_reward_mean": r,
             "episode_len_mean": 20.0,
             "episodes_total": self._step * 3,
+            "timesteps_total": self._step * 20,
         }
 
     def save(self, path: str) -> str:

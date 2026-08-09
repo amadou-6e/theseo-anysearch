@@ -136,61 +136,65 @@ class RllibTrainResult(BaseModel):
         """
         return cls.model_validate(result)
 
-    # TODO! make these properties e.g. @property def mean_reward(self) → float
-    def parse_episode_return(self) -> float:
+    def parse_episode_return(self) -> float | None:
         """Return the mean episode return across RLlib API versions.
 
         Returns
         -------
-        float
-            Mean episode return, or zero when unavailable.
+        float | None
+            Mean episode return, or ``None`` when unavailable.
         """
         value = self.env_runners.get("episode_return_mean")
         if value is not None:
             return float(value)
-        return float(self.episode_reward_mean
-                     ) if self.episode_reward_mean is not None else 0.0
+        return (
+            float(self.episode_reward_mean)
+            if self.episode_reward_mean is not None
+            else None
+        )
 
-    def parse_episode_len(self) -> float:
+    def parse_episode_len(self) -> float | None:
         """Return the mean episode length across RLlib API versions.
 
         Returns
         -------
-        float
-            Mean episode length, or zero when unavailable.
+        float | None
+            Mean episode length, or ``None`` when unavailable.
         """
         value = self.env_runners.get("episode_len_mean")
         if value is not None:
             return float(value)
-        return float(self.episode_len_mean
-                     ) if self.episode_len_mean is not None else 0.0
+        return (
+            float(self.episode_len_mean)
+            if self.episode_len_mean is not None
+            else None
+        )
 
-    def parse_episodes_total(self) -> int:
+    def parse_episodes_total(self) -> int | None:
         """Return the lifetime episode count across RLlib API versions.
 
         Returns
         -------
-        int
-            Lifetime episode count.
+        int | None
+            Lifetime episode count, or ``None`` when unavailable.
         """
         value = self.env_runners.get("num_episodes_lifetime")
         if value is not None:
             return int(value)
-        return int(
-            self.episodes_total) if self.episodes_total is not None else 0
+        return int(self.episodes_total) if self.episodes_total is not None else None
 
-    def parse_environment_steps_total(self) -> int:
+    def parse_environment_steps_total(self) -> int | None:
         """Return sampled environment steps across RLlib API versions.
 
         Returns
         -------
-        int
-            Lifetime sampled environment-step count.
+        int | None
+            Lifetime sampled environment-step count, or ``None`` when unavailable.
         """
         value = self.env_runners.get("num_env_steps_sampled_lifetime")
         if value is not None:
             return int(value)
-        return int(self.timesteps_total) if self.timesteps_total is not None else 0
+        return int(self.timesteps_total) if self.timesteps_total is not None else None
 
 
 class TrainResult(BaseModel):
@@ -247,13 +251,42 @@ class TrainResult(BaseModel):
     ) -> "TrainResult":
         """Build from the dict returned by ray.rllib.algorithms.Algorithm.train()."""
         parsed = RllibTrainResult.from_raw(rllib_result)
+        required_metrics = {
+            "episode reward mean": (
+                parsed.parse_episode_return(),
+                "env_runners.episode_return_mean or episode_reward_mean",
+            ),
+            "episode length mean": (
+                parsed.parse_episode_len(),
+                "env_runners.episode_len_mean or episode_len_mean",
+            ),
+            "episode count": (
+                parsed.parse_episodes_total(),
+                "env_runners.num_episodes_lifetime or episodes_total",
+            ),
+            "environment step count": (
+                parsed.parse_environment_steps_total(),
+                "env_runners.num_env_steps_sampled_lifetime or timesteps_total",
+            ),
+        }
+        missing = [
+            f"{name} ({keys})"
+            for name, (value, keys) in required_metrics.items()
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                "RLlib training result is missing required metrics: "
+                + "; ".join(missing)
+            )
+
         return cls(
             iteration=iteration,
-            episode_reward_mean=parsed.parse_episode_return(),
-            episode_len_mean=parsed.parse_episode_len(),
-            episodes_total=parsed.parse_episodes_total(),
+            episode_reward_mean=required_metrics["episode reward mean"][0],
+            episode_len_mean=required_metrics["episode length mean"][0],
+            episodes_total=required_metrics["episode count"][0],
             elapsed_s=elapsed_s,
-            environment_steps_total=parsed.parse_environment_steps_total(),
+            environment_steps_total=required_metrics["environment step count"][0],
             timings=IterationTimings.from_rllib(rllib_result),
             extra={
                 "training_iteration": parsed.training_iteration or iteration,
