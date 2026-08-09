@@ -113,7 +113,9 @@ pub fn py_surface_env_from_stl(
     let filled = placements.iter().map(|p| p.coord).collect::<Vec<_>>();
 
     let mut env = SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps);
-    let mut obs = env.reset(seed);
+    let mut obs = env
+        .reset(seed)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let mut total_reward = 0.0f32;
     let mut steps = 0u32;
 
