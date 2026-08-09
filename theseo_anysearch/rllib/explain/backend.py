@@ -77,6 +77,7 @@ class PolicyExplanationBackend:
         )
         if self._report_writer is not None:
             self._report_writer.write(report)
+            self._report_writer.write_observations(self._trace, selected_steps)
         return report
 
     def _selector_for_request(self, request: ExplanationRequest) -> StepSelector:

@@ -20,6 +20,7 @@ from typing import Any, Optional
 import typer
 
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
+from theseo_anysearch.cli.commands.explain import run_explain
 from theseo_anysearch.cli.commands import garden as garden_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
 from theseo_anysearch.cli.commands import ray_cmd
@@ -32,6 +33,29 @@ app = typer.Typer(
     help="Theseo AnySearch — train and tune Rust-backed RL environments.",
     no_args_is_help=True,
 )
+
+
+@app.command()
+def explain(
+    run: str = typer.Argument(..., help="Run directory or registered name:run-id."),
+    checkpoint: str = typer.Option("latest", help="Checkpoint selector."),
+    trace: Optional[str] = typer.Option(None, help="best, latest, iteration name, or trajectory path."),
+    scenario: Optional[Path] = typer.Option(None, exists=True, dir_okay=False),
+    request: Optional[Path] = typer.Option(None, exists=True, dir_okay=False),
+    method: Optional[str] = typer.Option(None, help="Attribution method (currently occlusion)."),
+    focus: Optional[str] = typer.Option(None, help="collisions, all, or explicit."),
+    steps: Optional[str] = typer.Option(None, help="Comma-separated indices for explicit focus."),
+    max_steps: Optional[int] = typer.Option(None, min=1),
+    background: Optional[str] = typer.Option(None, help="trace, mean, or zeros."),
+    output: Optional[Path] = typer.Option(None, file_okay=False),
+    seed: Optional[int] = typer.Option(None),
+) -> None:
+    """Explain DQN decisions from a saved trace or controlled scenario."""
+
+    run_explain(
+        run, checkpoint, trace, scenario, request, method, focus, steps,
+        max_steps, background, output, seed,
+    )
 
 def _restore_archived_output_root(experiment: Any, run_dir: Path) -> Any:
     """Restore the output root after loading a run-local YAML snapshot.

@@ -92,7 +92,9 @@ def test_backend_explains_visible_collision_without_cli_or_checkpoint(tmp_path: 
     )
 
     assert tmp_path.joinpath("report.json").exists()
-    assert tmp_path.joinpath("collision_steps.csv").exists()
+    assert tmp_path.joinpath("steps.csv").exists()
+    assert tmp_path.joinpath("summary.md").exists()
+    assert tmp_path.joinpath("observations", "step_000000.json").exists()
     assert len(report.steps) == 1
     assert report.steps[0].collision_visible is True
     assert report.steps[0].chosen_action == ACTION_PLUS_X

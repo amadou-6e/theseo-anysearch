@@ -9,7 +9,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ExplainMethod = Literal["occlusion", "grouped_shap", "permutation_shap", "captum"]
+ExplainMethod = Literal["occlusion"]
 ExplainFocus = Literal["collisions", "all", "explicit"]
 
 
@@ -52,6 +52,9 @@ class ExplanationRequest(BaseModel):
     output_dir: Path | None = None
     background: str = "auto"
     explicit_steps: tuple[int, ...] = ()
+    scenario_validity: Literal[
+        "environment_validated", "not_environment_validated"
+    ] = "environment_validated"
 
 
 class ActionScoreTable(BaseModel):
@@ -124,6 +127,9 @@ class ExplainedStep(BaseModel):
     best_safe_score: float
     score_margin: float
     group_attributions: dict[str, float] = Field(default_factory=dict)
+    action_scores: list[float] = Field(default_factory=list)
+    goal_direction: list[float] | None = None
+    goal_distance: float | None = None
 
     def to_json_dict(self) -> dict:
         """Return a JSON-serializable representation of this step."""
@@ -141,6 +147,9 @@ class ExplainedStep(BaseModel):
             "best_safe_score": self.best_safe_score,
             "score_margin": self.score_margin,
             "group_attributions": dict(self.group_attributions),
+            "action_scores": list(self.action_scores),
+            "goal_direction": self.goal_direction,
+            "goal_distance": self.goal_distance,
         }
 
 
@@ -157,6 +166,9 @@ class ExplanationReport(BaseModel):
     method: str
     feature_schema_version: int
     steps: list[ExplainedStep]
+    scenario_validity: Literal["environment_validated", "not_environment_validated"] = (
+        "environment_validated"
+    )
 
     def to_json_dict(self) -> dict:
         """Return a JSON-serializable report dictionary."""
@@ -170,4 +182,5 @@ class ExplanationReport(BaseModel):
             "method": self.method,
             "feature_schema_version": self.feature_schema_version,
             "steps": [step.to_json_dict() for step in self.steps],
+            "scenario_validity": self.scenario_validity,
         }

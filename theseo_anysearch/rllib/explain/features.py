@@ -16,7 +16,6 @@ OBSERVATION_ORDER = (
     "ray_hits",
     "ray_hit_types",
     "steps_remaining",
-    "voxel_count",
 )
 
 

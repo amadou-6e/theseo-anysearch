@@ -61,6 +61,7 @@ class ExplanationReportBuilder:
             method=self._method,
             feature_schema_version=self._schema.version,
             steps=explained_steps,
+            scenario_validity=request.scenario_validity,
         )
 
     def _build_step(
@@ -98,6 +99,15 @@ class ExplanationReportBuilder:
             best_safe_score=best_safe_score,
             score_margin=chosen_score - best_safe_score,
             group_attributions=attributions,
+            action_scores=[float(value) for value in scores],
+            goal_direction=(
+                [float(value) for value in np.asarray(step.observation["goal_direction"])]
+                if "goal_direction" in step.observation else None
+            ),
+            goal_distance=(
+                float(np.asarray(step.observation["goal_distance"]).reshape(-1)[0])
+                if "goal_distance" in step.observation else None
+            ),
         )
 
     def best_safe_action(
@@ -184,18 +194,19 @@ class ExplanationReportWriter:
         return self._output_dir
 
     def write(self, report: ExplanationReport) -> Path:
-        """Write report JSON and collision-step CSV artifacts."""
+        """Write report JSON, tabular data, and a readable summary."""
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
         report_path = self._output_dir.joinpath("report.json")
         report_path.write_text(json.dumps(report.to_json_dict(), indent=2), encoding="utf-8")
-        self._write_collision_steps(report)
+        self._write_steps(report)
+        self._write_summary(report)
         return report_path
 
-    def _write_collision_steps(self, report: ExplanationReport) -> None:
-        """Write a compact CSV summary for selected collision steps."""
+    def _write_steps(self, report: ExplanationReport) -> None:
+        """Write a compact CSV summary for explained steps."""
 
-        csv_path = self._output_dir.joinpath("collision_steps.csv")
+        csv_path = self._output_dir.joinpath("steps.csv")
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(
                 handle,
@@ -228,3 +239,55 @@ class ExplanationReportWriter:
                         "score_margin": step.score_margin,
                     }
                 )
+
+    def write_observations(
+        self,
+        trace: ObservationTrace,
+        selected_steps: list[int],
+    ) -> None:
+        """Write the exact selected pre-action observations."""
+
+        directory = self._output_dir.joinpath("observations")
+        directory.mkdir(parents=True, exist_ok=True)
+        for index in selected_steps:
+            observation = {
+                name: np.asarray(value).tolist()
+                for name, value in trace.step(index).observation.items()
+            }
+            directory.joinpath(f"step_{index:06d}.json").write_text(
+                json.dumps(observation, indent=2), encoding="utf-8"
+            )
+
+    def _write_summary(self, report: ExplanationReport) -> None:
+        """Write a concise Markdown interpretation of the report."""
+
+        lines = [
+            "# Policy explanation",
+            "",
+            f"- Algorithm: `{report.algorithm}`",
+            f"- Checkpoint: `{report.checkpoint}`",
+            f"- Method: `{report.method}`",
+            f"- Scenario validity: `{report.scenario_validity}`",
+            "",
+        ]
+        for step in report.steps:
+            strongest = max(
+                step.group_attributions,
+                key=lambda name: abs(step.group_attributions[name]),
+                default="none",
+            )
+            lines.extend(
+                [
+                    f"## Step {step.step}",
+                    "",
+                    f"The policy chose action `{step.chosen_action}` {step.chosen_direction}. "
+                    f"Its score was `{step.chosen_score:.6g}` versus "
+                    f"`{step.best_safe_score:.6g}` for safe action "
+                    f"`{step.best_safe_action}`. The margin was "
+                    f"`{step.score_margin:.6g}`. Strongest measured group: `{strongest}`.",
+                    "",
+                ]
+            )
+        self._output_dir.joinpath("summary.md").write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
