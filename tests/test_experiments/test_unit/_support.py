@@ -53,6 +53,7 @@ class FakeAlgo:
                 "episode_return_mean": float(self._step),
                 "episode_len_mean": 20.0,
                 "num_episodes_lifetime": self._step * 3,
+                "num_env_steps_sampled_lifetime": self._step * 20,
             },
             "training_iteration": self._step,
         }
