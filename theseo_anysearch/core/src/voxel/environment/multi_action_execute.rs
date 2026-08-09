@@ -77,6 +77,8 @@ pub fn execute_agent_action(
             ConfiguredPredicate::Native(extension) => {
                 extension.evaluate(PredicateContextV2 { ..context })?
             }
+            #[cfg(test)]
+            ConfiguredPredicate::Failing(message) => Err(message.clone())?,
         };
         if !feasible {
             record(

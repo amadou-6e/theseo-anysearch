@@ -319,6 +319,9 @@ mod tests {
             -1.0,
             -0.01,
             "linear".to_string(),
+            None,
+            None,
+            None,
         )
         .unwrap()
     }
