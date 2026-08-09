@@ -137,6 +137,23 @@ class PolicyExplanationService:
             validity="environment_validated",
         )
 
+    def initial_observation(self, seed: int | None = None) -> dict[str, np.ndarray]:
+        """Return one validated initial observation from the restored run settings."""
+
+        env = self._build_env()
+        observation, _ = env.reset(seed=seed or self.experiment.env.seed)
+        result = self._copy_observation(observation)
+        env.close()
+        return result
+
+    def observation_space(self) -> Any:
+        """Return the authoritative policy observation space."""
+
+        env = self._build_env()
+        observation_space = env.observation_space
+        env.close()
+        return observation_space
+
     def explain_scenario(
         self,
         path: Path,
@@ -223,7 +240,7 @@ class PolicyExplanationService:
             scenario_validity=validity,
             output_dir=destination,
         )
-        schema = FeatureSchema.from_observation(trace.step(0).observation)
+        schema = self.feature_schema(trace.step(0).observation)
         background_observations = trace.observations()
         if background == "zeros":
             background_observations = [
@@ -260,6 +277,17 @@ class PolicyExplanationService:
             encoding="utf-8",
         )
         return report
+
+    def feature_schema(self, observation: Mapping[str, Any]) -> FeatureSchema:
+        """Build a schema aligned with the restored policy's action ordering."""
+
+        mode = self.experiment.env.action.mode
+        if mode == "vector_3":
+            raise ValueError("vector_3 policy explanations are not yet supported")
+        return FeatureSchema.from_observation(
+            observation,
+            action_directions=offsets_for_mode(mode),
+        )
 
     def _build_env(self, overrides: Mapping[str, Any] | None = None) -> VoxelEnv:
         """Build an environment from authoritative run settings and state overrides."""

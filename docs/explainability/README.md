@@ -71,3 +71,24 @@ Attribution is relative to `chosen Q-value - best-safe Q-value`. A positive grou
 ## Current scope
 
 Checkpoint restoration supports DQN with discrete voxel action spaces. The available method is grouped occlusion. Unsupported algorithms, vector actions, malformed scenarios, and divergent traces raise explicit errors.
+
+## Interactive UI
+
+Install the optional UI dependencies and launch a checkpoint session:
+
+```powershell
+pip install -e ".[explain-ui]"
+anysearch explain-ui dqn-waypoints:4d312abc --checkpoint latest
+```
+
+The browser interface restores the policy once. It can start from a real initial
+observation or load an exact observation JSON or fictional-observation YAML. Use
+the X, Y, and Z slice selector to edit individual normalized voxel inputs, and
+use the generated sidebar controls to change every scalar or vector field within
+its declared bounds. Each valid edit recomputes the action scores, selected
+movement vector, safe-action margin, and grouped attribution immediately.
+
+Download the edited scenario YAML to reproduce it later with `anysearch explain`,
+or download the current JSON report. UI-created observations remain explicitly
+marked `not_environment_validated`; editing a value does not claim that the
+environment could naturally produce that combination.
