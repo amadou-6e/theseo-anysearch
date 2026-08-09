@@ -232,8 +232,12 @@ impl PyVoxelEnv {
     }
 
     /// Return feasibility for all 26 canonical moves plus no-op.
-    pub fn action_mask(&mut self) -> Vec<u8> {
-        self.inner.action_mask()
+    pub fn action_mask(&mut self) -> PyResult<Vec<u8>> {
+        let mask = self.inner.action_mask();
+        if let Some(error) = self.inner.take_reward_error() {
+            return Err(PyValueError::new_err(error));
+        }
+        Ok(mask)
     }
     /// Returns the current cursor position as (x, y, z) in [1, 32].
     pub fn cursor_pos(&self) -> (u16, u16, u16) {
