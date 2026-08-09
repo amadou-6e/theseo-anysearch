@@ -37,8 +37,8 @@ class VoxelBox2DCNN(BaseVoxelTorchModel):
     """2D CNN model for single-radius voxel box observations.
 
     The model interprets the voxel box as a 2D feature map stack by treating the
-    z-axis as channels, then combines pooled convolution features with shared
-    scalar observation features before producing policy and value outputs.
+    z-axis as channels, then combines the spatial convolution map with all
+    non-grid observation features before producing policy and value outputs.
 
     Parameters
     ----------
@@ -68,17 +68,14 @@ class VoxelBox2DCNN(BaseVoxelTorchModel):
         box_radius: int = cfg.get("box_radius", 2)
         conv_channels: list[int] = cfg.get("conv_channels", [32, 64, 64])
         fc_hiddens: list[int] = cfg.get("fc_hiddens", [256])
-        pool_type: str = cfg.get("pool_type", "avg")
-
         self._n = 2 * box_radius + 1
 
         self._conv, last_c = self._build_conv2d_stack(self._n, conv_channels)
-        self._pool = (
-            nn.AdaptiveAvgPool2d((1, 1))
-            if pool_type == "avg"
-            else nn.AdaptiveMaxPool2d((1, 1))
+        self._build_heads(
+            last_c * self._n * self._n + self._n_auxiliary,
+            fc_hiddens,
+            num_outputs,
         )
-        self._build_heads(last_c + self._n_scalars, fc_hiddens, num_outputs)
 
     def forward(
         self,
@@ -105,13 +102,12 @@ class VoxelBox2DCNN(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, self._n, self._n, self._n).permute(0, 3, 1, 2)
+        grid_3d = grid.reshape(batch, self._n, self._n, self._n).permute(0, 3, 1, 2)
         feat = self._conv(grid_3d)
-        feat = self._pool(feat)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
-        scalars = self._scalar_features(obs)
-        features = torch.cat([feat, scalars], dim=1)
+        auxiliary = self._auxiliary_features(obs)
+        features = torch.cat([feat, auxiliary], dim=1)
         return self._forward_heads(features, state)
 
 
@@ -119,7 +115,7 @@ class VoxelBox3DCNN(BaseVoxelTorchModel):
     """3D CNN model for single-radius voxel box observations.
 
     The model reshapes the voxel box into a single-channel 3D volume, extracts
-    pooled convolution features, and combines them with shared scalar features
+    spatial convolution features, and combines them with all non-grid features
     before producing policy and value outputs.
 
     Parameters
@@ -150,17 +146,14 @@ class VoxelBox3DCNN(BaseVoxelTorchModel):
         box_radius: int = cfg.get("box_radius", 2)
         conv_channels: list[int] = cfg.get("conv_channels", [32, 64, 64])
         fc_hiddens: list[int] = cfg.get("fc_hiddens", [256])
-        pool_type: str = cfg.get("pool_type", "avg")
-
         self._n = 2 * box_radius + 1
 
         self._conv, last_c = self._build_conv3d_stack(conv_channels)
-        self._pool = (
-            nn.AdaptiveAvgPool3d((1, 1, 1))
-            if pool_type == "avg"
-            else nn.AdaptiveMaxPool3d((1, 1, 1))
+        self._build_heads(
+            last_c * self._n**3 + self._n_auxiliary,
+            fc_hiddens,
+            num_outputs,
         )
-        self._build_heads(last_c + self._n_scalars, fc_hiddens, num_outputs)
 
     def forward(
         self,
@@ -187,13 +180,12 @@ class VoxelBox3DCNN(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, 1, self._n, self._n, self._n)
+        grid_3d = grid.reshape(batch, 1, self._n, self._n, self._n)
         feat = self._conv(grid_3d)
-        feat = self._pool(feat)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
-        scalars = self._scalar_features(obs)
-        features = torch.cat([feat, scalars], dim=1)
+        auxiliary = self._auxiliary_features(obs)
+        features = torch.cat([feat, auxiliary], dim=1)
         return self._forward_heads(features, state)
 
 
@@ -232,8 +224,6 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
         radii: list[int] = cfg.get("box_radii", [1, 4])
         conv_channels: list[int] = cfg.get("conv_channels", [32, 64, 64])
         fc_hiddens: list[int] = cfg.get("fc_hiddens", [256])
-        pool_type: str = cfg.get("pool_type", "avg")
-
         if len(radii) < 2:
             raise ValueError("VoxelHierarchicalBox3DCNN requires at least 2 radii.")
 
@@ -243,12 +233,11 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
         n_channels = len(radii)
 
         self._conv, last_c = self._build_conv3d_stack(conv_channels, in_channels=n_channels)
-        self._pool = (
-            nn.AdaptiveAvgPool3d((1, 1, 1))
-            if pool_type == "avg"
-            else nn.AdaptiveMaxPool3d((1, 1, 1))
+        self._build_heads(
+            last_c * self._n_max**3 + self._n_auxiliary,
+            fc_hiddens,
+            num_outputs,
         )
-        self._build_heads(last_c + self._n_scalars, fc_hiddens, num_outputs)
 
     def forward(
         self,
@@ -280,7 +269,7 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
         offset = 0
         for size in self._sizes:
             segment = grid[:, offset : offset + size**3]
-            volume = segment.view(batch, size, size, size)
+            volume = segment.reshape(batch, size, size, size)
             pad = (self._n_max - size) // 2
             if pad > 0:
                 volume = F.pad(volume, [pad, pad, pad, pad, pad, pad])
@@ -289,11 +278,10 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
 
         stacked = torch.stack(volumes, dim=1)
         feat = self._conv(stacked)
-        feat = self._pool(feat)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
-        scalars = self._scalar_features(obs)
-        features = torch.cat([feat, scalars], dim=1)
+        auxiliary = self._auxiliary_features(obs)
+        features = torch.cat([feat, auxiliary], dim=1)
         return self._forward_heads(features, state)
 
 
@@ -301,7 +289,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
     """3D CNN policy head backed by a pretrained garden encoder.
 
     This model loads a garden encoder checkpoint, optionally freezes it, and
-    uses the resulting latent vector together with shared scalar observation
+    uses the resulting latent vector together with all non-grid observation
     features to produce policy and value outputs.
 
     Parameters
@@ -359,7 +347,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
 
         self._encoder = encoder
         self._freeze = freeze
-        self._build_heads(latent_dim + self._n_scalars, fc_hiddens, num_outputs)
+        self._build_heads(latent_dim + self._n_auxiliary, fc_hiddens, num_outputs)
 
     def forward(
         self,
@@ -386,7 +374,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, self._n, self._n, self._n)
+        grid_3d = grid.reshape(batch, self._n, self._n, self._n)
 
         if self._freeze:
             with torch.no_grad():
@@ -394,8 +382,8 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         else:
             latent = self._encoder(grid_3d)
 
-        scalars = self._scalar_features(obs)
-        features = torch.cat([latent, scalars], dim=1)
+        auxiliary = self._auxiliary_features(obs)
+        features = torch.cat([latent, auxiliary], dim=1)
         return self._forward_heads(features, state)
 
 
