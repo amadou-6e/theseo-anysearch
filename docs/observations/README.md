@@ -41,3 +41,14 @@ env:
 ```
 
 Legacy fields such as `env.obs_mode`, `env.box_radius`, and `env.ray_max_len` remain loadable during migration. Do not combine them with `env.observation` in the same configuration.
+
+## Shared navigation features
+
+Every observation mode includes `goal_direction`, the Euclidean unit vector
+from the cursor to the active goal. It is `(0, 0, 0)` at the goal. Goal
+distance is represented separately by `goal_distance`, so changing only the
+distance does not change `goal_direction`.
+
+This unit-vector encoding replaces the earlier grid-scaled displacement.
+Existing policy checkpoints trained with the earlier encoding are therefore
+not observation-compatible and should be retrained.
