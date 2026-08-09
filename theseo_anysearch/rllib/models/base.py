@@ -142,8 +142,8 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
         RLlib model instance name.
     """
 
-    _scalar_keys = ("steps_remaining", "voxel_count", "cursor_pos")
-    _n_scalars = 5
+    _scalar_keys = ("steps_remaining", "cursor_pos")
+    _n_scalars = 4
 
     def __init__(
         self,

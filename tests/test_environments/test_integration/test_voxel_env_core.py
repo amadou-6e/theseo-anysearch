@@ -19,18 +19,16 @@ class TestVoxelEnvIntegration:
         assert type(env._rust_env).__name__ == "PyVoxelEnv"
 
     def test_observation_space_has_expected_keys(self, env):
-        assert "steps_remaining" in env.observation_space.spaces
-        assert "voxel_count" in env.observation_space.spaces
+        assert set(env.observation_space.spaces) == {"steps_remaining"}
 
     def test_reset_returns_dict_with_correct_keys(self, env):
         obs, info = env.reset(seed=0)
-        assert set(obs.keys()) == {"steps_remaining", "voxel_count"}
+        assert set(obs.keys()) == {"steps_remaining"}
         assert isinstance(info, dict)
 
     def test_reset_obs_dtypes_are_float32(self, env):
         obs, _ = env.reset(seed=0)
         assert obs["steps_remaining"].dtype == np.float32
-        assert obs["voxel_count"].dtype == np.float32
 
     def test_reset_steps_remaining_is_normalised(self, env):
         obs, _ = env.reset(seed=0)
@@ -59,10 +57,6 @@ class TestVoxelEnvIntegration:
                 done = True
                 break
         assert done
-
-    def test_voxel_count_nonnegative_after_reset(self, env):
-        obs, _ = env.reset(seed=0)
-        assert float(obs["voxel_count"][0]) >= 0.0
 
     def test_encode_action_returns_int(self, env):
         assert env._encode_action(0) == 0

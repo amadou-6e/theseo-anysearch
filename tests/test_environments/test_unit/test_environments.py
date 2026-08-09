@@ -18,13 +18,11 @@ class TestVoxelEnv:
 
     def test_observation_space_keys(self):
         env = self.make()
-        assert "steps_remaining" in env.observation_space.spaces
-        assert "voxel_count" in env.observation_space.spaces
+        assert set(env.observation_space.spaces) == {"steps_remaining"}
 
     def test_observation_space_shapes(self):
         env = self.make()
         assert env.observation_space["steps_remaining"].shape == (1,)
-        assert env.observation_space["voxel_count"].shape == (1,)
 
     def test_action_space_size(self):
         env = self.make()
@@ -35,7 +33,6 @@ class TestVoxelEnv:
         obs, info = env.reset()
         assert isinstance(obs, dict)
         assert "steps_remaining" in obs
-        assert "voxel_count" in obs
         assert isinstance(info, dict)
 
     def test_obs_values_are_numpy(self):
@@ -62,7 +59,7 @@ class TestVoxelEnvObsModes:
     def test_scalar_mode_unchanged(self):
         env = self.make(obs_mode="scalar")
         keys = set(env.observation_space.spaces)
-        assert keys == {"steps_remaining", "voxel_count"}
+        assert keys == {"steps_remaining"}
 
     def test_scalar_default_no_cursor_pos(self):
         env = self.make()  # no obs_mode key

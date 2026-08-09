@@ -7,7 +7,6 @@ env:
   observation:
     mode: box
     box_radius: 1
-    include_voxel_count: true
 ```
 
 ## Fields
@@ -18,7 +17,6 @@ env:
 | `box_radius` | `2` | Radius of a local cubic observation. Radius 1 produces a `3 × 3 × 3` grid. |
 | `box_radii` | `null` | Radii concatenated by hierarchical box observations. |
 | `ray_max_len` | `16` | Maximum radial ray distance. |
-| `include_voxel_count` | `true` | Includes the normalized filled-voxel count. |
 
 Examples:
 

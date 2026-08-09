@@ -41,7 +41,6 @@ class TestVoxelEnvObservationsRadial:
 
         assert set(obs) == {
             "steps_remaining",
-            "voxel_count",
             "goal_distance",
             "goal_direction",
             "cursor_pos",
@@ -49,7 +48,6 @@ class TestVoxelEnvObservationsRadial:
             "ray_hit_types",
         }
         assert obs["steps_remaining"].shape == (1,)
-        assert obs["voxel_count"].shape == (1,)
         assert obs["goal_distance"].shape == (1,)
         assert obs["goal_direction"].shape == (3,)
         assert obs["cursor_pos"].shape == (3,)
@@ -108,16 +106,6 @@ class TestVoxelEnvObservationsRadial:
         assert tuple(obs2["goal_direction"]) == pytest.approx(
             normalized_goal_direction((4, 5, 5), GOAL)
         )
-
-    def test_voxel_count_increases_on_successful_moves(self, tmp_path):
-        env = make_radial_test_env(tmp_path)
-        obs0, _ = env.reset(seed=0)
-        obs1, *_ = env.step(ACTION_PLUS_Z)
-        obs2, *_ = env.step(ACTION_PLUS_Y)
-
-        assert obs0["voxel_count"][0] == pytest.approx(0.0)
-        assert obs1["voxel_count"][0] == pytest.approx(1.0)
-        assert obs2["voxel_count"][0] == pytest.approx(2.0)
 
     def test_ray_hits_show_adjacent_geometry(self, tmp_path):
         geometry_boxes = [[5, 4, 4, 5, 4, 4]]
