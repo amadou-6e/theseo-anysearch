@@ -1,0 +1,51 @@
+description: >
+  Runs APPO with asynchronous sampling on a fixed single-agent waypoint task.
+
+experiment:
+  name: appo-baseline
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 100
+  seed: 42
+  waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
+  geometry:
+    grid_size: 32
+  observation:
+    mode: radial
+  action:
+    mode: discrete_26
+
+training:
+  algorithm: appo
+  runner: local
+  iterations: 100
+  checkpoint_interval: 25
+  trajectory_every: 10
+  num_env_runners: 4
+  num_envs_per_env_runner: 2
+
+evaluation:
+  episodes: 10
+  seed: 142
+  num_env_runners: 1
+
+algorithm_config:
+  lr: 3.0e-4
+  gamma: 0.99
+  train_batch_size: 1024
+  rollout_fragment_length: 32
+  vtrace: true
+  use_gae: true
+  lambda_: 1.0
+  clip_param: 0.4
+  circular_buffer_num_batches: 8
+  circular_buffer_iterations_per_batch: 2
+
+model_config:
+  hidden_sizes: [128, 128]
+  activation: relu
+
+mlflow: {}
