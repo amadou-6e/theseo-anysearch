@@ -1,6 +1,6 @@
 """Base algorithm and model configuration contracts."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -39,7 +39,7 @@ class ModelConfig(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    hidden_sizes: list[int] = Field(default_factory=lambda: [256, 256], description="Hidden layer widths of the default fully connected policy.")
+    hidden_sizes: list[Annotated[int, Field(gt=0)]] = Field(default_factory=lambda: [256, 256], description="Hidden layer widths of the default fully connected policy.")
     activation: Literal["relu", "tanh", "elu"] = Field("relu", description="Hidden-layer activation function.")
     custom_model: str | None = Field(None, description="Registered RLlib model implementation name.")
     custom_model_config: dict[str, Any] | None = Field(None, description="Parameters forwarded to the registered model implementation.")
