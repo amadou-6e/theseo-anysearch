@@ -67,35 +67,51 @@ staging:
   replay_transition: clear
   stages:
     - name: select-adjacent-goal
-      iterations: 25
+      completion:
+        type: iterations
+        iterations: 25
       env:
         max_steps: 1
         trail_mode: false
         waypoints_file: usage/experiments/showcase/staged_waypoint_training/waypoint_adjacent.json
 
     - name: reach-near-goal
-      iterations: 50
+      completion:
+        type: iterations
+        iterations: 50
       env:
         max_steps: 8
         trail_mode: false
         waypoints_file: usage/experiments/showcase/staged_waypoint_training/waypoint_near.json
 
     - name: reach-medium-goal
-      iterations: 100
+      completion:
+        type: iterations
+        iterations: 100
       env:
         max_steps: 32
         trail_mode: false
         waypoints_file: usage/experiments/showcase/staged_waypoint_training/waypoint_medium.json
 
     - name: full-episode-no-trails
-      iterations: 150
+      completion:
+        type: iterations
+        iterations: 150
       env:
         max_steps: 96
         trail_mode: false
         waypoints_file: usage/experiments/showcase/staged_waypoint_training/waypoint_full.json
 
     - name: full-episode-with-trails
-      iterations: 175
+      completion:
+        type: any
+        max_iterations: 175
+        conditions:
+          - type: performance
+            metric: evaluation_success_rate
+            threshold: 0.95
+            comparison: gte
+            consecutive_iterations: 5
       replay_transition: clear
       env:
         max_steps: 128

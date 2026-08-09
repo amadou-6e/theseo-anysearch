@@ -1,9 +1,8 @@
 # Staged training
 
-Staged training keeps one policy while applying an ordered list of task
-configurations. Use it to introduce environment dynamics gradually, for
-example by beginning with an adjacent waypoint, increasing the episode budget
-and goal distance, and enabling trail placement only in the final stage.
+Staging trains one policy through an ordered list of tasks. Each stage may
+override environment, evaluation, and algorithm settings without changing the
+policy's observation or action contract.
 
 ```yaml
 staging:
@@ -12,58 +11,114 @@ staging:
   replay_transition: clear
   stages:
     - name: select-adjacent-goal
-      iterations: 25
+      completion:
+        type: iterations
+        iterations: 25
       env:
         max_steps: 1
         trail_mode: false
-        waypoints_file: path/to/adjacent.json
 
-    - name: full-task-with-trails
-      iterations: 200
+    - name: navigate-with-trails
+      completion:
+        type: any
+        max_iterations: 200
+        conditions:
+          - type: performance
+            metric: evaluation_success_rate
+            threshold: 0.95
+            comparison: gte
+            consecutive_iterations: 5
       env:
         max_steps: 128
         trail_mode: true
-        waypoints_file: path/to/full.json
 ```
 
-Each stage is merged over the shared `env`, `evaluation`, and
-`algorithm_config` blocks. `iterations` is the number of iterations spent in
-that stage; checkpoint and metric iteration numbers remain cumulative across
-the complete run.
+## Completion conditions
 
-## Stage fields
+`completion` is a condition tree. The built-in condition types are:
 
-| Field | Default | Purpose |
-|---|---:|---|
-| `name` | required | Unique stable stage identifier. |
-| `iterations` | required | Training iterations allocated to the stage. |
-| `env` | `{}` | Environment overrides such as `max_steps`, `trail_mode`, goals, rewards, and task termination. |
-| `evaluation` | `{}` | Evaluation overrides for this stage. |
-| `algorithm_config` | `{}` | Algorithm hyperparameter overrides for this stage. |
-| `replay_transition` | staging default | Selects `clear` or `preserve` when entering this stage. |
+| Type | Configuration | Meaning |
+| --- | --- | --- |
+| `iterations` | `iterations` | Complete after this many stage-local iterations. |
+| `performance` | `metric`, `threshold`, `comparison`, `consecutive_iterations` | Complete after a metric satisfies a threshold for consecutive iterations. |
+| `all` | `conditions` | Complete when every child condition is true. |
+| `any` | `conditions` | Complete when at least one child condition is true. |
+| `not` | `condition` | Negate one child condition. |
+| `python` | `callable`, optional `parameters` | Delegate a leaf condition to Python. |
 
-`clear` constructs a fresh algorithm and transfers policy weights. This clears
-replay and optimizer state, which is appropriate when transition semantics
-change, such as enabling trails. `preserve` restores the full preceding
-checkpoint, including replay and optimizer state.
+Comparisons are `gte`, `gt`, `lte`, `lt`, and `eq`. Metrics come from the
+normalized `TrainResult.standard_metrics()` contract, including
+`episode_reward_mean`, `training_success_rate`, and
+`evaluation_success_rate`.
 
-## Policy-contract restrictions
+Conditions can be nested:
 
-Stages cannot change fields that alter policy tensor shapes:
+```yaml
+completion:
+  type: any
+  conditions:
+    - type: all
+      conditions:
+        - type: performance
+          metric: evaluation_success_rate
+          threshold: 0.95
+          consecutive_iterations: 5
+        - type: performance
+          metric: episode_len_mean
+          comparison: lte
+          threshold: 32
+    - type: iterations
+      iterations: 200
+```
 
-- `agent_count`
-- `observation`
-- `action`
-- `geometry.grid_size`
+Every stage must have a finite upper bound. An `iterations` condition can
+provide that bound when its position in the tree guarantees termination.
+Alternatively, set `max_iterations` on the root condition. The cap completes
+the stage even when the configured condition never becomes true.
 
-Create a separate experiment when one of these must change. Runtime task fields
-such as episode length, trail behavior, waypoint files, rewards, geometry
-contents at a fixed grid size, and termination settings may change between
-stages.
+## Python extension conditions
 
-The runner writes `staging_state.json` and a checkpoint at each transition.
-Resume restores the active stage and continues without repeating completed
-stages. MLflow metrics include `training_stage_index`.
+A Python leaf references an importable callable with
+`module.path:function_name`:
 
-See the [progressive waypoint showcase](../../usage/experiments/showcase/staged_waypoint_training/README.md)
-for a complete runnable configuration.
+```yaml
+completion:
+  type: python
+  callable: my_training.completion:ready_for_trails
+  max_iterations: 200
+  parameters:
+    minimum_success: 0.9
+```
+
+The callable receives one context dictionary and returns a truthy value when
+the leaf is complete:
+
+```python
+def ready_for_trails(context):
+    success = context["metrics"]["evaluation_success_rate"]
+    state = context["state"]
+    required = context["parameters"]["minimum_success"]
+    state["best_success"] = max(state.get("best_success", 0.0), success)
+    return state["best_success"] >= required
+```
+
+The context contains `result` (the normalized `TrainResult`), `metrics`,
+`stage_iteration`, `parameters`, and a mutable `state` dictionary. State must
+remain JSON-serializable; it is persisted in `staging_state.json` after every
+iteration and restored on resume. Python leaves compose with `all`, `any`, and
+`not` exactly like built-in leaves. The referenced module must be importable in
+the training process.
+
+## Stage transitions and resume
+
+`replay_transition: clear` creates a fresh algorithm and transfers policy
+weights, resetting replay and optimizer state. `preserve` restores the full
+checkpoint. A stage can override the staging default.
+
+The runner checkpoints at transitions and writes `staging_state.json`, which
+contains the active stage, its original start iteration, and condition state.
+`resume: true` allows a run to continue inside the active stage without
+resetting consecutive-performance or Python-extension state.
+
+Stage overrides may not change `agent_count`, `observation`, `action`, or
+`geometry.grid_size`, because those fields define the policy contract.

@@ -88,12 +88,12 @@ class TestExperimentRunnerRun:
             "stages": [
                 {
                     "name": "one-step",
-                    "iterations": 1,
+                    "completion": {"type": "iterations", "iterations": 1},
                     "env": {"max_steps": 1, "trail_mode": False},
                 },
                 {
                     "name": "with-trails",
-                    "iterations": 2,
+                    "completion": {"type": "iterations", "iterations": 2},
                     "env": {"max_steps": 50, "trail_mode": True},
                 },
             ],

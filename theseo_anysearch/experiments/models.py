@@ -287,17 +287,75 @@ class HeuristicConfig(BaseModel):
         return self
 
 
+class StageCompletionConfig(BaseModel):
+    """Composable condition controlling when a training stage advances."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["iterations", "performance", "all", "any", "not", "python"]
+    iterations: int | None = Field(default=None, ge=1)
+    metric: str | None = None
+    threshold: float | None = None
+    comparison: Literal["gte", "gt", "lte", "lt", "eq"] = "gte"
+    consecutive_iterations: int = Field(default=1, ge=1)
+    conditions: list["StageCompletionConfig"] = Field(default_factory=list)
+    condition: "StageCompletionConfig | None" = None
+    callable: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    max_iterations: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "StageCompletionConfig":
+        if self.type == "iterations" and self.iterations is None:
+            raise ValueError("iterations completion requires iterations")
+        if self.type == "performance" and (
+            self.metric is None or self.threshold is None
+        ):
+            raise ValueError("performance completion requires metric and threshold")
+        if self.type in {"all", "any"} and not self.conditions:
+            raise ValueError(f"{self.type} completion requires conditions")
+        if self.type == "not" and self.condition is None:
+            raise ValueError("not completion requires condition")
+        if self.type == "python" and not self.callable:
+            raise ValueError("python completion requires callable")
+        return self
+
+    def iteration_limit(self) -> int | None:
+        """Return a finite upper bound implied by this condition tree."""
+        if self.max_iterations is not None:
+            return self.max_iterations
+        if self.type == "iterations":
+            return self.iterations
+        child_limits = [child.iteration_limit() for child in self.conditions]
+        if self.type == "any" and any(limit is not None for limit in child_limits):
+            return min(limit for limit in child_limits if limit is not None)
+        if self.type == "all" and child_limits and all(
+            limit is not None for limit in child_limits
+        ):
+            return max(limit for limit in child_limits if limit is not None)
+        return None
+
+
 class TrainingStageConfig(BaseModel):
     """One ordered training task applied over the shared experiment config."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    iterations: int = Field(ge=1)
+    completion: StageCompletionConfig
     env: dict[str, Any] = Field(default_factory=dict)
     evaluation: dict[str, Any] = Field(default_factory=dict)
     algorithm_config: dict[str, Any] = Field(default_factory=dict)
     replay_transition: Literal["clear", "preserve"] | None = None
+
+    @model_validator(mode="after")
+    def validate_bounded_completion(self) -> "TrainingStageConfig":
+        if self.completion.iteration_limit() is None:
+            raise ValueError(
+                "stage completion must be bounded by max_iterations or an "
+                "iteration condition"
+            )
+        return self
 
 
 class StagingConfig(BaseModel):
@@ -413,7 +471,10 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
         _merge_stage_overrides(raw["env"], stage.env)
         _merge_stage_overrides(raw["evaluation"], stage.evaluation)
         _merge_stage_overrides(raw["algorithm_config"], stage.algorithm_config)
-        raw["training"]["iterations"] = completed_iterations + stage.iterations
+        limit = stage.completion.iteration_limit()
+        if limit is None:  # guarded by TrainingStageConfig validation
+            raise RuntimeError("stage completion has no finite iteration limit")
+        raw["training"]["iterations"] = completed_iterations + limit
 
         from theseo_anysearch.experiments.loader import _resolve_typed_configs
 

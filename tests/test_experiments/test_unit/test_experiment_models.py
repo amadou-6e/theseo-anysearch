@@ -115,12 +115,12 @@ class TestStagingConfig:
             "stages": [
                 {
                     "name": "select-goal",
-                    "iterations": 2,
+                    "completion": {"type": "iterations", "iterations": 2},
                     "env": {"max_steps": 1, "trail_mode": False},
                 },
                 {
                     "name": "full-route",
-                    "iterations": 3,
+                    "completion": {"type": "iterations", "iterations": 3},
                     "env": {"max_steps": 50, "trail_mode": True},
                 },
             ]
@@ -144,8 +144,8 @@ class TestStagingConfig:
         payload = self._payload(experiment_config)
         payload["staging"] = {
             "stages": [
-                {"name": "same", "iterations": 1},
-                {"name": "same", "iterations": 1},
+                {"name": "same", "completion": {"type": "iterations", "iterations": 1}},
+                {"name": "same", "completion": {"type": "iterations", "iterations": 1}},
             ]
         }
 
@@ -169,7 +169,7 @@ class TestStagingConfig:
         payload = self._payload(experiment_config)
         payload["staging"] = {
             "stages": [
-                {"name": "invalid", "iterations": 1, "env": env_override}
+                {"name": "invalid", "completion": {"type": "iterations", "iterations": 1}, "env": env_override}
             ]
         }
 

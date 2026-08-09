@@ -18,5 +18,9 @@ Run it from the repository root:
 anysearch experiment run usage/experiments/showcase/staged_waypoint_training/experiment.yaml
 ```
 
+The first four stages use iteration completion. The final trail stage advances
+after `evaluation_success_rate` reaches 0.95 for five consecutive iterations,
+with a 175-iteration safety cap.
+
 The run directory contains `staging_state.json`, cumulative checkpoints, and
 stage-indexed MLflow metrics.

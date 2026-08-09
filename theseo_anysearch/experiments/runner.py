@@ -158,7 +158,9 @@ class StagingState(BaseModel):
     stage_index: int = Field(default=0, ge=0)
     stage_name: str = ""
     completed_iterations: int = Field(default=0, ge=0)
+    stage_started_at: int = Field(default=0, ge=0)
     completed_stages: list[str] = Field(default_factory=list)
+    completion_state: dict[str, Any] = Field(default_factory=dict)
 
 
 def _new_run_id() -> str:
@@ -383,11 +385,43 @@ class ExperimentRunner:
 
         for stage_index in range(start_index, len(staging.stages)):
             stage = staging.stages[stage_index]
+            stage_started_at = (
+                state.stage_started_at
+                if state.stage_name == stage.name
+                else state.completed_iterations
+            )
             stage_config = self._config.stage_experiment(
                 stage_index,
-                completed_iterations=state.completed_iterations,
+                completed_iterations=stage_started_at,
             )
             trainer = _build_trainer(stage_config, run_dir)
+            from theseo_anysearch.experiments.stage_completion import (
+                StageCompletionController,
+            )
+            controller = StageCompletionController(
+                stage.completion,
+                stage_start_iteration=stage_started_at,
+                state=state.completion_state,
+            )
+            original_iteration_hook = trainer.on_iteration_end
+
+            def _stage_iteration_hook(result: TrainResult) -> None:
+                original_iteration_hook(result)
+                controller.evaluate(result)
+                active_state = StagingState(
+                    stage_index=stage_index,
+                    stage_name=stage.name,
+                    completed_iterations=result.iteration,
+                    stage_started_at=stage_started_at,
+                    completed_stages=state.completed_stages,
+                    completion_state=controller.state,
+                )
+                self._write_staging_state(store, active_state)
+
+            trainer.on_iteration_end = _stage_iteration_hook  # type: ignore[method-assign]
+            trainer.should_stop_training = (  # type: ignore[method-assign]
+                lambda result: controller.completed
+            )
             _attach_tracking_hook(trainer, tracker, stage_index=stage_index)
             transition = stage.replay_transition or staging.replay_transition
 
@@ -407,7 +441,8 @@ class ExperimentRunner:
                     previous_config = self._config.stage_experiment(
                         stage_index - 1,
                         completed_iterations=(
-                            state.completed_iterations - previous_stage.iterations
+                            state.completed_iterations
+                            - (previous_stage.completion.iteration_limit() or 0)
                         ),
                     )
                     checkpoint_trainer = _build_trainer(previous_config, run_dir)
@@ -437,7 +472,11 @@ class ExperimentRunner:
                     trainer._episodes_total = episodes_total
 
             active_state = state.model_copy(
-                update={"stage_index": stage_index, "stage_name": stage.name}
+                update={
+                    "stage_index": stage_index,
+                    "stage_name": stage.name,
+                    "stage_started_at": stage_started_at,
+                }
             )
             self._write_staging_state(store, active_state)
             trainer.train()
@@ -447,12 +486,15 @@ class ExperimentRunner:
                 stage_index=stage_index + 1,
                 stage_name="",
                 completed_iterations=trainer._iteration,
+                stage_started_at=trainer._iteration,
                 completed_stages=completed_stages,
+                completion_state={},
             )
             self._write_staging_state(store, state)
             _append_run_stage(
                 run_dir,
-                f"Completed training stage {stage_index}: {stage.name}",
+                f"Completed training stage {stage_index}: {stage.name} "
+                f"({controller.reason})",
             )
             previous_trainer = trainer
             resume = False
@@ -462,7 +504,8 @@ class ExperimentRunner:
             final_config = self._config.stage_experiment(
                 final_index,
                 completed_iterations=(
-                    state.completed_iterations - staging.stages[final_index].iterations
+                    state.completed_iterations
+                    - (staging.stages[final_index].completion.iteration_limit() or 0)
                 ),
             )
             previous_trainer = _build_trainer(final_config, run_dir)
