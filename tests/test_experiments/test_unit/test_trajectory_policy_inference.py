@@ -14,7 +14,7 @@ from theseo_anysearch.experiments.trajectory import (
 
 
 def _observation() -> dict[str, np.ndarray]:
-    return {"voxel_count": np.asarray([0.0], dtype=np.float32)}
+    return {"steps_remaining": np.asarray([1.0], dtype=np.float32)}
 
 
 class _OneStepEnv:

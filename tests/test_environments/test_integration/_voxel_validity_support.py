@@ -6,7 +6,7 @@ Create a radial test environment with fixed waypoints.
 
 >>> env = make_radial_test_env(tmp_path)
 >>> obs, _ = env.reset(seed=0)
->>> set(obs) >= {"steps_remaining", "voxel_count", "goal_distance", "cursor_pos", "ray_hits"}
+>>> set(obs) >= {"steps_remaining", "goal_distance", "cursor_pos", "ray_hits"}
 True
 """
 

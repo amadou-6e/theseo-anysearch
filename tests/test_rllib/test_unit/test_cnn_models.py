@@ -19,7 +19,6 @@ def _make_obs_space(box_radius: int) -> gym.spaces.Dict:
     n = 2 * box_radius + 1
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0, (1,), np.float32),
-        "voxel_count":     gym.spaces.Box(0.0, np.inf, (1,), np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0, (3,), np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0, (n**3,), np.float32),
     })
@@ -33,7 +32,6 @@ def _make_dummy_obs(batch: int, box_radius: int) -> dict[str, torch.Tensor]:
     n = 2 * box_radius + 1
     return {
         "steps_remaining": torch.rand(batch, 1),
-        "voxel_count":     torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
         "local_grid":      torch.rand(batch, n**3),
     }
@@ -261,7 +259,6 @@ def _make_hier_obs_space(radii: list[int]) -> gym.spaces.Dict:
     flat_size = sum((2 * r + 1) ** 3 for r in radii)
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0,    (1,),         np.float32),
-        "voxel_count":     gym.spaces.Box(0.0, np.inf,  (1,),         np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0,    (3,),         np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
     })
@@ -271,7 +268,6 @@ def _make_hier_obs(batch: int, radii: list[int]) -> dict[str, torch.Tensor]:
     flat_size = sum((2 * r + 1) ** 3 for r in radii)
     return {
         "steps_remaining": torch.rand(batch, 1),
-        "voxel_count":     torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
         "local_grid":      torch.rand(batch, flat_size),
     }
@@ -407,7 +403,6 @@ class TestVoxelHierarchicalBox3DCNN:
         flat_size = sum((2 * r + 1) ** 3 for r in [1, 4])
         obs = {
             "steps_remaining": torch.rand(1, 1, requires_grad=False),
-            "voxel_count":     torch.rand(1, 1),
             "cursor_pos":      torch.rand(1, 3),
             "local_grid":      torch.rand(1, flat_size, requires_grad=True),
         }
@@ -495,7 +490,6 @@ class TestVoxelEnvHierarchicalBoxObsMode:
 
         mock_obs = MagicMock()
         mock_obs.steps_remaining = 5
-        mock_obs.filled = 3
         mock_obs.cursor_pos = (5, 5, 5)
 
         result = env._obs_to_numpy(mock_obs)
@@ -514,7 +508,6 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         env._init_obs_cache(env._config)
         mock_obs = MM()
         mock_obs.steps_remaining = 1
-        mock_obs.filled = 0
         mock_obs.cursor_pos = (1, 1, 1)
         with pytest.raises(ValueError, match="hierarchical_box"):
             env._obs_to_numpy(mock_obs)

@@ -12,4 +12,3 @@ class ObservationConfig(BaseModel):
     box_radius: int = Field(default=2, ge=0, description="Voxel radius of a local box observation.")
     box_radii: list[int] | None = Field(None, description="Radii combined by a hierarchical box observation.")
     ray_max_len: int = Field(default=16, ge=1, description="Maximum radial-observation ray length in voxels.")
-    include_voxel_count: bool = Field(True, description="Include the normalized filled-voxel count in observations.")

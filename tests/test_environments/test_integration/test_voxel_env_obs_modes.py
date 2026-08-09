@@ -72,17 +72,17 @@ class TestVoxelEnvObsModesIntegration:
         obs, *_ = env.step(2)
         assert obs["ray_hits"].shape == (26,)
 
-    @pytest.mark.parametrize("obs_mode", ["scalar", "box", "radial"])
-    def test_voxel_count_can_be_excluded_for_checkpoint_compatibility(
-        self,
-        obs_mode,
-    ):
-        env = self.make(obs_mode=obs_mode, include_voxel_count=False)
+    @pytest.mark.parametrize(
+        "obs_mode", ["scalar", "box", "radial", "hierarchical_box"]
+    )
+    def test_filled_cell_count_is_not_exposed_to_policy(self, obs_mode):
+        env = self.make(obs_mode=obs_mode)
 
         obs, _ = env.reset()
 
         assert "voxel_count" not in obs
         assert "voxel_count" not in env.observation_space.spaces
+
     def test_cursor_pos_in_box_obs(self):
         env = self.make(obs_mode="box")
         obs, _ = env.reset()

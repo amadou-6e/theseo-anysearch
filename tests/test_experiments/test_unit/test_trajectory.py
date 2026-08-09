@@ -260,9 +260,9 @@ class TestPayload:
 # collect_eval_episode — fake env + algo (no Rust, no Ray)
 # ---------------------------------------------------------------------------
 
-def _obs(voxel_count: int) -> dict:
-    """Minimal obs dict with only the key collect_eval_episode reads."""
-    return {"voxel_count": np.array([voxel_count], dtype=np.float32)}
+def _obs() -> dict:
+    """Minimal policy observation for the fake environment."""
+    return {"steps_remaining": np.array([1.0], dtype=np.float32)}
 
 
 class _FakeEnv:
@@ -280,12 +280,15 @@ class _FakeEnv:
 
     def reset(self, seed=None):
         self._voxel_count = 0
-        return _obs(self._voxel_count), {}
+        return _obs(), {}
 
     def step(self, action):  # noqa: ARG002
         _action_expected, new_count, done = self._script.pop(0)
         self._voxel_count = new_count
-        return _obs(new_count), -0.01, done, False, {}
+        return _obs(), -0.01, done, False, {}
+
+    def filled_voxel_count(self) -> int:
+        return self._voxel_count
 
     def close(self):
         pass
