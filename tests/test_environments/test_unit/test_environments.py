@@ -1,6 +1,7 @@
 """Unit tests for Gymnasium and PettingZoo environment wrappers and observation modes."""
 
 import json
+import re
 
 import pytest
 import numpy as np
@@ -111,6 +112,52 @@ class TestVoxelEnvObsModes:
     def test_unknown_mode_raises(self):
         with pytest.raises(ValueError, match="bogus"):
             self.make(obs_mode="bogus")
+
+
+class TestVoxelEnvLoadWaypoints:
+    """Tests VoxelEnv._load_waypoints failure modes (issue #118)."""
+
+    def test_valid_waypoints_file_loads(self, tmp_path):
+        path = tmp_path.joinpath("waypoints.json")
+        path.write_text(
+            json.dumps({"start": [4, 4, 4], "goal": [4, 4, 6]}),
+            encoding="utf-8",
+        )
+        wp = VoxelEnv._load_waypoints(str(path))
+        assert wp == {"start": [4, 4, 4], "goal": [4, 4, 6]}
+
+    def test_missing_file_raises_with_path(self, tmp_path):
+        missing = tmp_path.joinpath("does_not_exist.json")
+        with pytest.raises(FileNotFoundError, match=re.escape(str(missing))):
+            VoxelEnv._load_waypoints(str(missing))
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path.joinpath("waypoints.json")
+        path.write_text("{not valid json", encoding="utf-8")
+        with pytest.raises(ValueError, match="not valid JSON"):
+            VoxelEnv._load_waypoints(str(path))
+
+    def test_missing_required_keys_raises(self, tmp_path):
+        path = tmp_path.joinpath("waypoints.json")
+        path.write_text(json.dumps({"start": [4, 4, 4]}), encoding="utf-8")
+        with pytest.raises(ValueError, match="missing required key"):
+            VoxelEnv._load_waypoints(str(path))
+
+    def test_invalid_coordinate_shape_raises(self, tmp_path):
+        path = tmp_path.joinpath("waypoints.json")
+        path.write_text(
+            json.dumps({"start": [4, 4], "goal": [4, 4, 6]}), encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="invalid 'start' value"):
+            VoxelEnv._load_waypoints(str(path))
+
+    def test_unconfigured_waypoints_file_does_not_raise(self):
+        # waypoints_file left unset entirely: _build_rust_env must not call
+        # _load_waypoints at all, and env construction must succeed.
+        env = VoxelEnv(
+            {"agent_count": 1, "max_steps": 50, "seed": 42, "waypoints_file": None}
+        )
+        assert "goal_distance" not in env.observation_space.spaces
 
 
 class TestSurfaceEnv:
