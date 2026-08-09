@@ -35,6 +35,7 @@ training:
 | `num_env_runners` | `0` | Parallel training rollout workers; zero samples in the local trainer process. |
 | `num_envs_per_env_runner` | `1` | Synchronously vectorized environments hosted by each rollout worker. Values above one batch policy inference without creating more Ray actors. |
 | `num_gpus_per_env_runner` | `0.0` | GPU allocation per rollout worker. Keep zero for CPU rollout inference so learner updates retain the configured training GPU. |
+| `weight_sync_interval` | `1` | DQN learner updates between policy broadcasts to training EnvRunners. |
 | `trajectory_every` | `10` | Iteration interval for replayable evaluation trajectories. |
 | `best_trajectory` | `true` | Retains the best evaluation trajectory observed so far. |
 | `video_every` | `10` | Iteration interval for rendered video artifacts. |
@@ -54,6 +55,35 @@ model_config:
 ```
 
 Algorithm-specific models validate additional fields such as PPO clipping, minibatch, and SGD settings. See [goal-finding evaluation](evaluation.md) for deterministic evaluation behavior and reported metrics.
+
+## DQN batching and synchronization
+
+DQN exposes sampling granularity and replay intensity independently:
+
+```yaml
+algorithm_config:
+  train_batch_size: 1024
+  rollout_fragment_length: 10
+  training_intensity: 42.6666667
+
+training:
+  num_env_runners: 5
+  num_envs_per_env_runner: 4
+  weight_sync_interval: 4
+```
+
+`rollout_fragment_length` controls the steps collected by each vector
+environment in one request. `"auto"`, the default, uses DQN's `n_step`.
+`training_intensity` controls replayed transitions per newly sampled
+transition. Leaving it unset uses one replay update per outer DQN training step,
+so changing fragment length without setting intensity also changes total
+learning volume.
+
+`weight_sync_interval` is counted in learner updates, not outer driver calls.
+The example therefore broadcasts after updates 4, 8, 12, and so on regardless
+of whether one outer call contains one or ten replay updates. Sampling
+granularity, learning volume, and policy freshness can consequently be tuned
+without silently redefining one another.
 
 Vectorized rollouts improve inference batching when a worker's single environment
 does not provide enough work. For example, two workers with four environments
