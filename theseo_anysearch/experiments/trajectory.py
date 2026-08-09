@@ -318,7 +318,7 @@ class _VoxelEpisodeState:
             init_filled=init_filled,
             start_pos=start_pos,
             goal_pos=goal_pos,
-            prev_voxel_count=_extract_voxel_count(obs),
+            prev_voxel_count=_environment_voxel_count(env, len(init_filled)),
             steps=[],
         )
 
@@ -331,7 +331,7 @@ class _VoxelEpisodeState:
         )
         obs_next, reward, terminated, truncated, info = self.env.step(raw_action)
         self.done = bool(terminated or truncated)
-        voxel_count = _extract_voxel_count(obs_next)
+        voxel_count = _environment_voxel_count(self.env, len(self.init_filled))
         cursor = (1, 1, 1)
         if hasattr(self.env, "_rust_env") and self.env._rust_env is not None:
             cursor = self.env._rust_env.cursor_pos()
@@ -891,16 +891,14 @@ class MultiTrajectoryWriter:
         return written
 
 
-def _extract_voxel_count(obs: Any) -> int:
-    if not isinstance(obs, dict):
+def _environment_voxel_count(env: Any, initial_filled_count: int = 0) -> int:
+    """Return the current filled-cell count without exposing it to the policy."""
+    if hasattr(env, "filled_voxel_count"):
+        return int(env.filled_voxel_count())
+    rust_env = getattr(env, "_rust_env", None)
+    if rust_env is None or not hasattr(rust_env, "filled_voxels"):
         return 0
-    vc = obs.get("voxel_count")
-    if vc is None:
-        return 0
-    try:
-        return int(float(vc[0]) if hasattr(vc, "__len__") else float(vc))
-    except Exception:
-        return 0
+    return max(len(rust_env.filled_voxels()) - initial_filled_count, 0)
 
 
 def _last_cursor(episode: VoxelEpisodeData) -> tuple[int, int, int] | None:

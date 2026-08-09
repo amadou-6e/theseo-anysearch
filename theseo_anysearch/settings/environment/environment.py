@@ -27,7 +27,6 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
     "box_radius": ("observation", "box_radius"),
     "box_radii": ("observation", "box_radii"),
     "ray_max_len": ("observation", "ray_max_len"),
-    "include_voxel_count": ("observation", "include_voxel_count"),
     "action_mode": ("action", "mode"),
     "step_cost": ("rewards", "step_cost"),
     "collision_cost": ("rewards", "collision_cost"),
@@ -113,7 +112,6 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "box_radius": self.observation__box_radius,
             "box_radii": self.observation__box_radii,
             "ray_max_len": self.observation__ray_max_len,
-            "include_voxel_count": self.observation__include_voxel_count,
             "action_mode": self.action__mode,
             "action_behavior": self.action.behavior,
             "action_predicates": [
