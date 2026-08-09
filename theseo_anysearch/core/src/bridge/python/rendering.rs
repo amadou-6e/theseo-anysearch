@@ -133,7 +133,12 @@ pub fn py_render_stl(
 ) -> PyResult<String> {
     let mesh = parse_ascii_stl(&stl_ascii)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
-    let placements = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     let geometry_coords: Vec<(u16, u16, u16)> = placements.iter().map(|p| p.coord).collect();
     let trace = EpisodeTrace {
         triangles: mesh.triangles.len(),
