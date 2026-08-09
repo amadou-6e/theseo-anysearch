@@ -86,6 +86,38 @@ def resolve_trajectory(run_dir: Path, selector: str) -> Path:
     return candidate.resolve()
 
 
+def resolve_occlusion_background(
+    background: str, trace: ObservationTrace
+) -> list[dict[str, np.ndarray]]:
+    """Return the background observation set for one occlusion request.
+
+    Raises when ``background`` requests a trace-derived baseline but the trace
+    is too short to avoid a degenerate baseline that equals the observation
+    being explained (every group attribution would silently be 0.0).
+    """
+
+    if background == "zeros":
+        return [
+            {
+                name: np.zeros_like(value, dtype=np.float32)
+                for name, value in trace.step(0).observation.items()
+            }
+        ]
+    if background not in {"trace", "mean"}:
+        raise ValueError(f"unsupported occlusion background: {background!r}")
+    background_observations = trace.observations()
+    if len(background_observations) <= 1:
+        raise ValueError(
+            "occlusion requires a background of at least two observations to "
+            "avoid a degenerate baseline that equals the observation being "
+            f"explained (got {len(background_observations)} from a "
+            f"{'single_step' if len(trace) == 1 else 'short'} trace); "
+            "use a multi-step rollout trajectory/scenario, or pass "
+            "background='zeros'"
+        )
+    return background_observations
+
+
 class PolicyExplanationService:
     """Restore a run and explain one trace or scenario."""
 
@@ -152,16 +184,21 @@ class PolicyExplanationService:
         scenario = load_scenario(path)
         if isinstance(scenario, ObservationScenario):
             env = self._build_env()
-            observation = validate_observation(
-                scenario.observation, env.observation_space
-            )
-            action = (
-                self.scorer.select_action(observation)
-                if scenario.chosen_action == "policy"
-                else int(scenario.chosen_action)
-            )
-            if not env.action_space.contains(action):
-                raise ValueError(f"chosen_action {action} is outside the policy action space")
+            try:
+                observation = validate_observation(
+                    scenario.observation, env.observation_space
+                )
+                action = (
+                    self.scorer.select_action(observation)
+                    if scenario.chosen_action == "policy"
+                    else int(scenario.chosen_action)
+                )
+                if not env.action_space.contains(action):
+                    raise ValueError(
+                        f"chosen_action {action} is outside the policy action space"
+                    )
+            finally:
+                env.close()
             cursor = self._cursor(observation)
             trace = ObservationTrace(
                 [
@@ -179,7 +216,6 @@ class PolicyExplanationService:
                 algorithm="dqn",
             )
             validity = "not_environment_validated"
-            env.close()
         else:
             trace = self._environment_scenario_trace(scenario, output_dir)
             validity = "environment_validated"
@@ -224,16 +260,7 @@ class PolicyExplanationService:
             output_dir=destination,
         )
         schema = FeatureSchema.from_observation(trace.step(0).observation)
-        background_observations = trace.observations()
-        if background == "zeros":
-            background_observations = [
-                {
-                    name: np.zeros_like(value, dtype=np.float32)
-                    for name, value in trace.step(0).observation.items()
-                }
-            ]
-        elif background not in {"trace", "mean"}:
-            raise ValueError(f"unsupported occlusion background: {background!r}")
+        background_observations = resolve_occlusion_background(background, trace)
         backend = PolicyExplanationBackend(
             schema,
             trace,
@@ -295,17 +322,19 @@ class PolicyExplanationService:
         env = self._build_env(
             {"geometry_boxes": boxes, "waypoints_file": str(waypoints)}
         )
-        if scenario.execution.mode == "rollout":
-            trace = PolicyEvaluationTraceCollector(env, self.scorer, "dqn").collect(
-                seed=scenario.seed, max_steps=scenario.execution.max_steps
-            )
-        elif scenario.execution.mode == "single_step":
-            trace = PolicyEvaluationTraceCollector(env, self.scorer, "dqn").collect(
-                seed=scenario.seed, max_steps=1
-            )
-        else:
-            trace = self._collect_actions(env, scenario.seed, scenario.execution.actions)
-        env.close()
+        try:
+            if scenario.execution.mode == "rollout":
+                trace = PolicyEvaluationTraceCollector(env, self.scorer, "dqn").collect(
+                    seed=scenario.seed, max_steps=scenario.execution.max_steps
+                )
+            elif scenario.execution.mode == "single_step":
+                trace = PolicyEvaluationTraceCollector(env, self.scorer, "dqn").collect(
+                    seed=scenario.seed, max_steps=1
+                )
+            else:
+                trace = self._collect_actions(env, scenario.seed, scenario.execution.actions)
+        finally:
+            env.close()
         return trace
 
     def _replay_trajectory(self, path: Path, seed: int | None) -> ObservationTrace:
@@ -326,45 +355,49 @@ class PolicyExplanationService:
         env = self._build_env(
             {"geometry_boxes": boxes, "waypoints_file": str(waypoint_path)}
         )
-        observation, _ = env.reset(seed=seed or self.experiment.env.seed)
-        steps: list[ObservationTraceStep] = []
-        expected_cursor = start
-        actual_start = tuple(int(value) for value in env._rust_env.cursor_pos())
-        if actual_start != expected_cursor:
-            raise ValueError(
-                f"trajectory replay diverged at reset: expected {expected_cursor}, got {actual_start}"
+        try:
+            observation, _ = env.reset(
+                seed=seed if seed is not None else self.experiment.env.seed
             )
-        for index, recorded in enumerate(payload.get("steps", [])):
-            canonical_action = int(recorded["action"])
-            policy_action = self._policy_action(canonical_action)
-            before = self._cursor(observation)
-            next_observation, reward, terminated, truncated, info = env.step(policy_action)
-            actual = tuple(int(value) for value in env._rust_env.cursor_pos())
-            expected = (
-                int(recorded["cursor_x"]),
-                int(recorded["cursor_y"]),
-                int(recorded["cursor_z"]),
-            )
-            if actual != expected:
+            steps: list[ObservationTraceStep] = []
+            expected_cursor = start
+            actual_start = tuple(int(value) for value in env._rust_env.cursor_pos())
+            if actual_start != expected_cursor:
                 raise ValueError(
-                    f"trajectory replay diverged at step {index}: expected cursor "
-                    f"{expected}, got {actual}"
+                    f"trajectory replay diverged at reset: expected {expected_cursor}, got {actual_start}"
                 )
-            steps.append(
-                ObservationTraceStep(
-                    step=index,
-                    observation=self._copy_observation(observation),
-                    action=policy_action,
-                    reward=float(reward),
-                    cursor_before=before,
-                    cursor_after=self._cursor(next_observation),
-                    done=bool(terminated or truncated),
-                    collision=bool(info.get("collision", False)),
-                    info=info,
+            for index, recorded in enumerate(payload.get("steps", [])):
+                canonical_action = int(recorded["action"])
+                policy_action = self._policy_action(canonical_action)
+                before = self._cursor(observation)
+                next_observation, reward, terminated, truncated, info = env.step(policy_action)
+                actual = tuple(int(value) for value in env._rust_env.cursor_pos())
+                expected = (
+                    int(recorded["cursor_x"]),
+                    int(recorded["cursor_y"]),
+                    int(recorded["cursor_z"]),
                 )
-            )
-            observation = next_observation
-        env.close()
+                if actual != expected:
+                    raise ValueError(
+                        f"trajectory replay diverged at step {index}: expected cursor "
+                        f"{expected}, got {actual}"
+                    )
+                steps.append(
+                    ObservationTraceStep(
+                        step=index,
+                        observation=self._copy_observation(observation),
+                        action=policy_action,
+                        reward=float(reward),
+                        cursor_before=before,
+                        cursor_after=self._cursor(next_observation),
+                        done=bool(terminated or truncated),
+                        collision=bool(info.get("collision", False)),
+                        info=info,
+                    )
+                )
+                observation = next_observation
+        finally:
+            env.close()
         if not steps:
             raise ValueError(f"trajectory {path} contains no steps")
         return ObservationTrace(steps, algorithm="dqn")

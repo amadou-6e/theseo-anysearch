@@ -78,15 +78,8 @@ def run_explain(
         )
     else:
         report = service.explain_scenario(source.scenario, **common)
-    destination = output_settings.directory
-    if destination is None:
-        candidates = sorted(
-            (
-                path for path in run_dir.joinpath("explanations").iterdir()
-                if path.joinpath("report.json").is_file()
-            ),
-            key=lambda path: path.stat().st_mtime,
-        )
-        destination = candidates[-1]
+    if report.output_dir is None:
+        raise ValueError("explanation report is missing its output directory")
+    destination = report.output_dir
     typer.echo(f"Explained {len(report.steps)} step(s): {destination}")
     return destination

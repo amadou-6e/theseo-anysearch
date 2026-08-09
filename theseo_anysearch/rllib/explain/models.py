@@ -166,6 +166,7 @@ class ExplanationReport(BaseModel):
     method: str
     feature_schema_version: int
     steps: list[ExplainedStep]
+    output_dir: Path | None = None
     scenario_validity: Literal["environment_validated", "not_environment_validated"] = (
         "environment_validated"
     )

@@ -354,9 +354,10 @@ class DQNPolicyScorer(PolicyScorer):
             return int(count)
         if self._action_count is not None:
             return self._action_count
-        if self._algorithm is not None and not hasattr(self._algorithm, "get_policy"):
-            return 26
-        raise ValueError("DQN scorer requires a discrete action space")
+        raise ValueError(
+            "DQN scorer could not determine a discrete action space from the "
+            "restored algorithm/module; pass action_count explicitly"
+        )
 
     def select_action(self, observation: Mapping[str, np.ndarray]) -> int:
         """Return RLlib's deterministic DQN action for one observation."""
@@ -430,6 +431,7 @@ class DQNPolicyScorer(PolicyScorer):
         flat = flatten(self._observation_space, observation)
         device = next(self._module.parameters()).device
         batch = {Columns.OBS: torch.as_tensor(flat, device=device).unsqueeze(0)}
+        self._module.eval()
         with torch.inference_mode():
             output = self._module.compute_q_values(batch)
         return output[QF_PREDS][0].detach().cpu().numpy().astype(np.float32)

@@ -45,6 +45,7 @@ class ExplanationReportBuilder:
         score_rows: Mapping[int, np.ndarray],
         attributions: Mapping[int, dict[str, float]],
         score_type: str,
+        output_dir: Path | None = None,
     ) -> ExplanationReport:
         """Build an explanation report."""
 
@@ -61,6 +62,7 @@ class ExplanationReportBuilder:
             method=self._method,
             feature_schema_version=self._schema.version,
             steps=explained_steps,
+            output_dir=output_dir if output_dir is not None else request.output_dir,
             scenario_validity=request.scenario_validity,
         )
 
