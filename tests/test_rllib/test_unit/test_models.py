@@ -437,6 +437,53 @@ class TestSettings:
         assert s2.env.seed == s.env.seed
         assert s2.training.algorithm == s.training.algorithm
         assert s2.algorithm_config.lr == pytest.approx(s.algorithm_config.lr)
+class TestGetAlgorithmConfigClass:
+    """Tests get_algorithm_config_class registry lookup."""
+
+    def test_unknown_algorithm_raises(self):
+        from theseo_anysearch.rllib.algorithms.models import get_algorithm_config_class
+
+        with pytest.raises(ValueError, match="ppoo"):
+            get_algorithm_config_class("ppoo")
+
+    def test_valid_algorithm_resolves(self):
+        from theseo_anysearch.rllib.algorithms.models import (
+            PPOConfig,
+            get_algorithm_config_class,
+        )
+
+        assert get_algorithm_config_class("ppo") is PPOConfig
+        assert get_algorithm_config_class("PPO") is PPOConfig
+
+    def test_heuristic_baseline_resolves_to_base_config(self):
+        """'heuristic' is a legitimate non-RL standalone baseline, not a typo."""
+        from theseo_anysearch.rllib.algorithms.models import (
+            AlgorithmConfig,
+            get_algorithm_config_class,
+        )
+
+        assert get_algorithm_config_class("heuristic") is AlgorithmConfig
+
+
+class TestGetModelConfigClass:
+    """Tests get_model_config_class registry lookup."""
+
+    def test_unknown_model_raises(self):
+        from theseo_anysearch.rllib.models.models import get_model_config_class
+
+        with pytest.raises(ValueError, match="voxel_encoderr"):
+            get_model_config_class("voxel_encoderr")
+
+    def test_valid_model_resolves(self):
+        from theseo_anysearch.rllib.models.models import (
+            VoxelEncoderConfig,
+            get_model_config_class,
+        )
+
+        assert get_model_config_class("voxel_encoder") is VoxelEncoderConfig
+        assert get_model_config_class("VOXEL_ENCODER") is VoxelEncoderConfig
+
+
 def test_dqn_replay_buffer_mapping() -> None:
     from theseo_anysearch.rllib.algorithms.dqn import _dqn_replay_buffer_config
     from theseo_anysearch.rllib.algorithms.models import DQNConfig, RainbowConfig

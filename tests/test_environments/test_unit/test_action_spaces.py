@@ -42,3 +42,13 @@ def test_vector_3_space_and_encoding() -> None:
 @pytest.mark.parametrize("mode", ["discrete_6", "discrete_18", "vector_3"])
 def test_action_modes_validate_from_yaml_schema(mode: str) -> None:
     assert ActionConfig(mode=mode).mode == mode
+
+
+def test_offsets_for_unknown_mode_raises() -> None:
+    with pytest.raises(ValueError, match="discrete_27"):
+        offsets_for_mode("discrete_27")
+
+
+@pytest.mark.parametrize("mode,size", [("discrete_6", 6), ("discrete_18", 18), ("discrete_26", 26)])
+def test_offsets_for_known_mode_resolves(mode: str, size: int) -> None:
+    assert len(offsets_for_mode(mode)) == size
