@@ -66,6 +66,9 @@ impl PyMultiVoxelEnv {
             zone_reward_max,
             zone_reward_curve,
         };
+        reward_config
+            .validate_finite()
+            .map_err(PyValueError::new_err)?;
         let inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
@@ -88,9 +91,10 @@ impl PyMultiVoxelEnv {
     }
 
     /// `actions` must be a list of length == agent_count; each value is 0..25.
-    pub fn step(&mut self, actions: Vec<i32>) -> PyMultiVoxelStepResult {
+    pub fn step(&mut self, actions: Vec<i32>) -> PyResult<PyMultiVoxelStepResult> {
+        check_actions_len(actions.len(), self.inner.agents.len())?;
         let r = self.inner.step_all(&actions);
-        PyMultiVoxelStepResult {
+        Ok(PyMultiVoxelStepResult {
             observation: PyMultiVoxelObs {
                 steps_remaining: r.steps_remaining,
                 voxel_count: r.voxel_count,
@@ -99,7 +103,7 @@ impl PyMultiVoxelEnv {
             },
             rewards: r.rewards,
             done: r.done,
-        }
+        })
     }
 
     pub fn agent_count(&self) -> usize {
@@ -131,7 +135,8 @@ impl PyMultiVoxelEnv {
 
     /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
     /// 1.0 = that neighbor cell is filled or outside the configured grid.
-    pub fn face_neighbors(&self, agent_idx: usize) -> Vec<f32> {
+    pub fn face_neighbors(&self, agent_idx: usize) -> PyResult<Vec<f32>> {
+        check_agent_idx(agent_idx, self.inner.agents.len())?;
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
         let g = i32::from(self.inner.grid_size);
         let dirs: [(i32, i32, i32); 6] = [
@@ -142,7 +147,8 @@ impl PyMultiVoxelEnv {
             (0, 0, 1),
             (0, 0, -1),
         ];
-        dirs.iter()
+        Ok(dirs
+            .iter()
             .map(|&(dx, dy, dz)| {
                 let x = cx as i32 + dx;
                 let y = cy as i32 + dy;
@@ -153,12 +159,13 @@ impl PyMultiVoxelEnv {
                     1.0
                 }
             })
-            .collect()
+            .collect())
     }
 
     /// Flattened (2*radius+1)Â³ binary box observation centred on agent `agent_idx`'s cursor.
     /// 1.0 = filled or outside the configured grid. Ordered x-outer, y-mid, z-inner.
     pub fn box_obs(&self, agent_idx: usize, radius: u32) -> PyResult<Vec<f32>> {
+        check_agent_idx(agent_idx, self.inner.agents.len())?;
         validate_box_radius(radius)?;
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
         let g = i32::from(self.inner.grid_size);
@@ -190,7 +197,8 @@ impl PyMultiVoxelEnv {
     ///   0.0                        â€” filled cell immediately adjacent (d=1) or self filled (0,0,0)
     ///   (d-1) as f32 / max_len     â€” hit at step d (d âˆˆ 2..=max_len); larger = farther
     ///   1.0                        â€” no hit within max_len, or self empty for (0,0,0)
-    pub fn ray_cast(&self, agent_idx: usize, max_len: u32) -> Vec<f32> {
+    pub fn ray_cast(&self, agent_idx: usize, max_len: u32) -> PyResult<Vec<f32>> {
+        check_agent_idx(agent_idx, self.inner.agents.len())?;
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
         let g = i32::from(self.inner.grid_size);
         let mut result = Vec::with_capacity(27);
@@ -224,7 +232,61 @@ impl PyMultiVoxelEnv {
                 }
             }
         }
-        result
+        Ok(result)
+    }
+}
+
+/// Validates `agent_idx` against `agent_count`, returning a descriptive
+/// `PyValueError` when the index is out of range.
+fn check_agent_idx(agent_idx: usize, agent_count: usize) -> PyResult<()> {
+    if agent_idx >= agent_count {
+        return Err(PyValueError::new_err(format!(
+            "agent_idx {} out of range for {} agents",
+            agent_idx, agent_count
+        )));
+    }
+    Ok(())
+}
+
+/// Validates `actions.len()` against `agent_count`, returning a descriptive
+/// `PyValueError` on mismatch.
+fn check_actions_len(actions_len: usize, agent_count: usize) -> PyResult<()> {
+    if actions_len != agent_count {
+        return Err(PyValueError::new_err(format!(
+            "actions length {} does not match agent_count {}",
+            actions_len, agent_count
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_agent_idx_rejects_out_of_range() {
+        assert!(check_agent_idx(0, 0).is_err());
+        assert!(check_agent_idx(2, 2).is_err());
+        assert!(check_agent_idx(1, 2).is_ok());
+    }
+
+    #[test]
+    fn check_agent_idx_accepts_in_range() {
+        assert!(check_agent_idx(0, 3).is_ok());
+        assert!(check_agent_idx(2, 3).is_ok());
+    }
+
+    #[test]
+    fn check_actions_len_rejects_mismatch() {
+        assert!(check_actions_len(1, 2).is_err());
+        assert!(check_actions_len(3, 2).is_err());
+    }
+
+    #[test]
+    fn check_actions_len_accepts_match() {
+        assert!(check_actions_len(2, 2).is_ok());
+        assert!(check_actions_len(0, 0).is_ok());
     }
 }
 

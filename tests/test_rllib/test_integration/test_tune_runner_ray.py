@@ -333,8 +333,22 @@ class TestTrainableReportTarget:
         fake_results = [
             TrainResult(iteration=1, episode_reward_mean=-5.0,
                         episode_len_mean=10.0, episodes_total=5, elapsed_s=0.1),
-            TrainResult(iteration=2, episode_reward_mean=-3.0,
-                        episode_len_mean=10.0, episodes_total=10, elapsed_s=0.2),
+            TrainResult(
+                iteration=2,
+                episode_reward_mean=-3.0,
+                episode_len_mean=10.0,
+                episodes_total=10,
+                elapsed_s=0.2,
+                extra={"evaluation_navigation_score": 0.75},
+            ),
+            TrainResult(
+                iteration=3,
+                episode_reward_mean=-2.0,
+                episode_len_mean=10.0,
+                episodes_total=15,
+                elapsed_s=0.3,
+                extra={"evaluation_navigation_score": float("nan")},
+            ),
         ]
 
         mock_trainer = MagicMock()
@@ -364,18 +378,23 @@ class TestTrainableReportTarget:
             _experiment_trainable(
                 config={"lr": 3e-4},
                 experiment_dict=exp_dict,
-                metric="episode_reward_mean",
+                metric="evaluation_navigation_score",
                 mode="max",
-                max_iterations=2,
+                max_iterations=3,
                 mlflow_tracking_uri="",
                 mlflow_experiment_name="test",
                 mlflow_parent_run_id="",
                 run_tag="test",
             )
 
-        assert mock_tune.report.call_count == 2, (
-            f"Expected 2 tune.report calls, got {mock_tune.report.call_count}"
+        assert mock_tune.report.call_count == 3, (
+            f"Expected 3 tune.report calls, got {mock_tune.report.call_count}"
         )
+        reports = [reported.args[0] for reported in mock_tune.report.call_args_list]
+        assert "evaluation_navigation_score" not in reports[0]
+        assert reports[0]["episode_reward_mean"] == pytest.approx(-5.0)
+        assert reports[1]["evaluation_navigation_score"] == pytest.approx(0.75)
+        assert reports[2]["evaluation_navigation_score"] == -1e9
         mock_train.report.assert_not_called()
 
     def test_report_payload_has_required_keys(self, tmp_path):

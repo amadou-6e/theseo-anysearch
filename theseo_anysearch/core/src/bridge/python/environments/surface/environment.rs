@@ -1,7 +1,6 @@
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
-    environments::Environment,
     surface::{SurfaceAction, SurfaceEnv},
     voxel::world::{
         ingest::{parse_ascii_stl, voxelize_mesh},
@@ -43,7 +42,12 @@ impl PySurfaceEnv {
     ) -> PyResult<Self> {
         let mesh = parse_ascii_stl(stl_ascii)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
-        let placements = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+        let (placements, dropped) = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+        if dropped > 0 {
+            eprintln!(
+                "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+            );
+        }
         let filled: Vec<Coord> = placements.iter().map(|p| p.coord).collect();
         Ok(Self {
             inner: SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps),
@@ -51,9 +55,9 @@ impl PySurfaceEnv {
     }
 
     /// Reset the environment and return the initial observation.
-    pub fn reset(&mut self, seed: u64) -> PySurfaceObservation {
-        let obs = self.inner.reset(seed);
-        py_surface_obs(obs)
+    pub fn reset(&mut self, seed: u64) -> PyResult<PySurfaceObservation> {
+        let obs = self.inner.reset(seed).map_err(PyValueError::new_err)?;
+        Ok(py_surface_obs(obs))
     }
 
     /// Step the environment (StepAll â€” `action` is ignored).

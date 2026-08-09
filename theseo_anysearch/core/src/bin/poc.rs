@@ -35,7 +35,12 @@ endsolid tri
 "#;
 
     let mesh = parse_ascii_stl(sample_stl).expect("stl parse should work in poc");
-    let placements = voxelize_mesh(&mesh, (50, 50, 50), 2.0);
+    let (placements, dropped) = voxelize_mesh(&mesh, (50, 50, 50), 2.0);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     for p in &placements {
         let _ = world.set_block(p.coord, p.block.clone());
     }

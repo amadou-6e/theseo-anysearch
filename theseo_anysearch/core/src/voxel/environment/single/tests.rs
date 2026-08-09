@@ -288,6 +288,45 @@ fn action_mask_uses_the_same_bounds_and_occupancy_predicates() {
 }
 
 #[test]
+fn action_mask_error_surfaces_immediately_not_on_later_step() {
+    // Regression test for the bug where a predicate error raised during
+    // action_mask() was stashed in `last_reward_error` and only drained by
+    // the next call to `take_reward_error()` — which, at the PyO3 binding
+    // layer, happens inside `step()`. That misattributed a masking failure
+    // to a later, unrelated step (or silently dropped it if step() was
+    // never called again before reset()).
+    //
+    // The fix is for the caller of `action_mask()` (the PyO3 binding) to
+    // drain `take_reward_error()` immediately after computing the mask.
+    // This test exercises that exact call sequence at the Rust level.
+    let mut env = make_env(10);
+    env.set_waypoints((1, 1, 1), (6, 2, 2));
+    env.reset(1);
+    configure_pipeline(&mut env, r#"[{"name":"cursor_movement"}]"#, 4);
+    env.action_predicates.push(ConfiguredPredicate::Failing(
+        "predicate exploded".to_owned(),
+    ));
+
+    // action_mask() swallows the predicate error into `last_reward_error`
+    // and marks the corresponding action(s) infeasible.
+    let mask = env.action_mask();
+    assert!(mask.iter().all(|&feasible| feasible == 0));
+
+    // The error must be observable right at the action_mask() call site —
+    // this is what the fixed PyO3 binding now checks for.
+    let error = env.take_reward_error();
+    assert_eq!(error.as_deref(), Some("predicate exploded"));
+
+    // Having drained the error at the mask call site, a subsequent
+    // unrelated, successful step must NOT resurface it.
+    env.action_predicates.pop();
+    env.prepare_navigation_step(21, env.cursor(), false);
+    let action = env.execute_navigation_action(21);
+    let _ = env.step(action);
+    assert_eq!(env.take_reward_error(), None);
+}
+
+#[test]
 fn action_history_is_bounded() {
     let mut env = make_env(10);
     env.set_waypoints((2, 2, 2), (6, 2, 2));
@@ -302,4 +341,43 @@ fn action_history_is_bounded() {
     assert_eq!(env.action_history.len(), 1);
     assert_eq!(env.action_history[0].previous_cursor, [3, 2, 2]);
     assert_eq!(env.action_history[0].cursor, [4, 2, 2]);
+}
+
+#[test]
+fn configure_action_pipeline_fails_when_native_predicate_load_fails() {
+    let mut env = make_env(10);
+    let bad_library = Path::new("this/path/does/not/exist.so");
+    let result = env.configure_action_pipeline(
+        r#"[{"name":"bounds"}]"#,
+        r#"[{"name":"cursor_movement"}]"#,
+        4,
+        Some(bad_library),
+    );
+    assert!(
+        result.is_err(),
+        "construction must fail instead of silently falling back to the builtin predicate"
+    );
+    let message = result.unwrap_err();
+    assert!(message.contains("bounds"), "error should mention the predicate name: {message}");
+}
+
+#[test]
+fn configure_action_pipeline_fails_when_native_outcome_load_fails() {
+    let mut env = make_env(10);
+    let bad_library = Path::new("this/path/does/not/exist.so");
+    let result = env.configure_action_pipeline(
+        "[]",
+        r#"[{"name":"cursor_movement"}]"#,
+        4,
+        Some(bad_library),
+    );
+    assert!(
+        result.is_err(),
+        "construction must fail instead of silently falling back to the builtin outcome"
+    );
+    let message = result.unwrap_err();
+    assert!(
+        message.contains("cursor_movement"),
+        "error should mention the outcome name: {message}"
+    );
 }

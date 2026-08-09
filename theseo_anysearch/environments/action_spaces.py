@@ -17,8 +17,20 @@ _OFFSETS_BY_MODE = {
 }
 
 def offsets_for_mode(mode: str) -> tuple[tuple[int, int, int], ...]:
-    """Return canonical movement vectors selectable by a discrete mode."""
-    return _OFFSETS_BY_MODE.get(mode, ACTION_OFFSETS_26)
+    """Return canonical movement vectors selectable by a discrete mode.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is not a registered discrete action mode.
+    """
+    try:
+        return _OFFSETS_BY_MODE[mode]
+    except KeyError:
+        valid = sorted(_OFFSETS_BY_MODE)
+        raise ValueError(
+            f"Unknown action mode: {mode!r}. Valid discrete modes: {valid}"
+        ) from None
 
 def build_action_space(mode: str) -> spaces.Space:
     """Build the Gymnasium action space configured by ``mode``."""

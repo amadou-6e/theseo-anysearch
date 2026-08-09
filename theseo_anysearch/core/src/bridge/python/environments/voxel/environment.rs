@@ -219,6 +219,11 @@ impl PyVoxelEnv {
     pub fn step(&mut self, action: i32) -> PyResult<PyStepResultVoxel> {
         let previous_cursor = self.inner.cursor();
         let invalid_action = !(0..=26).contains(&action);
+        if invalid_action {
+            return Err(PyValueError::new_err(format!(
+                "action {action} out of range: expected an integer in 0..=26"
+            )));
+        }
         self.inner
             .prepare_navigation_step(action, previous_cursor, invalid_action);
         let rust_action = self.inner.execute_navigation_action(action);
@@ -244,8 +249,12 @@ impl PyVoxelEnv {
     }
 
     /// Return feasibility for all 26 canonical moves plus no-op.
-    pub fn action_mask(&mut self) -> Vec<u8> {
-        self.inner.action_mask()
+    pub fn action_mask(&mut self) -> PyResult<Vec<u8>> {
+        let mask = self.inner.action_mask();
+        if let Some(error) = self.inner.take_reward_error() {
+            return Err(PyValueError::new_err(error));
+        }
+        Ok(mask)
     }
     /// Returns the current cursor position as (x, y, z) in [1, 32].
     pub fn cursor_pos(&self) -> (u16, u16, u16) {
@@ -419,6 +428,20 @@ mod tests {
 
         assert_eq!(env.cursor_pos(), (5, 5, 5));
         assert!((result.reward + 0.01).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn step_rejects_negative_action_before_execute() {
+        let mut env = env_at_cursor((5, 5, 5));
+        let result = env.step(-1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn step_rejects_action_above_range_before_execute() {
+        let mut env = env_at_cursor((5, 5, 5));
+        let result = env.step(27);
+        assert!(result.is_err());
     }
     // ----- box_obs -----
 

@@ -37,6 +37,17 @@ def get_model_config_class(name: str) -> type[ModelConfig]:
     Returns
     -------
     type[ModelConfig]
-        Matching config class, or ``ModelConfig`` when the name is unknown.
+        Matching config class.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a registered model.
     """
-    return MODEL_CONFIGS.get(name.lower(), ModelConfig)
+    try:
+        return MODEL_CONFIGS[name.lower()]
+    except KeyError:
+        valid = sorted(MODEL_CONFIGS)
+        raise ValueError(
+            f"Unknown model: {name!r}. Valid models: {valid}"
+        ) from None

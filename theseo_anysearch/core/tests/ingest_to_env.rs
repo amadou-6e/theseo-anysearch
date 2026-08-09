@@ -91,7 +91,7 @@ endsolid cube"#;
 
 fn make_env(agent_count: usize, max_steps: u32) -> SurfaceEnv {
     let mesh = parse_ascii_stl(CUBE_STL).unwrap();
-    let placements = voxelize_mesh(&mesh, (100, 100, 100), 5.0);
+    let (placements, _dropped) = voxelize_mesh(&mesh, (100, 100, 100), 5.0);
     let coords: Vec<_> = placements.iter().map(|p| p.coord).collect();
     SurfaceEnv::from_filled_surface(&coords, agent_count, max_steps)
 }
@@ -99,7 +99,7 @@ fn make_env(agent_count: usize, max_steps: u32) -> SurfaceEnv {
 #[test]
 fn surface_env_from_stl_completes() {
     let mut env = make_env(2, 500);
-    env.reset(42);
+    env.reset(42).unwrap();
     let mut done = false;
     for _ in 0..500 {
         let sr = env.step(SurfaceAction::StepAll);
@@ -115,9 +115,9 @@ fn surface_env_from_stl_completes() {
 fn surface_env_deterministic_across_runs() {
     // Resetting the same env twice with the same seed must yield identical assignments.
     let mut env = make_env(2, 500);
-    let obs1 = env.reset(7);
+    let obs1 = env.reset(7).unwrap();
     let snap1: Vec<_> = obs1.agents.iter().map(|a| (a.current, a.target)).collect();
-    let obs2 = env.reset(7);
+    let obs2 = env.reset(7).unwrap();
     let snap2: Vec<_> = obs2.agents.iter().map(|a| (a.current, a.target)).collect();
     assert_eq!(snap1, snap2);
 }

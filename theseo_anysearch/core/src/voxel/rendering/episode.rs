@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::{
-    environments::Environment,
     surface::{SurfaceAction, SurfaceEnv},
     voxel::world::ingest::{parse_ascii_stl, voxelize_mesh},
 };
@@ -67,11 +66,16 @@ pub(crate) fn run_episode_trace(
     seed: u64,
 ) -> Result<EpisodeTrace, String> {
     let mesh = parse_ascii_stl(stl_ascii).map_err(|e| format!("{e:?}"))?;
-    let placements = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, (origin_x, origin_y, origin_z), scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     let filled = placements.iter().map(|p| p.coord).collect::<Vec<_>>();
 
     let mut env = SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps);
-    let mut obs = env.reset(seed);
+    let mut obs = env.reset(seed)?;
     let mut total_reward = 0.0f32;
     let mut steps = 0u32;
     let mut seen_painted = HashSet::new();

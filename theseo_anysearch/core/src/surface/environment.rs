@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::voxel::world::Coord;
 
-use crate::environments::{Environment, StepResult};
+use crate::environments::StepResult;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AgentState {
@@ -121,7 +121,17 @@ impl SurfaceEnv {
         false
     }
 
-    fn randomize_agents(&mut self, seed: u64) {
+    fn randomize_agents(&mut self, seed: u64) -> Result<(), String> {
+        let required = self.agents.len() * 2;
+        if self.start_surface.len() < required {
+            return Err(format!(
+                "surface has {} usable cell(s) but requires at least {} for {} agent(s)",
+                self.start_surface.len(),
+                required,
+                self.agents.len()
+            ));
+        }
+
         self.blocked.clear();
         self.trail_owner.clear();
 
@@ -129,16 +139,9 @@ impl SurfaceEnv {
         let mut coords: Vec<Coord> = self.start_surface.clone();
         coords.shuffle(&mut rng);
 
-        if coords.len() < 2 {
-            return;
-        }
-
         for (idx, agent) in self.agents.iter_mut().enumerate() {
             let start_index = idx * 2;
             let target_index = idx * 2 + 1;
-            if target_index >= coords.len() {
-                break;
-            }
             agent.current = coords[start_index];
             agent.target = coords[target_index];
             agent.reached = agent.current == agent.target;
@@ -146,6 +149,8 @@ impl SurfaceEnv {
             self.blocked.insert(agent.current);
             self.trail_owner.entry(agent.current).or_insert(idx);
         }
+
+        Ok(())
     }
 
     fn as_observation(&self) -> SurfaceObservation {
@@ -157,19 +162,19 @@ impl SurfaceEnv {
             agents: self.agents.clone(),
         }
     }
-}
 
-impl Environment for SurfaceEnv {
-    type Action = SurfaceAction;
-    type Observation = SurfaceObservation;
-
-    fn reset(&mut self, seed: u64) -> SurfaceObservation {
+    /// Reset the environment and return the initial observation.
+    ///
+    /// Fails when the surface does not have enough usable cells to place
+    /// every agent with a distinct current/target pair. On error, `self`
+    /// is left unmodified rather than partially reset.
+    pub fn reset(&mut self, seed: u64) -> Result<SurfaceObservation, String> {
+        self.randomize_agents(seed)?;
         self.steps = 0;
-        self.randomize_agents(seed);
-        self.as_observation()
+        Ok(self.as_observation())
     }
 
-    fn step(&mut self, action: SurfaceAction) -> StepResult<SurfaceObservation> {
+    pub fn step(&mut self, action: SurfaceAction) -> StepResult<SurfaceObservation> {
         self.steps += 1;
         let mut reward = 0.0;
 
@@ -458,7 +463,7 @@ mod tests {
         let surface = line_surface();
         let surface_set: HashSet<Coord> = surface.iter().copied().collect();
         let mut env = SurfaceEnv::from_surface(&surface, 2, 50);
-        let obs = env.reset(42);
+        let obs = env.reset(42).expect("surface has enough cells for 2 agents");
         assert_eq!(obs.total_agents, 2);
         for agent in &obs.agents {
             assert!(surface_set.contains(&agent.current));
@@ -471,9 +476,9 @@ mod tests {
         // Resetting the same env twice with the same seed must yield identical assignments.
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 2, 50);
-        let obs1 = env.reset(42);
+        let obs1 = env.reset(42).unwrap();
         let snap1: Vec<_> = obs1.agents.iter().map(|a| (a.current, a.target)).collect();
-        let obs2 = env.reset(42);
+        let obs2 = env.reset(42).unwrap();
         let snap2: Vec<_> = obs2.agents.iter().map(|a| (a.current, a.target)).collect();
         assert_eq!(snap1, snap2);
     }
@@ -483,8 +488,8 @@ mod tests {
         let surface = line_surface();
         let mut env1 = SurfaceEnv::from_surface(&surface, 2, 50);
         let mut env2 = SurfaceEnv::from_surface(&surface, 2, 50);
-        let obs1 = env1.reset(1);
-        let obs2 = env2.reset(2);
+        let obs1 = env1.reset(1).unwrap();
+        let obs2 = env2.reset(2).unwrap();
         // Different seeds should (almost certainly) produce different assignments
         let same = obs1.agents[0].current == obs2.agents[0].current
             && obs1.agents[0].target == obs2.agents[0].target;
@@ -497,7 +502,7 @@ mod tests {
     fn step_all_advances_agents() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 50);
-        let obs0 = env.reset(42);
+        let obs0 = env.reset(42).unwrap();
         let start = obs0.agents[0].current;
         let sr = env.step(SurfaceAction::StepAll);
         let end = sr.observation.agents[0].current;
@@ -509,7 +514,7 @@ mod tests {
     fn reached_agent_counted() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 200);
-        env.reset(42);
+        env.reset(42).unwrap();
         let mut last_reached = 0;
         loop {
             let sr = env.step(SurfaceAction::StepAll);
@@ -525,7 +530,7 @@ mod tests {
     fn trail_blocks_cells() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 50);
-        env.reset(42);
+        env.reset(42).unwrap();
         // trail_owner already has the starting cell after reset
         assert!(!env.trail_owner().is_empty());
         env.step(SurfaceAction::StepAll);
@@ -537,7 +542,7 @@ mod tests {
     fn done_when_all_reached() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 200);
-        env.reset(42);
+        env.reset(42).unwrap();
         let mut done = false;
         for _ in 0..200 {
             let sr = env.step(SurfaceAction::StepAll);
@@ -554,7 +559,7 @@ mod tests {
     fn done_at_max_steps() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 3);
-        env.reset(42);
+        env.reset(42).unwrap();
         env.step(SurfaceAction::StepAll);
         env.step(SurfaceAction::StepAll);
         let sr = env.step(SurfaceAction::StepAll);
@@ -565,7 +570,7 @@ mod tests {
     fn reward_success() {
         let surface = line_surface();
         let mut env = SurfaceEnv::from_surface(&surface, 1, 200);
-        env.reset(42);
+        env.reset(42).unwrap();
         let mut got_success = false;
         for _ in 0..200 {
             let sr = env.step(SurfaceAction::StepAll);
@@ -577,5 +582,25 @@ mod tests {
             }
         }
         assert!(got_success, "agent never reached its goal");
+    }
+
+    #[test]
+    fn reset_errors_when_surface_too_small_for_agent_count() {
+        // Only 3 usable cells but 2 agents need 4 (2 per agent: current + target).
+        let surface: Vec<Coord> = (0u16..3).map(|i| (100 + i, 100, 100)).collect();
+        let mut env = SurfaceEnv::from_surface(&surface, 2, 50);
+        let err = env
+            .reset(42)
+            .expect_err("reset must fail when the surface can't fit every agent");
+        assert!(
+            err.contains("3") && err.contains('4') && err.contains('2'),
+            "error message should mention usable/required cell counts and agent count: {err}"
+        );
+
+        // The failed reset must not leave agents holding stale/off-surface coordinates
+        // silently — nothing has been placed, and a retry with a valid surface must work.
+        let bigger_surface = line_surface();
+        let mut env2 = SurfaceEnv::from_surface(&bigger_surface, 2, 50);
+        assert!(env2.reset(42).is_ok());
     }
 }

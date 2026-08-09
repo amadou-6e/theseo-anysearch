@@ -44,14 +44,14 @@ class TestLoadSettings:
         assert s.model_cfg.hidden_sizes == [128]
         assert s.model_cfg.activation == "relu"
 
-    def test_unknown_algorithm_falls_back_to_base(self, tmp_path: Path, minimal_yaml: Path):
+    def test_unknown_algorithm_raises(self, tmp_path: Path, minimal_yaml: Path):
         import yaml as _yaml
         raw = _yaml.safe_load(minimal_yaml.read_text())
         raw["training"]["algorithm"] = "unknown_algo"
         p = tmp_path / "s2.yaml"
         p.write_text(_yaml.dump(raw))
-        s = load_settings(p)
-        assert type(s.algorithm_config) is AlgorithmConfig
+        with pytest.raises(ValueError, match="unknown_algo"):
+            load_settings(p)
 
     def test_override_applied(self, minimal_yaml: Path):
         s = load_settings(minimal_yaml, overrides={"env": {"seed": 999}})

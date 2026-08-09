@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Slider, Stroke, Vec2};
-use theseo_core::environments::Environment as _;
 use theseo_core::surface::{AgentState, SurfaceAction, SurfaceEnv};
 use theseo_core::voxel::world::ingest::{parse_ascii_stl, voxelize_mesh};
 
@@ -33,11 +32,16 @@ fn run_episode_trace(
     epoch: u32,
 ) -> Result<EpisodeTrace, String> {
     let mesh = parse_ascii_stl(stl_ascii).map_err(|e| format!("{e:?}"))?;
-    let placements = voxelize_mesh(&mesh, origin, scale);
+    let (placements, dropped) = voxelize_mesh(&mesh, origin, scale);
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} point(s) fell outside world bounds during STL voxelization and were dropped"
+        );
+    }
     let filled = placements.iter().map(|p| p.coord).collect::<Vec<_>>();
 
     let mut env = SurfaceEnv::from_filled_surface(&filled, agent_count, max_steps);
-    let mut obs = env.reset(seed);
+    let mut obs = env.reset(seed)?;
     let mut steps = 0u32;
     let mut seen = HashSet::new();
     let mut trace_steps = Vec::new();
