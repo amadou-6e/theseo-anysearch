@@ -16,6 +16,11 @@ pub(crate) enum ConfiguredPredicate {
     Bounds,
     Unoccupied,
     Native(NativePredicateExtension),
+    /// Test-only predicate that always errors, used to exercise error
+    /// propagation out of `action_mask()` without needing a real native
+    /// extension library.
+    #[cfg(test)]
+    Failing(String),
 }
 
 pub(crate) enum ConfiguredOutcome {
