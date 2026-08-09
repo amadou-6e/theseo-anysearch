@@ -59,6 +59,40 @@ impl ZoneRewardCurve {
 }
 
 impl RewardConfig {
+    /// Validates that every numeric reward-shaping field is finite (not NaN or
+    /// +/-infinity). A non-finite value would silently poison every reward
+    /// computed for the run, so this must be checked at construction time
+    /// (e.g. right after a `RewardConfig` is built from raw Python/YAML input).
+    ///
+    /// Returns `Err` naming the first offending field encountered.
+    pub fn validate_finite(&self) -> Result<(), String> {
+        let fields: [(&str, f32); 9] = [
+            ("step_cost", self.step_cost),
+            ("goal_reward", self.goal_reward),
+            ("distance_shaping", self.distance_shaping),
+            ("collision_cost", self.collision_cost),
+            ("invalid_action_cost", self.invalid_action_cost),
+            (
+                "construction_residual_weight",
+                self.construction_residual_weight,
+            ),
+            (
+                "construction_overshoot_weight",
+                self.construction_overshoot_weight,
+            ),
+            ("zone_reward_min", self.zone_reward_min),
+            ("zone_reward_max", self.zone_reward_max),
+        ];
+        for (name, value) in fields {
+            if !value.is_finite() {
+                return Err(format!(
+                    "{name} must be a finite number, got {value} (NaN/Inf are not allowed)"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn base_step_reward(&self, previous_l2: f32, current_l2: f32, grid_size: u16) -> f32 {
         match self.distance_reward_mode {
             DistanceRewardMode::Progress => {
@@ -96,6 +130,153 @@ impl Default for RewardConfig {
             zone_reward_min: -1.0,
             zone_reward_max: -0.01,
             zone_reward_curve: ZoneRewardCurve::Linear,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_validates_as_finite() {
+        assert!(RewardConfig::default().validate_finite().is_ok());
+    }
+
+    #[test]
+    fn nan_step_cost_is_rejected() {
+        let config = RewardConfig {
+            step_cost: f32::NAN,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("step_cost"));
+    }
+
+    #[test]
+    fn infinite_goal_reward_is_rejected() {
+        let config = RewardConfig {
+            goal_reward: f32::INFINITY,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("goal_reward"));
+    }
+
+    #[test]
+    fn negative_infinite_distance_shaping_is_rejected() {
+        let config = RewardConfig {
+            distance_shaping: f32::NEG_INFINITY,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("distance_shaping"));
+    }
+
+    #[test]
+    fn nan_collision_cost_is_rejected() {
+        let config = RewardConfig {
+            collision_cost: f32::NAN,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("collision_cost"));
+    }
+
+    #[test]
+    fn nan_zone_reward_min_is_rejected() {
+        let config = RewardConfig {
+            zone_reward_min: f32::NAN,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("zone_reward_min"));
+    }
+
+    #[test]
+    fn infinite_zone_reward_max_is_rejected() {
+        let config = RewardConfig {
+            zone_reward_max: f32::INFINITY,
+            ..Default::default()
+        };
+        let err = config.validate_finite().unwrap_err();
+        assert!(err.contains("zone_reward_max"));
+    }
+
+    #[test]
+    fn every_numeric_field_is_checked_exhaustively() {
+        // Each (field-setter) pair independently poisons the config with a
+        // non-finite value; every one of them must be caught.
+        let poisoners: Vec<(&str, RewardConfig)> = vec![
+            (
+                "step_cost",
+                RewardConfig {
+                    step_cost: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "goal_reward",
+                RewardConfig {
+                    goal_reward: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "distance_shaping",
+                RewardConfig {
+                    distance_shaping: f32::INFINITY,
+                    ..Default::default()
+                },
+            ),
+            (
+                "collision_cost",
+                RewardConfig {
+                    collision_cost: f32::NEG_INFINITY,
+                    ..Default::default()
+                },
+            ),
+            (
+                "invalid_action_cost",
+                RewardConfig {
+                    invalid_action_cost: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "construction_residual_weight",
+                RewardConfig {
+                    construction_residual_weight: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "construction_overshoot_weight",
+                RewardConfig {
+                    construction_overshoot_weight: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "zone_reward_min",
+                RewardConfig {
+                    zone_reward_min: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+            (
+                "zone_reward_max",
+                RewardConfig {
+                    zone_reward_max: f32::NAN,
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (field, config) in poisoners {
+            assert!(
+                config.validate_finite().is_err(),
+                "expected {field} to be rejected"
+            );
         }
     }
 }
