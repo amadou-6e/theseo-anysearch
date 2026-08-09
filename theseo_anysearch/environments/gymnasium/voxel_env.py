@@ -40,8 +40,7 @@ class VoxelEnv(RustGymnasiumEnv):
     """
     Single-agent Gymnasium wrapper for the Rust VoxelEnv.
 
-    Observation space: Dict(steps_remaining: Box(1,),
-                            [goal_distance: Box(1,), goal_direction: Box(3,)]
+    Observation space: Dict([goal_distance: Box(1,), goal_direction: Box(3,)]
                             when geometry is present)
     Action space: Discrete(26) — all 26 face/edge/corner neighbors in {-1,0,1}³
 
@@ -84,11 +83,8 @@ class VoxelEnv(RustGymnasiumEnv):
     def _init_obs_cache(self, config: dict) -> None:
         """Cache config values and pre-allocate obs buffers. Called from __init__
         and can be called manually in tests that use VoxelEnv.__new__."""
-        max_steps = max(config.get("max_steps", 200), 1)
         grid_size  = config.get("grid_size", 32)
-        self._inv_max_steps     = 1.0 / max_steps
         self._inv_max_manhattan = 1.0 / _max_manhattan(grid_size)
-        self._inv_norm          = 1.0 / float(max(grid_size - 1, 1))
         self._obs_mode          = config.get("obs_mode", "scalar")
         self._box_radius        = config.get("box_radius", 2)
         self._ray_max_len       = config.get("ray_max_len", 16)
@@ -96,11 +92,8 @@ class VoxelEnv(RustGymnasiumEnv):
         self._has_goal_flag     = self._has_goal()
 
         # Pre-allocate observation buffers — avoids per-step np.array([x]) allocation
-        self._buf_steps = np.zeros(1, dtype=np.float32)
         self._buf_goal  = np.zeros(1, dtype=np.float32)
         self._buf_goal_direction = np.zeros(3, dtype=np.float32)
-        if self._obs_mode != "scalar":
-            self._buf_cursor = np.zeros(3, dtype=np.float32)
         if self._obs_mode == "box":
             n = 2 * self._box_radius + 1
             self._buf_grid = np.empty(n ** 3, dtype=np.float32)
@@ -455,22 +448,15 @@ class VoxelEnv(RustGymnasiumEnv):
         )
 
         if mode == "scalar":
-            return spaces.Dict({
-                "steps_remaining": spaces.Box(0.0, 1.0, (1,), np.float32),
-                **goal_space,
-            })
+            return spaces.Dict(goal_space)
         if mode == "box":
             n = 2 * self._config.get("box_radius", 2) + 1
             return spaces.Dict({
-                "steps_remaining": spaces.Box(0.0, 1.0,   (1,),    np.float32),
-                "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),    np.float32),
                 "local_grid":      spaces.Box(0.0, 1.0,   (n**3,), np.float32),
                 **goal_space,
             })
         if mode == "radial":
             return spaces.Dict({
-                "steps_remaining": spaces.Box(0.0, 1.0,   (1,),  np.float32),
-                "cursor_pos":      spaces.Box(0.0, 1.0,   (3,),  np.float32),
                 "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
                 "ray_hit_types":   spaces.Box(0.0, 1.0,   (26,), np.float32),
                 **goal_space,
@@ -479,8 +465,6 @@ class VoxelEnv(RustGymnasiumEnv):
             radii = self._config.get("box_radii") or [1, 4]
             flat_size = sum((2 * r + 1) ** 3 for r in radii)
             return spaces.Dict({
-                "steps_remaining": spaces.Box(0.0, 1.0,    (1,),         np.float32),
-                "cursor_pos":      spaces.Box(0.0, 1.0,    (3,),         np.float32),
                 "local_grid":      spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
                 **goal_space,
             })
@@ -500,8 +484,7 @@ class VoxelEnv(RustGymnasiumEnv):
             )
         # Write into pre-allocated buffers; copy before returning so RLlib's
         # sample collector (which holds per-step references) sees stable data.
-        self._buf_steps[0] = rust_obs.steps_remaining * self._inv_max_steps
-        base = {"steps_remaining": self._buf_steps.copy()}
+        base = {}
         if self._has_goal_flag and rust_obs.goal_distance is not None:
             self._buf_goal[0] = rust_obs.goal_distance * self._inv_max_manhattan
             base["goal_distance"] = self._buf_goal.copy()
@@ -511,13 +494,6 @@ class VoxelEnv(RustGymnasiumEnv):
 
         if self._obs_mode == "scalar":
             return base
-
-        cx, cy, cz = rust_obs.cursor_pos
-        inv = self._inv_norm
-        self._buf_cursor[0] = (cx - 1) * inv
-        self._buf_cursor[1] = (cy - 1) * inv
-        self._buf_cursor[2] = (cz - 1) * inv
-        base["cursor_pos"] = self._buf_cursor.copy()
 
         if self._obs_mode == "box":
             local_grid = rust_obs.local_grid

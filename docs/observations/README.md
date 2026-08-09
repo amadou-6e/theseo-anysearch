@@ -52,3 +52,17 @@ distance does not change `goal_direction`.
 This unit-vector encoding replaces the earlier grid-scaled displacement.
 Existing policy checkpoints trained with the earlier encoding are therefore
 not observation-compatible and should be retrained.
+
+## No absolute-position or time-budget inputs
+
+Policy observations do not include `cursor_pos` or `steps_remaining`. The
+environment continues to track both values internally for movement, episode
+termination, rewards, predicates, rendering, and trajectory recording, but the
+network cannot use them as shortcuts.
+
+Removing these fields is an intentional schema break. Checkpoints whose
+observation space contains either field are incompatible and must be retrained;
+AnySearch does not silently pad or discard checkpoint inputs.
+
+Without a configured goal, `scalar` mode consequently has no policy features.
+Use a spatial observation mode or a goal-conditioned task for trainable runs.

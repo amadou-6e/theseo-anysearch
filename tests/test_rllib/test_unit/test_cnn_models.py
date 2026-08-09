@@ -517,13 +517,13 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         # Default radii [1, 4] → 27 + 729 = 756
         assert sp["local_grid"].shape == (756,)
 
-    def test_observation_space_has_cursor_pos(self):
+    def test_observation_space_omits_cursor_pos(self):
         from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
         env = VoxelEnv.__new__(VoxelEnv)
         env._config = {"obs_mode": "hierarchical_box"}
         env._rust_env = None
         sp = env._observation_space()
-        assert "cursor_pos" in sp.spaces
+        assert "cursor_pos" not in sp.spaces
 
     def test_obs_to_numpy_concatenates_segments(self):
         """_obs_to_numpy should concatenate box_obs(r) calls in radius order."""
