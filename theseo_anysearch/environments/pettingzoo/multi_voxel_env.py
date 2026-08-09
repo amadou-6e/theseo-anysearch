@@ -86,7 +86,6 @@ class MultiVoxelEnv(RustParallelEnv):
     Trail mode auto-fills each agent's destination on successful moves.
 
     Observation space per agent:
-        cursor_pos:      Box(3,)   normalised cursor position [0, 1]³
         face_neighbors:  Box(6,)   binary fill state of 6 cardinal neighbors (+x-x+y-y+z-z)
         local_grid:      Box(N³,)  binary fill state of (2*box_radius+1)³ box around cursor
         ray_cast:        Box(27,)  distance to nearest filled cell in 27 directions (0=adjacent, 1=none)
@@ -197,7 +196,6 @@ class MultiVoxelEnv(RustParallelEnv):
         radius = self._config.get("box_radius", 2)
         n = 2 * radius + 1
         base = {
-            "cursor_pos":     spaces.Box(0.0, 1.0, (3,),    np.float32),
             "face_neighbors": spaces.Box(0.0, 1.0, (6,),    np.float32),
             "local_grid":     spaces.Box(0.0, 1.0, (n**3,), np.float32),
             "ray_cast":       spaces.Box(0.0, 1.0, (27,),   np.float32),
@@ -212,7 +210,6 @@ class MultiVoxelEnv(RustParallelEnv):
 
     def _fanout_obs(self, rust_obs: Any) -> dict:
         grid_size = self._config.get("grid_size", 32)
-        norm = float(max(grid_size - 1, 1))
         radius = self._config.get("box_radius", 2)
         ray_max_len = self._config.get("ray_max_len", 16)
         use_euclidean = self._config.get("distance_metric", "euclidean") == "euclidean"
@@ -224,9 +221,6 @@ class MultiVoxelEnv(RustParallelEnv):
             if i < len(rust_obs.cursors):
                 cx, cy, cz = rust_obs.cursors[i]
                 obs = {
-                    "cursor_pos":     np.array(
-                        [(cx - 1) / norm, (cy - 1) / norm, (cz - 1) / norm], dtype=np.float32
-                    ),
                     "face_neighbors": np.array(
                         self._rust_env.face_neighbors(i), dtype=np.float32
                     ),
