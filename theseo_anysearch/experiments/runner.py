@@ -78,6 +78,12 @@ class RunInfo(BaseModel):
         Relative render artifact paths.
     mlflow_run_url : str | None
         Optional MLflow run URL for the experiment.
+    mlflow_degraded : bool
+        True when MLflow tracking was requested but at least one MLflow call
+        failed during the run (tracking silently stopped working). False for
+        both a healthy run and a run that never configured MLflow.
+    mlflow_degraded_reason : str | None
+        Human-readable reason for the most recent MLflow failure, if any.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -90,6 +96,8 @@ class RunInfo(BaseModel):
     trajectory_iterations: list[int] = Field(default_factory=list)
     render_files: list[str] = Field(default_factory=list)
     mlflow_run_url: str | None = None
+    mlflow_degraded: bool = False
+    mlflow_degraded_reason: str | None = None
     early_stop_reason: str | None = None
     early_stop_iteration: int | None = None
     early_stop_value: float | None = None
@@ -121,6 +129,10 @@ class InspectResult(BaseModel):
         Relative render artifact paths.
     mlflow_run_url : str | None
         Optional MLflow run URL for the experiment.
+    mlflow_degraded : bool
+        True when MLflow tracking was requested but degraded during the run.
+    mlflow_degraded_reason : str | None
+        Human-readable reason for the degraded MLflow state, if any.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +146,8 @@ class InspectResult(BaseModel):
     trajectory_iterations: list[int]
     render_files: list[str]
     mlflow_run_url: str | None
+    mlflow_degraded: bool = False
+    mlflow_degraded_reason: str | None = None
 
 
 def _new_run_id() -> str:
@@ -371,7 +385,13 @@ class ExperimentRunner:
             tracker.start_run(run_name=run_id, tags={"project_run_id": run_id})
             _append_run_stage(run_dir, "MLflow run started")
 
-            run_info = run_info.model_copy(update={"mlflow_run_url": tracker.run_url})
+            run_info = run_info.model_copy(
+                update={
+                    "mlflow_run_url": tracker.run_url,
+                    "mlflow_degraded": tracker.degraded,
+                    "mlflow_degraded_reason": tracker.degraded_reason,
+                }
+            )
             store.write_json("run.json", run_info.model_dump())
             _append_run_stage(run_dir, "run.json updated with MLflow URL")
             standalone_heuristic = (
@@ -430,16 +450,16 @@ class ExperimentRunner:
 
             tracker.end_run("FINISHED")
             _append_run_stage(run_dir, "MLflow run finished")
-            return self._finalise(store, run_info, "COMPLETED")
+            return self._finalise(store, run_info, "COMPLETED", tracker)
         except KeyboardInterrupt:
             tracker.end_run("FAILED")
             _append_run_stage(run_dir, "KeyboardInterrupt during run")
-            self._finalise(store, run_info, "INTERRUPTED")
+            self._finalise(store, run_info, "INTERRUPTED", tracker)
             raise
         except Exception:
             tracker.end_run("FAILED")
             _append_run_stage(run_dir, "Exception during run")
-            self._finalise(store, run_info, "FAILED")
+            self._finalise(store, run_info, "FAILED", tracker)
             raise
 
     def resume(self, run_id: str) -> RunInfo:
@@ -522,6 +542,8 @@ class ExperimentRunner:
             trajectory_iterations=trajectory_iterations,
             render_files=render_files,
             mlflow_run_url=run_info.mlflow_run_url,
+            mlflow_degraded=run_info.mlflow_degraded,
+            mlflow_degraded_reason=run_info.mlflow_degraded_reason,
         )
 
     @staticmethod
@@ -577,6 +599,7 @@ class ExperimentRunner:
         store: OutputStore,
         run_info: RunInfo,
         status: str,
+        tracker: Any = None,
     ) -> RunInfo:
         checkpoint_iterations = sorted(
             int(path.split("iter_")[-1])
@@ -589,18 +612,25 @@ class ExperimentRunner:
             if path.endswith(".json") and "iter_" in path
         )
         early_stop = store.read_json("early_stop.json") if store.exists("early_stop.json") else {}
-        final_info = run_info.model_copy(
-            update={
-                "status": status,
-                "end_time": _now_iso(),
-                "checkpoint_iterations": checkpoint_iterations,
-                "trajectory_iterations": trajectory_iterations,
-                "early_stop_reason": early_stop.get("mode"),
-                "early_stop_iteration": early_stop.get("iteration"),
-                "early_stop_value": early_stop.get("value"),
-                "early_stop_threshold": early_stop.get("threshold"),
-            }
-        )
+        update: dict[str, Any] = {
+            "status": status,
+            "end_time": _now_iso(),
+            "checkpoint_iterations": checkpoint_iterations,
+            "trajectory_iterations": trajectory_iterations,
+            "early_stop_reason": early_stop.get("mode"),
+            "early_stop_iteration": early_stop.get("iteration"),
+            "early_stop_value": early_stop.get("value"),
+            "early_stop_threshold": early_stop.get("threshold"),
+        }
+        if tracker is not None:
+            # Re-read the tracker's degraded state at finalisation time: a
+            # failure may occur any time after the initial run.json write
+            # (e.g. mid-training log_metrics calls), so this is the
+            # authoritative last word on whether tracking stayed healthy.
+            update["mlflow_degraded"] = tracker.degraded
+            update["mlflow_degraded_reason"] = tracker.degraded_reason
+            update["mlflow_run_url"] = tracker.run_url
+        final_info = run_info.model_copy(update=update)
         store.write_json("run.json", final_info.model_dump())
         _print_replay_hint(store.root, run_info.run_id, trajectory_iterations)
         return final_info

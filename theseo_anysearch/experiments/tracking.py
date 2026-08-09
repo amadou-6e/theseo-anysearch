@@ -74,6 +74,11 @@ class MLflowTracker:
         self._run_id: str | None = None
         self._child_run_id: str | None = None
         self._tracking_uri: str | None = None
+        # Degraded state: set whenever an MLflow call fails after tracking was
+        # requested (mlflow_config is not None). Distinct from `_enabled=False`
+        # via mlflow_config=None, which means tracking was never configured.
+        self._degraded = False
+        self._degraded_reason: str | None = None
         if not self._enabled:
             return
         try:
@@ -88,8 +93,22 @@ class MLflowTracker:
             )
             mlflow.set_experiment(eff_name)
         except Exception as exc:
-            warnings.warn(f"MLflowTracker init failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflowTracker init failed: {exc}")
             self._enabled = False
+
+    def _record_degraded(self, message: str) -> None:
+        """Mark tracking as degraded and surface the reason as a warning.
+
+        Called from every guarded MLflow call site on failure so that, in
+        addition to the transient warning, the tracker retains a persistent
+        record of *why* tracking is no longer reliable. Callers (e.g.
+        ``ExperimentRunner``) read ``degraded`` / ``degraded_reason`` and
+        write them into the run's persisted metadata so degraded tracking is
+        visible after the fact, not just in ephemeral log output.
+        """
+        self._degraded = True
+        self._degraded_reason = message
+        warnings.warn(message, stacklevel=3)
 
     # ------------------------------------------------------------------
     # Run lifecycle
@@ -105,7 +124,7 @@ class MLflowTracker:
             self._run_id = active.info.run_id
             return self._run_id
         except Exception as exc:
-            warnings.warn(f"MLflow start_run failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow start_run failed: {exc}")
             return None
 
     def start_child_run(
@@ -136,7 +155,7 @@ class MLflowTracker:
             self._child_run_id = active.info.run_id
             return self._child_run_id
         except Exception as exc:
-            warnings.warn(f"MLflow start_child_run failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow start_child_run failed: {exc}")
             return None
 
     def end_run(self, status: str = "FINISHED") -> None:
@@ -147,7 +166,7 @@ class MLflowTracker:
             import mlflow
             mlflow.end_run(status=status)
         except Exception as exc:
-            warnings.warn(f"MLflow end_run failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow end_run failed: {exc}")
 
     def end_child_run(self, status: str = "FINISHED") -> None:
         """End the child run opened by start_child_run."""
@@ -164,7 +183,7 @@ class MLflowTracker:
                 )
                 self._child_run_id = None
             except Exception as exc:
-                warnings.warn(f"MLflow end_child_run failed: {exc}", stacklevel=2)
+                self._record_degraded(f"MLflow end_child_run failed: {exc}")
         else:
             self.end_run(status=status)
 
@@ -182,7 +201,7 @@ class MLflowTracker:
             str_params = {k: str(v)[:500] for k, v in params.items()}
             mlflow.log_params(str_params)
         except Exception as exc:
-            warnings.warn(f"MLflow log_params failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow log_params failed: {exc}")
 
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         """Log a dict of numeric metrics at the given training iteration."""
@@ -192,7 +211,7 @@ class MLflowTracker:
             import mlflow
             mlflow.log_metrics(metrics, step=step)
         except Exception as exc:
-            warnings.warn(f"MLflow log_metrics failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow log_metrics failed: {exc}")
 
     def log_artifact(self, local_path: str | Path) -> None:
         """Upload a local file or directory to the active run's artifact store."""
@@ -202,7 +221,7 @@ class MLflowTracker:
             import mlflow
             mlflow.log_artifact(str(local_path))
         except Exception as exc:
-            warnings.warn(f"MLflow log_artifact failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow log_artifact failed: {exc}")
 
     def set_tag(self, key: str, value: str) -> None:
         """Set a string tag on the active run."""
@@ -212,7 +231,7 @@ class MLflowTracker:
             import mlflow
             mlflow.set_tag(key, value)
         except Exception as exc:
-            warnings.warn(f"MLflow set_tag failed: {exc}", stacklevel=2)
+            self._record_degraded(f"MLflow set_tag failed: {exc}")
 
     # ------------------------------------------------------------------
     # Introspection
@@ -239,3 +258,19 @@ class MLflowTracker:
             )
         except Exception:
             return None
+
+    @property
+    def degraded(self) -> bool:
+        """True once any MLflow call has failed after tracking was requested.
+
+        A run that starts with tracking configured but hits a degraded state
+        is not the same as a run that never configured tracking — callers
+        should persist this flag (and ``degraded_reason``) into the run's
+        artifacts so the distinction survives after the process exits.
+        """
+        return self._degraded
+
+    @property
+    def degraded_reason(self) -> str | None:
+        """Human-readable reason for the most recent MLflow failure, if any."""
+        return self._degraded_reason
