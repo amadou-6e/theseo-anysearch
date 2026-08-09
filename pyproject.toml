@@ -33,7 +33,6 @@ dev = [
   "pytest>=8.0",
   "pytest-timeout>=2.3",
 ]
-explain-ui = ["streamlit>=1.37", "pandas>=2.2"]
 torch-cpu = ["torch>=2.0"]
 torch-gpu = ["torch>=2.0"]
 

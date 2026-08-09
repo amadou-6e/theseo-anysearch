@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
+use theseo_core::replay::explain::NativeExplainUi;
 
 // ---------------------------------------------------------------------------
 // JSON data model — must match the Python TrajectoryWriter output
@@ -131,6 +132,7 @@ fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
 fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
     let json = std::fs::read_to_string(path).ok()?;
     let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
+    traj.source_path = path.to_path_buf();
     if traj.episode.init_filled.is_empty() {
         if let Some(sidecar) = &traj.episode.init_filled_file {
             let npy_path = path.parent().unwrap_or(std::path::Path::new(".")).join(sidecar);
@@ -143,6 +145,8 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
 
 #[derive(Deserialize, Clone)]
 struct TrajectoryData {
+    #[serde(skip)]
+    source_path: PathBuf,
     experiment_name: String,
     run_id: String,
     iteration: u32,
@@ -524,6 +528,8 @@ struct VoxelReplayApp {
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
     current_trial: usize,
+    /// Optional checkpoint-backed native explanation windows.
+    explain_ui: Option<NativeExplainUi>,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -548,7 +554,7 @@ struct UiEvents {
 }
 
 impl VoxelReplayApp {
-    fn new(trajectories: Vec<TrajectoryData>) -> Self {
+    fn new(trajectories: Vec<TrajectoryData>, explain_ui: Option<NativeExplainUi>) -> Self {
         let geo_voxels = trajectories.iter().map(|t| {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
@@ -562,6 +568,7 @@ impl VoxelReplayApp {
             playing: false,
             tune_trials: Vec::new(),
             current_trial: 0,
+            explain_ui,
         }
     }
 
@@ -576,6 +583,7 @@ impl VoxelReplayApp {
             playing: false,
             tune_trials: trials,
             current_trial: 0,
+            explain_ui: None,
         };
         app.load_trial(0);
         app
@@ -711,6 +719,7 @@ impl eframe::App for VoxelReplayApp {
                 traj.agent_count,
             )
         };
+        let current_trajectory_path = self.trajectories[iter_idx].source_path.clone();
 
         // ---- Left panel -----------------------------------------------------
         egui::SidePanel::left("controls").min_width(260.0).show(ctx, |ui| {
@@ -836,6 +845,26 @@ impl eframe::App for VoxelReplayApp {
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
             ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
+            ui.separator();
+
+            ui.label(egui::RichText::new("Explainability").strong());
+            let explain_available = self.explain_ui.as_ref()
+                .map(NativeExplainUi::available).unwrap_or(false);
+            if ui.add_enabled(explain_available, egui::Button::new("Explain current step")).clicked() {
+                if let Some(explain) = self.explain_ui.as_mut() {
+                    explain.explain_trajectory(&current_trajectory_path, step_idx);
+                }
+            }
+            if ui.add_enabled(explain_available, egui::Button::new("Open observation editor")).clicked() {
+                if let Some(explain) = self.explain_ui.as_mut() {
+                    explain.observation_open = true;
+                }
+            }
+            if !explain_available {
+                ui.label(egui::RichText::new(
+                    "Open this replay from a run reference to attach a checkpoint."
+                ).small().weak());
+            }
             ui.separator();
 
             // Reward curve
@@ -1121,6 +1150,9 @@ impl eframe::App for VoxelReplayApp {
             if !still_going { self.playing = false; }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
+        if let Some(explain) = self.explain_ui.as_mut() {
+            explain.show(ctx);
+        }
     }
 }
 
@@ -1129,7 +1161,27 @@ impl eframe::App for VoxelReplayApp {
 // ---------------------------------------------------------------------------
 
 fn main() -> eframe::Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args = Vec::new();
+    let mut explain_run: Option<PathBuf> = None;
+    let mut checkpoint = "latest".to_string();
+    let mut open_observation_editor = false;
+    let mut index = 0;
+    while index < raw_args.len() {
+        match raw_args[index].as_str() {
+            "--explain-run" => {
+                index += 1;
+                explain_run = raw_args.get(index).map(PathBuf::from);
+            }
+            "--checkpoint" => {
+                index += 1;
+                checkpoint = raw_args.get(index).cloned().unwrap_or_else(|| "latest".into());
+            }
+            "--open-observation-editor" => open_observation_editor = true,
+            value => args.push(value.to_string()),
+        }
+        index += 1;
+    }
     if args.is_empty() {
         eprintln!("Usage:");
         eprintln!("  voxel-replay --tune-dir <tune-run-dir>     Navigate tune trials");
@@ -1206,9 +1258,11 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
+    let explain_ui = explain_run.as_deref()
+        .map(|run| NativeExplainUi::start(run, &checkpoint, open_observation_editor));
     eframe::run_native(
         "Voxel Replay",
         options,
-        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories)))),
+        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories, explain_ui)))),
     )
 }

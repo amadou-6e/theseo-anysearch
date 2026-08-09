@@ -63,11 +63,10 @@ def explain(
 def explain_ui(
     run: str = typer.Argument(..., help="Run directory or registered name:run-id."),
     checkpoint: str = typer.Option("latest", help="Checkpoint selector."),
-    port: int = typer.Option(8501, min=1, max=65535),
 ) -> None:
-    """Launch the interactive policy-observation explanation interface."""
+    """Launch the native replay and policy-observation explanation interface."""
 
-    launch_explain_ui(run, checkpoint, port)
+    launch_explain_ui(run, checkpoint)
 
 
 def _restore_archived_output_root(experiment: Any, run_dir: Path) -> Any:

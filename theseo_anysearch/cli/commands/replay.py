@@ -13,6 +13,7 @@ Browse all trajectories in a sweep::
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -315,7 +316,20 @@ def replay(
         files = _all_iter_trajectories(run_dir)
         typer.echo(f"Replaying {len(files)} iteration(s) from {traj_dir}")
 
-    subprocess.run([str(binary)] + [str(f) for f in files], check=True)
+    environment = dict(os.environ)
+    environment["ANYSEARCH_PYTHON"] = sys.executable
+    subprocess.run(
+        [
+            str(binary),
+            "--explain-run",
+            str(run_dir),
+            "--checkpoint",
+            "latest",
+            *[str(path) for path in files],
+        ],
+        env=environment,
+        check=True,
+    )
     raise typer.Exit()
 
 

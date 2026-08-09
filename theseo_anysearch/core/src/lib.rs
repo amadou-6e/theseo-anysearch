@@ -4,6 +4,7 @@ pub mod camera;
 pub mod environments;
 pub mod renderer;
 pub mod rendering;
+pub mod replay;
 pub mod surface;
 pub mod voxel;
 

@@ -80,21 +80,23 @@ Checkpoint restoration supports DQN with discrete voxel action spaces. The avail
 
 ## Interactive UI
 
-Install the optional UI dependencies and launch a checkpoint session:
+Build the native replayer once, then launch a checkpoint session:
 
 ```powershell
-pip install -e ".[explain-ui]"
+cargo build --manifest-path theseo_anysearch/core/Cargo.toml --release --bin voxel-replay
 anysearch explain-ui dqn-waypoints:4d312abc --checkpoint latest
 ```
 
-The browser interface restores the policy once. It can start from a real initial
-observation or load an exact observation JSON or fictional-observation YAML. Use
-the X, Y, and Z slice selector to edit individual normalized voxel inputs, and
-use the generated sidebar controls to change every scalar or vector field within
-its declared bounds. Each valid edit recomputes the action scores, selected
-movement vector, safe-action margin, and grouped attribution immediately.
+The native `egui/eframe` interface restores the policy once through a persistent
+Python scoring process. The trajectory panel provides **Explain current step**
+for the selected replay step and **Open observation editor** for a dedicated
+fictional-observation window. The editor provides X/Y/Z voxel slices and
+schema-derived controls for every non-spatial field. Press **Explain policy
+decision** after an edit to update action scores, the selected movement vector,
+the safe-action margin, and grouped attribution. Changes to voxel cells and
+scalar controls trigger a new explanation immediately; the explicit button is
+also available to recompute the current state.
 
-Download the edited scenario YAML to reproduce it later with `anysearch explain`,
-or download the current JSON report. UI-created observations remain explicitly
-marked `not_environment_validated`; editing a value does not claim that the
-environment could naturally produce that combination.
+The same controls are available from a normal `anysearch replay <run-ref>`
+session. UI-created observations are explicitly `not_environment_validated`;
+editing a value does not claim the environment could naturally produce it.
