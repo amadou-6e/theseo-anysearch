@@ -143,6 +143,7 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
     """
 
     _spatial_keys = frozenset({"local_grid"})
+    _policy_only_keys = frozenset({"action_mask"})
 
     def __init__(
         self,
@@ -160,7 +161,8 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
         if spaces is None:
             raise ValueError("voxel CNN models require a Dict observation space")
         self._auxiliary_keys = tuple(
-            key for key in spaces if key not in self._spatial_keys
+            key for key in spaces
+            if key not in self._spatial_keys and key not in self._policy_only_keys
         )
         self._n_auxiliary = sum(
             int(space.shape[0]) for key, space in spaces.items()
@@ -222,11 +224,25 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
             dim=1,
         )
 
-    def _forward_heads(self, features: torch.Tensor, state: list) -> tuple[torch.Tensor, list]:
+    def _forward_heads(
+        self,
+        features: torch.Tensor,
+        state: list,
+        action_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list]:
         """Run the shared FC trunk and produce policy logits plus cached value output."""
         x = self._fc(features)
         self._value_out = self._value_head(x)
-        return self._policy_head(x), state
+        logits = self._policy_head(x)
+        if action_mask is not None:
+            if action_mask.shape[-1] != logits.shape[-1]:
+                raise ValueError(
+                    "action mask width does not match policy logits: "
+                    f"{action_mask.shape[-1]} != {logits.shape[-1]}"
+                )
+            minimum = torch.finfo(logits.dtype).min
+            logits = logits.masked_fill(action_mask <= 0, minimum)
+        return logits, state
 
     def value_function(self) -> torch.Tensor:
         """Return the cached scalar value prediction from the most recent forward pass.

@@ -13,6 +13,14 @@ class ActionExtensionSelector(BaseModel):
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class ActionMaskingConfig(BaseModel):
+    """Expose predicate feasibility to discrete policies as an action mask."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    all_masked: Literal["error"] = "error"
+
+
 class ActionConfig(BaseModel):
     """Policy action-space and Rust behavior pipeline."""
 
@@ -32,6 +40,7 @@ class ActionConfig(BaseModel):
     history_length: int = Field(
         default=16, ge=0, le=4096, description="Actions retained for extension context."
     )
+    masking: ActionMaskingConfig = Field(default_factory=ActionMaskingConfig)
 
     @field_validator("predicates", "outcomes", mode="before")
     @classmethod
@@ -51,6 +60,12 @@ class ActionConfig(BaseModel):
             duplicates = sorted({name for name in names if names.count(name) > 1})
             if duplicates:
                 raise ValueError(f"duplicate action {kind} names: {duplicates}")
+        if self.masking.enabled and self.mode == "vector_3":
+            raise ValueError(
+                "action masking requires a discrete action mode; vector_3 uses "
+                "factorized MultiDiscrete logits that cannot represent an arbitrary "
+                "joint predicate mask"
+            )
         return self
 
     def resolved_pipeline(
