@@ -102,9 +102,9 @@ class VoxelBox2DCNN(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, self._n, self._n, self._n).permute(0, 3, 1, 2)
+        grid_3d = grid.reshape(batch, self._n, self._n, self._n).permute(0, 3, 1, 2)
         feat = self._conv(grid_3d)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
@@ -180,9 +180,9 @@ class VoxelBox3DCNN(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, 1, self._n, self._n, self._n)
+        grid_3d = grid.reshape(batch, 1, self._n, self._n, self._n)
         feat = self._conv(grid_3d)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
@@ -269,7 +269,7 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
         offset = 0
         for size in self._sizes:
             segment = grid[:, offset : offset + size**3]
-            volume = segment.view(batch, size, size, size)
+            volume = segment.reshape(batch, size, size, size)
             pad = (self._n_max - size) // 2
             if pad > 0:
                 volume = F.pad(volume, [pad, pad, pad, pad, pad, pad])
@@ -278,7 +278,7 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
 
         stacked = torch.stack(volumes, dim=1)
         feat = self._conv(stacked)
-        feat = feat.view(batch, -1)
+        feat = feat.reshape(batch, -1)
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
@@ -374,7 +374,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         obs = input_dict["obs"]
         grid = obs["local_grid"]
         batch = grid.shape[0]
-        grid_3d = grid.view(batch, self._n, self._n, self._n)
+        grid_3d = grid.reshape(batch, self._n, self._n, self._n)
 
         if self._freeze:
             with torch.no_grad():
