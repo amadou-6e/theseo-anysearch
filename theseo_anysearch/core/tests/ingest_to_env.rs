@@ -91,7 +91,7 @@ endsolid cube"#;
 
 fn make_env(agent_count: usize, max_steps: u32) -> SurfaceEnv {
     let mesh = parse_ascii_stl(CUBE_STL).unwrap();
-    let placements = voxelize_mesh(&mesh, (100, 100, 100), 5.0);
+    let (placements, _dropped) = voxelize_mesh(&mesh, (100, 100, 100), 5.0);
     let coords: Vec<_> = placements.iter().map(|p| p.coord).collect();
     SurfaceEnv::from_filled_surface(&coords, agent_count, max_steps)
 }
