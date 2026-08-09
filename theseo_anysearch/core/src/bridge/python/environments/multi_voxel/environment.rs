@@ -52,6 +52,9 @@ impl PyMultiVoxelEnv {
             zone_reward_max,
             zone_reward_curve,
         };
+        reward_config
+            .validate_finite()
+            .map_err(PyValueError::new_err)?;
         let inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
