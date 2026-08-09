@@ -47,20 +47,19 @@ class TestSurfaceEnvIntegration:
     def test_reset_obs_has_correct_keys(self, env):
         obs, _ = env.reset(seed=0)
         for agent_obs in obs.values():
-            assert set(agent_obs.keys()) == {"steps_remaining", "position", "target", "reached"}
+            assert set(agent_obs.keys()) == {"position", "target", "reached"}
 
     def test_reset_obs_dtypes(self, env):
         obs, _ = env.reset(seed=0)
         for agent_obs in obs.values():
-            assert agent_obs["steps_remaining"].dtype == np.float32
+            assert "steps_remaining" not in agent_obs
             assert agent_obs["position"].dtype == np.float32
             assert agent_obs["target"].dtype == np.float32
 
-    def test_reset_steps_remaining_is_normalised(self, env):
+    def test_reset_steps_remaining_is_not_exposed(self, env):
         obs, _ = env.reset(seed=0)
         for agent_obs in obs.values():
-            val = float(agent_obs["steps_remaining"][0])
-            assert 0.0 <= val <= 1.0
+            assert "steps_remaining" not in agent_obs
 
     def test_step_returns_expected_keys(self, env):
         env.reset(seed=0)
