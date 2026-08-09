@@ -150,6 +150,17 @@ class InspectResult(BaseModel):
     mlflow_degraded_reason: str | None = None
 
 
+class StagingState(BaseModel):
+    """Persisted position within an ordered staged training run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_index: int = Field(default=0, ge=0)
+    stage_name: str = ""
+    completed_iterations: int = Field(default=0, ge=0)
+    completed_stages: list[str] = Field(default_factory=list)
+
+
 def _new_run_id() -> str:
     return secrets.token_hex(4)
 
@@ -267,6 +278,27 @@ def _build_trainer(config: ExperimentConfig, output_dir: Path) -> Trainer:
     return _Trainer.from_settings(settings)
 
 
+def _attach_tracking_hook(
+    trainer: Trainer,
+    tracker: Any | None,
+    *,
+    stage_index: int | None = None,
+) -> None:
+    """Attach MLflow reporting, including the active stage when configured."""
+    if tracker is None:
+        return
+    _orig_hook = trainer.on_iteration_end
+
+    def _combined_hook(result: TrainResult) -> None:
+        _orig_hook(result)
+        metrics = result.standard_metrics()
+        if stage_index is not None:
+            metrics["training_stage_index"] = float(stage_index)
+        tracker.log_metrics(metrics, step=result.iteration)
+
+    trainer.on_iteration_end = _combined_hook  # type: ignore[method-assign]
+
+
 def _collect_heuristic_reference(
     config: ExperimentConfig,
     store: Any,
@@ -321,6 +353,122 @@ class ExperimentRunner:
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
         self._config = config
         self._config_path = config_path
+
+    @staticmethod
+    def _write_staging_state(store: OutputStore, state: StagingState) -> None:
+        store.write_json("staging_state.json", state.model_dump())
+
+    def _run_staged_training(
+        self,
+        store: OutputStore,
+        run_dir: Path,
+        tracker: MLflowTracker | None,
+        *,
+        resume: bool = False,
+    ) -> Trainer:
+        """Execute configured stages while transferring policy state."""
+        staging = self._config.staging
+        if staging is None or not staging.enabled:
+            raise RuntimeError("staged training requested without enabled staging")
+        if resume and not staging.resume:
+            raise ValueError("staging.resume is disabled for this experiment")
+
+        state = (
+            StagingState.model_validate(store.read_json("staging_state.json"))
+            if resume and store.exists("staging_state.json")
+            else StagingState()
+        )
+        previous_trainer: Trainer | None = None
+        start_index = state.stage_index
+
+        for stage_index in range(start_index, len(staging.stages)):
+            stage = staging.stages[stage_index]
+            stage_config = self._config.stage_experiment(
+                stage_index,
+                completed_iterations=state.completed_iterations,
+            )
+            trainer = _build_trainer(stage_config, run_dir)
+            _attach_tracking_hook(trainer, tracker, stage_index=stage_index)
+            transition = stage.replay_transition or staging.replay_transition
+
+            _append_run_stage(
+                run_dir,
+                f"Starting training stage {stage_index}: {stage.name}",
+            )
+
+            if resume and stage_index == start_index:
+                if state.stage_name == stage.name or transition == "preserve":
+                    if not trainer.resume():
+                        raise FileNotFoundError(
+                            "staging_state.json exists but no trainer checkpoint is available"
+                        )
+                elif stage_index > 0:
+                    previous_stage = staging.stages[stage_index - 1]
+                    previous_config = self._config.stage_experiment(
+                        stage_index - 1,
+                        completed_iterations=(
+                            state.completed_iterations - previous_stage.iterations
+                        ),
+                    )
+                    checkpoint_trainer = _build_trainer(previous_config, run_dir)
+                    if not checkpoint_trainer.resume():
+                        raise FileNotFoundError(
+                            "staging_state.json exists but no trainer checkpoint is available"
+                        )
+                    weights = checkpoint_trainer._algo.get_weights()
+                    episodes_total = checkpoint_trainer._episodes_total
+                    checkpoint_trainer._algo.stop()
+                    trainer._algo = trainer._build_algorithm()
+                    trainer._algo.set_weights(weights)
+                    trainer._iteration = state.completed_iterations
+                    trainer._episodes_total = episodes_total
+            elif previous_trainer is not None:
+                checkpoint_dir = previous_trainer.checkpoint()
+                if transition == "preserve":
+                    previous_trainer._algo.stop()
+                    trainer.restore(checkpoint_dir)
+                else:
+                    weights = previous_trainer._algo.get_weights()
+                    episodes_total = previous_trainer._episodes_total
+                    previous_trainer._algo.stop()
+                    trainer._algo = trainer._build_algorithm()
+                    trainer._algo.set_weights(weights)
+                    trainer._iteration = state.completed_iterations
+                    trainer._episodes_total = episodes_total
+
+            active_state = state.model_copy(
+                update={"stage_index": stage_index, "stage_name": stage.name}
+            )
+            self._write_staging_state(store, active_state)
+            trainer.train()
+            trainer.checkpoint()
+            completed_stages = [*state.completed_stages, stage.name]
+            state = StagingState(
+                stage_index=stage_index + 1,
+                stage_name="",
+                completed_iterations=trainer._iteration,
+                completed_stages=completed_stages,
+            )
+            self._write_staging_state(store, state)
+            _append_run_stage(
+                run_dir,
+                f"Completed training stage {stage_index}: {stage.name}",
+            )
+            previous_trainer = trainer
+            resume = False
+
+        if previous_trainer is None:
+            final_index = len(staging.stages) - 1
+            final_config = self._config.stage_experiment(
+                final_index,
+                completed_iterations=(
+                    state.completed_iterations - staging.stages[final_index].iterations
+                ),
+            )
+            previous_trainer = _build_trainer(final_config, run_dir)
+            if not previous_trainer.resume():
+                raise FileNotFoundError("completed staged run has no checkpoint")
+        return previous_trainer
 
     def run(self) -> RunInfo:
         # Register the run immediately using only stdlib so it shows in `anysearch list`
@@ -398,9 +546,15 @@ class ExperimentRunner:
                 self._config.training.algorithm.lower() == "heuristic"
             )
             trainer = None
-            if not standalone_heuristic:
+            staged_training = bool(
+                self._config.staging is not None
+                and self._config.staging.enabled
+            )
+            if not standalone_heuristic and not staged_training:
                 trainer = _build_trainer(self._config, run_dir)
                 _append_run_stage(run_dir, "Trainer built")
+            elif staged_training:
+                _append_run_stage(run_dir, "Staged training selected")
             else:
                 _append_run_stage(run_dir, "Standalone heuristic mode selected")
 
@@ -412,18 +566,9 @@ class ExperimentRunner:
             _append_run_stage(run_dir, "experiment.yaml logged to MLflow")
 
             if trainer is not None:
-                _orig_hook = trainer.on_iteration_end
+                _attach_tracking_hook(trainer, tracker)
 
-                def _combined_hook(result: TrainResult) -> None:
-                    _orig_hook(result)
-                    tracker.log_metrics(
-                        result.standard_metrics(),
-                        step=result.iteration,
-                    )
-
-                trainer.on_iteration_end = _combined_hook  # type: ignore[method-assign]
-
-            if trainer is None:
+            if standalone_heuristic:
                 _collect_heuristic_reference(
                     self._config,
                     store,
@@ -433,6 +578,20 @@ class ExperimentRunner:
                     self._config.env.to_runtime_dict(),
                     iteration=0,
                 )
+            elif staged_training:
+                _append_run_stage(run_dir, "Calling staged training")
+                trainer = self._run_staged_training(store, run_dir, tracker)
+                _append_run_stage(run_dir, "Staged training returned")
+                if self._config.heuristic.enabled:
+                    _collect_heuristic_reference(
+                        self._config,
+                        store,
+                        run_dir,
+                        run_id,
+                        tracker,
+                        trainer._env_config_dict(),
+                        iteration=trainer._iteration,
+                    )
             else:
                 _append_run_stage(run_dir, "Calling trainer.train()")
                 trainer.train()
@@ -473,13 +632,25 @@ class ExperimentRunner:
         store.write_json("run.json", run_info.model_dump())
 
         try:
-            with _loading_throbber():
-                trainer = _build_trainer(self._config, run_dir)
-            if not trainer.resume():
-                raise FileNotFoundError(
-                    f"No checkpoint found in {run_dir.joinpath('checkpoints')}. Cannot resume."
+            staged_training = bool(
+                self._config.staging is not None
+                and self._config.staging.enabled
+            )
+            if staged_training:
+                trainer = self._run_staged_training(
+                    store,
+                    run_dir,
+                    None,
+                    resume=True,
                 )
-            trainer.train()
+            else:
+                with _loading_throbber():
+                    trainer = _build_trainer(self._config, run_dir)
+                if not trainer.resume():
+                    raise FileNotFoundError(
+                        f"No checkpoint found in {run_dir.joinpath('checkpoints')}. Cannot resume."
+                    )
+                trainer.train()
             return self._finalise(store, run_info, "COMPLETED")
         except KeyboardInterrupt:
             self._finalise(store, run_info, "INTERRUPTED")

@@ -76,6 +76,45 @@ class TestExperimentRunnerRun:
 
         assert info.checkpoint_iterations == [1, 2, 3]
 
+    def test_staged_run_completes_all_stages(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["staging"] = {
+            "replay_transition": "clear",
+            "stages": [
+                {
+                    "name": "one-step",
+                    "iterations": 1,
+                    "env": {"max_steps": 1, "trail_mode": False},
+                },
+                {
+                    "name": "with-trails",
+                    "iterations": 2,
+                    "env": {"max_steps": 50, "trail_mode": True},
+                },
+            ],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            info = ExperimentRunner(config).run()
+        finally:
+            runner_mod._build_trainer = original
+
+        run_dir = config.run_output_dir.joinpath(info.run_id)
+        state = json.loads(
+            run_dir.joinpath("staging_state.json").read_text(encoding="utf-8")
+        )
+        assert info.status == "COMPLETED"
+        assert state["completed_stages"] == ["one-step", "with-trails"]
+        assert state["completed_iterations"] == 3
+        assert info.checkpoint_iterations == [1, 2, 3]
+
     def test_run_collects_enabled_heuristic_reference(
         self,
         experiment_config: ExperimentConfig,

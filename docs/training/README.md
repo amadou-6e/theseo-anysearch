@@ -1,5 +1,8 @@
 # Training configuration
 
+For ordered task curricula that change episode budgets, goals, trail behavior,
+or other runtime settings, see [staged training](staging.md).
+
 See [performance metrics](performance.md) for the per-iteration RLlib and
 AnySearch timing breakdown available in TensorBoard.
 
