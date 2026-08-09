@@ -72,4 +72,14 @@ class AlgorithmEnvCompatibilityMixin:
                 f"VoxelEnv, but env.agent_count={self.env.agent_count}. "
                 "Use env.agent_count=1 or switch to training.algorithm='multi_agent_voxel_ppo'."
             )
+        selected_model = self.model_cfg.custom_model or self.training.model
+        from theseo_anysearch.environments.perception import get_perception
+
+        for selector in self.env.observation.resolved_selectors():
+            compatible = get_perception(selector.name).metadata.compatible_models
+            if compatible and selected_model not in compatible:
+                raise ValueError(
+                    f"perception {selector.name!r} is incompatible with model "
+                    f"{selected_model!r}; compatible models: {list(compatible)}"
+                )
         return self

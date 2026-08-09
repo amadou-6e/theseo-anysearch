@@ -19,6 +19,7 @@ from theseo_anysearch.environments.action_spaces import (
 )
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
+from theseo_anysearch.environments.perception import PerceptionPipeline
 from theseo_anysearch.environments.task import (
     TaskConfig,
     goal_distance,
@@ -51,6 +52,7 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        self._perception = self._build_perception_pipeline(config)
         self._task = TaskConfig.model_validate(config.get("task") or {})
         from theseo_anysearch.experiments.custom_rewards import load_reward_provider
 
@@ -90,6 +92,15 @@ class VoxelEnv(RustGymnasiumEnv):
         self._ray_max_len       = config.get("ray_max_len", 16)
         self._box_radii         = config.get("box_radii") or [1, 4]
         self._has_goal_flag     = self._has_goal()
+        try:
+            self._perception = self._build_perception_pipeline(config)
+        except ValueError:
+            # Preserve the legacy test/helper lifecycle that initializes caches
+            # before asking the conversion path to diagnose an unknown mode.
+            self._perception = None
+        self._native_box_radius = (
+            self._configured_local_box_radius() if self._perception is not None else None
+        )
 
         # Pre-allocate observation buffers — avoids per-step np.array([x]) allocation
         self._buf_goal  = np.zeros(1, dtype=np.float32)
@@ -199,9 +210,7 @@ class VoxelEnv(RustGymnasiumEnv):
             ),
             action_history_length=int(config.get("action_history_length", 16)),
             box_radius=(
-                config.get("box_radius", 2)
-                if config.get("obs_mode", "scalar") == "box"
-                else None
+                self._configured_local_box_radius()
             ),
         )
 
@@ -436,42 +445,37 @@ class VoxelEnv(RustGymnasiumEnv):
             or self._config.get("geometry_pool")
         )
 
-    def _observation_space(self) -> gymnasium.Space:
-        mode = self._config.get("obs_mode", "scalar")
-        goal_space = (
-            {
-                "goal_distance": spaces.Box(0.0, 1.0, (1,), np.float32),
-                "goal_direction": spaces.Box(-1.0, 1.0, (3,), np.float32),
-            }
-            if self._has_goal()
-            else {}
-        )
+    @staticmethod
+    def _build_perception_pipeline(config: dict) -> PerceptionPipeline:
+        selectors = config.get("perceptions")
+        if selectors is None:
+            mode = config.get("obs_mode", "scalar")
+            selectors = []
+            if mode == "box":
+                selectors.append({"name": "local_box", "parameters": {"radius": config.get("box_radius", 2)}})
+            elif mode == "radial":
+                selectors.append({"name": "radial", "parameters": {"max_len": config.get("ray_max_len", 16)}})
+            elif mode == "hierarchical_box":
+                selectors.append({"name": "hierarchical_box", "parameters": {"radii": config.get("box_radii") or [1, 4]}})
+            elif mode != "scalar":
+                raise ValueError(
+                    f"unknown legacy obs_mode {mode!r}; expected scalar, box, radial, or hierarchical_box"
+                )
+            selectors.append({"name": "goal_vector", "parameters": {}})
+        return PerceptionPipeline(selectors)
 
-        if mode == "scalar":
-            return spaces.Dict(goal_space)
-        if mode == "box":
-            n = 2 * self._config.get("box_radius", 2) + 1
-            return spaces.Dict({
-                "local_grid":      spaces.Box(0.0, 1.0,   (n**3,), np.float32),
-                **goal_space,
-            })
-        if mode == "radial":
-            return spaces.Dict({
-                "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
-                "ray_hit_types":   spaces.Box(0.0, 1.0,   (26,), np.float32),
-                **goal_space,
-            })
-        if mode == "hierarchical_box":
-            radii = self._config.get("box_radii") or [1, 4]
-            flat_size = sum((2 * r + 1) ** 3 for r in radii)
-            return spaces.Dict({
-                "local_grid":      spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
-                **goal_space,
-            })
-        raise ValueError(
-            f"Unknown obs_mode: {mode!r}. "
-            "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
-        )
+    def _configured_local_box_radius(self) -> int | None:
+        for sensor in self._perception.sensors:
+            if sensor.metadata.name == "local_box":
+                return int(sensor.parameters.get("radius", 2))
+        return None
+
+    def _observation_space(self) -> gymnasium.Space:
+        pipeline = getattr(self, "_perception", None)
+        if pipeline is None:
+            pipeline = self._build_perception_pipeline(self._config)
+            self._perception = pipeline
+        return pipeline.observation_space(self)
 
     def _action_space(self) -> gymnasium.Space:
         return build_action_space(self._config.get("action_mode", "discrete_26"))
@@ -482,44 +486,9 @@ class VoxelEnv(RustGymnasiumEnv):
             self._log_env_stage(
                 f"obs_to_numpy start index={self._obs_log_count} mode={self._obs_mode}"
             )
-        # Write into pre-allocated buffers; copy before returning so RLlib's
-        # sample collector (which holds per-step references) sees stable data.
-        base = {}
-        if self._has_goal_flag and rust_obs.goal_distance is not None:
-            self._buf_goal[0] = rust_obs.goal_distance * self._inv_max_manhattan
-            base["goal_distance"] = self._buf_goal.copy()
-            if rust_obs.goal_direction is not None:
-                self._buf_goal_direction[:] = rust_obs.goal_direction
-                base["goal_direction"] = self._buf_goal_direction.copy()
-
-        if self._obs_mode == "scalar":
-            return base
-
-        if self._obs_mode == "box":
-            local_grid = rust_obs.local_grid
-            if local_grid is None:
-                local_grid = self._rust_env.box_obs(self._box_radius)
-            self._buf_grid[:] = local_grid
-            base["local_grid"] = self._buf_grid.copy()
-        elif self._obs_mode == "radial":
-            self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
-            self._buf_ray_types[:] = self._rust_env.radial_obs_types(self._ray_max_len)
-            self._buf_ray_types *= 1.0 / MAX_RAY_HIT_TYPE
-            base["ray_hits"] = self._buf_rays.copy()
-            base["ray_hit_types"] = self._buf_ray_types.copy()
-        elif self._obs_mode == "hierarchical_box":
-            offset = 0
-            for r in self._box_radii:
-                seg = self._rust_env.box_obs(r)
-                n = (2 * r + 1) ** 3
-                self._buf_grid[offset:offset + n] = seg
-                offset += n
-            base["local_grid"] = self._buf_grid.copy()
-        else:
-            raise ValueError(
-                f"Unknown obs_mode: {self._obs_mode!r}. "
-                "Expected 'scalar', 'box', 'radial', or 'hierarchical_box'."
-            )
+        if self._perception is None:
+            self._perception = self._build_perception_pipeline(self._config)
+        base = self._perception.compute(self, rust_obs)
         if self._obs_log_count <= 5:
             self._log_env_stage(f"obs_to_numpy done index={self._obs_log_count}")
         return base

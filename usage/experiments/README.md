@@ -31,8 +31,11 @@ env:
     scale: 40.0
     grid_size: 32
   observation:
-    mode: box
-    box_radius: 1
+    sensors:
+      - name: local_box
+        parameters:
+          radius: 1
+      - name: goal_vector
   action:
     mode: discrete_26
   rewards:

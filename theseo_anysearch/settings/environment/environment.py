@@ -72,6 +72,14 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
         if not isinstance(value, dict):
             return value
         data = dict(value)
+        if "obs_mode" in data:
+            import warnings
+
+            warnings.warn(
+                "env.obs_mode is deprecated; use env.observation.sensors",
+                DeprecationWarning,
+                stacklevel=3,
+            )
         legacy_by_block: dict[str, list[str]] = {}
         for legacy, (block, _) in _LEGACY_ENV_FIELDS.items():
             if legacy in data:
@@ -108,10 +116,12 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale_variants_per_map": self.geometry__scale_variants_per_map,
             "geometry_padding": self.geometry__padding,
             "geometry_pool": self.geometry__pool,
-            "obs_mode": self.observation__mode,
+            "obs_mode": self.observation__mode or "scalar",
             "box_radius": self.observation__box_radius,
             "box_radii": self.observation__box_radii,
             "ray_max_len": self.observation__ray_max_len,
+            "perceptions": self.observation.runtime_selectors(),
+            "perception_metadata": self.observation.metadata(),
             "action_mode": self.action__mode,
             "action_behavior": self.action.behavior,
             "action_predicates": [
@@ -145,3 +155,25 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             ),
             "task": self.task.model_dump(mode="json"),
         }
+
+    @model_validator(mode="after")
+    def validate_perception_capabilities(self) -> "EnvConfig":
+        """Reject explicit sensor/capability mismatches during settings validation."""
+        if self.observation.sensors is None:
+            return self
+        has_goal = bool(
+            self.geometry.stl_path
+            or self.geometry.stl_paths
+            or self.geometry.boxes
+            or self.geometry.pool
+            or self.waypoints_file
+        )
+        for selector in self.observation.sensors:
+            from theseo_anysearch.environments.perception import get_perception
+
+            required = get_perception(selector.name).metadata.required_capabilities
+            if "goal" in required and not has_goal:
+                raise ValueError(
+                    f"perception {selector.name!r} requires a goal-capable environment"
+                )
+        return self
