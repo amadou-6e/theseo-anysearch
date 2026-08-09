@@ -7,6 +7,101 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
+
+
+class TestSampledConfigValidation:
+    """Sampled Tune values are validated before trainer construction."""
+
+    @pytest.mark.parametrize(
+        "sampled_config",
+        [
+            {"gamma": -0.01},
+            {"train_batch_size": 0},
+            {"layer_size": 0},
+        ],
+    )
+    def test_invalid_sample_fails_before_trainer_startup(
+        self,
+        sampled_config,
+        tmp_path,
+    ):
+        from theseo_anysearch.experiments.tune_runner import _experiment_trainable
+        from tests.test_rllib.test_unit._tune_runner_support import (
+            make_experiment_config,
+        )
+
+        experiment = make_experiment_config(output_dir=str(tmp_path))
+        experiment_dict = experiment.model_dump(by_alias=True, mode="json")
+        fake_tune = MagicMock()
+        fake_tune.get_context.return_value.get_trial_id.return_value = "invalid"
+
+        with patch(
+            "theseo_anysearch.experiments.tune_runner._tune",
+            fake_tune,
+        ), patch(
+            "theseo_anysearch.experiments.tune_runner.Trainer",
+        ) as trainer:
+            with pytest.raises(ValidationError):
+                _experiment_trainable(
+                    config=sampled_config,
+                    experiment_dict=experiment_dict,
+                    metric="episode_reward_mean",
+                    mode="max",
+                    max_iterations=1,
+                    mlflow_tracking_uri="",
+                    mlflow_experiment_name="test",
+                    mlflow_parent_run_id="",
+                    run_tag="test",
+                )
+
+        trainer.from_settings.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("updates", "field"),
+        [
+            ({"gamma": 1.1}, "gamma"),
+            ({"train_batch_size": 0}, "train_batch_size"),
+        ],
+    )
+    def test_algorithm_updates_revalidate_concrete_type(self, updates, field):
+        from theseo_anysearch.experiments.tune_runner import _validated_model_update
+        from theseo_anysearch.rllib.algorithms.models import PPOConfig
+
+        with pytest.raises(ValidationError, match=field):
+            _validated_model_update(PPOConfig(), updates)
+
+    def test_invalid_sampled_model_width_fails(self):
+        from theseo_anysearch.experiments.tune_runner import _apply_sampled_model_config
+        from theseo_anysearch.rllib.models.models import VoxelEncoderConfig
+
+        with pytest.raises(ValidationError, match="hidden_sizes"):
+            _apply_sampled_model_config(VoxelEncoderConfig(), {"layer_size": 0})
+
+    def test_valid_sampled_values_preserve_concrete_types_and_aliases(self):
+        from theseo_anysearch.experiments.tune_runner import (
+            _apply_sampled_model_config,
+            _validated_model_update,
+        )
+        from theseo_anysearch.rllib.algorithms.models import PPOConfig
+        from theseo_anysearch.rllib.models.models import VoxelEncoderConfig
+
+        algorithm = _validated_model_update(
+            PPOConfig(),
+            {"gamma": 0.9, "train_batch_size": 128, "lambda_": 0.8},
+        )
+        model = _apply_sampled_model_config(
+            VoxelEncoderConfig(),
+            {"layer_size": 64, "num_layers": 2},
+        )
+
+        assert type(algorithm) is PPOConfig
+        assert algorithm.gamma == pytest.approx(0.9)
+        assert algorithm.train_batch_size == 128
+        assert algorithm.lambda_ == pytest.approx(0.8)
+        assert type(model) is VoxelEncoderConfig
+        assert model.encoder_depth == 2
+        assert model.hidden_sizes == [64, 64]
 
 
 class TestTrialDirname:

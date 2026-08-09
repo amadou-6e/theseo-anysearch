@@ -175,6 +175,32 @@ def _ray_checkpoint(checkpoint_dir: Any) -> Any | None:
 
     return Checkpoint.from_directory(str(checkpoint_dir))
 
+
+def _validated_model_update(model: Any, updates: dict[str, Any]) -> Any:
+    """Merge updates and revalidate them as the model's concrete type."""
+    values = model.model_dump(by_alias=True, mode="python")
+    values.update(updates)
+    return type(model).model_validate(values)
+
+
+def _apply_sampled_model_config(model_config: Any, config: dict[str, Any]) -> Any:
+    """Apply Tune's model aliases and validate the resulting concrete config."""
+    model_updates: dict[str, Any] = {}
+    for key, value in config.items():
+        if key in ("encoder_depth", "num_layers"):
+            model_updates["encoder_depth"] = int(value)
+        elif key == "use_position_encoding":
+            model_updates["use_position_encoding"] = bool(value)
+    if "layer_size" in config:
+        depth = model_updates.get(
+            "encoder_depth",
+            getattr(model_config, "encoder_depth", 2),
+        )
+        model_updates["hidden_sizes"] = [int(config["layer_size"])] * max(
+            int(depth), 1
+        )
+    return _validated_model_update(model_config, model_updates)
+
 # ---------------------------------------------------------------------------
 # Module-level trainable (must be picklable by cloudpickle / Ray)
 # ---------------------------------------------------------------------------
@@ -252,21 +278,12 @@ def _experiment_trainable(
     # ------------------------------------------------------------------ #
     valid_algo_fields = set(type(exp_config.algorithm_config).model_fields.keys())
     algo_updates = {k: v for k, v in config.items() if k in valid_algo_fields}
-    new_algo = exp_config.algorithm_config.model_copy(update=algo_updates)
+    new_algo = _validated_model_update(exp_config.algorithm_config, algo_updates)
 
     # ------------------------------------------------------------------ #
     # Apply sampled model hyper-params to model_cfg                        #
     # ------------------------------------------------------------------ #
-    model_updates: dict[str, Any] = {}
-    for k, v in config.items():
-        if k in ("encoder_depth", "num_layers"):
-            model_updates["encoder_depth"] = int(v)
-        elif k == "use_position_encoding":
-            model_updates["use_position_encoding"] = bool(v)
-        elif k == "layer_size":
-            depth = getattr(exp_config.model_cfg, "encoder_depth", 2)
-            model_updates["hidden_sizes"] = [int(v)] * max(int(depth), 1)
-    new_model = exp_config.model_cfg.model_copy(update=model_updates)
+    new_model = _apply_sampled_model_config(exp_config.model_cfg, config)
 
     # ------------------------------------------------------------------ #
     # Trial output directory                                               #
