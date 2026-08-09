@@ -74,6 +74,9 @@ class PolicyExplanationBackend:
             score_rows,
             attributions,
             score_table.score_type,
+            output_dir=(
+                self._report_writer.output_dir if self._report_writer is not None else None
+            ),
         )
         if self._report_writer is not None:
             self._report_writer.write(report)

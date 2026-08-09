@@ -23,7 +23,7 @@ explanation:
   method: occlusion
   focus: collisions
   max_steps: 50
-  background: trace
+  background: auto
 output:
   directory: artifacts/explanation
 seed: 142
@@ -31,7 +31,13 @@ seed: 142
 
 Run `anysearch explain dqn-waypoints:4d312abc --request explain.yaml`. Request and scenario files reject unknown fields. CLI attribution and output options override request values; source flags cannot be mixed with `--request`.
 
-The background can be `trace` or `mean` (the mean replay observation), or `zeros`. `trace` is recommended because it represents states the policy encountered.
+The background can be `auto`, `trace`/`mean` (both average every observation in the replayed trace or scenario into a single reference observation), or `zeros`. `auto` uses trace observations for multi-step inputs and zeros for one-step scenarios. `trace`/`mean` is recommended when available because it represents states the policy encountered; `zeros` is a hard occlusion but is *not* semantically neutral for every feature group (0.0 encodes "empty cell" / "no ray hit", not "no information"), so treat zero-background attributions as an occlusion-to-open-space effect rather than an unbiased baseline.
+
+An explicitly requested `trace` or `mean` background requires at least two observations, since a single-observation background collapses to the observation itself and always attributes 0.0 to every group. `auto` prevents this degeneration for single-step and fictional scenarios.
+
+Modern DQN checkpoints restore only their saved RLModule for explanations. This
+avoids starting Ray, rebuilding a trainer, or allocating rollout workers merely
+to score observations.
 
 ## Controlled environment scenarios
 

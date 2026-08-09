@@ -206,13 +206,19 @@ class DQNPolicyScorer(PolicyScorer):
         if not isinstance(experiment, ExperimentConfig):
             raise ValueError(f"run directory {run_dir} does not contain a single experiment config")
         experiment = cls.resolve_run_geometry_pool(experiment, experiment_path)
-        settings = experiment.to_settings().model_copy(
-            update={
-                "training": experiment.training.model_copy(update={"output_dir": run_dir})
-            }
-        )
         checkpoint_dir = cls.resolve_checkpoint_dir(run_dir, checkpoint)
-        return cls.from_checkpoint(settings, checkpoint_dir, policy_id=policy_id)
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv(experiment.env.to_runtime_dict())
+        try:
+            observation_space = env.observation_space
+        finally:
+            env.close()
+        return cls.from_module_checkpoint(
+            checkpoint_dir,
+            observation_space,
+            policy_id=policy_id,
+        )
 
     @classmethod
     def from_checkpoint(
@@ -354,9 +360,10 @@ class DQNPolicyScorer(PolicyScorer):
             return int(count)
         if self._action_count is not None:
             return self._action_count
-        if self._algorithm is not None and not hasattr(self._algorithm, "get_policy"):
-            return 26
-        raise ValueError("DQN scorer requires a discrete action space")
+        raise ValueError(
+            "DQN scorer could not determine a discrete action space from the "
+            "restored algorithm/module; pass action_count explicitly"
+        )
 
     def select_action(self, observation: Mapping[str, np.ndarray]) -> int:
         """Return RLlib's deterministic DQN action for one observation."""
@@ -430,6 +437,7 @@ class DQNPolicyScorer(PolicyScorer):
         flat = flatten(self._observation_space, observation)
         device = next(self._module.parameters()).device
         batch = {Columns.OBS: torch.as_tensor(flat, device=device).unsqueeze(0)}
+        self._module.eval()
         with torch.inference_mode():
             output = self._module.compute_q_values(batch)
         return output[QF_PREDS][0].detach().cpu().numpy().astype(np.float32)

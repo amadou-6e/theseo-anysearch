@@ -59,7 +59,7 @@ def test_mock_policy_scorer_returns_26_scores_for_each_observation():
 def test_dqn_policy_scorer_extracts_q_values_from_full_fetch_info():
     q_values = np.linspace(-1.0, 1.0, 26, dtype=np.float32)
     algorithm = FakeDQNAlgorithm(q_values)
-    scorer = DQNPolicyScorer(algorithm)
+    scorer = DQNPolicyScorer(algorithm, action_count=26)
 
     table = scorer.score_all([observation()])
 
@@ -73,10 +73,21 @@ def test_dqn_policy_scorer_extracts_q_values_from_full_fetch_info():
 
 def test_dqn_policy_scorer_rejects_missing_q_values():
     algorithm = FakeDQNAlgorithm(np.arange(25, dtype=np.float32))
-    scorer = DQNPolicyScorer(algorithm)
+    scorer = DQNPolicyScorer(algorithm, action_count=26)
 
     with pytest.raises(ValueError, match="26 Q-values"):
         scorer.score_all([observation()])
+
+
+def test_dqn_policy_scorer_raises_when_action_space_cannot_be_determined():
+    """A restored algorithm that exposes neither action_space nor get_policy
+    must fail loudly rather than silently assuming the 26-way voxel space."""
+
+    algorithm = FakeDQNAlgorithm(np.arange(26, dtype=np.float32))
+    scorer = DQNPolicyScorer(algorithm)
+
+    with pytest.raises(ValueError, match="could not determine a discrete action space"):
+        scorer.action_count
 
 
 def test_dqn_policy_scorer_resolves_latest_project_checkpoint(tmp_path: Path):
