@@ -19,6 +19,18 @@ use super::{
 /// keeps the resulting allocation ((2r+1)^3 f32s) within sane memory limits.
 const MAX_BOX_RADIUS: u32 = 1024;
 
+fn unit_goal_direction(cursor: (u16, u16, u16), goal: (u16, u16, u16)) -> (f32, f32, f32) {
+    let dx = f32::from(goal.0) - f32::from(cursor.0);
+    let dy = f32::from(goal.1) - f32::from(cursor.1);
+    let dz = f32::from(goal.2) - f32::from(cursor.2);
+    let norm = (dx * dx + dy * dy + dz * dz).sqrt();
+    if norm == 0.0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        (dx / norm, dy / norm, dz / norm)
+    }
+}
+
 fn validate_box_radius(radius: u32) -> PyResult<()> {
     if radius > MAX_BOX_RADIUS {
         return Err(crate::bridge::python::errors::invalid_value(format!(
@@ -36,15 +48,10 @@ pub struct PyVoxelEnv {
 
 impl PyVoxelEnv {
     fn to_py_observation(&self, obs: crate::voxel::VoxelObservation) -> PyVoxelObservation {
-        let goal_direction = self.inner.active_goal().map(|(gx, gy, gz)| {
-            let (cx, cy, cz) = self.inner.cursor();
-            let inv = 1.0f32 / f32::from(self.inner.grid_size.saturating_sub(1).max(1));
-            (
-                (f32::from(gx) - f32::from(cx)) * inv,
-                (f32::from(gy) - f32::from(cy)) * inv,
-                (f32::from(gz) - f32::from(cz)) * inv,
-            )
-        });
+        let goal_direction = self
+            .inner
+            .active_goal()
+            .map(|goal| unit_goal_direction(self.inner.cursor(), goal));
         PyVoxelObservation {
             filled: obs.filled,
             steps_remaining: obs.steps_remaining,
@@ -428,6 +435,26 @@ mod tests {
 
         assert_eq!(env.cursor_pos(), (5, 5, 5));
         assert!((result.reward + 0.01).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn goal_direction_is_a_unit_vector_for_axis_and_diagonal_goals() {
+        assert_eq!(unit_goal_direction((4, 4, 4), (4, 4, 6)), (0.0, 0.0, 1.0));
+
+        let direction = unit_goal_direction((4, 4, 4), (6, 6, 6));
+        let expected = 1.0 / 3.0f32.sqrt();
+        assert!((direction.0 - expected).abs() < 1e-6);
+        assert!((direction.1 - expected).abs() < 1e-6);
+        assert!((direction.2 - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn goal_direction_is_distance_invariant_and_zero_at_goal() {
+        assert_eq!(
+            unit_goal_direction((4, 4, 4), (5, 4, 4)),
+            unit_goal_direction((4, 4, 4), (20, 4, 4))
+        );
+        assert_eq!(unit_goal_direction((4, 4, 4), (4, 4, 4)), (0.0, 0.0, 0.0));
     }
 
     #[test]

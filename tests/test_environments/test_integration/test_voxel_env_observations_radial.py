@@ -108,6 +108,23 @@ class TestVoxelEnvObservationsRadial:
         assert tuple(obs2["goal_direction"]) == pytest.approx(
             normalized_goal_direction((4, 5, 5), GOAL)
         )
+        assert np.linalg.norm(obs0["goal_direction"]) == pytest.approx(1.0)
+        assert np.linalg.norm(obs1["goal_direction"]) == pytest.approx(1.0)
+        assert np.linalg.norm(obs2["goal_direction"]) == pytest.approx(1.0)
+
+    def test_goal_direction_does_not_encode_goal_distance(self, tmp_path):
+        near = make_radial_test_env(
+            tmp_path.joinpath("near"), start=(4, 4, 4), goal=(5, 4, 4)
+        )
+        far = make_radial_test_env(
+            tmp_path.joinpath("far"), start=(4, 4, 4), goal=(20, 4, 4)
+        )
+
+        near_obs, _ = near.reset(seed=0)
+        far_obs, _ = far.reset(seed=0)
+
+        assert tuple(near_obs["goal_direction"]) == pytest.approx((1.0, 0.0, 0.0))
+        assert tuple(far_obs["goal_direction"]) == pytest.approx((1.0, 0.0, 0.0))
 
     def test_voxel_count_increases_on_successful_moves(self, tmp_path):
         env = make_radial_test_env(tmp_path)
