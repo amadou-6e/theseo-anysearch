@@ -20,6 +20,8 @@ def _make_obs_space(box_radius: int) -> gym.spaces.Dict:
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0, (1,), np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0, (3,), np.float32),
+        "goal_distance":   gym.spaces.Box(0.0, 1.0, (1,), np.float32),
+        "goal_direction":  gym.spaces.Box(-1.0, 1.0, (3,), np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0, (n**3,), np.float32),
     })
 
@@ -33,6 +35,8 @@ def _make_dummy_obs(batch: int, box_radius: int) -> dict[str, torch.Tensor]:
     return {
         "steps_remaining": torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
+        "goal_distance":   torch.rand(batch, 1),
+        "goal_direction":  torch.rand(batch, 3) * 2.0 - 1.0,
         "local_grid":      torch.rand(batch, n**3),
     }
 
@@ -125,10 +129,20 @@ class TestVoxelBox2DCNN:
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         model = _build_2d(pool_type="max")
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
+        assert not hasattr(model, "_pool")
+
+    def test_goal_features_are_consumed(self):
+        model = _build_2d()
+        assert "goal_distance" in model._auxiliary_keys
+        assert "goal_direction" in model._auxiliary_keys
+
+    def test_spatial_layout_reaches_fully_connected_head(self):
+        model = _build_2d(box_radius=2)
+        assert model._fc[0].in_features == 64 * 5 * 5 + model._n_auxiliary
 
     def test_different_num_outputs(self):
         model = _build_2d(num_outputs=7)
@@ -188,10 +202,44 @@ class TestVoxelBox3DCNN:
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         model = _build_3d(pool_type="max")
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
+        assert not hasattr(model, "_pool")
+
+    def test_spatial_layout_reaches_fully_connected_head(self):
+        model = _build_3d(box_radius=2)
+        assert model._fc[0].in_features == 64 * 5**3 + model._n_auxiliary
+
+    def test_multi_agent_observation_contract(self):
+        from theseo_anysearch.rllib.models.cnn import VoxelBox3DCNN
+
+        n = 5
+        obs_space = gym.spaces.Dict({
+            "cursor_pos": gym.spaces.Box(0.0, 1.0, (3,), np.float32),
+            "face_neighbors": gym.spaces.Box(0.0, 1.0, (6,), np.float32),
+            "goal_distance": gym.spaces.Box(0.0, 1.0, (1,), np.float32),
+            "goal_direction": gym.spaces.Box(-1.0, 1.0, (3,), np.float32),
+            "local_grid": gym.spaces.Box(0.0, 1.0, (n**3,), np.float32),
+            "ray_cast": gym.spaces.Box(0.0, 1.0, (27,), np.float32),
+        })
+        model = VoxelBox3DCNN(
+            obs_space,
+            _make_action_space(),
+            3,
+            {"custom_model_config": {"box_radius": 2}},
+            "test_multi_agent",
+        )
+        obs = {
+            key: torch.as_tensor(space.sample()).unsqueeze(0)
+            for key, space in obs_space.spaces.items()
+        }
+
+        logits, _ = model.forward({"obs": obs}, [], torch.tensor([1]))
+
+        assert logits.shape == (1, 3)
+        assert set(model._auxiliary_keys) == set(obs_space.spaces) - {"local_grid"}
 
     def test_3d_vs_2d_same_output_dim(self):
         m2 = _build_2d(num_outputs=4)
@@ -260,6 +308,8 @@ def _make_hier_obs_space(radii: list[int]) -> gym.spaces.Dict:
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0,    (1,),         np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0,    (3,),         np.float32),
+        "goal_distance":   gym.spaces.Box(0.0, 1.0,    (1,),         np.float32),
+        "goal_direction":  gym.spaces.Box(-1.0, 1.0,   (3,),         np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
     })
 
@@ -269,6 +319,8 @@ def _make_hier_obs(batch: int, radii: list[int]) -> dict[str, torch.Tensor]:
     return {
         "steps_remaining": torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
+        "goal_distance":   torch.rand(batch, 1),
+        "goal_direction":  torch.rand(batch, 3) * 2.0 - 1.0,
         "local_grid":      torch.rand(batch, flat_size),
     }
 
@@ -358,10 +410,11 @@ class TestVoxelHierarchicalBox3DCNN:
         logits, _, _ = _forward_hier(m)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         m = _build_hier(pool_type="max")
         logits, _, _ = _forward_hier(m)
         assert logits.shape == (1, 3)
+        assert not hasattr(m, "_pool")
 
     def test_single_radius_raises(self):
         with pytest.raises(ValueError, match="at least 2 radii"):
@@ -404,6 +457,8 @@ class TestVoxelHierarchicalBox3DCNN:
         obs = {
             "steps_remaining": torch.rand(1, 1, requires_grad=False),
             "cursor_pos":      torch.rand(1, 3),
+            "goal_distance":   torch.rand(1, 1),
+            "goal_direction":  torch.rand(1, 3),
             "local_grid":      torch.rand(1, flat_size, requires_grad=True),
         }
         logits, _ = m.forward({"obs": obs}, [], torch.tensor([1]))
