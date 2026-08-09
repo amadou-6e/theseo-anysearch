@@ -96,6 +96,8 @@ def resolve_occlusion_background(
     being explained (every group attribution would silently be 0.0).
     """
 
+    if background == "auto":
+        background = "zeros" if len(trace) == 1 else "trace"
     if background == "zeros":
         return [
             {
@@ -150,14 +152,19 @@ class PolicyExplanationService:
         focus: str = "collisions",
         max_steps: int = 50,
         explicit_steps: tuple[int, ...] = (),
-        background: str = "trace",
+        background: str = "auto",
         output_dir: Path | None = None,
         seed: int | None = None,
     ) -> ExplanationReport:
         """Replay and explain a saved AnySearch trajectory."""
 
         path = resolve_trajectory(self.run_dir, selector)
-        trace = self._replay_trajectory(path, seed)
+        replay_limit: int | None = None
+        if focus == "explicit" and explicit_steps:
+            replay_limit = max(explicit_steps) + 1
+        elif focus == "all":
+            replay_limit = max_steps
+        trace = self._replay_trajectory(path, seed, replay_limit=replay_limit)
         return self._explain(
             trace,
             trajectory=str(path),
@@ -176,7 +183,7 @@ class PolicyExplanationService:
         focus: str = "all",
         max_steps: int = 50,
         explicit_steps: tuple[int, ...] = (),
-        background: str = "trace",
+        background: str = "auto",
         output_dir: Path | None = None,
     ) -> ExplanationReport:
         """Explain a strict environment or fictional-observation scenario."""
@@ -259,7 +266,7 @@ class PolicyExplanationService:
             scenario_validity=validity,
             output_dir=destination,
         )
-        schema = FeatureSchema.from_observation(trace.step(0).observation)
+        schema = self.feature_schema(trace.step(0).observation)
         background_observations = resolve_occlusion_background(background, trace)
         backend = PolicyExplanationBackend(
             schema,
@@ -287,6 +294,17 @@ class PolicyExplanationService:
             encoding="utf-8",
         )
         return report
+
+    def feature_schema(self, observation: Mapping[str, Any]) -> FeatureSchema:
+        """Build a feature schema aligned with the policy action ordering."""
+
+        mode = self.experiment.env.action.mode
+        if mode == "vector_3":
+            raise ValueError("vector_3 policy explanations are not yet supported")
+        return FeatureSchema.from_observation(
+            observation,
+            action_directions=offsets_for_mode(mode),
+        )
 
     def _build_env(self, overrides: Mapping[str, Any] | None = None) -> VoxelEnv:
         """Build an environment from authoritative run settings and state overrides."""
@@ -337,15 +355,31 @@ class PolicyExplanationService:
             env.close()
         return trace
 
-    def _replay_trajectory(self, path: Path, seed: int | None) -> ObservationTrace:
+    def _replay_trajectory(
+        self,
+        path: Path,
+        seed: int | None,
+        replay_limit: int | None = None,
+    ) -> ObservationTrace:
         """Rebuild pre-action observations and fail at the first replay mismatch."""
 
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(path.read_text(encoding="utf-8"))
+        payload = document.get("episode", document)
+        if not isinstance(payload, dict):
+            raise ValueError(f"trajectory {path} has an invalid episode payload")
         start = tuple(payload.get("start_pos") or ())
         goal = tuple(payload.get("goal_pos") or ())
         if len(start) != 3 or len(goal) != 3:
             raise ValueError(f"trajectory {path} lacks start_pos or goal_pos")
-        boxes = [list(coord) + list(coord) for coord in payload.get("init_filled", [])]
+        filled = payload.get("init_filled")
+        if filled is None and payload.get("init_filled_file"):
+            filled_path = path.parent.joinpath(str(payload["init_filled_file"]))
+            if not filled_path.is_file():
+                raise FileNotFoundError(
+                    f"trajectory initial-filled array not found: {filled_path}"
+                )
+            filled = np.load(filled_path, allow_pickle=False).tolist()
+        boxes = [list(coord) + list(coord) for coord in (filled or [])]
         state_dir = self.run_dir.joinpath("explanations", ".replay")
         state_dir.mkdir(parents=True, exist_ok=True)
         waypoint_path = state_dir.joinpath("waypoints.json")
@@ -366,7 +400,10 @@ class PolicyExplanationService:
                 raise ValueError(
                     f"trajectory replay diverged at reset: expected {expected_cursor}, got {actual_start}"
                 )
-            for index, recorded in enumerate(payload.get("steps", [])):
+            recorded_steps = payload.get("steps", [])
+            if replay_limit is not None:
+                recorded_steps = recorded_steps[:replay_limit]
+            for index, recorded in enumerate(recorded_steps):
                 canonical_action = int(recorded["action"])
                 policy_action = self._policy_action(canonical_action)
                 before = self._cursor(observation)

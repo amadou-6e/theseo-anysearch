@@ -36,7 +36,7 @@ class AttributionSettings(RequestModel):
     method: Literal["occlusion"] = "occlusion"
     focus: Literal["collisions", "all", "explicit"] = "collisions"
     max_steps: int = Field(default=50, ge=1)
-    background: Literal["trace", "zeros", "mean"] = "trace"
+    background: Literal["auto", "trace", "zeros", "mean"] = "auto"
     steps: tuple[int, ...] = ()
 
     @model_validator(mode="after")

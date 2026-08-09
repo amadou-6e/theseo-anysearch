@@ -84,6 +84,17 @@ class TestResolveOcclusionBackground:
         with pytest.raises(ValueError, match="at least two background observations|degenerate"):
             resolve_occlusion_background("trace", _one_step_trace())
 
+    def test_auto_uses_zeros_for_single_step_trace(self) -> None:
+        background = resolve_occlusion_background("auto", _one_step_trace())
+
+        assert len(background) == 1
+        assert all(np.all(value == 0.0) for value in background[0].values())
+
+    def test_auto_uses_trace_for_multi_step_trace(self) -> None:
+        background = resolve_occlusion_background("auto", _two_step_trace())
+
+        assert len(background) == 2
+
     def test_single_step_trace_mean_background_raises(self) -> None:
         with pytest.raises(ValueError, match="degenerate"):
             resolve_occlusion_background("mean", _one_step_trace())
@@ -113,14 +124,17 @@ class _StubActionConfig:
 
 class _StubEnvConfig:
     seed = 999
-    action = _StubActionConfig()
+
+    def __init__(self) -> None:
+        self.action = _StubActionConfig()
 
     def to_runtime_dict(self) -> dict:
         return {}
 
 
 class _StubExperiment:
-    env = _StubEnvConfig()
+    def __init__(self) -> None:
+        self.env = _StubEnvConfig()
 
 
 class _FakeRustEnv:
@@ -192,6 +206,47 @@ class TestReplaySeedHandling:
 
         assert env.reset_seeds == [999]
 
+    def test_nested_trajectory_envelope_and_npy_geometry_are_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        env = _FakeVoxelEnv(cursor=(0, 0, 0))
+        service = _make_service(tmp_path, env)
+        captured: dict = {}
+        service._build_env = lambda overrides=None: (captured.update(overrides or {}) or env)  # type: ignore[method-assign]
+        np.save(tmp_path.joinpath("filled.npy"), np.asarray([[2, 3, 4]], dtype=np.int64))
+        trajectory = tmp_path.joinpath("trace.json")
+        trajectory.write_text(
+            json.dumps(
+                {
+                    "experiment_name": "example",
+                    "episode": {
+                        "start_pos": [0, 0, 0],
+                        "goal_pos": [1, 1, 1],
+                        "init_filled_file": "filled.npy",
+                        "steps": [],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="contains no steps"):
+            service._replay_trajectory(trajectory, seed=1)
+
+        assert captured["geometry_boxes"] == [[2, 3, 4, 2, 3, 4]]
+
+
+class TestActionAlignedFeatureSchema:
+    """Reported directions must follow the selected policy action space."""
+
+    def test_discrete_18_schema_uses_discrete_18_offsets(self, tmp_path: Path) -> None:
+        service = _make_service(tmp_path, _FakeVoxelEnv())
+        service.experiment.env.action.mode = "discrete_18"
+
+        schema = service.feature_schema(_observation())
+
+        assert len(schema.action_directions) == 18
+
 
 class TestReplayEnvironmentCleanup:
     """The environment must be closed even when replay diverges."""
@@ -206,6 +261,25 @@ class TestReplayEnvironmentCleanup:
             service._replay_trajectory(trajectory, seed=1)
 
         assert env.closed is True
+
+    def test_replay_limit_does_not_validate_unrequested_later_steps(
+        self, tmp_path: Path
+    ) -> None:
+        env = _FakeVoxelEnv(cursor=(0, 0, 0))
+        service = _make_service(tmp_path, env)
+        trajectory = tmp_path.joinpath("trace.json")
+        _write_trajectory(
+            trajectory,
+            start=(0, 0, 0),
+            steps=(
+                {"action": 0, "cursor_x": 0, "cursor_y": 0, "cursor_z": 0},
+                {"action": 0, "cursor_x": 9, "cursor_y": 9, "cursor_z": 9},
+            ),
+        )
+
+        trace = service._replay_trajectory(trajectory, seed=1, replay_limit=1)
+
+        assert len(trace) == 1
 
     def test_env_closed_when_missing_start_pos_raises_before_build(self, tmp_path: Path) -> None:
         env = _FakeVoxelEnv()

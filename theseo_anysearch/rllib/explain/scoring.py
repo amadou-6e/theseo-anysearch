@@ -206,13 +206,19 @@ class DQNPolicyScorer(PolicyScorer):
         if not isinstance(experiment, ExperimentConfig):
             raise ValueError(f"run directory {run_dir} does not contain a single experiment config")
         experiment = cls.resolve_run_geometry_pool(experiment, experiment_path)
-        settings = experiment.to_settings().model_copy(
-            update={
-                "training": experiment.training.model_copy(update={"output_dir": run_dir})
-            }
-        )
         checkpoint_dir = cls.resolve_checkpoint_dir(run_dir, checkpoint)
-        return cls.from_checkpoint(settings, checkpoint_dir, policy_id=policy_id)
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv(experiment.env.to_runtime_dict())
+        try:
+            observation_space = env.observation_space
+        finally:
+            env.close()
+        return cls.from_module_checkpoint(
+            checkpoint_dir,
+            observation_space,
+            policy_id=policy_id,
+        )
 
     @classmethod
     def from_checkpoint(
