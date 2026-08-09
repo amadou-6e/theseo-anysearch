@@ -2,6 +2,20 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
+/// Upper bound on `box_radius`: keeps `2 * r + 1` well within `i32` range so
+/// the side-length computation in `box_obs` can never overflow, and keeps
+/// the resulting allocation ((2r+1)^3 f32s) within sane memory limits.
+const MAX_BOX_RADIUS: u32 = 1024;
+
+fn validate_box_radius(radius: u32) -> PyResult<()> {
+    if radius > MAX_BOX_RADIUS {
+        return Err(crate::bridge::python::errors::invalid_value(format!(
+            "box_radius must be <= {MAX_BOX_RADIUS}, got {radius}"
+        )));
+    }
+    Ok(())
+}
+
 #[pyclass]
 pub struct PyMultiVoxelEnv {
     inner: crate::voxel::MultiAgentVoxelEnv,
@@ -144,7 +158,8 @@ impl PyMultiVoxelEnv {
 
     /// Flattened (2*radius+1)Â³ binary box observation centred on agent `agent_idx`'s cursor.
     /// 1.0 = filled or outside the configured grid. Ordered x-outer, y-mid, z-inner.
-    pub fn box_obs(&self, agent_idx: usize, radius: u32) -> Vec<f32> {
+    pub fn box_obs(&self, agent_idx: usize, radius: u32) -> PyResult<Vec<f32>> {
+        validate_box_radius(radius)?;
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
         let g = i32::from(self.inner.grid_size);
         let r = radius as i32;
@@ -165,7 +180,7 @@ impl PyMultiVoxelEnv {
                 }
             }
         }
-        result
+        Ok(result)
     }
 
     /// 27-element ray-cast observation from agent `agent_idx`'s cursor, one value per
@@ -210,5 +225,54 @@ impl PyMultiVoxelEnv {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_env() -> PyMultiVoxelEnv {
+        PyMultiVoxelEnv::new(
+            1,
+            10,
+            true,
+            None,
+            32,
+            -0.01,
+            1.0,
+            0.0,
+            0.0,
+            "progress".to_string(),
+            -1.0,
+            -0.01,
+            "linear".to_string(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn box_obs_valid_radius_ok() {
+        let mut env = make_env();
+        env.reset(0);
+        let obs = env.box_obs(0, 2).unwrap();
+        assert_eq!(obs.len(), 125);
+    }
+
+    #[test]
+    fn box_obs_excessive_radius_returns_value_error() {
+        let mut env = make_env();
+        env.reset(0);
+        assert!(env.box_obs(0, MAX_BOX_RADIUS + 1).is_err());
+        assert!(validate_box_radius(MAX_BOX_RADIUS + 1).is_err());
+    }
+
+    #[test]
+    fn box_obs_radius_near_i32_overflow_returns_value_error_not_panic() {
+        let mut env = make_env();
+        env.reset(0);
+        // Without the bounds check, `2 * (radius as i32) + 1` overflows i32
+        // and the subsequent `as usize` cast produces a huge allocation size.
+        assert!(env.box_obs(0, u32::MAX / 2).is_err());
     }
 }
