@@ -530,6 +530,7 @@ struct VoxelReplayApp {
     current_trial: usize,
     /// Optional checkpoint-backed native explanation windows.
     explain_ui: Option<NativeExplainUi>,
+    explain_tab: bool,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -555,6 +556,7 @@ struct UiEvents {
 
 impl VoxelReplayApp {
     fn new(trajectories: Vec<TrajectoryData>, explain_ui: Option<NativeExplainUi>) -> Self {
+        let explain_tab = explain_ui.as_ref().map(|ui| ui.observation_open).unwrap_or(false);
         let geo_voxels = trajectories.iter().map(|t| {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
@@ -569,6 +571,7 @@ impl VoxelReplayApp {
             tune_trials: Vec::new(),
             current_trial: 0,
             explain_ui,
+            explain_tab,
         }
     }
 
@@ -584,6 +587,7 @@ impl VoxelReplayApp {
             tune_trials: trials,
             current_trial: 0,
             explain_ui: None,
+            explain_tab: false,
         };
         app.load_trial(0);
         app
@@ -721,6 +725,29 @@ impl eframe::App for VoxelReplayApp {
         };
         let current_trajectory_path = self.trajectories[iter_idx].source_path.clone();
 
+        let explain_available = self.explain_ui.as_ref()
+            .map(NativeExplainUi::available).unwrap_or(false);
+        egui::TopBottomPanel::top("application_tabs").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.explain_tab, false, "Replay");
+                ui.add_enabled_ui(explain_available, |ui| {
+                    ui.selectable_value(&mut self.explain_tab, true, "Explain");
+                });
+            });
+        });
+
+        let drag_delta = ctx.input(|i| i.pointer.delta());
+        let dragging = ctx.input(|i| i.pointer.primary_down());
+        let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+
+        if self.explain_tab {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                if let Some(explain) = self.explain_ui.as_mut() {
+                    explain.show_embedded(ui);
+                }
+            });
+        } else {
+
         // ---- Left panel -----------------------------------------------------
         egui::SidePanel::left("controls").min_width(260.0).show(ctx, |ui| {
             ui.heading("Voxel Replay");
@@ -848,17 +875,14 @@ impl eframe::App for VoxelReplayApp {
             ui.separator();
 
             ui.label(egui::RichText::new("Explainability").strong());
-            let explain_available = self.explain_ui.as_ref()
-                .map(NativeExplainUi::available).unwrap_or(false);
             if ui.add_enabled(explain_available, egui::Button::new("Explain current step")).clicked() {
                 if let Some(explain) = self.explain_ui.as_mut() {
                     explain.explain_trajectory(&current_trajectory_path, step_idx);
                 }
+                self.explain_tab = true;
             }
-            if ui.add_enabled(explain_available, egui::Button::new("Open observation editor")).clicked() {
-                if let Some(explain) = self.explain_ui.as_mut() {
-                    explain.observation_open = true;
-                }
+            if ui.add_enabled(explain_available, egui::Button::new("Open Explain tab")).clicked() {
+                self.explain_tab = true;
             }
             if !explain_available {
                 ui.label(egui::RichText::new(
@@ -914,10 +938,6 @@ impl eframe::App for VoxelReplayApp {
         let geo_list = &self.geo_voxels[iter_idx];
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
-        let drag_delta = ctx.input(|i| i.pointer.delta());
-        let dragging   = ctx.input(|i| i.pointer.primary_down());
-        let scroll_y   = ctx.input(|i| i.smooth_scroll_delta.y);
-
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
@@ -1100,6 +1120,7 @@ impl eframe::App for VoxelReplayApp {
             );
         });
 
+        }
         // ---- Apply collected events to state --------------------------------
         // Extract trial nav flags before ev is consumed by apply_events.
         let (trial_first, trial_last, trial_next, trial_prev) =
@@ -1149,9 +1170,6 @@ impl eframe::App for VoxelReplayApp {
             let still_going = self.play_advance();
             if !still_going { self.playing = false; }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        }
-        if let Some(explain) = self.explain_ui.as_mut() {
-            explain.show(ctx);
         }
     }
 }

@@ -19,6 +19,7 @@ pub struct NativeExplainUi {
     error: Option<String>,
     axis: usize,
     slice_index: usize,
+    imported_observation: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -90,6 +91,28 @@ impl NativeExplainUi {
         self.run_request(json!({"command": "explain_observation", "observation": self.observation}));
     }
 
+
+    fn import_observation(&mut self, path: &Path) {
+        let request = json!({"command": "load_observation_file", "path": path});
+        let Some(bridge) = self.bridge.as_mut() else {
+            self.error = Some("no checkpoint-backed explanation service is configured".into());
+            return;
+        };
+        match bridge.request(request) {
+            Ok(response) => {
+                let Some(observation) = response.get("observation").and_then(Value::as_object) else {
+                    self.error = Some("observation import response omitted the observation object".into());
+                    return;
+                };
+                self.observation = observation.clone();
+                let format = response.get("format").and_then(Value::as_str).unwrap_or("unknown");
+                self.imported_observation = Some(format!("{} ({format})", path.display()));
+                self.error = None;
+                self.explain_observation();
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
     fn run_request(&mut self, request: Value) {
         let Some(bridge) = self.bridge.as_mut() else {
             self.error = Some("no checkpoint-backed explanation service is configured".into());
@@ -112,32 +135,49 @@ impl NativeExplainUi {
         }
     }
 
-    pub fn show(&mut self, context: &egui::Context) {
-        self.show_observation_editor(context);
-        self.show_result(context);
+    pub fn show_embedded(&mut self, ui: &mut egui::Ui) {
         if let Some(message) = self.error.clone() {
-            let mut open = true;
-            egui::Window::new("Explanation error").open(&mut open).show(context, |ui| {
-                ui.colored_label(Color32::LIGHT_RED, message);
-            });
-            if !open { self.error = None; }
+            ui.colored_label(Color32::LIGHT_RED, message);
+            ui.separator();
         }
+        ui.columns(2, |columns| {
+            columns[0].heading("Observation editor");
+            self.show_observation_editor(&mut columns[0]);
+            columns[1].heading("Policy explanation");
+            self.show_result(&mut columns[1]);
+        });
     }
 
-    fn show_observation_editor(&mut self, context: &egui::Context) {
-        if !self.observation_open { return; }
-        let mut open = self.observation_open;
+    fn show_observation_editor(&mut self, ui: &mut egui::Ui) {
         let mut explain = false;
         let mut changed = false;
-        egui::Window::new("Policy observation editor").open(&mut open)
-            .default_size([620.0, 680.0]).show(context, |ui| {
-                ui.label("Edit normalized network inputs. Fictional observations are not environment-validated.");
-                ui.separator(); changed |= self.show_local_grid(ui); ui.separator();
-                changed |= self.show_scalar_fields(ui); ui.separator();
-                explain = ui.button("Explain policy decision").clicked();
-            });
-        self.observation_open = open;
-        if explain || changed { self.explain_observation(); }
+        let mut import_path = None;
+        ui.label("Edit normalized network inputs. Fictional observations are not environment-validated.");
+        ui.horizontal(|ui| {
+            if ui.button("Load fictional observation...").clicked() {
+                import_path = rfd::FileDialog::new()
+                    .add_filter("Observation", &["json", "npy", "npz", "pb", "tensor"])
+                    .pick_file();
+            }
+            ui.small("Format detected automatically.");
+        });
+        if let Some(source) = &self.imported_observation {
+            ui.colored_label(Color32::LIGHT_GREEN, format!("Loaded: {source}"));
+        }
+        ui.separator();
+        egui::ScrollArea::vertical().id_salt("explanation_observation").show(ui, |ui| {
+            changed |= self.show_local_grid(ui);
+            ui.separator();
+            changed |= self.show_scalar_fields(ui);
+            ui.separator();
+            explain = ui.button("Explain policy decision").clicked();
+        });
+        if let Some(path) = import_path {
+            self.import_observation(&path);
+        }
+        if explain || changed {
+            self.explain_observation();
+        }
     }
 
     fn show_local_grid(&mut self, ui: &mut egui::Ui) -> bool {
@@ -197,29 +237,38 @@ impl NativeExplainUi {
         changed
     }
 
-    fn show_result(&mut self, context: &egui::Context) {
-        if !self.result_open { return; }
-        let mut open = self.result_open;
+    fn show_result(&mut self, ui: &mut egui::Ui) {
         let result = self.result.clone();
-        egui::Window::new("Policy explanation").open(&mut open).default_size([520.0, 600.0]).show(context, |ui| {
+        egui::ScrollArea::vertical().id_salt("explanation_result").show(ui, |ui| {
             let Some(step) = result.as_ref().and_then(|report| report.get("steps"))
                 .and_then(Value::as_array).and_then(|steps| steps.first()) else {
-                ui.label("The explanation report contains no selected step."); return;
+                ui.label("Explain a replay step or edited observation to see policy scores.");
+                return;
             };
             let action = step.get("chosen_action").and_then(Value::as_i64).unwrap_or(-1);
             let direction = step.get("chosen_direction").cloned().unwrap_or(Value::Null);
             let margin = step.get("score_margin").and_then(Value::as_f64).unwrap_or(f64::NAN);
             ui.heading(format!("Action {action}  {direction}"));
             ui.label(format!("Margin over best safe action: {margin:.6}"));
-            ui.separator(); ui.label(RichText::new("Action scores").strong());
+            ui.separator();
+            ui.label(RichText::new("Action scores").strong());
             if let Some(scores) = step.get("action_scores").and_then(Value::as_array) {
-                for (index, score) in scores.iter().enumerate() { ui.label(format!("{index:>2}: {:>10.5}", score.as_f64().unwrap_or(f64::NAN))); }
+                for (index, score) in scores.iter().enumerate() {
+                    let value = score.as_f64().unwrap_or(f64::NAN);
+                    ui.horizontal(|ui| {
+                        ui.monospace(format!("{index:>2}"));
+                        ui.add(egui::ProgressBar::new(value.clamp(0.0, 1.0) as f32).text(format!("{value:.5}")));
+                    });
+                }
             }
-            ui.separator(); ui.label(RichText::new("Grouped attribution").strong());
+            ui.separator();
+            ui.label(RichText::new("Grouped attribution").strong());
             if let Some(groups) = step.get("group_attributions").and_then(Value::as_object) {
-                for (name, value) in groups { ui.label(format!("{name}: {:.6}", value.as_f64().unwrap_or(f64::NAN))); }
+                for (name, value) in groups {
+                    ui.label(format!("{name}: {:.6}", value.as_f64().unwrap_or(f64::NAN)));
+                }
             }
         });
-        self.result_open = open;
     }
+
 }
