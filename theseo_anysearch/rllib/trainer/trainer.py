@@ -46,6 +46,7 @@ class Trainer(BaseTrainer):
         self._config = config
         self._algo: Any = None
         self._iteration: int = 0
+        self._imitation_result: Any = None
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
         self._checkpoints = CheckpointManager(self._output_dir)
@@ -190,7 +191,7 @@ class Trainer(BaseTrainer):
                 run_imitation_pretraining,
             )
 
-            run_imitation_pretraining(
+            self._imitation_result = run_imitation_pretraining(
                 self._algo,
                 self._env_config_dict(),
                 self._config.imitation,
@@ -201,6 +202,18 @@ class Trainer(BaseTrainer):
         evaluation = self._config.evaluation
         results: list[TrainResult] = []
         tb_writer = _TensorBoardRunWriter(self._output_dir)
+        if self._imitation_result is not None:
+            tb_writer.log_scalars(
+                0,
+                {
+                    "imitation/cache_hit": float(self._imitation_result.cache_hit),
+                    "imitation/validation_accuracy": self._imitation_result.validation_accuracy,
+                    "imitation/validation_loss": self._imitation_result.best_validation_loss,
+                    "imitation/pre_rl_success_rate": (
+                        self._imitation_result.pre_rl_success_rate or 0.0
+                    ),
+                },
+            )
 
         # --- Deterministic evaluation batch and trajectory writer setup ---
         traj_every = training.trajectory_every

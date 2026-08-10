@@ -55,6 +55,37 @@ def test_multidiscrete_supervision_scores_complete_action_vectors() -> None:
     assert loss.item() < 1e-6
     assert accuracy.item() == 1.0
 
+
+def test_dataset_fingerprint_ignores_copied_native_manifest_path() -> None:
+    config = ImitationConfig(enabled=True)
+    first = dataset_fingerprint(
+        {"native_extension_manifest": "runtime/run-a/native_extension/extension.json"},
+        config,
+        observation_size=3,
+        action_count=18,
+    )
+    second = dataset_fingerprint(
+        {"native_extension_manifest": "runtime/run-b/native_extension/extension.json"},
+        config,
+        observation_size=3,
+        action_count=18,
+    )
+
+    assert first == second
+
+
+def test_dataset_fingerprint_ignores_tune_rollout_seed_offset() -> None:
+    config = ImitationConfig(enabled=True)
+
+    first = dataset_fingerprint(
+        {"seed": 42}, config, observation_size=3, action_count=18
+    )
+    second = dataset_fingerprint(
+        {"seed": 9042}, config, observation_size=3, action_count=18
+    )
+
+    assert first == second
+
 class TinyPolicy:
     """Policy wrapper exposing the model attribute used by pretraining."""
 

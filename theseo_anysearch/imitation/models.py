@@ -83,6 +83,17 @@ class ImitationHandoffConfig(BaseModel):
         return self
 
 
+class ImitationCacheConfig(BaseModel):
+    """Content-addressed behavior-cloning cache settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    directory: str | None = None
+    refresh: bool = False
+    lock_timeout_seconds: float = Field(default=1800.0, gt=0.0)
+
+
 class ImitationConfig(BaseModel):
     """Top-level heuristic imitation stage configuration."""
 
@@ -98,6 +109,7 @@ class ImitationConfig(BaseModel):
         default_factory=ImitationPretrainingConfig
     )
     handoff: ImitationHandoffConfig = Field(default_factory=ImitationHandoffConfig)
+    cache: ImitationCacheConfig = Field(default_factory=ImitationCacheConfig)
 
 
 class DemonstrationManifest(BaseModel):
@@ -135,3 +147,6 @@ class ImitationResult(BaseModel):
     validation_samples: int
     checkpoint_path: str
     pre_rl_success_rate: float | None = None
+    cache_hit: bool = False
+    cache_key: str | None = None
+    policy_id: str = "default_policy"

@@ -69,6 +69,12 @@ imitation:
     initialize_encoder: true
     initialize_policy: true
     initialize_value_head: false
+  cache:
+    enabled: true
+    # Tune resolves a shared experiment-level directory automatically when null.
+    directory: null
+    refresh: false
+    lock_timeout_seconds: 1800
 
 tune_config:
   scheduler: random

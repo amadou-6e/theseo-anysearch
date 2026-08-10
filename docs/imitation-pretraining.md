@@ -25,8 +25,8 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
 - `collection.reuse_dataset` reuses existing data only when its fingerprint
   matches every environment, task, observation, action, and teacher setting.
 - `collection.dataset_dir` optionally points multiple runs or Tune trials to
-  one shared compatible dataset. Generate it before concurrent trials start;
-  incompatible environment or teacher settings are rejected by fingerprint.
+  one shared compatible dataset. Concurrent collectors coordinate by dataset
+  fingerprint; incompatible environment or teacher settings are regenerated.
 - `pretraining.epochs` is the maximum number of behavior-cloning passes.
 - `pretraining.batch_size` is the supervised optimizer batch size.
 - `pretraining.learning_rate` applies only to behavior cloning.
@@ -36,6 +36,30 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
 - `handoff.initialize_policy` retains learned policy/action-head parameters.
 - `handoff.initialize_value_head` retains value parameters and defaults to
   false because action labels do not supervise values.
+- `cache.enabled` reuses a content-addressed behavior-cloned checkpoint.
+- `cache.directory` overrides the cache root. Tune automatically enables an
+  experiment-level cache when imitation is enabled.
+- `cache.refresh` retrains and replaces the matching entry.
+- `cache.lock_timeout_seconds` bounds how long a parallel trial waits for the
+  trial currently publishing the same network.
+
+## Tuning and cache identity
+
+Tune trials with the same demonstration, network, optimizer, and handoff
+contract pretrain once. Trials waiting for that contract load the atomically
+published checkpoint. PPO-only settings such as learning rate, gamma, lambda,
+clipping, KL coefficient, or RL batch sizes do not affect the key.
+
+The key changes with model structure and tensor shapes, observation and action
+contracts, geometry and curriculum inputs, teacher and collection settings,
+behavior-cloning optimizer settings, handoff settings, or policy ID. Trial IDs,
+output directories, timestamps, rollout seed offsets, and copied native
+extension paths are excluded. Cache hit/miss, validation metrics, and the cache
+key are written to trial artifacts and tracking metrics.
+
+Heterogeneous policy IDs receive independent keys, so differently configured
+models cannot consume each other's checkpoints. Agents mapped to the same
+shared policy ID reuse that policy's artifact.
 
 Demonstrations record the policy observation before each teacher action. The
 dataset is split by episode, not by step. Artifacts are written under the run's

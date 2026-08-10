@@ -27,21 +27,11 @@ from theseo_anysearch.imitation.models import (
 def _configure_waypoint_curriculum(env: VoxelEnv, env_config: dict[str, Any]) -> None:
     """Apply the initial trainer-owned curriculum stage to a teacher environment."""
 
-    raw_curriculum = env_config.get("waypoint_curriculum") or {}
-    if not raw_curriculum.get("enabled", False):
-        return
     from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
-        WaypointCurriculum,
-    )
-    from theseo_anysearch.settings.environment.curriculum import (
-        WaypointCurriculumConfig,
+        configure_initial_waypoint_curriculum,
     )
 
-    curriculum = WaypointCurriculum(
-        WaypointCurriculumConfig.model_validate(raw_curriculum),
-        env_config,
-    )
-    env.set_waypoint_curriculum(curriculum.stages(), [1.0])
+    configure_initial_waypoint_curriculum(env, env_config)
 
 
 def _route_action_plan(
@@ -88,6 +78,13 @@ def dataset_fingerprint(
     """Hash every contract that affects demonstration compatibility."""
 
     normalized_env = dict(env_config)
+    # Each run receives an identical copied native extension under a unique
+    # run directory. Its absolute manifest path is runtime plumbing, not part
+    # of the observation, action, geometry, or teacher contract.
+    normalized_env.pop("native_extension_manifest", None)
+    # Demonstration resets always use collection.seed_start + attempt, so the
+    # Tune trial's rollout seed offset cannot affect collected examples.
+    normalized_env.pop("seed", None)
     for path_key in ("stl_path", "waypoints_file"):
         path_value = normalized_env.get(path_key)
         if path_value:

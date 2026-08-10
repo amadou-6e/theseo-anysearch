@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+from gymnasium import spaces
 
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     AnySearchEvaluationFunction,
@@ -180,6 +181,23 @@ def test_stack_observations_preserves_nested_structure() -> None:
 
     assert stacked["box"].tolist() == [[1, 2], [5, 6]]
     assert [part.tolist() for part in stacked["goal"]] == [[3, 7], [4, 8]]
+
+
+def test_policy_adapter_flattens_with_explicit_evaluation_space() -> None:
+    observation_space = spaces.Dict(
+        {
+            "box": spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32),
+            "steps": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
+        }
+    )
+    adapter = _PolicyAdapter(SimpleNamespace(), observation_space=observation_space)
+
+    observations = adapter._module_observations(
+        [{"box": np.asarray([0.2, 0.4]), "steps": np.asarray([0.8])}]
+    )
+
+    assert observations[0].shape == (3,)
+    assert np.allclose(observations[0], [0.2, 0.4, 0.8])
 
 
 def test_policy_adapter_batches_observations_for_policy(monkeypatch) -> None:
