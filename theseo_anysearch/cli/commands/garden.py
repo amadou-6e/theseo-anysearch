@@ -636,6 +636,7 @@ def tune(
     tag: Optional[str] = typer.Option(None, "--tag", help="Tag appended to the run name."),
     save_best: bool = typer.Option(True, "--save-best/--no-save-best", help="Save best trial to garden store."),
     garden_dir: Optional[Path] = typer.Option(None, "--garden-dir"),
+    resume: bool = typer.Option(False, "--resume", help="Resume unfinished and errored trials."),
 ) -> None:
     """Hyperparameter search over garden encoder architecture and training config."""
     from theseo_anysearch.garden.tune_runner import GardenTuneRunner
@@ -663,7 +664,7 @@ def tune(
     summary.add_row("storage", str(out.resolve()))
     console.print(Panel(summary, title="[bold]Garden tune[/bold]", title_align="left"))
 
-    result = runner.run(out)
+    result = runner.run(out, resume=resume)
 
     best_summary = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
     best_summary.add_column(style="dim", min_width=18)

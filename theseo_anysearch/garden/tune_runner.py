@@ -72,7 +72,8 @@ def _resolve_paths_in_dict(d: Any, base: Path) -> Any:
 def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) -> None:
     """Ray Tune trainable: train one garden encoder trial and report val_loss each epoch."""
     import copy
-    from ray import tune as _tune
+    import shutil
+    from ray import tune as ray_tune
     from theseo_anysearch.garden.collect import collect_dataset
     from theseo_anysearch.garden.data_config import GardenConfig, load_data_config
     from theseo_anysearch.garden.dataset import make_train_val_datasets
@@ -101,8 +102,26 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = build_model(cfg)
 
+    checkpoint_dir = Path(ray_tune.get_context().get_trial_dir()) / "trainer_checkpoint"
+    checkpoint_path = checkpoint_dir / "trainer.pt"
+    incoming_checkpoint = ray_tune.get_checkpoint()
+    if incoming_checkpoint is not None:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        with incoming_checkpoint.as_directory() as incoming_dir:
+            incoming_path = Path(incoming_dir) / "trainer.pt"
+            if incoming_path.exists():
+                shutil.copy2(incoming_path, checkpoint_path)
+
     def epoch_cb(epoch: int, train_loss: float, val_loss: float) -> None:
-        _tune.report({"val_loss": val_loss, "train_loss": train_loss, "epoch": epoch})
+        checkpoint = (
+            ray_tune.Checkpoint.from_directory(checkpoint_dir)
+            if checkpoint_path.exists()
+            else None
+        )
+        ray_tune.report(
+            {"val_loss": val_loss, "train_loss": train_loss, "epoch": epoch},
+            checkpoint=checkpoint,
+        )
 
     run_train(
         model=model,
@@ -112,6 +131,7 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
         approach=cfg.approach,
         device=device,
         epoch_cb=epoch_cb,
+        checkpoint_path=checkpoint_path,
     )
 
 
@@ -135,7 +155,7 @@ class GardenTuneRunner:
         if self._cfg.tune is None:
             raise ValueError(f"No 'tune:' block in {config_path}. Add tune config to enable garden tune.")
 
-    def run(self, output_dir: Path) -> dict[str, Any]:
+    def run(self, output_dir: Path, resume: bool = False) -> dict[str, Any]:
         import ray
         from ray import tune as ray_tune
         from ray.tune.schedulers import AsyncHyperBandScheduler
@@ -156,7 +176,7 @@ class GardenTuneRunner:
         )
 
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True)
+            ray.init(ignore_reinit_error=True, include_dashboard=False)
 
         import torch
         gpu_per_trial = (1.0 / tc.max_concurrent) if torch.cuda.is_available() else 0.0
@@ -174,22 +194,32 @@ class GardenTuneRunner:
             trial_counter[0] += 1
             return f"t{trial_counter[0]:03d}"
 
-        tuner = ray_tune.Tuner(
-            trainable,
-            param_space=search_space,
-            tune_config=ray_tune.TuneConfig(
-                metric="val_loss",
-                mode="min",
-                scheduler=scheduler,
-                num_samples=tc.num_samples,
-                max_concurrent_trials=tc.max_concurrent,
-                trial_dirname_creator=_short_dirname,
-            ),
-            run_config=ray_tune.RunConfig(
-                name=run_name,
-                storage_path=str(output_dir.resolve()),
-            ),
-        )
+        experiment_path = output_dir.resolve() / run_name
+        if resume and ray_tune.Tuner.can_restore(experiment_path):
+            tuner = ray_tune.Tuner.restore(
+                str(experiment_path),
+                trainable=trainable,
+                resume_unfinished=True,
+                resume_errored=True,
+                param_space=search_space,
+            )
+        else:
+            tuner = ray_tune.Tuner(
+                trainable,
+                param_space=search_space,
+                tune_config=ray_tune.TuneConfig(
+                    metric="val_loss",
+                    mode="min",
+                    scheduler=scheduler,
+                    num_samples=tc.num_samples,
+                    max_concurrent_trials=tc.max_concurrent,
+                    trial_dirname_creator=_short_dirname,
+                ),
+                run_config=ray_tune.RunConfig(
+                    name=run_name,
+                    storage_path=str(output_dir.resolve()),
+                ),
+            )
 
         results = tuner.fit()
         best = results.get_best_result(metric="val_loss", mode="min")

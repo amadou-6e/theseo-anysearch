@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from theseo_anysearch.garden.models.ae import VoxelEncoder3D
+from theseo_anysearch.garden.models.ae import build_encoder
 
 
 def make_box_grids(count: int, n: int, seed: int) -> torch.Tensor:
@@ -192,6 +192,11 @@ def latency_ms(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--preset", choices=("r2", "r3"), default="r2")
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        help="Garden model directory containing meta.json and encoder.pt.",
+    )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--output", type=Path, default=Path("runtime", "encoder_validation.json"))
     args = parser.parse_args()
@@ -202,19 +207,42 @@ def main() -> None:
         "r2": {"radius": 2, "channels": [32, 64, 64], "latent_dim": 64},
         "r3": {"radius": 3, "channels": [32, 64, 128], "latent_dim": 128},
     }
-    cfg = configs[args.preset]
+    if args.model_dir is not None:
+        meta = json.loads((args.model_dir / "meta.json").read_text())
+        cfg = {
+            "radius": meta["box_radius"],
+            "channels": meta["conv_channels"],
+            "latent_dim": meta["latent_dim"],
+            "architecture": meta["architecture"],
+            "profile": meta.get("profile"),
+        }
+        checkpoint = args.model_dir / "encoder.pt"
+        model_name = f"{meta['name']}:{meta.get('tag') or 'untagged'}"
+    else:
+        cfg = {
+            **configs[args.preset],
+            "architecture": "voxel_box_3dcnn",
+            "profile": None,
+        }
+        checkpoint = Path(
+            "theseo_anysearch", "garden", "pretrained", args.preset, "v1", "encoder.pt"
+        )
+        model_name = f"{args.preset}:v1"
     n = 2 * cfg["radius"] + 1
     train_grids = make_box_grids(2400, n, 42)
     test_grids = make_box_grids(600, n, 43)
     ood_grids = make_ood_grids(600, n, 44)
 
-    pretrained = VoxelEncoder3D(n, cfg["channels"], cfg["latent_dim"])
-    checkpoint = Path("theseo_anysearch", "garden", "pretrained", args.preset, "v1", "encoder.pt")
+    pretrained = build_encoder(
+        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"]
+    )
     pretrained.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
-    random_encoder = VoxelEncoder3D(n, cfg["channels"], cfg["latent_dim"])
+    random_encoder = build_encoder(
+        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"]
+    )
 
     results: dict[str, object] = {
-        "preset": args.preset,
+        "preset": model_name,
         "grid_shape": [n, n, n],
         "latent_dim": cfg["latent_dim"],
         "encoder_parameters": sum(parameter.numel() for parameter in pretrained.parameters()),

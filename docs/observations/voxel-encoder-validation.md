@@ -12,6 +12,7 @@ The reproducible validation command is:
 ```powershell
 python scripts/validate_voxel_encoder.py --preset r2 --epochs 30
 python scripts/validate_voxel_encoder.py --preset r3 --epochs 30
+python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_tuned/gpu-v3 --epochs 30
 ```
 
 The encoder is frozen. A small decoder is trained on its latent vectors, then
@@ -38,6 +39,31 @@ the script.
 | Fill-fraction linear-probe R² | **0.990** | 0.935 | **0.996** | 0.976 |
 | Center-face probe accuracy | **99.58%** | 91.53% | **99.58%** | 93.78% |
 | Relative latent change from one voxel | **0.296** | 0.004 | **0.263** | 0.006 |
+
+### Tuned B0 pilot
+
+The first GPU search ran eight B0 optimization trials for up to 20 epochs on
+the same cached 50,000-sample random-box dataset. ASHA pruned four trials at
+epoch 4. The selected configuration used Adam, batch size 128, learning rate
+`7.388e-4`, and weight decay `5.916e-5`. Clean retraining reached validation
+loss `3.395e-5` with the corrected `positive_bce_v2` objective.
+
+| Metric | Tuned B0 | Random B0 | Pretrained r2 |
+|---|---:|---:|---:|
+| Parameters | **327,576** | 327,576 | 426,880 |
+| Held-out reconstruction IoU | 0.761 | 0.385 | **0.869** |
+| Held-out occupied recall | 0.955 | 0.793 | **0.976** |
+| OOD reconstruction IoU | 0.683 | 0.440 | **0.745** |
+| Fill-fraction linear-probe R² | 0.988 | 0.615 | **0.990** |
+| Center-face probe accuracy | 98.89% | 92.83% | **99.58%** |
+| Relative latent change from one voxel | 0.253 | 0.252 | **0.296** |
+
+The B0 encoder learned substantially better features than its random control,
+but minimizing the autoencoder validation objective did not produce the best
+frozen latent representation. Its much smaller training loss therefore must
+not be interpreted as beating `r2:v1`. The next search should rank checkpoints
+by representation metrics or a combined validation score rather than raw focal
+reconstruction loss alone.
 
 Single-threaded warm inference on the validation machine measured approximately
 2.4 ms for one r2 grid and 2.8 ms for one r3 grid on CPU. Warm GPU batches of
@@ -70,6 +96,11 @@ RLlib integration should therefore begin with frozen `r2:v1`, keep the raw
 local feasibility, and compare frozen, gradually unfrozen, and randomly
 initialized encoders. End-to-end success and sample efficiency remain separate
 gates; this validation establishes representation fidelity, not policy quality.
+
+The tuned B0 pilot does not replace `r2:v1`: it misses the r2 held-out IoU by
+0.108 and OOD IoU by 0.062. B0 remains a useful 23% smaller architecture and a
+valid tuning baseline, but it needs a representation-aligned selection metric
+or revised pooling/objective before policy integration.
 
 ## Limitations
 

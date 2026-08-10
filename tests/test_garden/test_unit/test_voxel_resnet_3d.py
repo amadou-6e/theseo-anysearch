@@ -6,7 +6,11 @@ import torch
 
 from theseo_anysearch.garden.data_config import load_garden_config
 from theseo_anysearch.garden.encoder import build_model
-from theseo_anysearch.garden.models.ae import VoxelResNet3D, build_encoder
+from theseo_anysearch.garden.models.ae import (
+    VoxelResNet3D,
+    binary_reconstruction_loss,
+    build_encoder,
+)
 
 
 @pytest.mark.parametrize(("profile", "latent_dim"), [("b0", 64), ("b1", 96)])
@@ -26,6 +30,13 @@ def test_b1_scales_depth_and_parameter_count_over_b0():
     assert len(b0.stages[1]) == 1
     assert len(b1.stages[1]) == 2
     assert b1_params > b0_params
+
+
+def test_positive_weight_only_scales_occupied_voxels():
+    reconstruction = torch.tensor([0.5, 0.5])
+    target = torch.tensor([0.0, 1.0])
+    loss = binary_reconstruction_loss(reconstruction, target, torch.tensor([3.0]))
+    assert loss == pytest.approx(2.0 * torch.log(torch.tensor(2.0)).item())
 
 
 def test_profile_rejects_incompatible_latent_dimension():
@@ -52,3 +63,12 @@ def test_builtin_profile_preset_builds_reconstruction_model(preset: str):
 
     assert reconstruction.shape == (2, 1, n, n, n)
     assert latent.shape == (2, cfg.encoder.latent_dim)
+
+
+def test_b0_tuning_preset_keeps_objective_fixed():
+    preset_path = Path("theseo_anysearch", "garden", "presets", "voxel_resnet_b0_tune.yaml")
+    cfg = load_garden_config(preset_path)
+    assert cfg.tune is not None
+    assert cfg.tune.max_concurrent == 1
+    assert "focal_gamma" not in cfg.tune.search_space["training"]
+    assert cfg.training.loss_version == "positive_bce_v2"

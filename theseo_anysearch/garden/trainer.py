@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from pathlib import Path
 from typing import Callable
 
@@ -98,7 +99,16 @@ def train(
         train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True, num_workers=0)
         val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=0)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    optimizer_types: dict[str, type[torch.optim.Optimizer]] = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW,
+        "rmsprop": torch.optim.RMSprop,
+    }
+    optimizer = optimizer_types[cfg.optimizer](
+        model.parameters(),
+        lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
+    )
     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
     if cfg.lr_scheduler == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
@@ -114,6 +124,7 @@ def train(
         log.info("pos_weight=%.2f  focal_gamma=%.1f", pos_weight.item(), focal_gamma)
 
     best_val = float("inf")
+    best_state: dict[str, torch.Tensor] | None = None
     patience_counter = 0
     loss_curve: list[dict] = []
 
@@ -126,6 +137,7 @@ def train(
         start_epoch = ckpt.get("epoch", 0) + 1
         best_val = ckpt.get("best_val", float("inf"))
         loss_curve = ckpt.get("loss_curve", [])
+        best_state = deepcopy(model.state_dict())
         log.info("Resumed from epoch %d", start_epoch - 1)
 
     for epoch in range(start_epoch, cfg.epochs + 1):
@@ -150,12 +162,11 @@ def train(
         val_loss = _compute_val_loss(model, val_loader, approach, device, pos_weight=pos_weight, focal_gamma=focal_gamma)
         loss_curve.append({"epoch": epoch, "train": train_loss, "val": val_loss})
 
-        if epoch_cb:
-            epoch_cb(epoch, train_loss, val_loss)
-
         # Early stopping
+        should_stop = False
         if val_loss < best_val:
             best_val = val_loss
+            best_state = deepcopy(model.state_dict())
             patience_counter = 0
             if checkpoint_path:
                 checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,14 +180,25 @@ def train(
         else:
             patience_counter += 1
             if patience_counter >= cfg.early_stop_patience:
-                log.info("Early stopping at epoch %d (patience %d)", epoch, cfg.early_stop_patience)
-                return TrainResult(
-                    epochs_trained=epoch,
-                    loss_curve=loss_curve,
-                    final_val_loss=best_val,
-                    stopped_early=True,
-                )
+                should_stop = True
 
+        # Report only after a newly improved checkpoint has been persisted.
+        if epoch_cb:
+            epoch_cb(epoch, train_loss, val_loss)
+
+        if should_stop:
+            log.info("Early stopping at epoch %d (patience %d)", epoch, cfg.early_stop_patience)
+            if best_state is not None:
+                model.load_state_dict(best_state)
+            return TrainResult(
+                epochs_trained=epoch,
+                loss_curve=loss_curve,
+                final_val_loss=best_val,
+                stopped_early=True,
+            )
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
     return TrainResult(
         epochs_trained=cfg.epochs,
         loss_curve=loss_curve,

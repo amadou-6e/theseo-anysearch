@@ -426,10 +426,13 @@ class GardenTrainingConfig(BaseModel):
     epochs: int = 100
     batch_size: int = 256
     lr: float = 3e-4
+    optimizer: Literal["adam", "adamw", "rmsprop"] = "adam"
+    weight_decay: float = 0.0
     lr_scheduler: Literal["cosine", "constant"] = "cosine"
     early_stop_patience: int = 10
     pos_weight_factor: float = 0.0  # 0 = auto from batch fill rate; >0 = fixed weight for filled voxels
     focal_gamma: float = 0.0        # 0 = plain (weighted) BCE; >0 = focal loss gamma
+    loss_version: Literal["positive_bce_v2"] = "positive_bce_v2"
 
 
 # ---------------------------------------------------------------------------

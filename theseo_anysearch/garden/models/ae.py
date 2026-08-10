@@ -15,6 +15,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def binary_reconstruction_loss(
+    reconstruction: torch.Tensor,
+    target: torch.Tensor,
+    pos_weight: torch.Tensor | None = None,
+    focal_gamma: float = 0.0,
+) -> torch.Tensor:
+    """Binary reconstruction loss with true positive-class and focal weighting."""
+    element_loss = F.binary_cross_entropy(reconstruction, target, reduction="none")
+    if pos_weight is not None:
+        class_weight = 1.0 + (pos_weight - 1.0) * target
+        element_loss = element_loss * class_weight
+    if focal_gamma > 0.0:
+        p_t = reconstruction * target + (1.0 - reconstruction) * (1.0 - target)
+        element_loss = element_loss * (1.0 - p_t).pow(focal_gamma)
+    return element_loss.mean()
+
+
 # ---------------------------------------------------------------------------
 # Encoders
 # ---------------------------------------------------------------------------
@@ -379,13 +396,7 @@ class VoxelAE(nn.Module):
             target = torch.stack([x[:, :, :, m], x[:, :, m, :], x[:, m, :, :]], dim=1)
         else:
             target = x.permute(0, 3, 1, 2)
-        if focal_gamma > 0.0:
-            # Focal loss: weight each voxel by (1 - p_t)^gamma to focus on hard examples
-            bce = F.binary_cross_entropy(recon, target, weight=pos_weight, reduction="none")
-            p_t = recon * target + (1 - recon) * (1 - target)
-            focal_weight = (1.0 - p_t) ** focal_gamma
-            return (focal_weight * bce).mean()
-        return F.binary_cross_entropy(recon, target, weight=pos_weight)
+        return binary_reconstruction_loss(recon, target, pos_weight, focal_gamma)
 
 
 class VoxelVAE(nn.Module):
