@@ -46,17 +46,34 @@ def test_positive_weight_only_scales_occupied_voxels():
     assert loss == pytest.approx(2.0 * torch.log(torch.tensor(2.0)).item())
 
 
-def test_profile_rejects_incompatible_latent_dimension():
-    with pytest.raises(ValueError, match="requires latent_dim=64"):
-        build_encoder("voxel_resnet_3d", n=5, channels=[24, 48, 64], latent_dim=96, profile="b0")
+@pytest.mark.parametrize("latent_dim", [16, 24, 32, 48, 64])
+def test_profile_supports_projection_dimension_search(latent_dim: int):
+    encoder = build_encoder(
+        "voxel_resnet_3d",
+        n=5,
+        channels=[24, 48, 64],
+        latent_dim=latent_dim,
+        profile="b0",
+        pooling="spatial_2x2x2",
+    )
+    assert encoder(torch.zeros(2, 5, 5, 5)).shape == (2, latent_dim)
 
 
-def test_profile_config_rejects_architecture_drift(tmp_path: Path):
+def test_profile_config_allows_latent_override(tmp_path: Path):
     preset_path = Path("theseo_anysearch", "garden", "presets", "voxel_resnet_b0.yaml")
-    raw = preset_path.read_text().replace("latent_dim: 64", "latent_dim: 96")
+    raw = preset_path.read_text().replace("latent_dim: 64", "latent_dim: 32")
     changed_path = tmp_path / "changed.yaml"
     changed_path.write_text(raw)
-    with pytest.raises(ValueError, match="requires conv_channels=.*latent_dim=64"):
+    cfg = load_garden_config(changed_path)
+    assert build_model(cfg).encoder.latent_dim == 32
+
+
+def test_profile_config_rejects_channel_drift(tmp_path: Path):
+    preset_path = Path("theseo_anysearch", "garden", "presets", "voxel_resnet_b0.yaml")
+    raw = preset_path.read_text().replace("conv_channels: [24, 48, 64]", "conv_channels: [16, 32, 48]")
+    changed_path = tmp_path / "changed.yaml"
+    changed_path.write_text(raw)
+    with pytest.raises(ValueError, match="requires conv_channels"):
         load_garden_config(changed_path)
 
 
@@ -98,3 +115,7 @@ def test_spatial_tuning_preset_uses_representation_score():
     assert cfg.tune is not None
     assert cfg.tune.metric == "representation_score"
     assert cfg.tune.mode == "max"
+    assert cfg.tune.num_samples == 100
+    assert cfg.tune.search_space["encoder"]["latent_dim"] == {
+        "choice": [16, 24, 32, 48, 64]
+    }

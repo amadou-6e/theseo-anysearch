@@ -150,7 +150,13 @@ class VoxelResNet3D(nn.Module):
     while retaining the same conservative two-step downsampling schedule.
     """
 
-    def __init__(self, n: int, profile: str = "b0", pooling: str = "global_avg") -> None:
+    def __init__(
+        self,
+        n: int,
+        profile: str = "b0",
+        pooling: str = "global_avg",
+        latent_dim: int | None = None,
+    ) -> None:
         super().__init__()
         del n  # Adaptive pooling keeps the encoder compatible with multiple radii.
         if profile not in VOXEL_RESNET_3D_PROFILES:
@@ -160,7 +166,9 @@ class VoxelResNet3D(nn.Module):
         channels = tuple(spec["channels"])
         block_counts = tuple(spec["blocks"])
         strides = tuple(spec["strides"])
-        latent_dim = int(spec["latent_dim"])
+        latent_dim = int(spec["latent_dim"] if latent_dim is None else latent_dim)
+        if latent_dim <= 0:
+            raise ValueError(f"latent_dim must be positive, got {latent_dim}")
 
         self.profile = profile
         self.pooling = pooling
@@ -264,13 +272,7 @@ def build_encoder(
     if architecture == "voxel_box_3dcnn":
         return VoxelEncoder3D(n, channels, latent_dim)
     if architecture == "voxel_resnet_3d":
-        encoder = VoxelResNet3D(n, profile or "b0", pooling)
-        if latent_dim != encoder.latent_dim:
-            raise ValueError(
-                f"voxel_resnet_3d profile {encoder.profile!r} requires latent_dim="
-                f"{encoder.latent_dim}, got {latent_dim}"
-            )
-        return encoder
+        return VoxelResNet3D(n, profile or "b0", pooling, latent_dim)
     if architecture == "voxel_box_2dcnn":
         return VoxelEncoder2D(n, channels, latent_dim)
     if architecture == "voxel_triplanar_2dcnn":

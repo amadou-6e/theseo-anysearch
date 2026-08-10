@@ -536,11 +536,11 @@ class GardenConfig(BaseModel):
             "b0": ([24, 48, 64], 64),
             "b1": ([32, 64, 80], 96),
         }
-        channels, latent_dim = expected[self.encoder.profile]
-        if self.encoder.conv_channels != channels or self.encoder.latent_dim != latent_dim:
+        channels, _default_latent_dim = expected[self.encoder.profile]
+        if self.encoder.conv_channels != channels:
             raise ValueError(
                 f"voxel_resnet_3d profile {self.encoder.profile!r} requires "
-                f"conv_channels={channels} and latent_dim={latent_dim}"
+                f"conv_channels={channels}"
             )
         return self
 

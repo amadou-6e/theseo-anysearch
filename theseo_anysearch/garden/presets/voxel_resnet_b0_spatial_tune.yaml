@@ -52,13 +52,15 @@ training:
   loss_version: positive_bce_v2
 
 tune:
-  num_samples: 8
+  num_samples: 100
   max_concurrent: 1
   grace_period: 4
   reduction_factor: 3
   metric: representation_score
   mode: max
   search_space:
+    encoder:
+      latent_dim: {choice: [16, 24, 32, 48, 64]}
     training:
       # gpu-v4's winner was in the lowest 18% of the previous log range.
       lr: {loguniform: [5.0e-5, 1.5e-3]}
