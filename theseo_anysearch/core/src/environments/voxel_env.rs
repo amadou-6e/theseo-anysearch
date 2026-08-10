@@ -2,9 +2,11 @@ use crate::world::{
     Block,
     Coord,
     World,
+    WorldError,
     WorldState,
     BLOCK_KIND_GOAL,
     BLOCK_KIND_START,
+    WORLD_SIZE,
 };
 
 use super::traits::{Environment, StepResult};
@@ -249,6 +251,30 @@ impl VoxelEnv {
 
     pub fn active_goal(&self) -> Option<Coord> {
         self.active_goal
+    }
+
+    /// Replace the active goal without resetting cursor, trail, or step count.
+    pub fn set_active_goal(&mut self, goal: Coord) -> Result<VoxelObservation, WorldError> {
+        self.world.set_block(
+            goal,
+            Block {
+                kind: BLOCK_KIND_GOAL,
+                active: false,
+                reward_weight: 0.0,
+            },
+        )?;
+        self.active_goal = Some(goal);
+        self.prev_goal_dist_l2 = l2(self.cursor, goal);
+        Ok(self.observation())
+    }
+
+    /// Snapshot the observation for the current cursor and active goal.
+    pub fn observation(&self) -> VoxelObservation {
+        VoxelObservation {
+            filled: self.agent_filled(),
+            steps_remaining: self.max_steps.saturating_sub(self.steps),
+            goal_distance: self.active_goal.map(|goal| manhattan(self.cursor, goal)),
+        }
     }
 
     pub fn surface_cells(&self) -> &[Coord] {
@@ -704,6 +730,36 @@ mod tests {
 
         assert!(sr.done);
         assert!((sr.reward - 9.99).abs() < 0.0001);
+    }
+
+    #[test]
+    fn set_active_goal_updates_state_on_success() {
+        let mut env = VoxelEnv::new(WorldState::new(), 10);
+        env.set_waypoints((1, 1, 1), (2, 2, 2));
+        env.reset(0);
+
+        let obs = env.set_active_goal((5, 5, 5)).expect("in-bounds goal");
+
+        assert_eq!(env.active_goal(), Some((5, 5, 5)));
+        assert!(env.world().is_filled((5, 5, 5)));
+        assert_eq!(obs.goal_distance, Some(manhattan(env.cursor(), (5, 5, 5))));
+    }
+
+    #[test]
+    fn set_active_goal_rejects_out_of_bounds_goal_without_mutating_state() {
+        let mut env = VoxelEnv::new(WorldState::new(), 10);
+        env.set_waypoints((1, 1, 1), (2, 2, 2));
+        env.reset(0);
+        let previous_goal = env.active_goal();
+
+        let result = env.set_active_goal((WORLD_SIZE, 0, 0));
+
+        assert!(result.is_err());
+        assert_eq!(
+            env.active_goal(),
+            previous_goal,
+            "a rejected goal must not silently become the active goal"
+        );
     }
 
     #[test]

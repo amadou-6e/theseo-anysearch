@@ -17,7 +17,10 @@ from theseo_anysearch.rllib.trainer.base import Trainer, TrainResult, _detect_nu
 from theseo_anysearch.rllib.trainer.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
 from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
-from theseo_anysearch.models import WaypointCurriculumConfig
+from theseo_anysearch.models import (
+    WaypointCurriculumConfig,
+    WaypointCurriculumEvaluationConfig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +336,70 @@ class TestExecution:
             ("curriculum/stage", 2.0, 1)
         ) == 1
 
+    def test_retention_evaluation_uses_configured_vectorization(
+        self,
+        trainer_settings: Any,
+    ) -> None:
+        trainer_settings.training.iterations = 1
+        trainer_settings.evaluation = trainer_settings.evaluation.model_copy(
+            update={
+                "episodes": 1,
+                "num_envs_per_env_runner": 4,
+                "waypoint_curriculum": WaypointCurriculumEvaluationConfig(
+                    enabled=True,
+                    episodes=3,
+                ),
+            }
+        )
+        trainer = make_trainer(trainer_settings)
+        trainer._waypoint_curriculum = WaypointCurriculum(
+            WaypointCurriculumConfig(
+                enabled=True,
+                initial_start=(1, 1, 1),
+                initial_goal=(2, 2, 2),
+            )
+        )
+        episode = VoxelEpisodeData(
+            agent_count=1,
+            max_steps=5,
+            obs_mode="scalar",
+            grid_size=8,
+            init_filled=[],
+            steps=[
+                VoxelStepData(
+                    step=0,
+                    action=13,
+                    reward=1.0,
+                    done=True,
+                    cursor_x=2,
+                    cursor_y=2,
+                    cursor_z=2,
+                    voxel_count=0,
+                    placed=False,
+                )
+            ],
+            total_reward=1.0,
+            success=True,
+            start_pos=(1, 1, 1),
+            goal_pos=(2, 2, 2),
+        )
+        calls: list[tuple[int, int]] = []
+
+        def collect(_algo, _env, count, **kwargs):
+            calls.append((count, kwargs["num_envs_per_env_runner"]))
+            return [episode] * count
+
+        with patch(
+            "theseo_anysearch.rllib.trainer.parallel_evaluation."
+            "collect_rllib_evaluation_episodes",
+            side_effect=collect,
+        ), patch(
+            "theseo_anysearch.rllib.trainer.waypoint_curriculum."
+            "broadcast_waypoint_curriculum",
+        ):
+            trainer.train()
+
+        assert calls == [(1, 4), (3, 4)]
 
 # ---------------------------------------------------------------------------
 # 2. Config validity: config fields reach the Trainer correctly

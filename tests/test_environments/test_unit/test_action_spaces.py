@@ -7,6 +7,7 @@ from theseo_anysearch.environments.action_spaces import (
     NOOP_ACTION_INDEX,
     build_action_space,
     encode_action,
+    maximum_movement_distance,
     offsets_for_mode,
 )
 from theseo_anysearch.models import ActionConfig
@@ -23,6 +24,19 @@ def test_discrete_action_space_cardinality(mode: str, size: int) -> None:
 def test_reduced_offsets_obey_squared_length_limit() -> None:
     assert all(sum(v * v for v in offset) <= 1 for offset in offsets_for_mode("discrete_6"))
     assert all(sum(v * v for v in offset) <= 2 for offset in offsets_for_mode("discrete_18"))
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("discrete_6", 1.0),
+        ("discrete_18", np.sqrt(2.0)),
+        ("discrete_26", np.sqrt(3.0)),
+        ("vector_3", np.sqrt(3.0)),
+    ],
+)
+def test_maximum_movement_distance_matches_action_space(mode: str, expected: float) -> None:
+    assert maximum_movement_distance(mode) == pytest.approx(expected)
 
 
 def test_reduced_action_encodes_to_canonical_direction() -> None:

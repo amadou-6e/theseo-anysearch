@@ -993,6 +993,15 @@ impl PyVoxelEnv {
         self.inner.set_waypoints(start, goal);
     }
 
+    /// Replace the active goal while preserving the current episode state.
+    pub fn set_goal(&mut self, goal: (u16, u16, u16)) -> PyResult<PyVoxelObservation> {
+        let obs = self
+            .inner
+            .set_active_goal(goal)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}")))?;
+        Ok(self.to_py_observation(obs))
+    }
+
     /// Clear fixed waypoints so random selection resumes.
     pub fn clear_waypoints(&mut self) {
         self.inner.clear_waypoints();
