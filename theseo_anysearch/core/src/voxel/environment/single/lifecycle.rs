@@ -303,7 +303,7 @@ impl Environment for VoxelEnv {
 // Tests
 // ---------------------------------------------------------------------------
 
-pub(super) fn merge_mutations(
+pub(crate) fn merge_mutations(
     target: &mut PendingMutations,
     result: OutcomeResultV2,
     grid_size: u16,

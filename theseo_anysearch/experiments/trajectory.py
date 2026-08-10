@@ -661,6 +661,7 @@ class MultiVoxelEpisodeData:
     start_positions: list[tuple[int, int, int] | None]
     goal_positions: list[tuple[int, int, int] | None]
     init_filled: list[tuple[int, int, int]]  # geometry voxels at episode start
+    obs_mode: str = "scalar"
 
 
 def collect_multi_eval_episode(
@@ -770,6 +771,7 @@ def collect_multi_eval_episode(
         start_positions=start_positions,
         goal_positions=goal_positions,
         init_filled=init_filled,
+        obs_mode=str(env_config.get("obs_mode", "scalar")),
     )
 
 
@@ -789,7 +791,7 @@ def _build_multi_payload(
         "episode_reward_mean": episode_reward_mean,
         "agent_count": episode.agent_count,
         "max_steps": episode.max_steps,
-        "obs_mode": "scalar",
+        "obs_mode": episode.obs_mode,
         "episode": {
             "total_reward": sum(episode.total_rewards),
             "steps_taken": len(episode.steps),
