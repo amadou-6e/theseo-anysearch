@@ -18,11 +18,20 @@ from theseo_anysearch.rllib.explain.traces import ObservationTrace, ObservationT
 class InteractiveExplanationSession:
     """Restore a policy once and repeatedly explain edited observations."""
 
+    # A single-observation occlusion background collapses to the observation
+    # being explained (see resolve_occlusion_background), silently zeroing
+    # every group attribution. Sample a small pool of diverse reset states
+    # instead of freezing one.
+    _BACKGROUND_SAMPLE_COUNT = 8
+
     def __init__(self, run_dir: Path, checkpoint: str = "latest") -> None:
         self.service = PolicyExplanationService(run_dir, checkpoint=checkpoint)
         self.checkpoint = checkpoint
         self.observation_space = self.service.observation_space()
-        self._background = self.service.initial_observation()
+        self._background = [
+            self.service.initial_observation(seed=seed)
+            for seed in range(self._BACKGROUND_SAMPLE_COUNT)
+        ]
 
     def initial_observation(self, seed: int | None = None) -> dict[str, np.ndarray]:
         """Return a real environment observation suitable as an editing baseline."""
@@ -73,6 +82,6 @@ class InteractiveExplanationSession:
             trace,
             self.service.scorer,
             explainer=OcclusionExplainer(
-                schema, self.service.scorer, [self._background]
+                schema, self.service.scorer, self._background
             ),
         ).explain(request)

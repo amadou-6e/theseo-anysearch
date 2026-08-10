@@ -336,9 +336,6 @@ class PolicyExplanationService:
         """Build an environment from authoritative run settings and state overrides."""
 
         config = self.experiment.env.to_runtime_dict()
-        curriculum = self.experiment.env.waypoint_curriculum
-        if curriculum is not None and curriculum.enabled:
-            config["waypoint_curriculum"] = curriculum.model_dump(mode="python")
         config.update(dict(overrides or {}))
         return VoxelEnv(config)
 

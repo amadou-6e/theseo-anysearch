@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from theseo_anysearch.rllib.explain.scenarios import validate_observation
 from theseo_anysearch.rllib.explain.service import resolve_run_dir
 from theseo_anysearch.rllib.explain.ui.session import InteractiveExplanationSession
 
@@ -41,8 +42,16 @@ def _schema(session: InteractiveExplanationSession) -> dict[str, Any]:
 def _flatten_observation(
     raw: dict[str, Any],
     fields: dict[str, Any],
+    observation_space: Any,
 ) -> dict[str, list[float]]:
-    """Validate names and flatten an imported observation mapping."""
+    """Reshape an imported observation to the policy schema and validate it.
+
+    Delegates finiteness and bounds checking to the same validate_observation
+    used by every other fictional-observation entry point, instead of only
+    checking that the imported array's total element count matches — a
+    same-size-but-wrong-shape or out-of-bounds import must fail loudly here
+    too, not just when a later explain request happens to trip over it.
+    """
 
     expected = set(fields)
     received = set(raw)
@@ -53,16 +62,18 @@ def _flatten_observation(
             "imported observation fields do not match the policy schema; "
             f"missing={missing}, extra={extra}"
         )
-    result: dict[str, list[float]] = {}
+    reshaped: dict[str, list[float]] = {}
     for name, value in raw.items():
         array = np.asarray(value, dtype=np.float32)
         expected_shape = tuple(fields[name]["shape"])
-        if array.shape != expected_shape and array.size != int(np.prod(expected_shape)):
+        expected_size = int(np.prod(expected_shape))
+        if array.size != expected_size:
             raise ValueError(
-                f"field {name!r} has shape {array.shape}; expected {expected_shape}"
+                f"field {name!r} has {array.size} value(s); expected {expected_size}"
             )
-        result[name] = array.reshape(-1).tolist()
-    return result
+        reshaped[name] = array.reshape(expected_shape).tolist()
+    validated = validate_observation(reshaped, observation_space)
+    return {name: np.asarray(value).reshape(-1).tolist() for name, value in validated.items()}
 
 
 def _single_tensor_observation(
@@ -87,6 +98,7 @@ def _single_tensor_observation(
 def _load_observation_file(
     path: Path,
     fields: dict[str, Any],
+    observation_space: Any,
 ) -> tuple[dict[str, list[float]], str]:
     """Load one fictional observation and report its automatically detected format."""
 
@@ -95,16 +107,16 @@ def _load_observation_file(
         raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raw = _single_tensor_observation(raw, fields)
-        return _flatten_observation(raw, fields), "JSON"
+        return _flatten_observation(raw, fields, observation_space), "JSON"
 
     if suffix == ".npz":
         with np.load(path, allow_pickle=False) as archive:
             raw = {name: archive[name] for name in archive.files}
-        return _flatten_observation(raw, fields), "NumPy NPZ"
+        return _flatten_observation(raw, fields, observation_space), "NumPy NPZ"
 
     if suffix == ".npy":
         raw = _single_tensor_observation(np.load(path, allow_pickle=False), fields)
-        return _flatten_observation(raw, fields), "NumPy NPY"
+        return _flatten_observation(raw, fields, observation_space), "NumPy NPY"
 
     if suffix in {".pb", ".tensor"}:
         import tensorflow as tf
@@ -112,7 +124,7 @@ def _load_observation_file(
         proto = tf.make_tensor_proto(0)
         proto.ParseFromString(path.read_bytes())
         raw = _single_tensor_observation(tf.make_ndarray(proto), fields)
-        return _flatten_observation(raw, fields), "TensorFlow TensorProto"
+        return _flatten_observation(raw, fields, observation_space), "TensorFlow TensorProto"
 
     raise ValueError(
         f"unsupported observation file {path.name!r}; expected JSON, NPY, NPZ, PB, or TENSOR"
@@ -141,12 +153,13 @@ def serve(run_ref: str, checkpoint: str) -> None:
         }
     )
     for raw_line in sys.stdin:
-        request = json.loads(raw_line)
-        command = request.get("command")
         try:
+            request = json.loads(raw_line)
+            command = request.get("command")
             with contextlib.redirect_stdout(sys.stderr):
                 if command == "explain_observation":
                     report = session.explain(request["observation"])
+                    response = {"ok": True, "report": report.to_json_dict()}
                 elif command == "explain_trajectory":
                     report = session.service.explain_trace(
                         request["trajectory"],
@@ -154,26 +167,24 @@ def serve(run_ref: str, checkpoint: str) -> None:
                         explicit_steps=(int(request["step"]),),
                         max_steps=1,
                     )
+                    response = {"ok": True, "report": report.to_json_dict()}
                 elif command == "reset_observation":
                     observation = session.initial_observation(request.get("seed"))
-                    _respond({"ok": True, "observation": _json_observation(observation)})
-                    continue
+                    response = {"ok": True, "observation": _json_observation(observation)}
                 elif command == "load_observation_file":
                     observation, detected_format = _load_observation_file(
                         Path(request["path"]),
                         schema,
+                        session.observation_space,
                     )
-                    _respond(
-                        {
-                            "ok": True,
-                            "observation": observation,
-                            "format": detected_format,
-                        }
-                    )
-                    continue
+                    response = {
+                        "ok": True,
+                        "observation": observation,
+                        "format": detected_format,
+                    }
                 else:
                     raise ValueError(f"unsupported native explanation command: {command!r}")
-            _respond({"ok": True, "report": report.to_json_dict()})
+            _respond(response)
         except Exception as error:
             _respond(
                 {

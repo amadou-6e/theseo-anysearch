@@ -210,9 +210,6 @@ class DQNPolicyScorer(PolicyScorer):
         from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
         env_config = experiment.env.to_runtime_dict()
-        curriculum = experiment.env.waypoint_curriculum
-        if curriculum is not None and curriculum.enabled:
-            env_config["waypoint_curriculum"] = curriculum.model_dump(mode="python")
         env = VoxelEnv(env_config)
         try:
             observation_space = env.observation_space

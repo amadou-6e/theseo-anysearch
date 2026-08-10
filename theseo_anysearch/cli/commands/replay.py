@@ -85,6 +85,26 @@ def _find_binary() -> Path:
     )
 
 
+def _supports_native_explain(run_dir: Path) -> bool:
+    """Return whether run_dir holds a DQN run the native explain bridge can restore.
+
+    Interactive explanations only support DQN (see
+    PolicyExplanationService.__init__), so plain replay of every other
+    algorithm must not attempt to launch the explain bridge at all.
+    """
+    config_path = run_dir / "experiment.yaml"
+    if not config_path.exists():
+        return False
+    try:
+        import yaml as _yaml
+
+        raw = _yaml.safe_load(config_path.read_text()) or {}
+        algorithm = raw.get("training", {}).get("algorithm")
+    except Exception:
+        return False
+    return algorithm == "dqn"
+
+
 def _find_trajectory(run_dir: Path, iteration: int) -> Path:
     """Return the trajectory JSON path for a specific iteration."""
     traj_dir = run_dir / "trajectories"
@@ -318,18 +338,12 @@ def replay(
 
     environment = dict(os.environ)
     environment["ANYSEARCH_PYTHON"] = sys.executable
-    subprocess.run(
-        [
-            str(binary),
-            "--explain-run",
-            str(run_dir),
-            "--checkpoint",
-            "latest",
-            *[str(path) for path in files],
-        ],
-        env=environment,
-        check=True,
-    )
+    launch_args = [str(binary)]
+    if _supports_native_explain(run_dir):
+        checkpoint_selector = str(iteration) if iteration is not None else "latest"
+        launch_args += ["--explain-run", str(run_dir), "--checkpoint", checkpoint_selector]
+    launch_args += [str(path) for path in files]
+    subprocess.run(launch_args, env=environment, check=True)
     raise typer.Exit()
 
 

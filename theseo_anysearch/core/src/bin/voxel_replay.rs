@@ -1190,11 +1190,27 @@ fn main() -> eframe::Result<()> {
         match raw_args[index].as_str() {
             "--explain-run" => {
                 index += 1;
-                explain_run = raw_args.get(index).map(PathBuf::from);
+                match raw_args.get(index) {
+                    Some(value) if !value.starts_with("--") => {
+                        explain_run = Some(PathBuf::from(value));
+                    }
+                    _ => {
+                        eprintln!("--explain-run requires a run directory path");
+                        return Ok(());
+                    }
+                }
             }
             "--checkpoint" => {
                 index += 1;
-                checkpoint = raw_args.get(index).cloned().unwrap_or_else(|| "latest".into());
+                match raw_args.get(index) {
+                    Some(value) if !value.starts_with("--") => {
+                        checkpoint = value.clone();
+                    }
+                    _ => {
+                        eprintln!("--checkpoint requires a value, e.g. latest or an iteration number");
+                        return Ok(());
+                    }
+                }
             }
             "--open-observation-editor" => open_observation_editor = true,
             value => args.push(value.to_string()),

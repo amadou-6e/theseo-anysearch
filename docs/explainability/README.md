@@ -91,11 +91,10 @@ The native `egui/eframe` interface restores the policy once through a persistent
 Python scoring process. The trajectory panel provides **Explain current step**
 for the selected replay step and **Open observation editor** for a dedicated
 fictional-observation window. The editor provides X/Y/Z voxel slices and
-schema-derived controls for every non-spatial field. Press **Explain policy
-decision** after an edit to update action scores, the selected movement vector,
-the safe-action margin, and grouped attribution. Changes to voxel cells and
-scalar controls trigger a new explanation immediately; the explicit button is
-also available to recompute the current state.
+schema-derived controls for every non-spatial field. Editing a voxel cell or
+scalar control clears the current result; press **Explain policy decision**
+to score the edited observation and update action scores, the selected
+movement vector, the safe-action margin, and grouped attribution.
 
 The same controls are available from a normal `anysearch replay <run-ref>`
 session. UI-created observations are explicitly `not_environment_validated`;

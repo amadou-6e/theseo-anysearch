@@ -284,7 +284,10 @@ impl NativeExplainUi {
             ui.label("This policy has no local_grid field."); return false;
         };
         let side = (values.len() as f64).cbrt().round() as usize;
-        if side.pow(3) != values.len() { ui.colored_label(Color32::LIGHT_RED, "local_grid is not cubic"); return false; }
+        if side == 0 || side.pow(3) != values.len() {
+            ui.colored_label(Color32::LIGHT_RED, "local_grid is not cubic");
+            return false;
+        }
         self.slice_index = self.slice_index.min(side.saturating_sub(1));
         ui.horizontal(|ui| {
             ui.label("Slice axis:");
@@ -329,7 +332,7 @@ impl NativeExplainUi {
             return;
         };
         let side = (values.len() as f64).cbrt().round() as usize;
-        if side.pow(3) != values.len() {
+        if side == 0 || side.pow(3) != values.len() {
             ui.colored_label(Color32::LIGHT_RED, "local_grid is not cubic");
             return;
         }
