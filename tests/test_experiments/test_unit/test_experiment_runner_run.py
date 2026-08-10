@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from theseo_anysearch.experiments.models import ExperimentConfig, HeuristicConfig
+from theseo_anysearch.experiments.output import OutputStore
 from theseo_anysearch.experiments.runner import ExperimentRunner, RunInfo
 
 from ._support import patch_build
@@ -114,6 +115,38 @@ class TestExperimentRunnerRun:
         assert state["completed_stages"] == ["one-step", "with-trails"]
         assert state["completed_iterations"] == 3
         assert info.checkpoint_iterations == [1, 2, 3]
+
+    def test_staged_run_resets_early_stop_state_between_stages(
+        self,
+        experiment_config: ExperimentConfig,
+        tmp_path: Path,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["staging"] = {
+            "stages": [
+                {
+                    "name": "first",
+                    "completion": {"type": "iterations", "iterations": 1},
+                },
+                {
+                    "name": "second",
+                    "completion": {"type": "iterations", "iterations": 1},
+                },
+            ],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        store = OutputStore(tmp_path)
+        store.write_json("early_stop_state.json", {"consecutive": 3})
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            ExperimentRunner(config)._run_staged_training(store, tmp_path, None)
+        finally:
+            runner_mod._build_trainer = original
+
+        assert not store.exists("early_stop_state.json")
 
     def test_run_collects_enabled_heuristic_reference(
         self,

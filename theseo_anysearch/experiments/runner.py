@@ -385,6 +385,16 @@ class ExperimentRunner:
 
         for stage_index in range(start_index, len(staging.stages)):
             stage = staging.stages[stage_index]
+            resuming_active_stage = (
+                resume
+                and stage_index == start_index
+                and state.stage_name == stage.name
+            )
+            if not resuming_active_stage:
+                # Consecutive evaluation counters belong to one stage.  Carrying
+                # them into a stage with different task settings can stop that
+                # stage before it has had a chance to learn.
+                store.remove("early_stop_state.json")
             stage_started_at = (
                 state.stage_started_at
                 if state.stage_name == stage.name
