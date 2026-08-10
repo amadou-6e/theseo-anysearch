@@ -40,7 +40,10 @@ class ActionConfig(BaseModel):
     history_length: int = Field(
         default=16, ge=0, le=4096, description="Actions retained for extension context."
     )
-    masking: ActionMaskingConfig = Field(default_factory=ActionMaskingConfig)
+    masking: ActionMaskingConfig = Field(
+        default_factory=ActionMaskingConfig,
+        description="Predicate-derived action masking for discrete policies.",
+    )
 
     @field_validator("predicates", "outcomes", mode="before")
     @classmethod
