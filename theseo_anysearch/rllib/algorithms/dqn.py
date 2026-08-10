@@ -108,6 +108,26 @@ class DQNTrainer(Trainer):
 
         env_config = env.to_runtime_dict()
         env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
+        if env.waypoint_curriculum.enabled:
+            from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+                WaypointCurriculum,
+            )
+
+            initial_curriculum = WaypointCurriculum(
+                env.waypoint_curriculum,
+                env_config,
+            )
+            initial_state = initial_curriculum.state
+            if initial_state.waypoints:
+                env_config["waypoint_route"] = {
+                    "start": initial_state.start,
+                    "waypoints": initial_state.waypoints,
+                }
+            else:
+                env_config["waypoints"] = {
+                    "start": initial_state.start,
+                    "goal": initial_state.goal,
+                }
         env_id = VoxelEnv.register_with_ray(env_config=env_config)
 
         from theseo_anysearch.rllib.models import (
@@ -160,6 +180,7 @@ class DQNTrainer(Trainer):
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
+            frequency=config.evaluation.frequency,
             env_config=env_config,
             episodes=config.evaluation.episodes,
             seed=config.evaluation.seed,

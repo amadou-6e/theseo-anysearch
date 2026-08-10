@@ -1,6 +1,7 @@
 """Action-space construction and canonical voxel-movement encoding."""
 from __future__ import annotations
 from itertools import product
+from math import ceil, sqrt
 from typing import Any
 import numpy as np
 from gymnasium import spaces
@@ -31,6 +32,30 @@ def offsets_for_mode(mode: str) -> tuple[tuple[int, int, int], ...]:
         raise ValueError(
             f"Unknown action mode: {mode!r}. Valid discrete modes: {valid}"
         ) from None
+
+
+def action_step_distance(
+    start: tuple[int, int, int],
+    goal: tuple[int, int, int],
+    mode: str,
+) -> int:
+    """Return the exact empty-grid shortest path in configured action steps."""
+    deltas = [abs(goal[index] - start[index]) for index in range(3)]
+    if mode == "discrete_6":
+        return sum(deltas)
+    if mode == "discrete_18":
+        return max(max(deltas), ceil(sum(deltas) / 2))
+    if mode in {"discrete_26", "vector_3"}:
+        return max(deltas)
+    raise ValueError(f"unsupported action mode for waypoint route: {mode!r}")
+
+def maximum_movement_distance(mode: str) -> float:
+    """Return the largest Euclidean displacement selectable by ``mode``."""
+    if mode == "vector_3":
+        return sqrt(3.0)
+    offsets = offsets_for_mode(mode)
+    return max(sqrt(sum(value * value for value in offset)) for offset in offsets)
+
 
 def build_action_space(mode: str) -> spaces.Space:
     """Build the Gymnasium action space configured by ``mode``."""

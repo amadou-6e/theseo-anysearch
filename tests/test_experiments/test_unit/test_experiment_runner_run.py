@@ -148,6 +148,39 @@ class TestExperimentRunnerRun:
 
         assert not store.exists("early_stop_state.json")
 
+    def test_training_early_stop_cannot_complete_a_stage(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["early_stop"] = {
+            "enabled": True,
+            "mode": "reward",
+            "min_reward": -1.0,
+        }
+        payload["staging"] = {
+            "stages": [{
+                "name": "must-succeed",
+                "completion": {
+                    "type": "performance",
+                    "metric": "evaluation_success_rate",
+                    "threshold": 1.0,
+                    "max_iterations": 3,
+                    "on_max_iterations": "error",
+                },
+            }],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            with pytest.raises(RuntimeError, match="before its completion"):
+                ExperimentRunner(config).run()
+        finally:
+            runner_mod._build_trainer = original
+
     def test_run_collects_enabled_heuristic_reference(
         self,
         experiment_config: ExperimentConfig,

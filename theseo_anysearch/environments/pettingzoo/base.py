@@ -48,7 +48,10 @@ class RustParallelEnv(ParallelEnv, ABC):
 
     @property
     def possible_agents(self) -> list[str]:
-        return list(self._possible_agents)
+        possible = getattr(self, "_possible_agents", None)
+        if possible is None:
+            possible = self._init_possible_agents(self._config)
+        return list(possible)
 
     def reset(self, seed: int | None = None, options: dict | None = None):
         self.agents = list(self._possible_agents)

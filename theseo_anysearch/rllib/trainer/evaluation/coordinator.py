@@ -163,9 +163,11 @@ class EvaluationCoordinator:
         )
         metrics = metrics_factory(episodes)
 
-        evaluation_reward_mean = sum(
-            episode.total_reward for episode in episodes
-        ) / len(episodes)
+        episode_rewards = [
+            sum(episode.total_rewards) if _is_multi else episode.total_reward
+            for episode in episodes
+        ]
+        evaluation_reward_mean = sum(episode_rewards) / len(episode_rewards)
         evaluation_len_mean = sum(
             len(episode.steps) for episode in episodes
         ) / len(episodes)
@@ -339,8 +341,12 @@ class EvaluationCoordinator:
                 "episodes": [
                     {
                         "seed": evaluation_seed + episode_index,
-                        "success": bool(episode.success),
-                        "total_reward": float(episode.total_reward),
+                        "success": (
+                            bool(sum(episode.total_rewards) > 0.0)
+                            if _is_multi
+                            else bool(episode.success)
+                        ),
+                        "total_reward": float(episode_rewards[episode_index]),
                         "steps": len(episode.steps),
                     }
                     for episode_index, episode in enumerate(episodes)

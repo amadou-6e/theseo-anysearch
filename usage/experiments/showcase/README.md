@@ -9,6 +9,7 @@ These are deliberately small examples for learning the experiment format and che
 - [`multi_agent_demo.yaml`](multi_agent_demo.yaml) demonstrates three agents sharing one PPO policy and producing a multi-agent replay.
 - [staged_waypoint_training/](staged_waypoint_training/README.md) progressively increases waypoint distance and episode length before enabling trail placement.
 - [hunter/](hunter/README.md) demonstrates a compiled Rust predicate and outcome that make one hunter cursor move exactly two voxels per action.
+- [hunter_and_hunted/](hunter_and_hunted/README.md) demonstrates ordered heterogeneous agents, independent policies, capture termination, and asymmetric rewards.
 
 These configurations prioritize quick feedback over final policy quality.
 

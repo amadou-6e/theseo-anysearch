@@ -395,6 +395,7 @@ class ExperimentRunner:
                 # them into a stage with different task settings can stop that
                 # stage before it has had a chance to learn.
                 store.remove("early_stop_state.json")
+                store.remove("early_stop.json")
             stage_started_at = (
                 state.stage_started_at
                 if state.stage_name == stage.name
@@ -430,7 +431,7 @@ class ExperimentRunner:
 
             trainer.on_iteration_end = _stage_iteration_hook  # type: ignore[method-assign]
             trainer.should_stop_training = (  # type: ignore[method-assign]
-                lambda result: controller.completed
+                lambda result: controller.completed or controller.halted
             )
             _attach_tracking_hook(trainer, tracker, stage_index=stage_index)
             transition = stage.replay_transition or staging.replay_transition
@@ -491,6 +492,22 @@ class ExperimentRunner:
             self._write_staging_state(store, active_state)
             trainer.train()
             trainer.checkpoint()
+            if store.exists("early_stop.json") and not controller.completed:
+                raise RuntimeError(
+                    f"training.early_stop stopped stage '{stage.name}' before "
+                    "its completion condition succeeded"
+                )
+            if controller.halted:
+                _append_run_stage(
+                    run_dir,
+                    f"Stopped training at incomplete stage {stage_index}: "
+                    f"{stage.name} ({controller.reason})",
+                )
+                return trainer
+            if not controller.completed:
+                raise RuntimeError(
+                    f"trainer returned before stage '{stage.name}' completed"
+                )
             completed_stages = [*state.completed_stages, stage.name]
             state = StagingState(
                 stage_index=stage_index + 1,

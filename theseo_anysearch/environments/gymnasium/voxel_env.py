@@ -13,8 +13,11 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
+    NOOP_ACTION_INDEX,
+    action_step_distance,
     build_action_space,
     encode_action,
+    maximum_movement_distance,
 )
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
@@ -60,12 +63,23 @@ class VoxelEnv(RustGymnasiumEnv):
         )
         self._reward_parameters = dict(config.get("custom_reward_parameters") or {})
         self._episode_steps = 0
+        self._consecutive_collisions = 0
         self._episode_reward_breakdown: dict[str, float] = {}
         self._initial_distance = 0.0
         self._minimum_distance = 0.0
         self._previous_task_distance = 0.0
         self._initial_filled: set[tuple[int, int, int]] = set()
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
+        self._pending_waypoints: tuple[
+            tuple[int, int, int], tuple[int, int, int]
+        ] | None = None
+        self._pending_route: dict[str, Any] | None = None
+        self._configured_route: dict[str, Any] | None = config.get("waypoint_route")
+        self._route_remaining: list[tuple[int, int, int]] = []
+        self._route_waypoint_count = 0
+        self._route_waypoints_reached = 0
+        self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
+        self._curriculum_stage_probabilities: list[float] = []
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -204,19 +218,59 @@ class VoxelEnv(RustGymnasiumEnv):
             ),
         )
 
-        # Load fixed waypoints from file if specified.
+        # Load fixed or curriculum waypoints if specified.
         wp = None
+        configured_route = config.get("waypoint_route")
+        if configured_route:
+            route_waypoints = [tuple(item) for item in configured_route["waypoints"]]
+            if not route_waypoints:
+                raise ValueError("waypoint_route requires at least one waypoint")
+            wp = {
+                "start": tuple(configured_route["start"]),
+                "goal": route_waypoints[0],
+            }
+            self._route_remaining = route_waypoints[1:]
+            self._route_waypoint_count = len(route_waypoints)
+        inline_waypoints = config.get("waypoints")
+        curriculum = config.get("waypoint_curriculum") or {}
+        if wp is None and not inline_waypoints and curriculum.get("enabled"):
+            inline_waypoints = {
+                "start": curriculum.get("initial_start"),
+                "goal": curriculum.get("initial_goal"),
+            }
+        if (
+            inline_waypoints
+            and inline_waypoints.get("start")
+            and inline_waypoints.get("goal")
+        ):
+            wp = inline_waypoints
         waypoints_file = config.get("waypoints_file")
-        if waypoints_file:
+        if wp is None and waypoints_file:
             wp = self._load_waypoints(waypoints_file)
-            if wp:
-                env.set_waypoints(tuple(wp["start"]), tuple(wp["goal"]))
+        if wp:
+            start = tuple(wp["start"])
+            goal = tuple(wp["goal"])
+            env.set_waypoints(
+                start,
+                goal,
+                action_step_distance(
+                    start, goal, config.get("action_mode", "discrete_26")
+                ),
+            )
 
         configured_targets = goal_voxels(self._task.goal, None)
         if configured_targets:
             if not wp:
                 raise ValueError("A configured task goal requires waypoints_file to provide the episode start")
-            env.set_waypoints(tuple(wp["start"]), configured_targets[0])
+            start = tuple(wp["start"])
+            goal = configured_targets[0]
+            env.set_waypoints(
+                start,
+                goal,
+                action_step_distance(
+                    start, goal, config.get("action_mode", "discrete_26")
+                ),
+            )
 
         return env
 
@@ -231,7 +285,7 @@ class VoxelEnv(RustGymnasiumEnv):
         """
         resolved = Path(path)
         if not resolved.is_absolute():
-            resolved = Path(os.getcwd()) / resolved
+            resolved = Path(os.getcwd(), resolved)
 
         if not resolved.exists():
             raise FileNotFoundError(
@@ -290,6 +344,11 @@ class VoxelEnv(RustGymnasiumEnv):
             cells = GeometryPool.grid_to_cells(grid)
             self._rust_env.set_geometry(cells)
             log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
+            if self._configured_route:
+                self._activate_route(self._configured_route)
+            self._apply_pending_waypoints()
+            self._apply_pending_route()
+            self._sample_curriculum_waypoints()
             return self._reset_task_state(super().reset(seed=seed, options=options))
 
         scale_range = self._config.get("scale_range")
@@ -301,7 +360,101 @@ class VoxelEnv(RustGymnasiumEnv):
             cfg = dict(self._config)
             cfg["scale"] = new_scale
             self._rust_env = self._build_rust_env(cfg)
+        if self._configured_route:
+            self._activate_route(self._configured_route)
+        self._apply_pending_waypoints()
+        self._apply_pending_route()
+        self._sample_curriculum_waypoints()
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _segment_length(
+        self,
+        start: tuple[int, int, int],
+        goal: tuple[int, int, int],
+    ) -> int:
+        return action_step_distance(
+            start,
+            goal,
+            self._config.get("action_mode", "discrete_26"),
+        )
+
+    def queue_waypoints(
+        self,
+        start: tuple[int, int, int],
+        goal: tuple[int, int, int],
+    ) -> None:
+        """Apply a trainer-broadcast waypoint pair on the next episode reset."""
+        self._pending_waypoints = (tuple(start), tuple(goal))
+
+    def _apply_pending_waypoints(self) -> None:
+        if self._pending_waypoints is None:
+            return
+        start, goal = self._pending_waypoints
+        self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
+        self._route_remaining = []
+        self._route_waypoint_count = 1
+        self._route_waypoints_reached = 0
+        self._config["waypoints"] = {"start": start, "goal": goal}
+        self._pending_waypoints = None
+
+    def queue_waypoint_route(self, start, waypoints) -> None:
+        """Apply an ordered waypoint route on the next episode reset."""
+        self._pending_route = {
+            "start": tuple(start),
+            "waypoints": [tuple(waypoint) for waypoint in waypoints],
+        }
+
+    def _activate_route(self, route: dict[str, Any]) -> None:
+        start = tuple(route["start"])
+        waypoints = [tuple(waypoint) for waypoint in route["waypoints"]]
+        if not waypoints:
+            raise ValueError("waypoint route requires at least one goal")
+        self._rust_env.set_waypoints(
+            start, waypoints[0], self._segment_length(start, waypoints[0])
+        )
+        self._route_remaining = waypoints[1:]
+        self._route_waypoint_count = len(waypoints)
+        self._route_waypoints_reached = 0
+        self._config["waypoint_route"] = {"start": start, "waypoints": waypoints}
+
+    def _apply_pending_route(self) -> None:
+        if self._pending_route is None:
+            return
+        self._activate_route(self._pending_route)
+        self._pending_route = None
+
+    def set_waypoint_curriculum(
+        self,
+        stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]],
+        probabilities: list[float],
+    ) -> None:
+        """Set the stage pool sampled by subsequent training resets."""
+        if len(stages) != len(probabilities):
+            raise ValueError("curriculum stages and probabilities must have equal length")
+        if stages and not np.isclose(sum(probabilities), 1.0):
+            raise ValueError("curriculum stage probabilities must sum to 1.0")
+        self._curriculum_stages = list(stages)
+        self._curriculum_stage_probabilities = [float(value) for value in probabilities]
+
+    def _sample_curriculum_waypoints(self) -> None:
+        if not self._curriculum_stages:
+            return
+        index = int(
+            self._obs_rng.choice(
+                len(self._curriculum_stages),
+                p=self._curriculum_stage_probabilities,
+            )
+        )
+        selected = self._curriculum_stages[index]
+        if isinstance(selected, dict) and "waypoints" in selected:
+            self._activate_route(selected)
+            return
+        start, goal = selected
+        self._route_remaining = []
+        self._route_waypoint_count = 1
+        self._route_waypoints_reached = 0
+        self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
+        self._config["waypoints"] = {"start": start, "goal": goal}
 
     def _reset_task_state(self, reset_result):
         """Initialize episode-level task metrics after a Rust reset."""
@@ -311,6 +464,7 @@ class VoxelEnv(RustGymnasiumEnv):
         fallback = self._rust_env.goal_pos()
         distance = goal_distance(self._task.goal, cursor, fallback)
         self._episode_steps = 0
+        self._consecutive_collisions = 0
         self._initial_distance = distance
         self._minimum_distance = distance
         self._previous_task_distance = distance
@@ -388,13 +542,38 @@ class VoxelEnv(RustGymnasiumEnv):
                 self._episode_reward_breakdown.get(name, 0.0) + value
             )
 
+        final_success = success and not self._route_remaining
+        waypoint_reached = success
+        if waypoint_reached:
+            self._route_waypoints_reached += 1
+        if success and self._route_remaining:
+            next_goal = self._route_remaining.pop(0)
+            observation = self._obs_to_numpy(
+                self._rust_env.set_goal(
+                    next_goal, self._segment_length(cursor, next_goal)
+                )
+            )
+            fallback = next_goal
+            current_distance = goal_distance(self._task.goal, cursor, fallback)
+            terminated = False
+            reason = "in_progress"
+        else:
+            reason = str(result.termination_reason)
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
         self._last_observation = observation
-        reason = str(result.termination_reason)
         info = {
             "task_version": self._task.version,
-            "goal_reached": success,
+            "goal_reached": final_success,
+            "waypoint_reached": waypoint_reached,
+            "route_waypoints_total": self._route_waypoint_count,
+            "route_waypoints_reached": self._route_waypoints_reached,
+            "route_waypoint_completion_fraction": (
+                self._route_waypoints_reached / self._route_waypoint_count
+                if self._route_waypoint_count
+                else 0.0
+            ),
+            "route_waypoints_remaining": len(self._route_remaining),
             "termination_reason": reason,
             "reward_breakdown": breakdown,
             "episode_reward_breakdown": dict(self._episode_reward_breakdown),
@@ -431,6 +610,9 @@ class VoxelEnv(RustGymnasiumEnv):
         return bool(
             self._config.get("geometry_boxes")
             or self._config.get("waypoints_file")
+            or self._config.get("waypoints")
+            or self._config.get("waypoint_route")
+            or (self._config.get("waypoint_curriculum") or {}).get("enabled")
             or self._config.get("stl_path")
             or self._config.get("geometry_pool")
         )

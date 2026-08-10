@@ -9,8 +9,8 @@ from typing import Any
 
 from theseo_anysearch.settings.compatibility import _deep_merge
 from theseo_anysearch.settings.algorithm import AlgorithmConfig, AlgorithmEnvCompatibilityMixin, ModelConfig
-from theseo_anysearch.settings.environment import ActionConfig, ActionExtensionSelector, EnvConfig, GeometryConfig, NestedFieldAccessMixin, ObservationConfig, RewardConfig, RewardSelector
-from theseo_anysearch.settings.evaluation import EvaluationConfig
+from theseo_anysearch.settings.environment import ActionConfig, ActionExtensionSelector, AgentConfig, EnvConfig, GeometryConfig, HunterAndHuntedConfig, NestedFieldAccessMixin, ObservationConfig, RewardConfig, RewardSelector, WaypointAdvanceConfig, WaypointCurriculumConfig, WaypointDifficultyConfig, WaypointRouteLengthConfig, WaypointTrainingSamplingConfig
+from theseo_anysearch.settings.evaluation import EvaluationConfig, WaypointCurriculumEvaluationConfig
 from theseo_anysearch.settings.execution import AnyscaleConfig
 from theseo_anysearch.settings.root import Settings
 from theseo_anysearch.settings.training import TrainingConfig, TrainingEarlyStopConfig
@@ -29,9 +29,9 @@ def load_experiment(path: Path) -> Any:
 
 
 __all__ = [
-    "ActionConfig", "ActionExtensionSelector", "AlgorithmConfig", "AlgorithmEnvCompatibilityMixin",
+    "ActionConfig", "ActionExtensionSelector", "AgentConfig", "AlgorithmConfig", "AlgorithmEnvCompatibilityMixin",
     "AnyscaleConfig", "EnvConfig", "EvaluationConfig", "GeometryConfig",
-    "ModelConfig", "NestedFieldAccessMixin", "ObservationConfig", "RewardConfig",
-    "RewardSelector", "Settings", "TrainingConfig", "TrainingEarlyStopConfig",
+    "HunterAndHuntedConfig", "ModelConfig", "NestedFieldAccessMixin", "ObservationConfig", "RewardConfig",
+    "RewardSelector", "Settings", "TrainingConfig", "TrainingEarlyStopConfig", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointCurriculumEvaluationConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
     "_deep_merge", "load_experiment", "load_settings",
 ]

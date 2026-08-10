@@ -45,6 +45,8 @@ class StageCompletionController:
         self.stage_start_iteration = stage_start_iteration
         self.state = state or {}
         self.completed = False
+        self.halted = False
+        self.exhausted = False
         self.reason = ""
 
     def evaluate(self, result: TrainResult) -> bool:
@@ -54,12 +56,23 @@ class StageCompletionController:
             self.config, result, metrics, local_iteration, "root"
         )
         if self.completed:
-            self.reason = (
-                f"max_iterations={self.config.max_iterations}"
-                if self.config.max_iterations is not None
-                and local_iteration >= self.config.max_iterations
-                else f"condition:{self.config.type}"
-            )
+            self.reason = f"condition:{self.config.type}"
+        elif (
+            self.config.max_iterations is not None
+            and local_iteration >= self.config.max_iterations
+        ):
+            self.exhausted = True
+            policy = self.config.on_max_iterations
+            self.reason = f"max_iterations={self.config.max_iterations}:{policy}"
+            if policy == "advance":
+                self.completed = True
+            elif policy == "stop":
+                self.halted = True
+            else:
+                raise RuntimeError(
+                    "stage exhausted max_iterations without satisfying its "
+                    "completion condition"
+                )
         return self.completed
 
     def _evaluate(
@@ -107,10 +120,4 @@ class StageCompletionController:
                 "state": extension_state,
                 "parameters": config.parameters,
             }))
-        if (
-            not matched
-            and config.max_iterations is not None
-            and local_iteration >= config.max_iterations
-        ):
-            matched = True
         return matched

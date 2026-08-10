@@ -22,6 +22,7 @@ staging:
       completion:
         type: any
         max_iterations: 200
+        on_max_iterations: stop
         conditions:
           - type: performance
             metric: evaluation_success_rate
@@ -73,8 +74,11 @@ completion:
 
 Every stage must have a finite upper bound. An `iterations` condition can
 provide that bound when its position in the tree guarantees termination.
-Alternatively, set `max_iterations` on the root condition. The cap completes
-the stage even when the configured condition never becomes true.
+Alternatively, set `max_iterations` on the root condition and explicitly choose
+`on_max_iterations: advance`, `stop`, or `error`. `advance` marks the stage
+complete despite missing its objective, `stop` ends the run without completing
+the stage, and `error` fails the run. Caps are never silently interpreted as
+successful completion.
 
 ## Python extension conditions
 
@@ -86,6 +90,7 @@ completion:
   type: python
   callable: my_training.completion:ready_for_trails
   max_iterations: 200
+  on_max_iterations: error
   parameters:
     minimum_success: 0.9
 ```
@@ -113,7 +118,9 @@ the training process.
 
 `replay_transition: clear` creates a fresh algorithm and transfers policy
 weights, resetting replay and optimizer state. `preserve` restores the full
-checkpoint. A stage can override the staging default.
+checkpoint. A stage can override the staging default. Replay-based algorithms
+currently reject `preserve` at startup because their checkpoints do not
+guarantee replay-buffer persistence; this avoids silently discarding replay.
 
 The runner checkpoints at transitions and writes `staging_state.json`, which
 contains the active stage, its original start iteration, and condition state.
@@ -122,3 +129,17 @@ resetting consecutive-performance or Python-extension state.
 
 Stage overrides may not change `agent_count`, `observation`, `action`, or
 `geometry.grid_size`, because those fields define the policy contract.
+`training.algorithm` and `training.model` are similarly immutable. Other
+training controls, such as runner resources, checkpoint frequency, trajectory
+frequency, weight synchronization, and early stopping, may be overridden.
+
+Overrides merge recursively with the original top-level configuration. An
+override of `evaluation.num_env_runners` preserves base `evaluation.episodes`
+and other sibling fields. Every stage is base-relative: values overridden by
+one stage do not flow into the next stage unless that next stage repeats them.
+
+All stage configurations are resolved and validated before the first trainer is
+built. Invalid settings in a later stage therefore fail immediately with their
+original Pydantic validation error. A top-level or stage-specific
+`training.early_stop` stops the run but never advances a stage whose completion
+condition did not succeed.

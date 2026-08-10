@@ -1,0 +1,10 @@
+[package]
+name = "anysearch_waypoint_route_decay"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anysearch-extension = "0.1.0"

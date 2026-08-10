@@ -29,7 +29,8 @@ impl PyMultiVoxelEnv {
                         distance_shaping=0.0, collision_cost=0.0,
                         distance_reward_mode="progress".to_string(),
                         zone_reward_min=-1.0, zone_reward_max=-0.01,
-                        zone_reward_curve="linear".to_string()))]
+                        zone_reward_curve="linear".to_string(), agents_json=None,
+                        hunter_and_hunted_json=None, native_action_path=None))]
     pub fn new(
         agent_count: usize,
         max_steps: u32,
@@ -44,6 +45,9 @@ impl PyMultiVoxelEnv {
         zone_reward_min: f32,
         zone_reward_max: f32,
         zone_reward_curve: String,
+        agents_json: Option<String>,
+        hunter_and_hunted_json: Option<String>,
+        native_action_path: Option<String>,
     ) -> PyResult<Self> {
         let distance_reward_mode =
             crate::voxel::DistanceRewardMode::from_name(distance_reward_mode.as_str()).ok_or_else(
@@ -69,7 +73,7 @@ impl PyMultiVoxelEnv {
         reward_config
             .validate_finite()
             .map_err(PyValueError::new_err)?;
-        let inner = crate::voxel::MultiAgentVoxelEnv::new(
+        let mut inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
             trail_mode,
@@ -77,6 +81,17 @@ impl PyMultiVoxelEnv {
             reward_config,
             grid_size,
         );
+        if let Some(agents_json) = agents_json {
+            inner
+                .configure_agents(
+                    &agents_json,
+                    native_action_path.as_deref().map(std::path::Path::new),
+                )
+                .map_err(PyValueError::new_err)?;
+        }
+        inner
+            .configure_capture_task(hunter_and_hunted_json.as_deref())
+            .map_err(PyValueError::new_err)?;
         Ok(Self { inner })
     }
 
@@ -304,6 +319,9 @@ mod tests {
             -1.0,
             -0.01,
             "linear".to_string(),
+            None,
+            None,
+            None,
         )
         .unwrap()
     }

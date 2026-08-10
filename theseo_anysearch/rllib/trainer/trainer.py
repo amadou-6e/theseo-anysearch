@@ -77,6 +77,11 @@ class Trainer(BaseTrainer):
         self._native_extension = NativeExtension.load(
             native_manifest if native_manifest.is_file() else None
         )
+        self._curriculum = None
+        if config.env.waypoint_curriculum.enabled:
+            from theseo_anysearch.rllib.trainer.curriculum.waypoint import CurriculumController
+
+            self._curriculum = CurriculumController(config.env, config.evaluation)
 
     @classmethod
     def from_settings(cls, config: Settings) -> "Trainer":
@@ -198,6 +203,8 @@ class Trainer(BaseTrainer):
             _env_cfg,
         )
         _store = OutputStore(self._output_dir)
+        if self._curriculum is not None:
+            self._curriculum.initialize(self._algo, _store, _env_cfg)
         from theseo_anysearch.rllib.trainer.early_stop import (
             EarlyStopState,
             TrainingEarlyStopController,
@@ -254,17 +261,21 @@ class Trainer(BaseTrainer):
                     rllib_result,
                     elapsed,
                 )
+                if self._curriculum is not None:
+                    result.extra.update(self._curriculum.stage_metric())
+                evaluation_due = self._iteration % evaluation.frequency == 0
                 rllib_evaluation_episodes = getattr(
                     self._algo,
                     "_anysearch_evaluation_episodes",
                     None,
                 )
-                if rllib_evaluation_episodes is None:
+                if evaluation_due and rllib_evaluation_episodes is None:
                     raise RuntimeError(
                         "RLlib evaluation completed without AnySearch "
                         "evaluation episodes"
                     )
-                delattr(self._algo, "_anysearch_evaluation_episodes")
+                if rllib_evaluation_episodes is not None:
+                    delattr(self._algo, "_anysearch_evaluation_episodes")
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False
@@ -272,22 +283,29 @@ class Trainer(BaseTrainer):
                 early_stop_decision = None
                 evaluation_started = time.perf_counter()
                 try:
-                    evaluation_outcome = evaluation_coordinator.evaluate(
-                        self._iteration,
-                        result,
-                        is_last_iteration=_is_last_iter,
-                        episodes=rllib_evaluation_episodes,
-                    )
-                    result = evaluation_outcome.result
-                    early_stop_triggered = evaluation_outcome.early_stop_triggered
-                    early_stop_decision = evaluation_outcome.early_stop_decision
-                    if evaluation_outcome.best_trajectory_written:
-                        checkpoint_started = time.perf_counter()
-                        self.checkpoint()
-                        result.timings.anysearch_checkpoint_s += (
-                            time.perf_counter() - checkpoint_started
+                    if rllib_evaluation_episodes is not None:
+                        evaluation_outcome = evaluation_coordinator.evaluate(
+                            self._iteration,
+                            result,
+                            is_last_iteration=_is_last_iter,
+                            episodes=rllib_evaluation_episodes,
                         )
-                        _checkpointed_for_best = True
+                        result = evaluation_outcome.result
+                        early_stop_triggered = evaluation_outcome.early_stop_triggered
+                        early_stop_decision = evaluation_outcome.early_stop_decision
+                        if evaluation_outcome.best_trajectory_written:
+                            checkpoint_started = time.perf_counter()
+                            self.checkpoint()
+                            result.timings.anysearch_checkpoint_s += (
+                                time.perf_counter() - checkpoint_started
+                            )
+                            _checkpointed_for_best = True
+                    if self._curriculum is not None:
+                        curriculum_metrics = self._curriculum.evaluate(
+                            self._algo, self._iteration, _env_cfg, _store
+                        )
+                        result.extra.update(curriculum_metrics)
+                        tb_writer.log_scalars(self._iteration, curriculum_metrics)
                 finally:
                     result.timings.anysearch_evaluation_s = max(
                         time.perf_counter() - evaluation_started
