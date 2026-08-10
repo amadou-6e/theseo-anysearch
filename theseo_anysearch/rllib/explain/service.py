@@ -185,6 +185,9 @@ class PolicyExplanationService:
                 seed=seed if seed is not None else self.experiment.env.seed
             )
             result = self._copy_observation(observation)
+            for name, space in env.observation_space.spaces.items():
+                if name not in result:
+                    result[name] = np.zeros(space.shape, dtype=space.dtype)
         finally:
             env.close()
         return result
@@ -333,6 +336,9 @@ class PolicyExplanationService:
         """Build an environment from authoritative run settings and state overrides."""
 
         config = self.experiment.env.to_runtime_dict()
+        curriculum = self.experiment.env.waypoint_curriculum
+        if curriculum is not None and curriculum.enabled:
+            config["waypoint_curriculum"] = curriculum.model_dump(mode="python")
         config.update(dict(overrides or {}))
         return VoxelEnv(config)
 

@@ -727,10 +727,11 @@ impl eframe::App for VoxelReplayApp {
 
         let explain_available = self.explain_ui.as_ref()
             .map(NativeExplainUi::available).unwrap_or(false);
+        let explain_configured = self.explain_ui.is_some();
         egui::TopBottomPanel::top("application_tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.explain_tab, false, "Replay");
-                ui.add_enabled_ui(explain_available, |ui| {
+                ui.add_enabled_ui(explain_configured, |ui| {
                     ui.selectable_value(&mut self.explain_tab, true, "Explain");
                 });
             });
