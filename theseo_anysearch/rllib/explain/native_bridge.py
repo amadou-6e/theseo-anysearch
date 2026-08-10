@@ -38,6 +38,87 @@ def _schema(session: InteractiveExplanationSession) -> dict[str, Any]:
     return fields
 
 
+def _flatten_observation(
+    raw: dict[str, Any],
+    fields: dict[str, Any],
+) -> dict[str, list[float]]:
+    """Validate names and flatten an imported observation mapping."""
+
+    expected = set(fields)
+    received = set(raw)
+    if received != expected:
+        missing = sorted(expected - received)
+        extra = sorted(received - expected)
+        raise ValueError(
+            "imported observation fields do not match the policy schema; "
+            f"missing={missing}, extra={extra}"
+        )
+    result: dict[str, list[float]] = {}
+    for name, value in raw.items():
+        array = np.asarray(value, dtype=np.float32)
+        expected_shape = tuple(fields[name]["shape"])
+        if array.shape != expected_shape and array.size != int(np.prod(expected_shape)):
+            raise ValueError(
+                f"field {name!r} has shape {array.shape}; expected {expected_shape}"
+            )
+        result[name] = array.reshape(-1).tolist()
+    return result
+
+
+def _single_tensor_observation(
+    tensor: Any,
+    fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Assign a single tensor only when its matching schema field is unambiguous."""
+
+    array = np.asarray(tensor)
+    matches = [
+        name for name, schema in fields.items()
+        if int(np.prod(schema["shape"])) == array.size
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "a single tensor can only be imported when exactly one observation field "
+            f"matches its size; matches={matches}"
+        )
+    return {matches[0]: array.reshape(tuple(fields[matches[0]]["shape"]))}
+
+
+def _load_observation_file(
+    path: Path,
+    fields: dict[str, Any],
+) -> tuple[dict[str, list[float]], str]:
+    """Load one fictional observation and report its automatically detected format."""
+
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raw = _single_tensor_observation(raw, fields)
+        return _flatten_observation(raw, fields), "JSON"
+
+    if suffix == ".npz":
+        with np.load(path, allow_pickle=False) as archive:
+            raw = {name: archive[name] for name in archive.files}
+        return _flatten_observation(raw, fields), "NumPy NPZ"
+
+    if suffix == ".npy":
+        raw = _single_tensor_observation(np.load(path, allow_pickle=False), fields)
+        return _flatten_observation(raw, fields), "NumPy NPY"
+
+    if suffix in {".pb", ".tensor"}:
+        import tensorflow as tf
+
+        proto = tf.make_tensor_proto(0)
+        proto.ParseFromString(path.read_bytes())
+        raw = _single_tensor_observation(tf.make_ndarray(proto), fields)
+        return _flatten_observation(raw, fields), "TensorFlow TensorProto"
+
+    raise ValueError(
+        f"unsupported observation file {path.name!r}; expected JSON, NPY, NPZ, PB, or TENSOR"
+    )
+
+
 def _respond(payload: dict[str, Any]) -> None:
     """Write one protocol response without buffering it."""
 
@@ -76,6 +157,19 @@ def serve(run_ref: str, checkpoint: str) -> None:
                 elif command == "reset_observation":
                     observation = session.initial_observation(request.get("seed"))
                     _respond({"ok": True, "observation": _json_observation(observation)})
+                    continue
+                elif command == "load_observation_file":
+                    observation, detected_format = _load_observation_file(
+                        Path(request["path"]),
+                        schema,
+                    )
+                    _respond(
+                        {
+                            "ok": True,
+                            "observation": observation,
+                            "format": detected_format,
+                        }
+                    )
                     continue
                 else:
                     raise ValueError(f"unsupported native explanation command: {command!r}")
