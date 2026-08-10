@@ -9,6 +9,8 @@ from theseo_anysearch.environments.action_spaces import (
     encode_action,
     maximum_movement_distance,
     offsets_for_mode,
+    shortest_action_indices,
+    shortest_actions,
 )
 from theseo_anysearch.models import ActionConfig
 
@@ -66,3 +68,27 @@ def test_offsets_for_unknown_mode_raises() -> None:
 @pytest.mark.parametrize("mode,size", [("discrete_6", 6), ("discrete_18", 18), ("discrete_26", 26)])
 def test_offsets_for_known_mode_resolves(mode: str, size: int) -> None:
     assert len(offsets_for_mode(mode)) == size
+
+
+@pytest.mark.parametrize("mode", ["discrete_6", "discrete_18", "discrete_26"])
+def test_shortest_action_indices_reach_goal_at_exact_distance(mode: str) -> None:
+    start = (3, 8, 4)
+    goal = (9, 3, 11)
+
+    actions = shortest_action_indices(start, goal, mode)
+    offsets = offsets_for_mode(mode)
+    cursor = list(start)
+    for action in actions:
+        for axis, delta in enumerate(offsets[action]):
+            cursor[axis] += delta
+
+    from theseo_anysearch.environments.action_spaces import action_step_distance
+
+    assert tuple(cursor) == goal
+    assert len(actions) == action_step_distance(start, goal, mode)
+
+
+def test_shortest_vector_actions_use_multidiscrete_encoding() -> None:
+    actions = shortest_actions((0, 0, 0), (2, -1, 1), "vector_3")
+
+    assert actions == ((2, 0, 2), (2, 1, 1))

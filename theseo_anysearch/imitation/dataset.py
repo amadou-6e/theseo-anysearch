@@ -12,6 +12,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict
 from ray.rllib.models import ModelCatalog
 
+from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic import (
     VoxelReplanningAStarHeuristic,
@@ -21,6 +22,49 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
 )
+
+
+def _configure_waypoint_curriculum(env: VoxelEnv, env_config: dict[str, Any]) -> None:
+    """Apply the initial trainer-owned curriculum stage to a teacher environment."""
+
+    raw_curriculum = env_config.get("waypoint_curriculum") or {}
+    if not raw_curriculum.get("enabled", False):
+        return
+    from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+        WaypointCurriculum,
+    )
+    from theseo_anysearch.settings.environment.curriculum import (
+        WaypointCurriculumConfig,
+    )
+
+    curriculum = WaypointCurriculum(
+        WaypointCurriculumConfig.model_validate(raw_curriculum),
+        env_config,
+    )
+    env.set_waypoint_curriculum(curriculum.stages(), [1.0])
+
+
+def _route_action_plan(
+    env: VoxelEnv, env_config: dict[str, Any]
+) -> list[int | tuple[int, int, int]] | None:
+    """Return a fast empty-grid plan for an active waypoint route."""
+
+    raw_curriculum = env_config.get("waypoint_curriculum") or {}
+    if raw_curriculum.get("completion_mode") != "continue_route":
+        return None
+    raw_goal = env._rust_env.goal_pos()
+    if raw_goal is None:
+        return None
+    points = [
+        tuple(int(value) for value in env._rust_env.cursor_pos()),
+        tuple(int(value) for value in raw_goal),
+        *(tuple(int(value) for value in goal) for goal in env._route_remaining),
+    ]
+    action_mode = str(env_config.get("action_mode", "discrete_26"))
+    actions: list[int | tuple[int, int, int]] = []
+    for start, goal in zip(points, points[1:]):
+        actions.extend(shortest_actions(start, goal, action_mode))
+    return actions
 
 
 class DemonstrationDataset(BaseModel):
@@ -39,7 +83,7 @@ def dataset_fingerprint(
     env_config: dict[str, Any],
     imitation: ImitationConfig,
     observation_size: int,
-    action_count: int,
+    action_count: int | list[int],
 ) -> str:
     """Hash every contract that affects demonstration compatibility."""
 
@@ -68,7 +112,7 @@ def dataset_fingerprint(
             "validation_fraction": imitation.collection.validation_fraction,
         },
         "observation_size": observation_size,
-        "action_count": action_count,
+        "action_spec": action_count,
     }
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -103,11 +147,17 @@ def collect_demonstrations(
     """Collect successful teacher rollouts from actual environment transitions."""
 
     env = VoxelEnv(env_config)
+    _configure_waypoint_curriculum(env, env_config)
     preprocessor = ModelCatalog.get_preprocessor_for_space(env.observation_space)
     observation_size = int(np.prod(preprocessor.shape))
-    action_count = int(env.action_space.n)
+    action_nvec = (
+        [int(value) for value in env.action_space.nvec]
+        if hasattr(env.action_space, "nvec")
+        else None
+    )
+    action_count = sum(action_nvec) if action_nvec else int(env.action_space.n)
     observations: list[np.ndarray] = []
-    actions: list[int] = []
+    actions: list[int | tuple[int, int, int]] = []
     episode_ids: list[int] = []
     accepted_seeds: list[int] = []
     teacher_successes = 0
@@ -120,20 +170,24 @@ def collect_demonstrations(
         seed = imitation.collection.seed_start + attempts
         attempts += 1
         observation, _ = env.reset(seed=seed)
-        teacher = build_voxel_heuristic(
-            env,
-            imitation.teacher.type,
-            weight=imitation.teacher.weight,
-        )
         episode_observations: list[np.ndarray] = []
-        episode_actions: list[int] = []
+        episode_actions: list[int | tuple[int, int, int]] = []
         success = False
 
         try:
-            if isinstance(teacher, VoxelReplanningAStarHeuristic):
-                action_plan: list[int] | None = None
+            route_plan = _route_action_plan(env, env_config)
+            if route_plan is not None:
+                action_plan = route_plan
             else:
-                action_plan = list(teacher.plan().action_indices)
+                teacher = build_voxel_heuristic(
+                    env,
+                    imitation.teacher.type,
+                    weight=imitation.teacher.weight,
+                )
+                if isinstance(teacher, VoxelReplanningAStarHeuristic):
+                    action_plan = None
+                else:
+                    action_plan = list(teacher.plan().action_indices)
 
             step_index = 0
             while True:
@@ -141,11 +195,11 @@ def collect_demonstrations(
                     current_plan = teacher.plan()
                     if not current_plan.action_indices:
                         break
-                    action = int(current_plan.action_indices[0])
+                    action = current_plan.action_indices[0]
                 else:
                     if step_index >= len(action_plan):
                         break
-                    action = int(action_plan[step_index])
+                    action = action_plan[step_index]
 
                 episode_observations.append(
                     np.asarray(preprocessor.transform(observation), dtype=np.float32)
@@ -197,7 +251,7 @@ def collect_demonstrations(
         env_config,
         imitation,
         observation_size,
-        action_count,
+        action_nvec or action_count,
     )
     manifest = DemonstrationManifest(
         fingerprint=fingerprint,
@@ -213,6 +267,7 @@ def collect_demonstrations(
         validation_samples=int(validation_mask.sum()),
         observation_size=observation_size,
         action_count=action_count,
+        action_nvec=action_nvec,
         seeds=accepted_seeds,
     )
     return DemonstrationDataset(

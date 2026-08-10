@@ -72,13 +72,32 @@ def _evaluate(
         obs = torch.as_tensor(observations, dtype=torch.float32, device=device)
         labels = torch.as_tensor(actions, dtype=torch.long, device=device)
         logits = _policy_logits(model, obs)
-        loss = functional.cross_entropy(
-            logits,
-            labels,
-            label_smoothing=label_smoothing,
-        )
-        accuracy = (logits.argmax(dim=1) == labels).float().mean()
+        loss, accuracy = _supervised_metrics(logits, labels, label_smoothing)
     return float(loss.item()), float(accuracy.item())
+
+
+def _supervised_metrics(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    label_smoothing: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute categorical or component-wise MultiDiscrete BC metrics."""
+
+    if labels.ndim == 1:
+        return (
+            functional.cross_entropy(logits, labels, label_smoothing=label_smoothing),
+            (logits.argmax(dim=1) == labels).float().mean(),
+        )
+    branch_count = labels.shape[1]
+    if logits.shape[1] % branch_count:
+        raise ValueError("policy logits cannot be divided across action components")
+    branches = logits.chunk(branch_count, dim=1)
+    losses = [
+        functional.cross_entropy(branch, labels[:, index], label_smoothing=label_smoothing)
+        for index, branch in enumerate(branches)
+    ]
+    predictions = torch.stack([branch.argmax(dim=1) for branch in branches], dim=1)
+    return torch.stack(losses).mean(), (predictions == labels).all(dim=1).float().mean()
 
 
 def behavior_clone_policy(
@@ -130,10 +149,8 @@ def behavior_clone_policy(
             )
             optimizer.zero_grad(set_to_none=True)
             logits = _policy_logits(model, observations)
-            loss = functional.cross_entropy(
-                logits,
-                actions,
-                label_smoothing=imitation.pretraining.label_smoothing,
+            loss, _ = _supervised_metrics(
+                logits, actions, imitation.pretraining.label_smoothing
             )
             loss.backward()
             optimizer.step()
@@ -211,7 +228,8 @@ def _dataset_for_run(
             env_config,
             imitation,
             int(np.prod(preprocessor.shape)),
-            int(env.action_space.n),
+            ([int(value) for value in env.action_space.nvec]
+             if hasattr(env.action_space, "nvec") else int(env.action_space.n)),
         )
         env.close()
         return load_compatible_dataset(dataset_dir, expected)

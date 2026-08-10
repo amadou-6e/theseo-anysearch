@@ -21,7 +21,10 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
 )
-from theseo_anysearch.imitation.pretraining import behavior_clone_policy
+from theseo_anysearch.imitation.pretraining import (
+    _supervised_metrics,
+    behavior_clone_policy,
+)
 
 
 class TinyPolicyModel(torch.nn.Module):
@@ -39,6 +42,18 @@ class TinyPolicyModel(torch.nn.Module):
         self.value_head(features)
         return self.policy_head(features), state
 
+
+def test_multidiscrete_supervision_scores_complete_action_vectors() -> None:
+    labels = torch.tensor([[2, 0, 1], [0, 2, 2]])
+    logits = torch.full((2, 9), -10.0)
+    for row, action in enumerate(labels):
+        for branch, value in enumerate(action):
+            logits[row, branch * 3 + value] = 10.0
+
+    loss, accuracy = _supervised_metrics(logits, labels, 0.0)
+
+    assert loss.item() < 1e-6
+    assert accuracy.item() == 1.0
 
 class TinyPolicy:
     """Policy wrapper exposing the model attribute used by pretraining."""
@@ -227,3 +242,54 @@ def test_astar_collection_records_pre_action_observations(tmp_path):
     assert dataset.manifest.validation_samples == 2
     assert dataset.train_observations.shape[1] == dataset.manifest.observation_size
     assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < 26))
+
+
+@pytest.mark.parametrize("action_mode", ["discrete_18", "vector_3"])
+def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None:
+    env_config = {
+        "grid_size": 8,
+        "max_steps": 6,
+        "agent_count": 1,
+        "obs_mode": "box",
+        "box_radius": 1,
+        "action_mode": action_mode,
+        "trail_mode": True,
+        "geometry_boxes": [],
+        "waypoint_curriculum": {
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [4, 4, 4],
+            "seed": 42,
+            "route_length": {"mode": "fixed", "distance": 6},
+            "difficulty": {
+                "mode": "segment_distance",
+                "initial_distance": 1,
+                "distance_increment": 1,
+                "maximum_distance": 3,
+                "sampling_attempts": 64,
+            },
+        },
+    }
+    config = ImitationConfig(
+        enabled=True,
+        teacher={"type": "replanning_astar"},
+        collection={
+            "episodes": 2,
+            "seed_start": 10,
+            "max_attempts": 2,
+            "validation_fraction": 0.5,
+        },
+    )
+
+    dataset = collect_demonstrations(env_config, config)
+
+    assert dataset.manifest.successful_episodes == 2
+    assert dataset.manifest.training_samples == 6
+    assert dataset.manifest.validation_samples == 6
+    expected_shape = (3,) if action_mode == "vector_3" else ()
+    assert dataset.train_actions.shape[1:] == expected_shape
+    upper_bound = 3 if action_mode == "vector_3" else 18
+    assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < upper_bound))
+    assert dataset.manifest.action_nvec == (
+        [3, 3, 3] if action_mode == "vector_3" else None
+    )

@@ -1,6 +1,6 @@
 """A* replanning for environments whose traversability changes each step."""
 
-from theseo_anysearch.heuristic.models import VoxelOraclePlan, VoxelOracleReplay
+from theseo_anysearch.heuristic.models import VoxelAction, VoxelOraclePlan, VoxelOracleReplay
 from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
 
 
@@ -17,7 +17,7 @@ class VoxelReplanningAStarHeuristic(VoxelAStarOracle):
         goal = self._position(raw_goal)
         actual_positions = [self._position(rust_env.cursor_pos())]
         rewards: list[float] = []
-        action_indices: list[int] = []
+        action_indices: list[VoxelAction] = []
         terminated = False
         truncated = False
         goal_reached = actual_positions[0] == goal

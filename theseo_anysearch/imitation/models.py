@@ -119,6 +119,7 @@ class DemonstrationManifest(BaseModel):
     validation_samples: int
     observation_size: int
     action_count: int
+    action_nvec: list[int] | None = None
     seeds: list[int]
 
 
