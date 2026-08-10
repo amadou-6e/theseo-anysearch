@@ -759,8 +759,11 @@ class TestMakeTrainablePaths:
                 num_gpus=0.25,
             )
 
+        bundles = mock_tune.PlacementGroupFactory.call_args.args[0]
+        assert bundles == [{"CPU": 1.0, "GPU": 0.25}]
         mock_tune.with_resources.assert_called_once_with(
-            parameterized, resources={"gpu": 0.25}
+            parameterized,
+            resources=mock_tune.PlacementGroupFactory.return_value,
         )
 
     def test_rollout_workers_receive_placement_group_bundles(self, tmp_path):

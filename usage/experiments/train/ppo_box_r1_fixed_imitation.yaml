@@ -10,33 +10,44 @@ experiment:
   seed: 42
 
 env:
-  stl_path: usage/geometries/stepped_terrain.stl
-  scale: 40.0
-  grid_size: 32
   max_steps: 200
   seed: 42
   agent_count: 1
-  obs_mode: box
-  box_radius: 1
   trail_mode: true
-  step_cost: -0.01
-  collision_cost: 0.0
-  goal_reward: 1.0
-  distance_shaping: 0.2
-  distance_reward_mode: progress
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    grid_size: 32
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_26
+
+  rewards:
+    step_cost: -0.01
+    collision_cost: 0.0
+    goal_reward: 1.0
+    distance_shaping: 0.2
+    distance_reward_mode: progress
 
 training:
   algorithm: ppo
-  model: fcnet
+  model: voxel_encoder
   runner: local
   iterations: 40
   checkpoint_interval: 40
   require_gpu: true
   num_env_runners: 0
-  evaluation_episodes: 1
   trajectory_every: 10
   best_trajectory: true
-  video_every: 0
+  video_every: 40
+
+evaluation:
+  episodes: 1
 
 imitation:
   enabled: true

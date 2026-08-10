@@ -58,6 +58,12 @@ class AlgorithmEnvCompatibilityMixin:
             )
         single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
+        imitation = getattr(self, "imitation", None)
+        if imitation is not None and imitation.enabled:
+            if algorithm != "ppo":
+                raise ValueError("imitation currently supports PPO only")
+            if self.env.agent_count != 1:
+                raise ValueError("imitation currently requires env.agent_count: 1")
         if (
             self.training.early_stop.enabled
             and self.training.early_stop.mode in {"heuristic_accuracy", "heuristic_distance"}
