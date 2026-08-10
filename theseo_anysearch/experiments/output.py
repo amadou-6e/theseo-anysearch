@@ -41,6 +41,12 @@ class OutputStore:
     def exists(self, rel_path: str) -> bool:
         return (self._root / rel_path).exists()
 
+    def remove(self, rel_path: str) -> None:
+        """Remove a file artifact when it exists."""
+        path = self._root.joinpath(rel_path)
+        if path.is_file():
+            path.unlink()
+
     # ------------------------------------------------------------------
     # Bytes helpers (for protobuf, etc.)
     # ------------------------------------------------------------------

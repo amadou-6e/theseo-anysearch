@@ -241,6 +241,27 @@ class TestVoxelBox3DCNN:
         assert logits.shape == (1, 3)
         assert set(model._auxiliary_keys) == set(obs_space.spaces) - {"local_grid"}
 
+    def test_action_mask_is_applied_to_logits_not_encoder_features(self):
+        from theseo_anysearch.rllib.models.cnn import VoxelBox3DCNN
+
+        obs_space = _make_obs_space(2)
+        obs_space.spaces["action_mask"] = gym.spaces.Box(0, 1, (3,), np.int8)
+        model = VoxelBox3DCNN(
+            obs_space,
+            _make_action_space(),
+            3,
+            {"custom_model_config": {"box_radius": 2}},
+            "test_masked",
+        )
+        obs = _make_dummy_obs(1, 2)
+        obs["action_mask"] = torch.tensor([[1, 0, 1]], dtype=torch.int8)
+
+        logits, _ = model.forward({"obs": obs}, [], torch.tensor([1]))
+
+        assert logits[0, 1] == torch.finfo(logits.dtype).min
+        assert torch.isfinite(logits[0, [0, 2]]).all()
+        assert "action_mask" not in model._auxiliary_keys
+
     def test_3d_vs_2d_same_output_dim(self):
         m2 = _build_2d(num_outputs=4)
         m3 = _build_3d(num_outputs=4)
@@ -524,6 +545,54 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         env._rust_env = None
         sp = env._observation_space()
         assert "cursor_pos" not in sp.spaces
+
+    def test_enabled_action_mask_is_declared_in_observation_space(self):
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "obs_mode": "box",
+            "box_radius": 1,
+            "action_mode": "discrete_18",
+            "action_masking_enabled": True,
+        }
+
+        space = env._observation_space()
+
+        assert space["action_mask"].shape == (18,)
+
+    def test_enabled_action_mask_is_attached_to_observation(self):
+        from unittest.mock import MagicMock
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "action_mode": "discrete_6",
+            "action_masking_enabled": True,
+        }
+        env._rust_env = MagicMock()
+        env._rust_env.action_mask.return_value = [1] * 27
+        env.action_space = env._action_space()
+
+        observation = env._attach_action_mask({"steps_remaining": np.ones(1)})
+
+        assert observation["action_mask"].shape == (6,)
+
+    def test_all_masked_observation_fails_clearly(self):
+        from unittest.mock import MagicMock
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "action_mode": "discrete_6",
+            "action_masking_enabled": True,
+        }
+        env._rust_env = MagicMock()
+        env._rust_env.action_mask.return_value = [0] * 27
+        env.action_space = env._action_space()
+
+        with pytest.raises(RuntimeError, match="all actions are masked"):
+            env._attach_action_mask({})
 
     def test_obs_to_numpy_concatenates_segments(self):
         """_obs_to_numpy should concatenate box_obs(r) calls in radius order."""

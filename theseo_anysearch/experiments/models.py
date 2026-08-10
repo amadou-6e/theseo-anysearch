@@ -286,6 +286,104 @@ class HeuristicConfig(BaseModel):
             )
         return self
 
+
+class StageCompletionConfig(BaseModel):
+    """Composable condition controlling when a training stage advances."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["iterations", "performance", "all", "any", "not", "python"]
+    iterations: int | None = Field(default=None, ge=1)
+    metric: str | None = None
+    threshold: float | None = None
+    comparison: Literal["gte", "gt", "lte", "lt", "eq"] = "gte"
+    consecutive_iterations: int = Field(default=1, ge=1)
+    conditions: list["StageCompletionConfig"] = Field(default_factory=list)
+    condition: "StageCompletionConfig | None" = None
+    callable: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    max_iterations: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "StageCompletionConfig":
+        if self.type == "iterations" and self.iterations is None:
+            raise ValueError("iterations completion requires iterations")
+        if self.type == "performance" and (
+            self.metric is None or self.threshold is None
+        ):
+            raise ValueError("performance completion requires metric and threshold")
+        if self.type in {"all", "any"} and not self.conditions:
+            raise ValueError(f"{self.type} completion requires conditions")
+        if self.type == "not" and self.condition is None:
+            raise ValueError("not completion requires condition")
+        if self.type == "python" and not self.callable:
+            raise ValueError("python completion requires callable")
+        return self
+
+    def iteration_limit(self) -> int | None:
+        """Return a finite upper bound implied by this condition tree."""
+        if self.max_iterations is not None:
+            return self.max_iterations
+        if self.type == "iterations":
+            return self.iterations
+        child_limits = [child.iteration_limit() for child in self.conditions]
+        if self.type == "any" and any(limit is not None for limit in child_limits):
+            return min(limit for limit in child_limits if limit is not None)
+        if self.type == "all" and child_limits and all(
+            limit is not None for limit in child_limits
+        ):
+            return max(limit for limit in child_limits if limit is not None)
+        return None
+
+
+class TrainingStageConfig(BaseModel):
+    """One ordered training task applied over the shared experiment config."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    completion: StageCompletionConfig
+    env: dict[str, Any] = Field(default_factory=dict)
+    evaluation: dict[str, Any] = Field(default_factory=dict)
+    algorithm_config: dict[str, Any] = Field(default_factory=dict)
+    replay_transition: Literal["clear", "preserve"] | None = None
+
+    @model_validator(mode="after")
+    def validate_bounded_completion(self) -> "TrainingStageConfig":
+        if self.completion.iteration_limit() is None:
+            raise ValueError(
+                "stage completion must be bounded by max_iterations or an "
+                "iteration condition"
+            )
+        return self
+
+
+class StagingConfig(BaseModel):
+    """Ordered task stages for progressive policy training."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    resume: bool = True
+    replay_transition: Literal["clear", "preserve"] = "clear"
+    stages: list[TrainingStageConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_names(self) -> "StagingConfig":
+        names = [stage.name for stage in self.stages]
+        if len(names) != len(set(names)):
+            raise ValueError("staging stage names must be unique")
+        return self
+
+
+def _merge_stage_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> None:
+    """Recursively merge one stage override mapping into a copied base mapping."""
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge_stage_overrides(base[key], value)
+        else:
+            base[key] = value
+
 class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     """
     A single fully-specified experiment.  Extends the base Settings fields
@@ -318,6 +416,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     heuristic: HeuristicConfig = Field(default_factory=HeuristicConfig)
     mlflow: MLflowConfig | None = None    # None → tracking disabled
     tune_config: TuneConfig | None = None
+    staging: StagingConfig | None = None
 
     @model_validator(mode="after")
     def validate_heuristic_compatibility(self) -> "ExperimentConfig":
@@ -332,7 +431,55 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
             raise ValueError("standalone heuristic execution requires runner: local")
         if standalone and self.tune_config is not None:
             raise ValueError("standalone heuristic execution does not support tune_config")
+        if self.staging is not None and self.staging.enabled:
+            if standalone:
+                raise ValueError("staged training does not support the heuristic algorithm")
+            if self.tune_config is not None:
+                raise ValueError("staged training does not support tune_config")
+            immutable_env_paths = {
+                "agent_count",
+                "observation",
+                "action",
+            }
+            for stage in self.staging.stages:
+                changed = immutable_env_paths.intersection(stage.env)
+                geometry = stage.env.get("geometry")
+                if isinstance(geometry, dict) and "grid_size" in geometry:
+                    changed.add("geometry.grid_size")
+                if changed:
+                    fields = ", ".join(sorted(changed))
+                    raise ValueError(
+                        f"stage '{stage.name}' changes policy-contract fields: {fields}"
+                    )
+                merged_env = self.env.model_dump(mode="python")
+                _merge_stage_overrides(merged_env, stage.env)
+                EnvConfig.model_validate(merged_env)
         return self
+
+    def stage_experiment(
+        self,
+        stage_index: int,
+        *,
+        completed_iterations: int,
+    ) -> "ExperimentConfig":
+        """Resolve one stage into a complete experiment configuration."""
+        if self.staging is None or not self.staging.enabled:
+            return self
+        stage = self.staging.stages[stage_index]
+        raw = self.model_dump(by_alias=True, mode="python")
+        raw.pop("staging", None)
+        _merge_stage_overrides(raw["env"], stage.env)
+        _merge_stage_overrides(raw["evaluation"], stage.evaluation)
+        _merge_stage_overrides(raw["algorithm_config"], stage.algorithm_config)
+        limit = stage.completion.iteration_limit()
+        if limit is None:  # guarded by TrainingStageConfig validation
+            raise RuntimeError("stage completion has no finite iteration limit")
+        raw["training"]["iterations"] = completed_iterations + limit
+
+        from theseo_anysearch.experiments.loader import _resolve_typed_configs
+
+        return ExperimentConfig(**_resolve_typed_configs(raw))
+
     @property
     def run_output_dir(self) -> Path:
         """Base directory under which run_id subdirectories are created."""

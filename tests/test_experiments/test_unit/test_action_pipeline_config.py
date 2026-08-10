@@ -1,3 +1,5 @@
+import pytest
+
 from theseo_anysearch.models import ActionConfig, EnvConfig
 
 
@@ -36,6 +38,25 @@ def test_explicit_predicates_and_outcomes_override_behavior_preset():
     ]
     assert runtime["action_outcomes"][-1]["name"] == "custom_fill"
     assert runtime["action_history_length"] == 12
+
+
+def test_action_masking_is_opt_in_and_reaches_runtime():
+    action = ActionConfig.model_validate({
+        "mode": "discrete_18",
+        "masking": {"enabled": True},
+    })
+    assert action.masking.enabled is True
+    runtime = EnvConfig(action=action).to_runtime_dict()
+    assert runtime["action_masking_enabled"] is True
+    assert runtime["action_masking_all_masked"] == "error"
+
+
+def test_action_masking_rejects_factorized_vector_actions():
+    with pytest.raises(ValueError, match="factorized MultiDiscrete"):
+        ActionConfig.model_validate({
+            "mode": "vector_3",
+            "masking": {"enabled": True},
+        })
 
 
 def test_cursor_navigation_preset_does_not_place_trail():

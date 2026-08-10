@@ -13,7 +13,6 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
-    NOOP_ACTION_INDEX,
     build_action_space,
     encode_action,
 )
@@ -438,6 +437,12 @@ class VoxelEnv(RustGymnasiumEnv):
 
     def _observation_space(self) -> gymnasium.Space:
         mode = self._config.get("obs_mode", "scalar")
+        action_mode = self._config.get("action_mode", "discrete_26")
+        mask_size = 27 if action_mode == "vector_3" else build_action_space(action_mode).n
+        def with_mask(items: dict[str, spaces.Space]) -> spaces.Dict:
+            if self._config.get("action_masking_enabled", False):
+                items["action_mask"] = spaces.Box(0, 1, (mask_size,), np.int8)
+            return spaces.Dict(items)
         goal_space = (
             {
                 "goal_distance": spaces.Box(0.0, 1.0, (1,), np.float32),
@@ -448,15 +453,15 @@ class VoxelEnv(RustGymnasiumEnv):
         )
 
         if mode == "scalar":
-            return spaces.Dict(goal_space)
+            return with_mask(goal_space)
         if mode == "box":
             n = 2 * self._config.get("box_radius", 2) + 1
-            return spaces.Dict({
+            return with_mask({
                 "local_grid":      spaces.Box(0.0, 1.0,   (n**3,), np.float32),
                 **goal_space,
             })
         if mode == "radial":
-            return spaces.Dict({
+            return with_mask({
                 "ray_hits":        spaces.Box(0.0, 1.0,   (26,), np.float32),
                 "ray_hit_types":   spaces.Box(0.0, 1.0,   (26,), np.float32),
                 **goal_space,
@@ -464,7 +469,7 @@ class VoxelEnv(RustGymnasiumEnv):
         if mode == "hierarchical_box":
             radii = self._config.get("box_radii") or [1, 4]
             flat_size = sum((2 * r + 1) ** 3 for r in radii)
-            return spaces.Dict({
+            return with_mask({
                 "local_grid":      spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
                 **goal_space,
             })
@@ -493,14 +498,13 @@ class VoxelEnv(RustGymnasiumEnv):
                 base["goal_direction"] = self._buf_goal_direction.copy()
 
         if self._obs_mode == "scalar":
-            return base
+            return self._attach_action_mask(base)
 
         if self._obs_mode == "box":
             local_grid = rust_obs.local_grid
             if local_grid is None:
                 local_grid = self._rust_env.box_obs(self._box_radius)
             self._buf_grid[:] = local_grid
-            self._buf_grid *= 1.0 / 3.0
             base["local_grid"] = self._buf_grid.copy()
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
@@ -514,7 +518,6 @@ class VoxelEnv(RustGymnasiumEnv):
                 seg = self._rust_env.box_obs(r)
                 n = (2 * r + 1) ** 3
                 self._buf_grid[offset:offset + n] = seg
-                self._buf_grid[offset:offset + n] *= 1.0 / 3.0
                 offset += n
             base["local_grid"] = self._buf_grid.copy()
         else:
@@ -524,4 +527,17 @@ class VoxelEnv(RustGymnasiumEnv):
             )
         if self._obs_log_count <= 5:
             self._log_env_stage(f"obs_to_numpy done index={self._obs_log_count}")
-        return base
+        return self._attach_action_mask(base)
+
+    def _attach_action_mask(self, observation: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """Attach predicate feasibility while enforcing the all-masked contract."""
+        if not self._config.get("action_masking_enabled", False):
+            return observation
+        mask = self.action_mask()
+        if np.any(mask):
+            observation["action_mask"] = mask
+            return observation
+        raise RuntimeError(
+            "all actions are masked by the configured predicates; the current "
+            "discrete action spaces do not expose a no-op action"
+        )
