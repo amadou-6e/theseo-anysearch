@@ -2,6 +2,7 @@
 
 Three encoder architectures share the same decoder interface:
   - voxel_box_3dcnn   : Conv3d over full (N,N,N) volume
+  - voxel_resnet_3d   : scalable preactivation ResNet over the full volume
   - voxel_box_2dcnn   : Conv2d with z-as-channels
   - voxel_triplanar_2dcnn : Conv2d on 3 center slices stacked as channels
 
@@ -81,6 +82,92 @@ class VoxelEncoder3D(nn.Module):
         return self.proj(h)
 
 
+VOXEL_RESNET_3D_PROFILES: dict[str, dict[str, object]] = {
+    "b0": {
+        "channels": (24, 48, 64),
+        "blocks": (1, 1, 1),
+        "strides": (1, 2, 2),
+        "latent_dim": 64,
+    },
+    "b1": {
+        "channels": (32, 64, 80),
+        "blocks": (1, 2, 1),
+        "strides": (1, 2, 2),
+        "latent_dim": 96,
+    },
+}
+
+
+def _group_count(channels: int, preferred: int = 8) -> int:
+    """Return the largest useful GroupNorm divisor up to ``preferred``."""
+    return next(groups for groups in range(min(preferred, channels), 0, -1) if channels % groups == 0)
+
+
+class _PreActResBlock3D(nn.Module):
+    """Full-preactivation residual block with batch-size-independent normalization."""
+
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 1) -> None:
+        super().__init__()
+        self.norm1 = nn.GroupNorm(_group_count(in_ch), in_ch)
+        self.conv1 = nn.Conv3d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False)
+        self.norm2 = nn.GroupNorm(_group_count(out_ch), out_ch)
+        self.conv2 = nn.Conv3d(out_ch, out_ch, 3, padding=1, bias=False)
+        self.skip = (
+            nn.Conv3d(in_ch, out_ch, 1, stride=stride, bias=False)
+            if in_ch != out_ch or stride != 1
+            else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        preactivated = F.silu(self.norm1(x))
+        skip = self.skip(preactivated) if not isinstance(self.skip, nn.Identity) else x
+        body = self.conv1(preactivated)
+        body = self.conv2(F.silu(self.norm2(body)))
+        return body + skip
+
+
+class VoxelResNet3D(nn.Module):
+    """Compound-scaled 3D residual encoder for small dense voxel grids.
+
+    ``b0`` is the compact reference model. ``b1`` scales both width and depth
+    while retaining the same conservative two-step downsampling schedule.
+    """
+
+    def __init__(self, n: int, profile: str = "b0") -> None:
+        super().__init__()
+        del n  # Adaptive pooling keeps the encoder compatible with multiple radii.
+        if profile not in VOXEL_RESNET_3D_PROFILES:
+            choices = ", ".join(sorted(VOXEL_RESNET_3D_PROFILES))
+            raise ValueError(f"Unknown voxel_resnet_3d profile {profile!r}; expected one of: {choices}")
+        spec = VOXEL_RESNET_3D_PROFILES[profile]
+        channels = tuple(spec["channels"])
+        block_counts = tuple(spec["blocks"])
+        strides = tuple(spec["strides"])
+        latent_dim = int(spec["latent_dim"])
+
+        self.profile = profile
+        self.latent_dim = latent_dim
+        self.stem = nn.Conv3d(1, channels[0], 3, padding=1, bias=False)
+        stages: list[nn.Module] = []
+        in_ch = channels[0]
+        for out_ch, count, stride in zip(channels, block_counts, strides, strict=True):
+            blocks = [_PreActResBlock3D(in_ch, out_ch, stride)]
+            blocks.extend(_PreActResBlock3D(out_ch, out_ch) for _ in range(count - 1))
+            stages.append(nn.Sequential(*blocks))
+            in_ch = out_ch
+        self.stages = nn.Sequential(*stages)
+        self.norm = nn.GroupNorm(_group_count(channels[-1]), channels[-1])
+        self.pool = nn.AdaptiveAvgPool3d(1)
+        self.proj = nn.Linear(channels[-1], latent_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 4:
+            x = x.unsqueeze(1)
+        h = self.stages(self.stem(x))
+        h = self.pool(F.silu(self.norm(h))).flatten(1)
+        return self.proj(h)
+
+
 class VoxelEncoder2D(nn.Module):
     """2D CNN with z-as-channels: input (B, N, N, N) → (B, latent_dim)."""
 
@@ -123,7 +210,13 @@ class VoxelEncoderTriplanar(nn.Module):
         return self.proj(h)
 
 
-def build_encoder(architecture: str, n: int, channels: list[int], latent_dim: int) -> nn.Module:
+def build_encoder(
+    architecture: str,
+    n: int,
+    channels: list[int],
+    latent_dim: int,
+    profile: str | None = None,
+) -> nn.Module:
     """Build an encoder module for the requested garden architecture.
 
     Parameters
@@ -144,6 +237,14 @@ def build_encoder(architecture: str, n: int, channels: list[int], latent_dim: in
     """
     if architecture == "voxel_box_3dcnn":
         return VoxelEncoder3D(n, channels, latent_dim)
+    if architecture == "voxel_resnet_3d":
+        encoder = VoxelResNet3D(n, profile or "b0")
+        if latent_dim != encoder.latent_dim:
+            raise ValueError(
+                f"voxel_resnet_3d profile {encoder.profile!r} requires latent_dim="
+                f"{encoder.latent_dim}, got {latent_dim}"
+            )
+        return encoder
     if architecture == "voxel_box_2dcnn":
         return VoxelEncoder2D(n, channels, latent_dim)
     if architecture == "voxel_triplanar_2dcnn":
@@ -240,12 +341,18 @@ class VoxelAE(nn.Module):
         n: int,
         channels: list[int],
         latent_dim: int,
+        profile: str | None = None,
     ) -> None:
         super().__init__()
         self.architecture = architecture
-        self.encoder = build_encoder(architecture, n, channels, latent_dim)
-        if architecture == "voxel_box_3dcnn":
-            self.decoder = VoxelDecoder3D(n, channels, latent_dim)
+        self.encoder = build_encoder(architecture, n, channels, latent_dim, profile)
+        if architecture in ("voxel_box_3dcnn", "voxel_resnet_3d"):
+            decoder_channels = (
+                list(VOXEL_RESNET_3D_PROFILES[profile or "b0"]["channels"])
+                if architecture == "voxel_resnet_3d"
+                else channels
+            )
+            self.decoder = VoxelDecoder3D(n, decoder_channels, latent_dim)
         elif architecture == "voxel_triplanar_2dcnn":
             self.decoder = VoxelDecoder2D(n, channels, latent_dim, out_channels=3)
         else:  # voxel_box_2dcnn
@@ -265,7 +372,7 @@ class VoxelAE(nn.Module):
         focal_gamma: float = 0.0,
     ) -> torch.Tensor:
         recon, _ = self(x)
-        if self.architecture == "voxel_box_3dcnn":
+        if self.architecture in ("voxel_box_3dcnn", "voxel_resnet_3d"):
             target = x.unsqueeze(1) if x.dim() == 4 else x
         elif self.architecture == "voxel_triplanar_2dcnn":
             m = x.shape[-1] // 2

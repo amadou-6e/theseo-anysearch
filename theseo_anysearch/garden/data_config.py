@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +328,7 @@ class EncoderConfig(BaseModel):
     box_radii: list[int] | None = None  # if set, trains on all resolutions simultaneously
     conv_channels: list[int] = Field(default=[32, 64, 64])
     latent_dim: int = 128
+    profile: Literal["b0", "b1"] | None = None
 
 
 class AutoencoderConfig(BaseModel):
@@ -472,7 +473,7 @@ class GardenConfig(BaseModel):
     ----------
     name : str
         Garden model family name.
-    architecture : {"voxel_box_3dcnn", "voxel_box_2dcnn", "voxel_triplanar_2dcnn", "custom"}
+    architecture : {"voxel_box_3dcnn", "voxel_resnet_3d", "voxel_box_2dcnn", "voxel_triplanar_2dcnn", "custom"}
         Encoder architecture family.
     approach : {"autoencoder", "vae", "mvmencoder"}
         Training objective family.
@@ -497,7 +498,7 @@ class GardenConfig(BaseModel):
 
     name: str
     architecture: Literal[
-        "voxel_box_3dcnn", "voxel_box_2dcnn", "voxel_triplanar_2dcnn", "custom"
+        "voxel_box_3dcnn", "voxel_resnet_3d", "voxel_box_2dcnn", "voxel_triplanar_2dcnn", "custom"
     ] = "voxel_box_3dcnn"
     approach: Literal["autoencoder", "vae", "mvmencoder"] = "autoencoder"
 
@@ -511,6 +512,29 @@ class GardenConfig(BaseModel):
     custom_encoder: CustomEncoderConfig | None = None
     training: GardenTrainingConfig = Field(default_factory=GardenTrainingConfig)
     tune: GardenTuneConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_resnet_profile(self) -> "GardenConfig":
+        """Keep named ResNet profiles reproducible rather than partially overridden."""
+        if self.architecture != "voxel_resnet_3d":
+            if self.encoder.profile is not None:
+                raise ValueError("encoder.profile is only valid for architecture='voxel_resnet_3d'")
+            return self
+        if self.approach != "autoencoder":
+            raise ValueError("voxel_resnet_3d currently supports approach='autoencoder'")
+        if self.encoder.profile is None:
+            raise ValueError("voxel_resnet_3d requires encoder.profile")
+        expected = {
+            "b0": ([24, 48, 64], 64),
+            "b1": ([32, 64, 80], 96),
+        }
+        channels, latent_dim = expected[self.encoder.profile]
+        if self.encoder.conv_channels != channels or self.encoder.latent_dim != latent_dim:
+            raise ValueError(
+                f"voxel_resnet_3d profile {self.encoder.profile!r} requires "
+                f"conv_channels={channels} and latent_dim={latent_dim}"
+            )
+        return self
 
 
 def load_garden_config(path: Path) -> GardenConfig:

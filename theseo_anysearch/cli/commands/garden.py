@@ -866,15 +866,21 @@ def _compute_reconstructions(grids: "np.ndarray", model_ref: str, box_radius: in
 
     meta = _json.loads(meta_file.read_text())
     architecture = meta.get("architecture", "voxel_box_3dcnn")
-    if architecture != "voxel_box_3dcnn":
+    if architecture not in ("voxel_box_3dcnn", "voxel_resnet_3d"):
         err_console.print(
-            f"[yellow]Warning:[/yellow] Reconstruction display requires voxel_box_3dcnn (got {architecture!r})."
+            f"[yellow]Warning:[/yellow] Reconstruction display requires a 3D encoder (got {architecture!r})."
         )
         return None
 
     from theseo_anysearch.garden.models.ae import VoxelAE
     n = 2 * box_radius + 1
-    ae = VoxelAE(architecture=architecture, n=n, channels=meta["conv_channels"], latent_dim=meta["latent_dim"])
+    ae = VoxelAE(
+        architecture=architecture,
+        n=n,
+        channels=meta["conv_channels"],
+        latent_dim=meta["latent_dim"],
+        profile=meta.get("profile"),
+    )
     ae.load_state_dict(torch.load(model_pt, map_location="cpu", weights_only=True))
     ae.eval()
 

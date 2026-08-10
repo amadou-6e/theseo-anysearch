@@ -50,6 +50,7 @@ def build_model(cfg: GardenConfig) -> nn.Module:
         n=n,
         channels=channels,
         latent_dim=latent_dim,
+        profile=cfg.encoder.profile,
     )
 
 

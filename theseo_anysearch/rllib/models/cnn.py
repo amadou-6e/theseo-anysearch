@@ -321,7 +321,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         freeze: bool = cfg.get("freeze_encoder", True)
         fc_hiddens: list[int] = cfg.get("fc_hiddens", [256, 256])
 
-        from theseo_anysearch.garden.models.ae import VoxelEncoder3D
+        from theseo_anysearch.garden.models.ae import build_encoder
         from theseo_anysearch.garden.store import GardenStore
         import json
 
@@ -330,12 +330,16 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         box_radius: int = meta["box_radius"]
         latent_dim: int = meta["latent_dim"]
         conv_channels: list[int] = meta["conv_channels"]
+        architecture: str = meta.get("architecture", "voxel_box_3dcnn")
+        profile: str | None = meta.get("profile")
 
         self._n = 2 * box_radius + 1
-        encoder = VoxelEncoder3D(
+        encoder = build_encoder(
+            architecture=architecture,
             n=self._n,
             channels=conv_channels,
             latent_dim=latent_dim,
+            profile=profile,
         )
         state = GardenStore(model_dir.parent).load_encoder_state(model_dir.name)
         encoder.load_state_dict(state)

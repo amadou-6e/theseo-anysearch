@@ -193,6 +193,7 @@ class GardenStore:
             "box_radius": cfg.encoder.box_radius,
             "box_radii": cfg.encoder.box_radii,
             "conv_channels": cfg.encoder.conv_channels,
+            "profile": cfg.encoder.profile,
             "epochs_trained": epochs_trained,
             "final_val_loss": final_val_loss,
             "created_at": datetime.now(timezone.utc).isoformat(),
