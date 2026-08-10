@@ -90,6 +90,29 @@ env:
 Predicates receive the current environment-derived state, proposed action and destination,
 observation scalars, and bounded action history. Every predicate must allow the action.
 The same Rust predicate evaluation powers `env.action_mask()` and step feasibility.
+
+To expose that feasibility mask to a discrete RLlib policy and apply it to the
+policy logits, enable masking under the action configuration:
+
+```yaml
+env:
+  action:
+    mode: discrete_26
+    masking:
+      enabled: true
+      all_masked: error
+```
+
+Masking is opt-in, so existing observations and policies are unchanged. The
+mask is added to the observation as `action_mask`; voxel CNN models exclude it
+from encoder features and set rejected-action logits to the minimum finite
+value before sampling. If predicates reject every action, the environment
+raises immediately because current discrete spaces do not expose a no-op.
+
+`vector_3` uses factorized `MultiDiscrete` logits, which cannot exactly encode
+an arbitrary joint 27-movement mask. Configuration validation therefore
+rejects masking with `vector_3` instead of silently sampling forbidden joint
+actions.
 Outcomes run only after feasibility succeeds and return validated mutations such as moving
 the cursor, placing a voxel, or removing an agent voxel. Mutations are applied atomically.
 

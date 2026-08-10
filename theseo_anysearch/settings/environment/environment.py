@@ -121,6 +121,8 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 item.model_dump(mode="json") for item in action_outcomes
             ],
             "action_history_length": self.action.history_length,
+            "action_masking_enabled": self.action.masking.enabled,
+            "action_masking_all_masked": self.action.masking.all_masked,
             "agent_count": self.agent_count,
             "max_steps": self.max_steps,
             "seed": self.seed,

@@ -108,7 +108,7 @@ class VoxelBox2DCNN(BaseVoxelTorchModel):
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
-        return self._forward_heads(features, state)
+        return self._forward_heads(features, state, obs.get("action_mask"))
 
 
 class VoxelBox3DCNN(BaseVoxelTorchModel):
@@ -186,7 +186,7 @@ class VoxelBox3DCNN(BaseVoxelTorchModel):
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
-        return self._forward_heads(features, state)
+        return self._forward_heads(features, state, obs.get("action_mask"))
 
 
 class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
@@ -282,7 +282,7 @@ class VoxelHierarchicalBox3DCNN(BaseVoxelTorchModel):
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([feat, auxiliary], dim=1)
-        return self._forward_heads(features, state)
+        return self._forward_heads(features, state, obs.get("action_mask"))
 
 
 class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
@@ -384,7 +384,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
 
         auxiliary = self._auxiliary_features(obs)
         features = torch.cat([latent, auxiliary], dim=1)
-        return self._forward_heads(features, state)
+        return self._forward_heads(features, state, obs.get("action_mask"))
 
 
 def register_voxel_cnn_models() -> None:
