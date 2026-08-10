@@ -14,6 +14,32 @@ use super::{
     settings::{default_action_outcomes, reward_config},
 };
 
+/// Upper bound on `box_radius`: keeps `2 * r + 1` well within `i32` range so
+/// the side-length computation in `build_box_obs` can never overflow, and
+/// keeps the resulting allocation ((2r+1)^3 f32s) within sane memory limits.
+const MAX_BOX_RADIUS: u32 = 1024;
+
+fn unit_goal_direction(cursor: (u16, u16, u16), goal: (u16, u16, u16)) -> (f32, f32, f32) {
+    let dx = f32::from(goal.0) - f32::from(cursor.0);
+    let dy = f32::from(goal.1) - f32::from(cursor.1);
+    let dz = f32::from(goal.2) - f32::from(cursor.2);
+    let norm = (dx * dx + dy * dy + dz * dz).sqrt();
+    if norm == 0.0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        (dx / norm, dy / norm, dz / norm)
+    }
+}
+
+fn validate_box_radius(radius: u32) -> PyResult<()> {
+    if radius > MAX_BOX_RADIUS {
+        return Err(crate::bridge::python::errors::invalid_value(format!(
+            "box_radius must be <= {MAX_BOX_RADIUS}, got {radius}"
+        )));
+    }
+    Ok(())
+}
+
 #[pyclass]
 pub struct PyVoxelEnv {
     pub(crate) inner: VoxelEnv,
@@ -22,15 +48,10 @@ pub struct PyVoxelEnv {
 
 impl PyVoxelEnv {
     fn to_py_observation(&self, obs: crate::voxel::VoxelObservation) -> PyVoxelObservation {
-        let goal_direction = self.inner.active_goal().map(|(gx, gy, gz)| {
-            let (cx, cy, cz) = self.inner.cursor();
-            let inv = 1.0f32 / f32::from(self.inner.grid_size.saturating_sub(1).max(1));
-            (
-                (f32::from(gx) - f32::from(cx)) * inv,
-                (f32::from(gy) - f32::from(cy)) * inv,
-                (f32::from(gz) - f32::from(cz)) * inv,
-            )
-        });
+        let goal_direction = self
+            .inner
+            .active_goal()
+            .map(|goal| unit_goal_direction(self.inner.cursor(), goal));
         PyVoxelObservation {
             filled: obs.filled,
             steps_remaining: obs.steps_remaining,
@@ -135,6 +156,9 @@ impl PyVoxelEnv {
         action_history_length: usize,
         box_radius: Option<u32>,
     ) -> PyResult<Self> {
+        if let Some(radius) = box_radius {
+            validate_box_radius(radius)?;
+        }
         let reward_config = reward_config(
             step_cost,
             goal_reward,
@@ -291,8 +315,9 @@ impl PyVoxelEnv {
     /// Each element is 1.0 if the world cell at (cursor + offset) is filled, else 0.0.
     /// Cells outside the configured grid are reported as filled.
     /// Elements are ordered x-outer, y-mid, z-inner (x changes slowest).
-    pub fn box_obs(&self, radius: u32) -> Vec<f32> {
-        self.build_box_obs(radius)
+    pub fn box_obs(&self, radius: u32) -> PyResult<Vec<f32>> {
+        validate_box_radius(radius)?;
+        Ok(self.build_box_obs(radius))
     }
 
     /// Returns a 26-element proximity array, one per non-self direction
@@ -432,6 +457,26 @@ mod tests {
     }
 
     #[test]
+    fn goal_direction_is_a_unit_vector_for_axis_and_diagonal_goals() {
+        assert_eq!(unit_goal_direction((4, 4, 4), (4, 4, 6)), (0.0, 0.0, 1.0));
+
+        let direction = unit_goal_direction((4, 4, 4), (6, 6, 6));
+        let expected = 1.0 / 3.0f32.sqrt();
+        assert!((direction.0 - expected).abs() < 1e-6);
+        assert!((direction.1 - expected).abs() < 1e-6);
+        assert!((direction.2 - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn goal_direction_is_distance_invariant_and_zero_at_goal() {
+        assert_eq!(
+            unit_goal_direction((4, 4, 4), (5, 4, 4)),
+            unit_goal_direction((4, 4, 4), (20, 4, 4))
+        );
+        assert_eq!(unit_goal_direction((4, 4, 4), (4, 4, 4)), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
     fn step_rejects_negative_action_before_execute() {
         let mut env = env_at_cursor((5, 5, 5));
         let result = env.step(-1);
@@ -449,7 +494,7 @@ mod tests {
     #[test]
     fn box_obs_empty_world_all_zeros() {
         let env = env_at_cursor((16, 16, 16));
-        let obs = env.box_obs(2);
+        let obs = env.box_obs(2).unwrap();
         assert_eq!(obs.len(), 125);
         assert!(obs.iter().all(|&v| v == 0.0));
     }
@@ -457,7 +502,7 @@ mod tests {
     #[test]
     fn box_obs_radius_0_single_cell() {
         let env = env_at_cursor((1, 1, 1)); // cursor at (1,1,1), empty world
-        let obs = env.box_obs(0);
+        let obs = env.box_obs(0).unwrap();
         assert_eq!(obs.len(), 1);
         assert_eq!(obs[0], 0.0);
     }
@@ -466,7 +511,7 @@ mod tests {
     fn box_obs_single_filled_at_cursor() {
         // cursor at (1,1,1)
         let env = env_with_block((5, 5, 5), (5, 5, 5));
-        let obs = env.box_obs(2); // 5Â³ = 125 cells
+        let obs = env.box_obs(2).unwrap(); // 5Â³ = 125 cells
                                   // centre element: dx=0,dy=0,dz=0 â†’ flat index = 2*25 + 2*5 + 2 = 62
         assert_eq!(obs[62], 1.0);
         let non_centre: Vec<f32> = obs
@@ -483,7 +528,7 @@ mod tests {
         // cursor at (1,1,1); radius 2 â†’ cells at coord 0 and -1 are OOB or edge
         // cell at (1-2, 1, 1) = (-1, 1, 1) â€” out of bounds (negative i32)
         let env = env_at_cursor((1, 1, 1)); // (1,1,1)
-        let obs = env.box_obs(2);
+        let obs = env.box_obs(2).unwrap();
         // first element: dx=-2,dy=-2,dz=-2 â†’ (1-2,1-2,1-2) = (-1,-1,-1) â†’ 0.0
         assert_eq!(obs[0], 1.0);
     }
@@ -491,10 +536,60 @@ mod tests {
     #[test]
     fn box_obs_length_correct_for_radius() {
         let env = env_at_cursor((1, 1, 1));
-        assert_eq!(env.box_obs(0).len(), 1);
-        assert_eq!(env.box_obs(1).len(), 27);
-        assert_eq!(env.box_obs(2).len(), 125);
-        assert_eq!(env.box_obs(3).len(), 343);
+        assert_eq!(env.box_obs(0).unwrap().len(), 1);
+        assert_eq!(env.box_obs(1).unwrap().len(), 27);
+        assert_eq!(env.box_obs(2).unwrap().len(), 125);
+        assert_eq!(env.box_obs(3).unwrap().len(), 343);
+    }
+
+    #[test]
+    fn box_obs_excessive_radius_returns_value_error() {
+        let env = env_at_cursor((16, 16, 16));
+        assert!(env.box_obs(MAX_BOX_RADIUS + 1).is_err());
+        assert!(validate_box_radius(MAX_BOX_RADIUS + 1).is_err());
+    }
+
+    #[test]
+    fn box_obs_radius_near_i32_overflow_returns_value_error_not_panic() {
+        let env = env_at_cursor((16, 16, 16));
+        // Without the bounds check, `2 * (radius as i32) + 1` overflows i32
+        // and the subsequent `as usize` cast produces a huge allocation size.
+        assert!(env.box_obs(u32::MAX / 2).is_err());
+    }
+
+    #[test]
+    fn new_rejects_excessive_box_radius() {
+        let result = PyVoxelEnv::new(
+            10,
+            true,
+            None,
+            32,
+            -0.01,
+            1.0,
+            0.0,
+            0.0,
+            "progress".to_string(),
+            -1.0,
+            -0.01,
+            "linear".to_string(),
+            0.0,
+            0.0,
+            0.0,
+            None,
+            None,
+            true,
+            None,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            "[{\"name\":\"valid_action\"},{\"name\":\"bounds\"},{\"name\":\"unoccupied\"}]".to_string(),
+            None,
+            16,
+            Some(MAX_BOX_RADIUS + 1),
+        );
+        assert!(result.is_err());
     }
 
     // ----- radial_obs -----

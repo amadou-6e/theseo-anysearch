@@ -361,7 +361,7 @@ impl VoxelEnv {
 }
 
 mod action_pipeline;
-mod lifecycle;
+pub(crate) mod lifecycle;
 
 use super::geometry::{compute_surface_cells, coord_to_i32, l2, manhattan};
 

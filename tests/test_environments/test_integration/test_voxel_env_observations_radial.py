@@ -25,7 +25,6 @@ from ._voxel_validity_support import (
     ACTION_PLUS_X,
     GRID_SIZE,
     make_radial_test_env,
-    normalized_cursor,
     normalized_goal_distance,
     normalized_goal_direction,
 )
@@ -40,31 +39,25 @@ class TestVoxelEnvObservationsRadial:
         obs, _ = env.reset(seed=0)
 
         assert set(obs) == {
-            "steps_remaining",
-            "voxel_count",
             "goal_distance",
             "goal_direction",
-            "cursor_pos",
             "ray_hits",
             "ray_hit_types",
         }
-        assert obs["steps_remaining"].shape == (1,)
-        assert obs["voxel_count"].shape == (1,)
         assert obs["goal_distance"].shape == (1,)
         assert obs["goal_direction"].shape == (3,)
-        assert obs["cursor_pos"].shape == (3,)
         assert obs["ray_hits"].shape == (26,)
         assert obs["ray_hit_types"].shape == (26,)
 
-    def test_steps_remaining_decreases_after_each_step(self, tmp_path):
+    def test_steps_remaining_is_not_exposed(self, tmp_path):
         env = make_radial_test_env(tmp_path)
         obs0, _ = env.reset(seed=0)
         obs1, *_ = env.step(ACTION_PLUS_Z)
         obs2, *_ = env.step(ACTION_PLUS_Z)
 
-        assert obs0["steps_remaining"][0] == pytest.approx(1.0)
-        assert obs1["steps_remaining"][0] == pytest.approx((MAX_STEPS - 1) / MAX_STEPS)
-        assert obs2["steps_remaining"][0] == pytest.approx((MAX_STEPS - 2) / MAX_STEPS)
+        assert "steps_remaining" not in obs0
+        assert "steps_remaining" not in obs1
+        assert "steps_remaining" not in obs2
 
     def test_goal_distance_decreases_toward_goal_and_increases_away(self, tmp_path):
         toward_env = make_radial_test_env(tmp_path.joinpath("toward"))
@@ -85,15 +78,15 @@ class TestVoxelEnvObservationsRadial:
         assert obs_away["goal_distance"][0] == pytest.approx(normalized_goal_distance(3))
         assert obs_neutral["goal_distance"][0] == pytest.approx(normalized_goal_distance(3))
 
-    def test_cursor_pos_tracks_deterministic_moves(self, tmp_path):
+    def test_cursor_pos_is_not_exposed(self, tmp_path):
         env = make_radial_test_env(tmp_path)
         obs0, _ = env.reset(seed=0)
         obs1, *_ = env.step(ACTION_PLUS_Z)
         obs2, *_ = env.step(ACTION_PLUS_Y)
 
-        assert tuple(obs0["cursor_pos"]) == pytest.approx(normalized_cursor(START))
-        assert tuple(obs1["cursor_pos"]) == pytest.approx(normalized_cursor((4, 4, 5)))
-        assert tuple(obs2["cursor_pos"]) == pytest.approx(normalized_cursor((4, 5, 5)))
+        assert "cursor_pos" not in obs0
+        assert "cursor_pos" not in obs1
+        assert "cursor_pos" not in obs2
 
     def test_goal_direction_tracks_deterministic_moves(self, tmp_path):
         env = make_radial_test_env(tmp_path)
@@ -108,16 +101,23 @@ class TestVoxelEnvObservationsRadial:
         assert tuple(obs2["goal_direction"]) == pytest.approx(
             normalized_goal_direction((4, 5, 5), GOAL)
         )
+        assert np.linalg.norm(obs0["goal_direction"]) == pytest.approx(1.0)
+        assert np.linalg.norm(obs1["goal_direction"]) == pytest.approx(1.0)
+        assert np.linalg.norm(obs2["goal_direction"]) == pytest.approx(1.0)
 
-    def test_voxel_count_increases_on_successful_moves(self, tmp_path):
-        env = make_radial_test_env(tmp_path)
-        obs0, _ = env.reset(seed=0)
-        obs1, *_ = env.step(ACTION_PLUS_Z)
-        obs2, *_ = env.step(ACTION_PLUS_Y)
+    def test_goal_direction_does_not_encode_goal_distance(self, tmp_path):
+        near = make_radial_test_env(
+            tmp_path.joinpath("near"), start=(4, 4, 4), goal=(5, 4, 4)
+        )
+        far = make_radial_test_env(
+            tmp_path.joinpath("far"), start=(4, 4, 4), goal=(20, 4, 4)
+        )
 
-        assert obs0["voxel_count"][0] == pytest.approx(0.0)
-        assert obs1["voxel_count"][0] == pytest.approx(1.0)
-        assert obs2["voxel_count"][0] == pytest.approx(2.0)
+        near_obs, _ = near.reset(seed=0)
+        far_obs, _ = far.reset(seed=0)
+
+        assert tuple(near_obs["goal_direction"]) == pytest.approx((1.0, 0.0, 0.0))
+        assert tuple(far_obs["goal_direction"]) == pytest.approx((1.0, 0.0, 0.0))
 
     def test_ray_hits_show_adjacent_geometry(self, tmp_path):
         geometry_boxes = [[5, 4, 4, 5, 4, 4]]
@@ -185,13 +185,13 @@ class TestVoxelEnvObservationsRadial:
                 obs, *_ = env.step(ACTION_PLUS_Y)
                 steps_taken += 1
 
-            cursor_before = obs["cursor_pos"].copy()
+            cursor_before = env._rust_env.cursor_pos()
             ray_hit_before = obs["ray_hits"][action]
             ray_type_before = obs["ray_hit_types"][action]
 
             obs, *_ = env.step(action)
             steps_taken += 1
-            cursor_after = obs["cursor_pos"].copy()
+            cursor_after = env._rust_env.cursor_pos()
 
             if np.array_equal(cursor_before, cursor_after):
                 observed_collisions.append(label)
@@ -205,7 +205,7 @@ class TestVoxelEnvObservationsRadial:
             "agent-filled trail",
         ]
         assert steps_taken == 5
-        assert obs["steps_remaining"][0] == pytest.approx((MAX_STEPS - steps_taken) / MAX_STEPS)
+        assert "steps_remaining" not in obs
 
     def test_random_collision_actions_are_visible_for_100_steps(self, tmp_path):
         env = make_radial_test_env(
@@ -226,11 +226,11 @@ class TestVoxelEnvObservationsRadial:
 
         for step_index in range(100):
             action = int(rng.integers(0, 26))
-            cursor_before = obs["cursor_pos"].copy()
+            cursor_before = env._rust_env.cursor_pos()
             ray_hit_before = float(obs["ray_hits"][action])
             ray_type_before = float(obs["ray_hit_types"][action])
             obs, reward, terminated, truncated, _ = env.step(action)
-            cursor_after = obs["cursor_pos"].copy()
+            cursor_after = env._rust_env.cursor_pos()
 
             if np.array_equal(cursor_before, cursor_after):
                 collisions += 1
@@ -249,4 +249,4 @@ class TestVoxelEnvObservationsRadial:
                 assert not truncated
 
         assert collisions > 0
-        assert obs["steps_remaining"][0] == pytest.approx(0.0)
+        assert "steps_remaining" not in obs

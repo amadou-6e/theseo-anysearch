@@ -7,6 +7,7 @@ import pytest
 import numpy as np
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
 from theseo_anysearch.environments.pettingzoo.surface_env import SurfaceEnv
 
 
@@ -18,13 +19,11 @@ class TestVoxelEnv:
 
     def test_observation_space_keys(self):
         env = self.make()
-        assert "steps_remaining" in env.observation_space.spaces
-        assert "voxel_count" in env.observation_space.spaces
+        assert set(env.observation_space.spaces) == set()
 
     def test_observation_space_shapes(self):
         env = self.make()
-        assert env.observation_space["steps_remaining"].shape == (1,)
-        assert env.observation_space["voxel_count"].shape == (1,)
+        assert len(env.observation_space.spaces) == 0
 
     def test_action_space_size(self):
         env = self.make()
@@ -34,8 +33,7 @@ class TestVoxelEnv:
         env = self.make()
         obs, info = env.reset()
         assert isinstance(obs, dict)
-        assert "steps_remaining" in obs
-        assert "voxel_count" in obs
+        assert "steps_remaining" not in obs
         assert isinstance(info, dict)
 
     def test_obs_values_are_numpy(self):
@@ -59,10 +57,10 @@ class TestVoxelEnvObsModes:
         )
         return str(path)
 
-    def test_scalar_mode_unchanged(self):
+    def test_scalar_mode_has_no_shortcut_fields(self):
         env = self.make(obs_mode="scalar")
         keys = set(env.observation_space.spaces)
-        assert keys == {"steps_remaining", "voxel_count"}
+        assert keys == set()
 
     def test_scalar_default_no_cursor_pos(self):
         env = self.make()  # no obs_mode key
@@ -76,10 +74,9 @@ class TestVoxelEnvObsModes:
         env = self.make(obs_mode="box", box_radius=3)
         assert env.observation_space["local_grid"].shape == (343,)
 
-    def test_box_cursor_pos_in_keys(self):
+    def test_box_cursor_pos_is_not_exposed(self):
         env = self.make(obs_mode="box")
-        assert "cursor_pos" in env.observation_space.spaces
-        assert env.observation_space["cursor_pos"].shape == (3,)
+        assert "cursor_pos" not in env.observation_space.spaces
 
     def test_goal_direction_in_keys_when_waypoints_present(self, tmp_path):
         env = self.make(obs_mode="box", waypoints_file=self.make_waypoints_file(tmp_path))
@@ -91,10 +88,9 @@ class TestVoxelEnvObsModes:
         assert env.observation_space["ray_hits"].shape == (26,)
         assert env.observation_space["ray_hit_types"].shape == (26,)
 
-    def test_radial_cursor_pos_in_keys(self):
+    def test_radial_cursor_pos_is_not_exposed(self):
         env = self.make(obs_mode="radial")
-        assert "cursor_pos" in env.observation_space.spaces
-        assert env.observation_space["cursor_pos"].shape == (3,)
+        assert "cursor_pos" not in env.observation_space.spaces
 
     def test_scalar_goal_keys_when_waypoints_present(self, tmp_path):
         env = self.make(obs_mode="scalar", waypoints_file=self.make_waypoints_file(tmp_path))
@@ -112,6 +108,28 @@ class TestVoxelEnvObsModes:
     def test_unknown_mode_raises(self):
         with pytest.raises(ValueError, match="bogus"):
             self.make(obs_mode="bogus")
+
+    @pytest.mark.parametrize(
+        "obs_mode", ["scalar", "box", "radial", "hierarchical_box"]
+    )
+    def test_shortcut_fields_are_absent_from_every_voxel_mode(self, obs_mode):
+        env = self.make(obs_mode=obs_mode)
+
+        assert "cursor_pos" not in env.observation_space.spaces
+        assert "steps_remaining" not in env.observation_space.spaces
+
+
+class TestMultiVoxelObservation:
+    """Multi-agent voxel policies receive no absolute cursor position."""
+
+    def test_cursor_pos_is_not_exposed(self):
+        env = MultiVoxelEnv.__new__(MultiVoxelEnv)
+        env._config = {"box_radius": 1}
+        env._has_goal = lambda: False
+
+        space = env._observation_space("agent_0")
+
+        assert "cursor_pos" not in space.spaces
 
 
 class TestVoxelEnvLoadWaypoints:
@@ -177,13 +195,13 @@ class TestSurfaceEnv:
     def test_observation_space_keys(self):
         env = self.make()
         space = env.observation_space("agent_0")
-        for key in ("steps_remaining", "position", "target", "reached"):
+        for key in ("position", "target", "reached"):
             assert key in space.spaces
 
     def test_observation_space_shapes(self):
         env = self.make()
         space = env.observation_space("agent_0")
-        assert space["steps_remaining"].shape == (1,)
+        assert "steps_remaining" not in space.spaces
         assert space["position"].shape == (3,)
         assert space["target"].shape == (3,)
 

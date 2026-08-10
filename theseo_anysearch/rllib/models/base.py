@@ -142,8 +142,8 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
         RLlib model instance name.
     """
 
-    _scalar_keys = ("steps_remaining", "voxel_count", "cursor_pos")
-    _n_scalars = 5
+    _spatial_keys = frozenset({"local_grid"})
+    _policy_only_keys = frozenset({"action_mask"})
 
     def __init__(
         self,
@@ -156,6 +156,18 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
         self._value_out: torch.Tensor | None = None
+        structured_space = getattr(obs_space, "original_space", obs_space)
+        spaces = getattr(structured_space, "spaces", None)
+        if spaces is None:
+            raise ValueError("voxel CNN models require a Dict observation space")
+        self._auxiliary_keys = tuple(
+            key for key in spaces
+            if key not in self._spatial_keys and key not in self._policy_only_keys
+        )
+        self._n_auxiliary = sum(
+            int(space.shape[0]) for key, space in spaces.items()
+            if key in self._auxiliary_keys
+        )
 
     @staticmethod
     def _custom_model_config(model_config: dict) -> dict[str, Any]:
@@ -202,15 +214,35 @@ class BaseVoxelTorchModel(TorchModelV2, nn.Module):
         self._policy_head = nn.Linear(fc_out, num_outputs)
         self._value_head = nn.Linear(fc_out, 1)
 
-    def _scalar_features(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Concatenate the shared scalar observation features into one tensor."""
-        return torch.cat([obs[key] for key in self._scalar_keys], dim=1)
+    def _auxiliary_features(self, obs: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Concatenate all non-spatial fields declared by the observation space."""
+        if not self._auxiliary_keys:
+            grid = obs["local_grid"]
+            return grid.new_zeros((grid.shape[0], 0))
+        return torch.cat(
+            [obs[key].reshape(obs[key].shape[0], -1) for key in self._auxiliary_keys],
+            dim=1,
+        )
 
-    def _forward_heads(self, features: torch.Tensor, state: list) -> tuple[torch.Tensor, list]:
+    def _forward_heads(
+        self,
+        features: torch.Tensor,
+        state: list,
+        action_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list]:
         """Run the shared FC trunk and produce policy logits plus cached value output."""
         x = self._fc(features)
         self._value_out = self._value_head(x)
-        return self._policy_head(x), state
+        logits = self._policy_head(x)
+        if action_mask is not None:
+            if action_mask.shape[-1] != logits.shape[-1]:
+                raise ValueError(
+                    "action mask width does not match policy logits: "
+                    f"{action_mask.shape[-1]} != {logits.shape[-1]}"
+                )
+            minimum = torch.finfo(logits.dtype).min
+            logits = logits.masked_fill(action_mask <= 0, minimum)
+        return logits, state
 
     def value_function(self) -> torch.Tensor:
         """Return the cached scalar value prediction from the most recent forward pass.

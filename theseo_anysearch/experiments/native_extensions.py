@@ -142,7 +142,13 @@ def _selected_action_names(experiment_dir: Path) -> tuple[tuple[str, ...], tuple
             return ()
         return tuple(str(item if isinstance(item, str) else item["name"]) for item in value)
 
-    return names(action.get("predicates")), names(action.get("outcomes"))
+    predicate_names = list(names(action.get("predicates")))
+    outcome_names = list(names(action.get("outcomes")))
+    for agent in (raw.get("env") or {}).get("agents") or []:
+        agent_action = agent.get("action") or {}
+        predicate_names.extend(names(agent_action.get("predicates")))
+        outcome_names.extend(names(agent_action.get("outcomes")))
+    return tuple(dict.fromkeys(predicate_names)), tuple(dict.fromkeys(outcome_names))
 def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Path:
     """Compile ``extension/`` and return its stable manifest path."""
     root = experiment_dir.resolve()

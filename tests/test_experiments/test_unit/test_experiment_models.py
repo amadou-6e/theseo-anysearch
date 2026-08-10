@@ -101,6 +101,170 @@ class TestExperimentModels:
         assert isinstance(result, ExperimentConfig)
         assert result.to_settings().anyscale.project == "proj-1"
 
+
+class TestStagingConfig:
+    def _payload(self, experiment_config: ExperimentConfig) -> dict:
+        return experiment_config.model_dump(by_alias=True, mode="python")
+
+    def test_resolves_ordered_environment_overrides(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = self._payload(experiment_config)
+        payload["staging"] = {
+            "stages": [
+                {
+                    "name": "select-goal",
+                    "completion": {"type": "iterations", "iterations": 2},
+                    "env": {"max_steps": 1, "trail_mode": False},
+                },
+                {
+                    "name": "full-route",
+                    "completion": {"type": "iterations", "iterations": 3},
+                    "env": {"max_steps": 50, "trail_mode": True},
+                },
+            ]
+        }
+        config = ExperimentConfig.model_validate(payload)
+
+        first = config.stage_experiment(0, completed_iterations=0)
+        second = config.stage_experiment(1, completed_iterations=2)
+
+        assert first.env.max_steps == 1
+        assert first.env.trail_mode is False
+        assert first.training.iterations == 2
+        assert second.env.max_steps == 50
+        assert second.env.trail_mode is True
+        assert second.training.iterations == 5
+
+    def test_rejects_duplicate_stage_names(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = self._payload(experiment_config)
+        payload["staging"] = {
+            "stages": [
+                {"name": "same", "completion": {"type": "iterations", "iterations": 1}},
+                {"name": "same", "completion": {"type": "iterations", "iterations": 1}},
+            ]
+        }
+
+        with pytest.raises(ValueError, match="unique"):
+            ExperimentConfig.model_validate(payload)
+
+    @pytest.mark.parametrize(
+        "env_override",
+        [
+            {"observation": {"mode": "radial"}},
+            {"action": {"mode": "discrete_6"}},
+            {"geometry": {"grid_size": 64}},
+            {"agent_count": 2},
+        ],
+    )
+    def test_rejects_policy_contract_changes(
+        self,
+        experiment_config: ExperimentConfig,
+        env_override: dict,
+    ):
+        payload = self._payload(experiment_config)
+        payload["staging"] = {
+            "stages": [
+                {"name": "invalid", "completion": {"type": "iterations", "iterations": 1}, "env": env_override}
+            ]
+        }
+
+        with pytest.raises(ValueError, match="policy-contract"):
+            ExperimentConfig.model_validate(payload)
+
+    def test_stage_overrides_are_recursive_and_base_relative(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = self._payload(experiment_config)
+        base_runners = payload["evaluation"]["num_env_runners"]
+        base_episodes = payload["evaluation"]["episodes"]
+        payload["staging"] = {
+            "stages": [
+                {
+                    "name": "first",
+                    "completion": {"type": "iterations", "iterations": 1},
+                    "evaluation": {"num_env_runners": base_runners + 1},
+                    "training": {"checkpoint_interval": 1},
+                },
+                {
+                    "name": "second",
+                    "completion": {"type": "iterations", "iterations": 1},
+                    "evaluation": {"episodes": base_episodes + 1},
+                },
+            ]
+        }
+
+        config = ExperimentConfig.model_validate(payload)
+        first = config.stage_experiment(0, completed_iterations=0)
+        second = config.stage_experiment(1, completed_iterations=1)
+
+        assert first.evaluation.num_env_runners == base_runners + 1
+        assert first.evaluation.episodes == base_episodes
+        assert first.training.checkpoint_interval == 1
+        assert second.evaluation.num_env_runners == base_runners
+        assert second.evaluation.episodes == base_episodes + 1
+
+    @pytest.mark.parametrize(
+        ("block", "override"),
+        [
+            ("evaluation", {"episodes": 0}),
+            ("algorithm_config", {"lr": -1.0}),
+            ("training", {"num_env_runners": -1}),
+        ],
+    )
+    def test_invalid_future_stage_fails_during_root_validation(
+        self,
+        experiment_config: ExperimentConfig,
+        block: str,
+        override: dict,
+    ):
+        payload = self._payload(experiment_config)
+        payload["staging"] = {
+            "stages": [{
+                "name": "invalid-later",
+                "completion": {"type": "iterations", "iterations": 1},
+                block: override,
+            }]
+        }
+
+        with pytest.raises(ValueError):
+            ExperimentConfig.model_validate(payload)
+
+    def test_rejects_replay_preservation_for_dqn(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        payload = self._payload(experiment_config)
+        payload["training"]["algorithm"] = "dqn"
+        payload["training"]["model"] = "fcnet"
+        payload["algorithm_config"] = {"lr": 0.001}
+        payload["staging"] = {
+            "replay_transition": "preserve",
+            "stages": [{
+                "name": "invalid-replay",
+                "completion": {"type": "iterations", "iterations": 1},
+            }],
+        }
+
+        with pytest.raises(ValueError, match="replay-buffer preservation"):
+            ExperimentConfig.model_validate(payload)
+
+    def test_max_iterations_requires_explicit_policy(self):
+        with pytest.raises(ValueError, match="on_max_iterations"):
+            from theseo_anysearch.experiments.models import StageCompletionConfig
+
+            StageCompletionConfig(
+                type="performance",
+                metric="evaluation_success_rate",
+                threshold=0.9,
+                max_iterations=10,
+            )
+
 class TestCustomRewardConfig:
     def test_string_shorthand_preserves_existing_yaml(self):
         config = EnvConfig.model_validate({"rewards": {"custom": "my_reward"}})

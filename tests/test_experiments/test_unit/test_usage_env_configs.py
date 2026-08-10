@@ -65,6 +65,13 @@ def test_representative_nested_experiments_load() -> None:
     repository = Path(__file__).resolve().parents[3]
     for parts in (
         ("usage", "experiments", "showcase", "quick_demo.yaml"),
+        (
+            "usage",
+            "experiments",
+            "showcase",
+            "staged_waypoint_training",
+            "experiment.yaml",
+        ),
         ("usage", "experiments", "heuristics", "dijkstra", "run.yaml"),
         ("usage", "experiments", "train", "ppo_maps_vector_zones.yaml"),
     ):

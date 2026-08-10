@@ -72,43 +72,42 @@ class TestVoxelEnvObsModesIntegration:
         obs, *_ = env.step(2)
         assert obs["ray_hits"].shape == (26,)
 
-    @pytest.mark.parametrize("obs_mode", ["scalar", "box", "radial"])
-    def test_voxel_count_can_be_excluded_for_checkpoint_compatibility(
-        self,
-        obs_mode,
-    ):
-        env = self.make(obs_mode=obs_mode, include_voxel_count=False)
+    @pytest.mark.parametrize(
+        "obs_mode", ["scalar", "box", "radial", "hierarchical_box"]
+    )
+    def test_filled_cell_count_is_not_exposed_to_policy(self, obs_mode):
+        env = self.make(obs_mode=obs_mode)
 
         obs, _ = env.reset()
 
         assert "voxel_count" not in obs
         assert "voxel_count" not in env.observation_space.spaces
-    def test_cursor_pos_in_box_obs(self):
+
+    def test_cursor_pos_not_in_box_obs(self):
         env = self.make(obs_mode="box")
         obs, _ = env.reset()
-        assert "cursor_pos" in obs
-        assert obs["cursor_pos"].shape == (3,)
+        assert "cursor_pos" not in obs
 
-    def test_cursor_pos_in_radial_obs(self):
+    def test_cursor_pos_not_in_radial_obs(self):
         env = self.make(obs_mode="radial")
         obs, _ = env.reset()
-        assert "cursor_pos" in obs
+        assert "cursor_pos" not in obs
 
-    def test_cursor_pos_normalised(self):
+    def test_steps_remaining_not_in_box_obs(self):
         env = self.make(obs_mode="box")
         obs, _ = env.reset()
-        assert np.all((obs["cursor_pos"] >= 0.0) & (obs["cursor_pos"] <= 1.0))
+        assert "steps_remaining" not in obs
 
-    def test_cursor_pos_dtype(self):
+    def test_steps_remaining_not_in_radial_obs(self):
         env = self.make(obs_mode="box")
         obs, _ = env.reset()
-        assert obs["cursor_pos"].dtype == np.float32
+        assert "steps_remaining" not in obs
 
-    def test_cursor_pos_changes_after_step(self):
+    def test_native_cursor_still_changes_after_step(self):
         env = self.make(obs_mode="box")
         obs0, _ = env.reset()
         obs1, *_ = env.step(21)
-        assert not np.array_equal(obs0["cursor_pos"], obs1["cursor_pos"])
+        assert env._rust_env.cursor_pos() != (1, 1, 1)
 
     def test_direct_cursor_pos_after_reset(self):
         rust_env = theseo_core.PyVoxelEnv(max_steps=20)

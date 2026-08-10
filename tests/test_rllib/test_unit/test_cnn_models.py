@@ -19,8 +19,9 @@ def _make_obs_space(box_radius: int) -> gym.spaces.Dict:
     n = 2 * box_radius + 1
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0, (1,), np.float32),
-        "voxel_count":     gym.spaces.Box(0.0, np.inf, (1,), np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0, (3,), np.float32),
+        "goal_distance":   gym.spaces.Box(0.0, 1.0, (1,), np.float32),
+        "goal_direction":  gym.spaces.Box(-1.0, 1.0, (3,), np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0, (n**3,), np.float32),
     })
 
@@ -33,8 +34,9 @@ def _make_dummy_obs(batch: int, box_radius: int) -> dict[str, torch.Tensor]:
     n = 2 * box_radius + 1
     return {
         "steps_remaining": torch.rand(batch, 1),
-        "voxel_count":     torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
+        "goal_distance":   torch.rand(batch, 1),
+        "goal_direction":  torch.rand(batch, 3) * 2.0 - 1.0,
         "local_grid":      torch.rand(batch, n**3),
     }
 
@@ -127,10 +129,20 @@ class TestVoxelBox2DCNN:
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         model = _build_2d(pool_type="max")
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
+        assert not hasattr(model, "_pool")
+
+    def test_goal_features_are_consumed(self):
+        model = _build_2d()
+        assert "goal_distance" in model._auxiliary_keys
+        assert "goal_direction" in model._auxiliary_keys
+
+    def test_spatial_layout_reaches_fully_connected_head(self):
+        model = _build_2d(box_radius=2)
+        assert model._fc[0].in_features == 64 * 5 * 5 + model._n_auxiliary
 
     def test_different_num_outputs(self):
         model = _build_2d(num_outputs=7)
@@ -190,10 +202,65 @@ class TestVoxelBox3DCNN:
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         model = _build_3d(pool_type="max")
         logits, _, _ = _forward(model)
         assert logits.shape == (1, 3)
+        assert not hasattr(model, "_pool")
+
+    def test_spatial_layout_reaches_fully_connected_head(self):
+        model = _build_3d(box_radius=2)
+        assert model._fc[0].in_features == 64 * 5**3 + model._n_auxiliary
+
+    def test_multi_agent_observation_contract(self):
+        from theseo_anysearch.rllib.models.cnn import VoxelBox3DCNN
+
+        n = 5
+        obs_space = gym.spaces.Dict({
+            "cursor_pos": gym.spaces.Box(0.0, 1.0, (3,), np.float32),
+            "face_neighbors": gym.spaces.Box(0.0, 1.0, (6,), np.float32),
+            "goal_distance": gym.spaces.Box(0.0, 1.0, (1,), np.float32),
+            "goal_direction": gym.spaces.Box(-1.0, 1.0, (3,), np.float32),
+            "local_grid": gym.spaces.Box(0.0, 1.0, (n**3,), np.float32),
+            "ray_cast": gym.spaces.Box(0.0, 1.0, (27,), np.float32),
+        })
+        model = VoxelBox3DCNN(
+            obs_space,
+            _make_action_space(),
+            3,
+            {"custom_model_config": {"box_radius": 2}},
+            "test_multi_agent",
+        )
+        obs = {
+            key: torch.as_tensor(space.sample()).unsqueeze(0)
+            for key, space in obs_space.spaces.items()
+        }
+
+        logits, _ = model.forward({"obs": obs}, [], torch.tensor([1]))
+
+        assert logits.shape == (1, 3)
+        assert set(model._auxiliary_keys) == set(obs_space.spaces) - {"local_grid"}
+
+    def test_action_mask_is_applied_to_logits_not_encoder_features(self):
+        from theseo_anysearch.rllib.models.cnn import VoxelBox3DCNN
+
+        obs_space = _make_obs_space(2)
+        obs_space.spaces["action_mask"] = gym.spaces.Box(0, 1, (3,), np.int8)
+        model = VoxelBox3DCNN(
+            obs_space,
+            _make_action_space(),
+            3,
+            {"custom_model_config": {"box_radius": 2}},
+            "test_masked",
+        )
+        obs = _make_dummy_obs(1, 2)
+        obs["action_mask"] = torch.tensor([[1, 0, 1]], dtype=torch.int8)
+
+        logits, _ = model.forward({"obs": obs}, [], torch.tensor([1]))
+
+        assert logits[0, 1] == torch.finfo(logits.dtype).min
+        assert torch.isfinite(logits[0, [0, 2]]).all()
+        assert "action_mask" not in model._auxiliary_keys
 
     def test_3d_vs_2d_same_output_dim(self):
         m2 = _build_2d(num_outputs=4)
@@ -261,8 +328,9 @@ def _make_hier_obs_space(radii: list[int]) -> gym.spaces.Dict:
     flat_size = sum((2 * r + 1) ** 3 for r in radii)
     return gym.spaces.Dict({
         "steps_remaining": gym.spaces.Box(0.0, 1.0,    (1,),         np.float32),
-        "voxel_count":     gym.spaces.Box(0.0, np.inf,  (1,),         np.float32),
         "cursor_pos":      gym.spaces.Box(0.0, 1.0,    (3,),         np.float32),
+        "goal_distance":   gym.spaces.Box(0.0, 1.0,    (1,),         np.float32),
+        "goal_direction":  gym.spaces.Box(-1.0, 1.0,   (3,),         np.float32),
         "local_grid":      gym.spaces.Box(0.0, 1.0,    (flat_size,), np.float32),
     })
 
@@ -271,8 +339,9 @@ def _make_hier_obs(batch: int, radii: list[int]) -> dict[str, torch.Tensor]:
     flat_size = sum((2 * r + 1) ** 3 for r in radii)
     return {
         "steps_remaining": torch.rand(batch, 1),
-        "voxel_count":     torch.rand(batch, 1),
         "cursor_pos":      torch.rand(batch, 3),
+        "goal_distance":   torch.rand(batch, 1),
+        "goal_direction":  torch.rand(batch, 3) * 2.0 - 1.0,
         "local_grid":      torch.rand(batch, flat_size),
     }
 
@@ -362,10 +431,11 @@ class TestVoxelHierarchicalBox3DCNN:
         logits, _, _ = _forward_hier(m)
         assert logits.shape == (1, 3)
 
-    def test_max_pool_variant(self):
+    def test_legacy_pool_setting_does_not_restore_global_pooling(self):
         m = _build_hier(pool_type="max")
         logits, _, _ = _forward_hier(m)
         assert logits.shape == (1, 3)
+        assert not hasattr(m, "_pool")
 
     def test_single_radius_raises(self):
         with pytest.raises(ValueError, match="at least 2 radii"):
@@ -407,8 +477,9 @@ class TestVoxelHierarchicalBox3DCNN:
         flat_size = sum((2 * r + 1) ** 3 for r in [1, 4])
         obs = {
             "steps_remaining": torch.rand(1, 1, requires_grad=False),
-            "voxel_count":     torch.rand(1, 1),
             "cursor_pos":      torch.rand(1, 3),
+            "goal_distance":   torch.rand(1, 1),
+            "goal_direction":  torch.rand(1, 3),
             "local_grid":      torch.rand(1, flat_size, requires_grad=True),
         }
         logits, _ = m.forward({"obs": obs}, [], torch.tensor([1]))
@@ -467,13 +538,61 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         # Default radii [1, 4] → 27 + 729 = 756
         assert sp["local_grid"].shape == (756,)
 
-    def test_observation_space_has_cursor_pos(self):
+    def test_observation_space_omits_cursor_pos(self):
         from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
         env = VoxelEnv.__new__(VoxelEnv)
         env._config = {"obs_mode": "hierarchical_box"}
         env._rust_env = None
         sp = env._observation_space()
-        assert "cursor_pos" in sp.spaces
+        assert "cursor_pos" not in sp.spaces
+
+    def test_enabled_action_mask_is_declared_in_observation_space(self):
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "obs_mode": "box",
+            "box_radius": 1,
+            "action_mode": "discrete_18",
+            "action_masking_enabled": True,
+        }
+
+        space = env._observation_space()
+
+        assert space["action_mask"].shape == (18,)
+
+    def test_enabled_action_mask_is_attached_to_observation(self):
+        from unittest.mock import MagicMock
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "action_mode": "discrete_6",
+            "action_masking_enabled": True,
+        }
+        env._rust_env = MagicMock()
+        env._rust_env.action_mask.return_value = [1] * 27
+        env.action_space = env._action_space()
+
+        observation = env._attach_action_mask({"steps_remaining": np.ones(1)})
+
+        assert observation["action_mask"].shape == (6,)
+
+    def test_all_masked_observation_fails_clearly(self):
+        from unittest.mock import MagicMock
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {
+            "action_mode": "discrete_6",
+            "action_masking_enabled": True,
+        }
+        env._rust_env = MagicMock()
+        env._rust_env.action_mask.return_value = [0] * 27
+        env.action_space = env._action_space()
+
+        with pytest.raises(RuntimeError, match="all actions are masked"):
+            env._attach_action_mask({})
 
     def test_obs_to_numpy_concatenates_segments(self):
         """_obs_to_numpy should concatenate box_obs(r) calls in radius order."""
@@ -495,7 +614,6 @@ class TestVoxelEnvHierarchicalBoxObsMode:
 
         mock_obs = MagicMock()
         mock_obs.steps_remaining = 5
-        mock_obs.filled = 3
         mock_obs.cursor_pos = (5, 5, 5)
 
         result = env._obs_to_numpy(mock_obs)
@@ -514,7 +632,6 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         env._init_obs_cache(env._config)
         mock_obs = MM()
         mock_obs.steps_remaining = 1
-        mock_obs.filled = 0
         mock_obs.cursor_pos = (1, 1, 1)
         with pytest.raises(ValueError, match="hierarchical_box"):
             env._obs_to_numpy(mock_obs)

@@ -42,7 +42,6 @@ class TaskConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
-    max_consecutive_collisions: int | None = Field(default=None, ge=1)
     goal: Goal = Field(default_factory=PointGoal)
     termination: TerminationPolicy = Field(default_factory=TerminationPolicy)
     max_consecutive_collisions: int | None = Field(default=None, ge=1)

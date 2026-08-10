@@ -24,6 +24,8 @@ class FakeAlgo:
         self._step = 0
         self.saved: list[str] = []
         self.restored: list[str] = []
+        self.weights: dict[str, int] = {"step": 0}
+        self.stopped = False
 
     def train(self) -> dict[str, Any]:
         """Return deterministic train results in RLlib's new API shape.
@@ -35,6 +37,7 @@ class FakeAlgo:
         """
 
         self._step += 1
+        self.weights = {"step": self._step}
         self._anysearch_evaluation_episodes = [
             VoxelEpisodeData(
                 agent_count=1,
@@ -91,6 +94,15 @@ class FakeAlgo:
         if not sentinel.exists():
             raise FileNotFoundError(path)
         self.restored.append(path)
+
+    def get_weights(self) -> dict[str, int]:
+        return dict(self.weights)
+
+    def set_weights(self, weights: dict[str, int]) -> None:
+        self.weights = dict(weights)
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 def patch_build(runner_mod, fake_algo_cls=FakeAlgo):

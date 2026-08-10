@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from theseo_anysearch.environments.task import TaskConfig
 from theseo_anysearch.settings.compatibility import NestedFieldAccessMixin
 from theseo_anysearch.settings.environment.action import ActionConfig
+from theseo_anysearch.settings.environment.agent import AgentConfig, HunterAndHuntedConfig
 from theseo_anysearch.settings.environment.curriculum import WaypointCurriculumConfig
 from theseo_anysearch.settings.environment.geometry import GeometryConfig
 from theseo_anysearch.settings.environment.observation import ObservationConfig
@@ -28,7 +29,6 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
     "box_radius": ("observation", "box_radius"),
     "box_radii": ("observation", "box_radii"),
     "ray_max_len": ("observation", "ray_max_len"),
-    "include_voxel_count": ("observation", "include_voxel_count"),
     "action_mode": ("action", "mode"),
     "step_cost": ("rewards", "step_cost"),
     "collision_cost": ("rewards", "collision_cost"),
@@ -70,6 +70,12 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     observation: ObservationConfig = Field(default_factory=ObservationConfig, description="Policy observation settings.")
     action: ActionConfig = Field(default_factory=ActionConfig, description="Policy action-space settings.")
     rewards: RewardConfig = Field(default_factory=RewardConfig, description="Reward terms and provider selection.")
+    agents: tuple[AgentConfig, ...] | None = Field(
+        None, description="Ordered per-agent settings for heterogeneous environments."
+    )
+    hunter_and_hunted: HunterAndHuntedConfig | None = Field(
+        None, description="Optional asymmetric capture task."
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -78,6 +84,8 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
         if not isinstance(value, dict):
             return value
         data = dict(value)
+        if data.get("agents") is not None and "agent_count" not in data:
+            data["agent_count"] = len(data["agents"])
         legacy_by_block: dict[str, list[str]] = {}
         for legacy, (block, _) in _LEGACY_ENV_FIELDS.items():
             if legacy in data:
@@ -96,11 +104,49 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             data[block] = nested
         return data
 
+    @model_validator(mode="after")
+    def validate_heterogeneous_agents(self) -> "EnvConfig":
+        """Validate agent identity, count, and capture-task references."""
+        if self.agents is None:
+            if self.hunter_and_hunted is not None:
+                raise ValueError("hunter_and_hunted requires env.agents")
+            return self
+        if len(self.agents) != self.agent_count:
+            raise ValueError("agent_count must equal the number of env.agents")
+        names = [agent.id for agent in self.agents]
+        if len(set(names)) != len(names):
+            raise ValueError("env.agents ids must be unique")
+        if self.hunter_and_hunted is not None:
+            configured = set(names)
+            if self.hunter_and_hunted.hunter not in configured:
+                raise ValueError("hunter_and_hunted.hunter must name a configured agent")
+            if self.hunter_and_hunted.hunted not in configured:
+                raise ValueError("hunter_and_hunted.hunted must name a configured agent")
+            if self.hunter_and_hunted.hunter == self.hunter_and_hunted.hunted:
+                raise ValueError("hunter and hunted must be different agents")
+        return self
+
     def to_runtime_dict(self) -> dict[str, Any]:
         """Return the flat dictionary consumed by the existing environments."""
         action_predicates, action_outcomes = self.action.resolved_pipeline(
             trail_mode=self.trail_mode
         )
+        heterogeneous_agents = None
+        if self.agents is not None:
+            heterogeneous_agents = []
+            for agent in self.agents:
+                predicates, outcomes = agent.action.resolved_pipeline(trail_mode=False)
+                heterogeneous_agents.append(
+                    {
+                        "id": agent.id,
+                        "policy": agent.policy or agent.id,
+                        "action_mode": agent.action.mode,
+                        "start": list(agent.start) if agent.start is not None else None,
+                        "action_predicates": [item.model_dump(mode="json") for item in predicates],
+                        "action_outcomes": [item.model_dump(mode="json") for item in outcomes],
+                        "action_history_length": agent.action.history_length,
+                    }
+                )
         return {
             "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
@@ -118,7 +164,6 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "box_radius": self.observation__box_radius,
             "box_radii": self.observation__box_radii,
             "ray_max_len": self.observation__ray_max_len,
-            "include_voxel_count": self.observation__include_voxel_count,
             "action_mode": self.action__mode,
             "action_behavior": self.action.behavior,
             "action_predicates": [
@@ -128,7 +173,15 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 item.model_dump(mode="json") for item in action_outcomes
             ],
             "action_history_length": self.action.history_length,
+            "action_masking_enabled": self.action.masking.enabled,
+            "action_masking_all_masked": self.action.masking.all_masked,
             "agent_count": self.agent_count,
+            "agents": heterogeneous_agents,
+            "hunter_and_hunted": (
+                self.hunter_and_hunted.model_dump(mode="json")
+                if self.hunter_and_hunted is not None
+                else None
+            ),
             "max_steps": self.max_steps,
             "seed": self.seed,
             "trail_mode": self.trail_mode,

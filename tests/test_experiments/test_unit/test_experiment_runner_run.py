@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from theseo_anysearch.experiments.models import ExperimentConfig, HeuristicConfig
+from theseo_anysearch.experiments.output import OutputStore
 from theseo_anysearch.experiments.runner import ExperimentRunner, RunInfo
 
 from ._support import patch_build
@@ -75,6 +76,110 @@ class TestExperimentRunnerRun:
             runner_mod._build_trainer = original
 
         assert info.checkpoint_iterations == [1, 2, 3]
+
+    def test_staged_run_completes_all_stages(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["staging"] = {
+            "replay_transition": "clear",
+            "stages": [
+                {
+                    "name": "one-step",
+                    "completion": {"type": "iterations", "iterations": 1},
+                    "env": {"max_steps": 1, "trail_mode": False},
+                },
+                {
+                    "name": "with-trails",
+                    "completion": {"type": "iterations", "iterations": 2},
+                    "env": {"max_steps": 50, "trail_mode": True},
+                },
+            ],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            info = ExperimentRunner(config).run()
+        finally:
+            runner_mod._build_trainer = original
+
+        run_dir = config.run_output_dir.joinpath(info.run_id)
+        state = json.loads(
+            run_dir.joinpath("staging_state.json").read_text(encoding="utf-8")
+        )
+        assert info.status == "COMPLETED"
+        assert state["completed_stages"] == ["one-step", "with-trails"]
+        assert state["completed_iterations"] == 3
+        assert info.checkpoint_iterations == [1, 2, 3]
+
+    def test_staged_run_resets_early_stop_state_between_stages(
+        self,
+        experiment_config: ExperimentConfig,
+        tmp_path: Path,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["staging"] = {
+            "stages": [
+                {
+                    "name": "first",
+                    "completion": {"type": "iterations", "iterations": 1},
+                },
+                {
+                    "name": "second",
+                    "completion": {"type": "iterations", "iterations": 1},
+                },
+            ],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        store = OutputStore(tmp_path)
+        store.write_json("early_stop_state.json", {"consecutive": 3})
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            ExperimentRunner(config)._run_staged_training(store, tmp_path, None)
+        finally:
+            runner_mod._build_trainer = original
+
+        assert not store.exists("early_stop_state.json")
+
+    def test_training_early_stop_cannot_complete_a_stage(
+        self,
+        experiment_config: ExperimentConfig,
+    ):
+        import theseo_anysearch.experiments.runner as runner_mod
+
+        payload = experiment_config.model_dump(by_alias=True, mode="python")
+        payload["training"]["early_stop"] = {
+            "enabled": True,
+            "mode": "reward",
+            "min_reward": -1.0,
+        }
+        payload["staging"] = {
+            "stages": [{
+                "name": "must-succeed",
+                "completion": {
+                    "type": "performance",
+                    "metric": "evaluation_success_rate",
+                    "threshold": 1.0,
+                    "max_iterations": 3,
+                    "on_max_iterations": "error",
+                },
+            }],
+        }
+        config = ExperimentConfig.model_validate(payload)
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            with pytest.raises(RuntimeError, match="before its completion"):
+                ExperimentRunner(config).run()
+        finally:
+            runner_mod._build_trainer = original
 
     def test_run_collects_enabled_heuristic_reference(
         self,

@@ -121,3 +121,33 @@ smallest action space will always learn fastest.
 
 The legacy flat `env.action_mode` field remains loadable during migration. Do
 not combine it with the nested `env.action` block in the same configuration.
+## Heterogeneous agents
+
+Multi-agent environments may replace the shared `env.action` behavior with an
+ordered `env.agents` list. Each entry selects its own policy, action space,
+predicates, outcomes, history length, and optional fixed start position:
+
+```yaml
+env:
+  agents:
+    - id: hunted
+      policy: hunted
+      action:
+        mode: discrete_26
+        behavior: cursor_navigation
+    - id: hunter
+      policy: hunter
+      action:
+        mode: discrete_26
+        predicates: [valid_action, double_step_in_bounds]
+        outcomes: [double_step]
+```
+
+Agents execute sequentially in list order. Mutations made by an earlier agent
+are therefore visible to later predicates and outcomes during the same step.
+Each distinct `policy` creates a separate RLlib policy; repeating a policy name
+shares parameters between those agents.
+
+The optional `env.hunter_and_hunted` task ends on same-voxel or adjacent capture
+and awards asymmetric capture/timeout rewards. See
+[`usage/experiments/showcase/hunter_and_hunted`](../../usage/experiments/showcase/hunter_and_hunted/README.md).

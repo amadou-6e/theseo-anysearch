@@ -12,6 +12,8 @@ use crate::voxel::rewards::RewardConfig;
 use crate::voxel::world::{Coord, WorldState};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
+use super::multi_action::AgentActionPipeline;
+use super::multi_heterogeneous::CaptureTask;
 
 // ---------------------------------------------------------------------------
 // Per-agent state
@@ -42,6 +44,9 @@ pub struct MultiAgentVoxelEnv {
     pub agent_count: usize,
     /// Side length of the cubic grid (coords in [1, grid_size]³). Default 32.
     pub grid_size: u16,
+    pub(crate) pipelines: Vec<AgentActionPipeline>,
+    pub(crate) capture_task: Option<CaptureTask>,
+    pub(crate) last_action_error: Option<String>,
 }
 
 pub struct MultiStepResult {
@@ -68,6 +73,9 @@ impl MultiAgentVoxelEnv {
         }
         let geometry_len = geometry.len();
         let surface_cells = compute_surface_cells(&geometry, grid_size);
+        let pipelines = (0..agent_count)
+            .map(|index| AgentActionPipeline::standard(format!("agent_{index}"), trail_mode))
+            .collect();
         let agents = (0..agent_count)
             .map(|_| AgentEntry {
                 cursor: (1, 1, 1),
@@ -88,6 +96,9 @@ impl MultiAgentVoxelEnv {
             agents,
             agent_count,
             grid_size,
+            pipelines,
+            capture_task: None,
+            last_action_error: None,
         }
     }
 
@@ -110,7 +121,7 @@ impl MultiAgentVoxelEnv {
     }
 
     /// Total agent-filled cells (excludes geometry).
-    fn voxel_count(&self) -> usize {
+    pub(crate) fn voxel_count(&self) -> usize {
         self.world.len().saturating_sub(self.geometry_len)
     }
 
@@ -119,6 +130,10 @@ impl MultiAgentVoxelEnv {
         self.world.clear();
         for &coord in &self.geometry {
             self.world.set(coord, true);
+        }
+
+        for pipeline in &mut self.pipelines {
+            pipeline.history.clear();
         }
 
         // Assign each agent a distinct start position (and goal if geometry available).
@@ -153,6 +168,7 @@ impl MultiAgentVoxelEnv {
                 ((x, y, 1), None)
             };
 
+            let start = self.pipelines[i].start.unwrap_or(start);
             agent.cursor = start;
             agent.goal = if goal != Some(start) { goal } else { None };
             agent.prev_l2 = agent.goal.map_or(0.0, |g| l2(start, g));
@@ -171,7 +187,7 @@ impl MultiAgentVoxelEnv {
 
     /// Process one simultaneous step for all agents.
     /// `actions` must have length == agent_count; out-of-range entries treated as collision.
-    pub fn step_all(&mut self, actions: &[i32]) -> MultiStepResult {
+    pub fn step_all_legacy(&mut self, actions: &[i32]) -> MultiStepResult {
         self.steps += 1;
         let mut rewards = vec![0.0f32; self.agent_count];
 

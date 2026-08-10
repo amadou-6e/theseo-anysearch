@@ -318,7 +318,7 @@ class _VoxelEpisodeState:
             init_filled=init_filled,
             start_pos=start_pos,
             goal_pos=goal_pos,
-            prev_voxel_count=_extract_voxel_count(obs),
+            prev_voxel_count=_environment_voxel_count(env, len(init_filled)),
             steps=[],
         )
 
@@ -331,7 +331,7 @@ class _VoxelEpisodeState:
         )
         obs_next, reward, terminated, truncated, info = self.env.step(raw_action)
         self.done = bool(terminated or truncated)
-        voxel_count = _extract_voxel_count(obs_next)
+        voxel_count = _environment_voxel_count(self.env, len(self.init_filled))
         cursor = (1, 1, 1)
         if hasattr(self.env, "_rust_env") and self.env._rust_env is not None:
             cursor = self.env._rust_env.cursor_pos()
@@ -661,6 +661,7 @@ class MultiVoxelEpisodeData:
     start_positions: list[tuple[int, int, int] | None]
     goal_positions: list[tuple[int, int, int] | None]
     init_filled: list[tuple[int, int, int]]  # geometry voxels at episode start
+    obs_mode: str = "scalar"
 
 
 def collect_multi_eval_episode(
@@ -713,17 +714,10 @@ def collect_multi_eval_episode(
             actions[agent_id] = action
 
         # Snapshot cursor positions before the step for placement detection.
-        pre_cursors: list[tuple[int, int, int]] = []
-        for agent_id in env.possible_agents:
-            cp = obs.get(agent_id, {}).get("cursor_pos")
-            if cp is not None:
-                pre_cursors.append((
-                    int(round(cp[0] * 31)) + 1,
-                    int(round(cp[1] * 31)) + 1,
-                    int(round(cp[2] * 31)) + 1,
-                ))
-            else:
-                pre_cursors.append((1, 1, 1))
+        pre_cursors = [
+            tuple(int(value) for value in cursor)
+            for cursor in env._rust_env.cursor_positions()
+        ]
 
         obs_next, rewards, terms, truncs, _ = env.step(actions)
         done = all(terms.values())
@@ -733,6 +727,7 @@ def collect_multi_eval_episode(
         placed: list[bool] = []
         acts: list[int] = []
         rews: list[float] = []
+        native_cursors = env._rust_env.cursor_positions()
 
         for i, agent_id in enumerate(env.possible_agents):
             a = actions.get(agent_id, 0)
@@ -741,15 +736,11 @@ def collect_multi_eval_episode(
             rews.append(float(r))
             total_rewards[i] += float(r)
 
-            cur = (1, 1, 1)
-            if agent_id in obs_next:
-                cp = obs_next[agent_id].get("cursor_pos")
-                if cp is not None:
-                    cur = (
-                        int(round(cp[0] * 31)) + 1,
-                        int(round(cp[1] * 31)) + 1,
-                        int(round(cp[2] * 31)) + 1,
-                    )
+            cur = (
+                tuple(int(value) for value in native_cursors[i])
+                if i < len(native_cursors)
+                else (1, 1, 1)
+            )
             cursors.append(cur)
 
             # Detect placement: agent moved to a new cell (trail mode fills destination).
@@ -780,6 +771,7 @@ def collect_multi_eval_episode(
         start_positions=start_positions,
         goal_positions=goal_positions,
         init_filled=init_filled,
+        obs_mode=str(env_config.get("obs_mode", "scalar")),
     )
 
 
@@ -799,7 +791,7 @@ def _build_multi_payload(
         "episode_reward_mean": episode_reward_mean,
         "agent_count": episode.agent_count,
         "max_steps": episode.max_steps,
-        "obs_mode": "scalar",
+        "obs_mode": episode.obs_mode,
         "episode": {
             "total_reward": sum(episode.total_rewards),
             "steps_taken": len(episode.steps),
@@ -891,16 +883,14 @@ class MultiTrajectoryWriter:
         return written
 
 
-def _extract_voxel_count(obs: Any) -> int:
-    if not isinstance(obs, dict):
+def _environment_voxel_count(env: Any, initial_filled_count: int = 0) -> int:
+    """Return the current filled-cell count without exposing it to the policy."""
+    if hasattr(env, "filled_voxel_count"):
+        return int(env.filled_voxel_count())
+    rust_env = getattr(env, "_rust_env", None)
+    if rust_env is None or not hasattr(rust_env, "filled_voxels"):
         return 0
-    vc = obs.get("voxel_count")
-    if vc is None:
-        return 0
-    try:
-        return int(float(vc[0]) if hasattr(vc, "__len__") else float(vc))
-    except Exception:
-        return 0
+    return max(len(rust_env.filled_voxels()) - initial_filled_count, 0)
 
 
 def _last_cursor(episode: VoxelEpisodeData) -> tuple[int, int, int] | None:

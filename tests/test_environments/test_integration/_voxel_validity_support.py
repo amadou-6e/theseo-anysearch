@@ -6,13 +6,14 @@ Create a radial test environment with fixed waypoints.
 
 >>> env = make_radial_test_env(tmp_path)
 >>> obs, _ = env.reset(seed=0)
->>> set(obs) >= {"steps_remaining", "voxel_count", "goal_distance", "cursor_pos", "ray_hits"}
+>>> set(obs) >= {"goal_distance", "goal_direction", "ray_hits"}
 True
 """
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
@@ -161,7 +162,7 @@ def normalized_goal_direction(
     start: tuple[int, int, int],
     goal: tuple[int, int, int],
 ) -> tuple[float, float, float]:
-    """Return the normalized signed delta from start to goal.
+    """Return the Euclidean unit direction from start to goal.
 
     Parameters
     ----------
@@ -173,8 +174,11 @@ def normalized_goal_direction(
     Returns
     -------
     tuple[float, float, float]
-        Signed delta divided by ``grid_size - 1``.
+        Unit-length signed direction, or zeros when start equals goal.
     """
 
-    inv = 1.0 / float(GRID_SIZE - 1)
-    return tuple((goal_value - start_value) * inv for start_value, goal_value in zip(start, goal))
+    delta = tuple(goal_value - start_value for start_value, goal_value in zip(start, goal))
+    norm = math.sqrt(sum(value * value for value in delta))
+    if norm == 0.0:
+        return (0.0, 0.0, 0.0)
+    return tuple(value / norm for value in delta)

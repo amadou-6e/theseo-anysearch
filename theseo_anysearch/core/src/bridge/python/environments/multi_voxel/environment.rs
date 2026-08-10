@@ -2,6 +2,20 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
+/// Upper bound on `box_radius`: keeps `2 * r + 1` well within `i32` range so
+/// the side-length computation in `box_obs` can never overflow, and keeps
+/// the resulting allocation ((2r+1)^3 f32s) within sane memory limits.
+const MAX_BOX_RADIUS: u32 = 1024;
+
+fn validate_box_radius(radius: u32) -> PyResult<()> {
+    if radius > MAX_BOX_RADIUS {
+        return Err(crate::bridge::python::errors::invalid_value(format!(
+            "box_radius must be <= {MAX_BOX_RADIUS}, got {radius}"
+        )));
+    }
+    Ok(())
+}
+
 #[pyclass]
 pub struct PyMultiVoxelEnv {
     inner: crate::voxel::MultiAgentVoxelEnv,
@@ -15,7 +29,8 @@ impl PyMultiVoxelEnv {
                         distance_shaping=0.0, collision_cost=0.0,
                         distance_reward_mode="progress".to_string(),
                         zone_reward_min=-1.0, zone_reward_max=-0.01,
-                        zone_reward_curve="linear".to_string()))]
+                        zone_reward_curve="linear".to_string(), agents_json=None,
+                        hunter_and_hunted_json=None, native_action_path=None))]
     pub fn new(
         agent_count: usize,
         max_steps: u32,
@@ -30,6 +45,9 @@ impl PyMultiVoxelEnv {
         zone_reward_min: f32,
         zone_reward_max: f32,
         zone_reward_curve: String,
+        agents_json: Option<String>,
+        hunter_and_hunted_json: Option<String>,
+        native_action_path: Option<String>,
     ) -> PyResult<Self> {
         let distance_reward_mode =
             crate::voxel::DistanceRewardMode::from_name(distance_reward_mode.as_str()).ok_or_else(
@@ -55,7 +73,7 @@ impl PyMultiVoxelEnv {
         reward_config
             .validate_finite()
             .map_err(PyValueError::new_err)?;
-        let inner = crate::voxel::MultiAgentVoxelEnv::new(
+        let mut inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
             trail_mode,
@@ -63,6 +81,17 @@ impl PyMultiVoxelEnv {
             reward_config,
             grid_size,
         );
+        if let Some(agents_json) = agents_json {
+            inner
+                .configure_agents(
+                    &agents_json,
+                    native_action_path.as_deref().map(std::path::Path::new),
+                )
+                .map_err(PyValueError::new_err)?;
+        }
+        inner
+            .configure_capture_task(hunter_and_hunted_json.as_deref())
+            .map_err(PyValueError::new_err)?;
         Ok(Self { inner })
     }
 
@@ -152,6 +181,7 @@ impl PyMultiVoxelEnv {
     /// 1.0 = filled or outside the configured grid. Ordered x-outer, y-mid, z-inner.
     pub fn box_obs(&self, agent_idx: usize, radius: u32) -> PyResult<Vec<f32>> {
         check_agent_idx(agent_idx, self.inner.agents.len())?;
+        validate_box_radius(radius)?;
         let (cx, cy, cz) = self.inner.agents[agent_idx].cursor;
         let g = i32::from(self.inner.grid_size);
         let r = radius as i32;
@@ -272,5 +302,52 @@ mod tests {
     fn check_actions_len_accepts_match() {
         assert!(check_actions_len(2, 2).is_ok());
         assert!(check_actions_len(0, 0).is_ok());
+    }
+
+    fn make_env() -> PyMultiVoxelEnv {
+        PyMultiVoxelEnv::new(
+            1,
+            10,
+            true,
+            None,
+            32,
+            -0.01,
+            1.0,
+            0.0,
+            0.0,
+            "progress".to_string(),
+            -1.0,
+            -0.01,
+            "linear".to_string(),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn box_obs_valid_radius_ok() {
+        let mut env = make_env();
+        env.reset(0);
+        let obs = env.box_obs(0, 2).unwrap();
+        assert_eq!(obs.len(), 125);
+    }
+
+    #[test]
+    fn box_obs_excessive_radius_returns_value_error() {
+        let mut env = make_env();
+        env.reset(0);
+        assert!(env.box_obs(0, MAX_BOX_RADIUS + 1).is_err());
+        assert!(validate_box_radius(MAX_BOX_RADIUS + 1).is_err());
+    }
+
+    #[test]
+    fn box_obs_radius_near_i32_overflow_returns_value_error_not_panic() {
+        let mut env = make_env();
+        env.reset(0);
+        // Without the bounds check, `2 * (radius as i32) + 1` overflows i32
+        // and the subsequent `as usize` cast produces a huge allocation size.
+        assert!(env.box_obs(0, u32::MAX / 2).is_err());
     }
 }

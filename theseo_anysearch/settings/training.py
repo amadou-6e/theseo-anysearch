@@ -76,8 +76,6 @@ class TrainingConfig(BaseModel):
         Number of rollout workers or env runners.
     num_envs_per_env_runner : int
         Number of vectorized environments hosted by each rollout worker.
-    max_requests_in_flight_per_env_runner : int
-        Maximum outstanding sampling requests queued on each rollout worker.
     num_gpus_per_env_runner : float
         GPU allocation for each rollout worker. Zero keeps rollout inference on CPU.
     weight_sync_interval : int
@@ -107,7 +105,6 @@ class TrainingConfig(BaseModel):
     num_gpus_per_learner: float | None = Field(default=None, ge=0.0, description="GPU allocation per Learner; defaults to training.num_gpus.")
     num_env_runners: int = Field(0, ge=0, description="Rollout workers; zero samples inline.")
     num_envs_per_env_runner: int = Field(default=1, ge=1, description="Vectorized environments hosted by each rollout worker.")
-    max_requests_in_flight_per_env_runner: int = Field(default=1, ge=1, description="Maximum outstanding sampling requests queued on each rollout worker.")
     num_gpus_per_env_runner: float = Field(default=0.0, ge=0.0, description="GPU allocation assigned to each rollout worker.")
     weight_sync_interval: int = Field(default=1, ge=1, description="DQN training steps between EnvRunner weight broadcasts.")
     max_requests_in_flight_per_env_runner: int = Field(default=2, ge=1, description="Maximum concurrent sample requests per remote EnvRunner.")

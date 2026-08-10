@@ -134,6 +134,10 @@ class Trainer(BaseTrainer):
             Completed normalized training result.
         """
 
+    def should_stop_training(self, result: TrainResult) -> bool:
+        """Return whether an external lifecycle controller requests a stop."""
+        return False
+
     def _env_config_dict(self) -> dict:
         """Build the runtime environment configuration.
 
@@ -351,6 +355,8 @@ class Trainer(BaseTrainer):
                     )
                     break
                 tb_writer.log_iteration(result)
+                if self.should_stop_training(result):
+                    break
         finally:
             tb_writer.close()
 

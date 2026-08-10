@@ -345,7 +345,9 @@ class MultiAgentVoxelPPOTrainer(Trainer):
     algorithm_name = "multi_agent_voxel_ppo"
 
     @staticmethod
-    def build_algorithm_from_settings(config: Settings) -> Any:
+    def build_algorithm_from_settings(
+        config: Settings, env_config: dict | None = None
+    ) -> Any:
         """Build the configured multi-agent RLlib algorithm.
 
         Parameters
@@ -376,7 +378,7 @@ class MultiAgentVoxelPPOTrainer(Trainer):
         if not isinstance(algo_cfg, PPOConfig):
             algo_cfg = PPOConfig(**algo_cfg.model_dump())
 
-        env_config = env_cfg.to_runtime_dict()
+        env_config = env_config or env_cfg.to_runtime_dict()
 
         env_id = "multi_voxel_ppo_env"
         register_env(
@@ -384,10 +386,31 @@ class MultiAgentVoxelPPOTrainer(Trainer):
             lambda cfg: ParallelPettingZooEnv(MultiVoxelEnv(cfg or env_config)),
         )
 
-        # Build a temp env to introspect spaces for the policy spec.
+        # Heterogeneous agents receive independent policies and action spaces.
         _tmp = MultiVoxelEnv(env_config)
-        obs_space = _tmp.observation_space("agent_0")
-        act_space = _tmp.action_space("agent_0")
+        configured_agents = env_config.get("agents") or []
+        if configured_agents:
+            agent_policies = {
+                agent["id"]: agent.get("policy") or agent["id"]
+                for agent in configured_agents
+            }
+            policies = {}
+            for agent_id, policy_id in agent_policies.items():
+                policies.setdefault(
+                    policy_id,
+                    PolicySpec(
+                        observation_space=_tmp.observation_space(agent_id),
+                        action_space=_tmp.action_space(agent_id),
+                    ),
+                )
+        else:
+            agent_policies = {}
+            policies = {
+                "shared_policy": PolicySpec(
+                    observation_space=_tmp.observation_space("agent_0"),
+                    action_space=_tmp.action_space("agent_0"),
+                )
+            }
 
         minibatch_size = algo_cfg.minibatch_size or min(128, algo_cfg.train_batch_size)
 
@@ -399,13 +422,11 @@ class MultiAgentVoxelPPOTrainer(Trainer):
             )
             .environment(env=env_id, env_config=env_config)
             .multi_agent(
-                policies={
-                    "shared_policy": PolicySpec(
-                        observation_space=obs_space,
-                        action_space=act_space,
-                    )
-                },
-                policy_mapping_fn=lambda agent_id, episode=None, worker=None, **kw: "shared_policy",
+                policies=policies,
+                policy_mapping_fn=(
+                    lambda agent_id, episode=None, worker=None, **kw:
+                    agent_policies.get(agent_id, "shared_policy")
+                ),
             )
             .training(
                 lr=algo_cfg.lr,
@@ -436,4 +457,6 @@ class MultiAgentVoxelPPOTrainer(Trainer):
         return bind_anysearch_evaluation_function(rllib_config.build_algo())
 
     def _build_algorithm(self) -> Any:
-        return self.build_algorithm_from_settings(self._config)
+        return self.build_algorithm_from_settings(
+            self._config, self._env_config_dict()
+        )

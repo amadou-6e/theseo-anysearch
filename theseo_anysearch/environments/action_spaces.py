@@ -51,6 +51,8 @@ def action_step_distance(
 
 def maximum_movement_distance(mode: str) -> float:
     """Return the largest Euclidean displacement selectable by ``mode``."""
+    if mode == "vector_3":
+        return sqrt(3.0)
     offsets = offsets_for_mode(mode)
     return max(sqrt(sum(value * value for value in offset)) for offset in offsets)
 
