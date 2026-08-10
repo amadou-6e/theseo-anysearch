@@ -10,6 +10,7 @@ from theseo_anysearch.environments.action_spaces import (
     maximum_movement_distance,
     offsets_for_mode,
     shortest_action_indices,
+    shortest_actions,
 )
 from theseo_anysearch.models import ActionConfig
 
@@ -85,3 +86,9 @@ def test_shortest_action_indices_reach_goal_at_exact_distance(mode: str) -> None
 
     assert tuple(cursor) == goal
     assert len(actions) == action_step_distance(start, goal, mode)
+
+
+def test_shortest_vector_actions_use_multidiscrete_encoding() -> None:
+    actions = shortest_actions((0, 0, 0), (2, -1, 1), "vector_3")
+
+    assert actions == ((2, 0, 2), (2, 1, 1))

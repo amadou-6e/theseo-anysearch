@@ -74,6 +74,23 @@ def shortest_action_indices(
         actions.append(index_by_offset[tuple(offset)])
     return tuple(actions)
 
+
+def shortest_actions(
+    start: tuple[int, int, int],
+    goal: tuple[int, int, int],
+    mode: str,
+) -> tuple[int | tuple[int, int, int], ...]:
+    """Return shortest actions in the representation consumed by ``mode``."""
+
+    planning_mode = "discrete_26" if mode == "vector_3" else mode
+    indices = shortest_action_indices(start, goal, planning_mode)
+    if mode != "vector_3":
+        return indices
+    return tuple(
+        tuple(value + 1 for value in ACTION_OFFSETS_26[index])
+        for index in indices
+    )
+
 def maximum_movement_distance(mode: str) -> float:
     """Return the largest Euclidean displacement selectable by ``mode``."""
     if mode == "vector_3":
