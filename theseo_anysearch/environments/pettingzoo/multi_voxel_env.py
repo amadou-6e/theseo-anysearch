@@ -245,6 +245,7 @@ class MultiVoxelEnv(RustParallelEnv):
         radius = self._config.get("box_radius", 2)
         ray_max_len = self._config.get("ray_max_len", 16)
         use_euclidean = self._config.get("distance_metric", "euclidean") == "euclidean"
+        norm = max(grid_size - 1, 1)
 
         goal_positions = self._rust_env.goal_positions() if self._has_goal() else []
 
