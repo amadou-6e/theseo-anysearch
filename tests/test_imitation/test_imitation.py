@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import torch
 from pydantic import ValidationError
+from ray.rllib.core.columns import Columns
 
 from theseo_anysearch.imitation.dataset import (
     DemonstrationDataset,
@@ -44,6 +45,15 @@ class TinyPolicy:
 
     def __init__(self) -> None:
         self.model = TinyPolicyModel()
+
+
+class TinyRLModule(TinyPolicyModel):
+    """Modern RLModule-shaped model used to exercise direct cloning."""
+
+    def forward_train(self, batch):
+        features = torch.relu(self.encoder(batch[Columns.OBS]))
+        self.value_head(features)
+        return {Columns.ACTION_DIST_INPUTS: self.policy_head(features)}
 
 
 def _manifest() -> DemonstrationManifest:
@@ -133,6 +143,30 @@ def test_behavior_cloning_learns_actions_and_preserves_value_head(tmp_path):
     for name, value in policy.model.state_dict().items():
         if "value" in name:
             assert torch.equal(value, value_before[name])
+
+
+def test_behavior_cloning_supports_modern_rl_module(tmp_path):
+    torch.manual_seed(4)
+    module = TinyRLModule()
+    config = ImitationConfig(
+        enabled=True,
+        collection={"episodes": 4, "max_attempts": 4},
+        pretraining={
+            "epochs": 100,
+            "batch_size": 4,
+            "learning_rate": 0.03,
+            "early_stopping_patience": 20,
+        },
+    )
+
+    result = behavior_clone_policy(
+        module,
+        _linearly_separable_dataset(),
+        config,
+        tmp_path,
+    )
+
+    assert result.validation_accuracy == pytest.approx(1.0)
 
 
 def test_dataset_reuse_rejects_schema_mismatch(tmp_path):

@@ -44,7 +44,13 @@ def _part_enabled(part: str, imitation: ImitationConfig) -> bool:
 
 
 def _policy_logits(model: Any, observations: torch.Tensor) -> torch.Tensor:
-    """Run an RLlib TorchModelV2 from its flattened policy observations."""
+    """Run either a legacy TorchModelV2 or a modern RLModule."""
+
+    if hasattr(model, "forward_train"):
+        from ray.rllib.core.columns import Columns
+
+        outputs = model.forward_train({Columns.OBS: observations})
+        return outputs[Columns.ACTION_DIST_INPUTS]
 
     logits, _ = model(
         {"obs": observations, "obs_flat": observations},
@@ -83,7 +89,7 @@ def behavior_clone_policy(
 ) -> ImitationResult:
     """Optimize policy logits and retain only configured handoff parameters."""
 
-    model = policy.model
+    model = getattr(policy, "model", policy)
     device = next(model.parameters()).device
     initial_state = copy.deepcopy(model.state_dict())
     trainable = [
@@ -215,6 +221,25 @@ def _dataset_for_run(
     return dataset
 
 
+def _trainable_policy_or_module(algorithm: Any) -> tuple[Any, bool]:
+    """Return the learner-owned RLModule or a legacy Policy."""
+
+    learner_group = getattr(algorithm, "learner_group", None)
+    if learner_group is not None:
+        if not learner_group.is_local:
+            raise RuntimeError(
+                "imitation pretraining currently requires num_learners: 0"
+            )
+        multi_module = learner_group._learner.module
+        module = (
+            multi_module.get("default_policy")
+            if hasattr(multi_module, "get")
+            else multi_module["default_policy"]
+        )
+        return module, True
+    return algorithm.get_policy(), False
+
+
 def run_imitation_pretraining(
     algorithm: Any,
     env_config: dict[str, Any],
@@ -236,12 +261,18 @@ def run_imitation_pretraining(
         imitation,
         dataset_dir,
     )
+    policy_or_module, uses_modern_module = _trainable_policy_or_module(algorithm)
     result = behavior_clone_policy(
-        algorithm.get_policy(),
+        policy_or_module,
         dataset,
         imitation,
         imitation_dir,
     )
+    if uses_modern_module:
+        algorithm.env_runner_group.sync_weights(
+            from_worker_or_learner_group=algorithm.learner_group,
+            inference_only=False,
+        )
     from theseo_anysearch.experiments.trajectory import collect_eval_episodes
     from theseo_anysearch.rllib.trainer.evaluation import EvaluationMetrics
 
