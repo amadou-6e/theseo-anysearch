@@ -329,6 +329,7 @@ class EncoderConfig(BaseModel):
     conv_channels: list[int] = Field(default=[32, 64, 64])
     latent_dim: int = 128
     profile: Literal["b0", "b1"] | None = None
+    pooling: Literal["global_avg", "spatial_2x2x2"] = "global_avg"
 
 
 class AutoencoderConfig(BaseModel):
@@ -432,6 +433,8 @@ class GardenTrainingConfig(BaseModel):
     early_stop_patience: int = 10
     pos_weight_factor: float = 0.0  # 0 = auto from batch fill rate; >0 = fixed weight for filled voxels
     focal_gamma: float = 0.0        # 0 = plain (weighted) BCE; >0 = focal loss gamma
+    dice_weight: float = 0.0
+    face_loss_weight: float = 0.0
     loss_version: Literal["positive_bce_v2"] = "positive_bce_v2"
 
 
@@ -461,6 +464,8 @@ class GardenTuneConfig(BaseModel):
     max_concurrent: int = 4
     grace_period: int = 5         # ASHA: min epochs before pruning
     reduction_factor: int = 3     # ASHA reduction factor
+    metric: Literal["val_loss", "representation_score"] = "val_loss"
+    mode: Literal["min", "max"] = "min"
     # search_space keys mirror GardenConfig sections: encoder.*, training.*
     search_space: dict[str, Any] = Field(default_factory=dict)
 

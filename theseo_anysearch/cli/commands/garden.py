@@ -340,7 +340,7 @@ def train(
             val=float("inf"),
         )
 
-        def epoch_cb(epoch: int, train_loss: float, val_loss: float) -> None:
+        def epoch_cb(epoch: int, train_loss: float, val_loss: float, val_metrics: dict[str, float]) -> None:
             progress.update(task, advance=1, train=train_loss, val=val_loss)
 
         result = run_train(
@@ -671,6 +671,7 @@ def tune(
     best_summary.add_column()
     best_summary.add_row("trials run", str(result["num_trials"]))
     best_summary.add_row("best val_loss", f"{result['best_val_loss']:.4f}")
+    best_summary.add_row(result["best_metric"], f"{result['best_metric_value']:.4f}")
     for k, v in result["best_config"].items():
         best_summary.add_row(k, str(v))
     console.print(Panel(best_summary, title="[bold]Garden tune — best trial[/bold]", title_align="left"))
@@ -711,7 +712,7 @@ def tune(
             TimeElapsedColumn(), console=console,
         ) as progress:
             task = progress.add_task("Training best", total=best_cfg.training.epochs, val=float("inf"))
-            def epoch_cb(epoch, train_loss, val_loss):
+            def epoch_cb(epoch, train_loss, val_loss, val_metrics):
                 progress.update(task, advance=1, val=val_loss)
             result_tr = run_train(model=model, train_ds=train_ds, val_ds=val_ds,
                                   cfg=best_cfg.training, approach=best_cfg.approach,
@@ -881,6 +882,8 @@ def _compute_reconstructions(grids: "np.ndarray", model_ref: str, box_radius: in
         channels=meta["conv_channels"],
         latent_dim=meta["latent_dim"],
         profile=meta.get("profile"),
+        pooling=meta.get("pooling", "global_avg"),
+        face_loss_weight=meta.get("face_loss_weight", 0.0),
     )
     ae.load_state_dict(torch.load(model_pt, map_location="cpu", weights_only=True))
     ae.eval()

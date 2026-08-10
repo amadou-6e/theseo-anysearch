@@ -13,6 +13,7 @@ The reproducible validation command is:
 python scripts/validate_voxel_encoder.py --preset r2 --epochs 30
 python scripts/validate_voxel_encoder.py --preset r3 --epochs 30
 python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_tuned/gpu-v3 --epochs 30
+python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_spatial/gpu-v4 --epochs 30
 ```
 
 The encoder is frozen. A small decoder is trained on its latent vectors, then
@@ -65,6 +66,32 @@ not be interpreted as beating `r2:v1`. The next search should rank checkpoints
 by representation metrics or a combined validation score rather than raw focal
 reconstruction loss alone.
 
+### Spatial B0 representation tuning
+
+The follow-up search preserves the final `2x2x2` spatial feature map, combines
+positive BCE with Dice and center-face auxiliary losses, and selects trials by
+a frozen linear-probe score containing both held-out and deterministic OOD
+geometry. Eight GPU trials selected Adam with batch size 128, learning rate
+`2.874e-4`, weight decay `2.435e-4`, Dice weight `0.25`, and face-loss weight
+`0.25`.
+
+| Metric | Spatial B0 | Random spatial B0 | Pretrained r2 |
+|---|---:|---:|---:|
+| Parameters | **356,248** | 356,248 | 426,880 |
+| Held-out reconstruction IoU | **0.933** | 0.508 | 0.869 |
+| Held-out occupied recall | **0.990** | 0.876 | 0.976 |
+| OOD reconstruction IoU | **0.777** | 0.530 | 0.745 |
+| OOD occupied recall | 0.936 | 0.781 | **0.976** |
+| Fill-fraction linear-probe R² | 0.977 | 0.606 | **0.990** |
+| Center-face probe accuracy | **100.00%** | 92.94% | 99.58% |
+| Relative latent change from one voxel | **0.634** | 0.433 | 0.296 |
+
+Spatial B0 clears the representation gate and improves on `r2:v1` by 0.064
+held-out IoU and 0.032 OOD IoU with 17% fewer encoder parameters. The result
+also validates the representation-oriented search metric: it selected a model
+that generalizes better even though raw reconstruction loss was no longer the
+optimization criterion.
+
 Single-threaded warm inference on the validation machine measured approximately
 2.4 ms for one r2 grid and 2.8 ms for one r3 grid on CPU. Warm GPU batches of
 128 took approximately 3.0 ms for r2 and 2.2 ms for r3, excluding host/device
@@ -82,25 +109,25 @@ Pretraining is effective and necessary. Both checkpoints retain substantially
 more occupied structure than a random encoder and respond strongly to a
 single-voxel change. The movement-relevant face probe is nearly perfect.
 
-The r2 checkpoint passes the initial representation gate for policy integration.
-Its 0.869 held-out IoU and 0.745 OOD IoU are sufficient for a first frozen-policy
-ablation, while its smaller latent and parameter count make it the safer default.
+The spatial B0 checkpoint is now the strongest 5x5x5 representation and should
+be the primary frozen-policy candidate. Its 0.933 held-out IoU and 0.777 OOD IoU
+surpass `r2:v1`, while using fewer parameters. Keep `r2:v1` as the established
+baseline for policy ablations.
 
 The r3 checkpoint is useful but does not yet meet a strict faithful-reconstruction
 standard: held-out IoU is 0.735. It should remain experimental until it is
 pretrained on more task-representative navigation and construction patches or
 its reconstruction IoU improves.
 
-RLlib integration should therefore begin with frozen `r2:v1`, keep the raw
+RLlib integration should therefore compare frozen spatial B0 with `r2:v1`, keep the raw
 `face_neighbors` or action mask available outside the latent for safety-critical
 local feasibility, and compare frozen, gradually unfrozen, and randomly
 initialized encoders. End-to-end success and sample efficiency remain separate
 gates; this validation establishes representation fidelity, not policy quality.
 
-The tuned B0 pilot does not replace `r2:v1`: it misses the r2 held-out IoU by
-0.108 and OOD IoU by 0.062. B0 remains a useful 23% smaller architecture and a
-valid tuning baseline, but it needs a representation-aligned selection metric
-or revised pooling/objective before policy integration.
+The original globally pooled B0 pilot does not replace `r2:v1`; spatial pooling
+and representation-aligned selection are the changes that close and reverse
+that gap. Policy learning remains the next required validation gate.
 
 ## Limitations
 

@@ -150,7 +150,7 @@ class VoxelResNet3D(nn.Module):
     while retaining the same conservative two-step downsampling schedule.
     """
 
-    def __init__(self, n: int, profile: str = "b0") -> None:
+    def __init__(self, n: int, profile: str = "b0", pooling: str = "global_avg") -> None:
         super().__init__()
         del n  # Adaptive pooling keeps the encoder compatible with multiple radii.
         if profile not in VOXEL_RESNET_3D_PROFILES:
@@ -163,6 +163,7 @@ class VoxelResNet3D(nn.Module):
         latent_dim = int(spec["latent_dim"])
 
         self.profile = profile
+        self.pooling = pooling
         self.latent_dim = latent_dim
         self.stem = nn.Conv3d(1, channels[0], 3, padding=1, bias=False)
         stages: list[nn.Module] = []
@@ -174,8 +175,15 @@ class VoxelResNet3D(nn.Module):
             in_ch = out_ch
         self.stages = nn.Sequential(*stages)
         self.norm = nn.GroupNorm(_group_count(channels[-1]), channels[-1])
-        self.pool = nn.AdaptiveAvgPool3d(1)
-        self.proj = nn.Linear(channels[-1], latent_dim)
+        if pooling == "global_avg":
+            self.pool = nn.AdaptiveAvgPool3d(1)
+            projection_features = channels[-1]
+        elif pooling == "spatial_2x2x2":
+            self.pool = nn.AdaptiveAvgPool3d(2)
+            projection_features = channels[-1] * 8
+        else:
+            raise ValueError(f"Unknown voxel_resnet_3d pooling: {pooling!r}")
+        self.proj = nn.Linear(projection_features, latent_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 4:
@@ -233,6 +241,7 @@ def build_encoder(
     channels: list[int],
     latent_dim: int,
     profile: str | None = None,
+    pooling: str = "global_avg",
 ) -> nn.Module:
     """Build an encoder module for the requested garden architecture.
 
@@ -255,7 +264,7 @@ def build_encoder(
     if architecture == "voxel_box_3dcnn":
         return VoxelEncoder3D(n, channels, latent_dim)
     if architecture == "voxel_resnet_3d":
-        encoder = VoxelResNet3D(n, profile or "b0")
+        encoder = VoxelResNet3D(n, profile or "b0", pooling)
         if latent_dim != encoder.latent_dim:
             raise ValueError(
                 f"voxel_resnet_3d profile {encoder.profile!r} requires latent_dim="
@@ -359,10 +368,13 @@ class VoxelAE(nn.Module):
         channels: list[int],
         latent_dim: int,
         profile: str | None = None,
+        pooling: str = "global_avg",
+        face_loss_weight: float = 0.0,
     ) -> None:
         super().__init__()
         self.architecture = architecture
-        self.encoder = build_encoder(architecture, n, channels, latent_dim, profile)
+        self.encoder = build_encoder(architecture, n, channels, latent_dim, profile, pooling)
+        self.face_head = nn.Linear(latent_dim, 6) if face_loss_weight > 0.0 else None
         if architecture in ("voxel_box_3dcnn", "voxel_resnet_3d"):
             decoder_channels = (
                 list(VOXEL_RESNET_3D_PROFILES[profile or "b0"]["channels"])
@@ -387,8 +399,10 @@ class VoxelAE(nn.Module):
         x: torch.Tensor,
         pos_weight: torch.Tensor | None = None,
         focal_gamma: float = 0.0,
+        dice_weight: float = 0.0,
+        face_loss_weight: float = 0.0,
     ) -> torch.Tensor:
-        recon, _ = self(x)
+        recon, latent = self(x)
         if self.architecture in ("voxel_box_3dcnn", "voxel_resnet_3d"):
             target = x.unsqueeze(1) if x.dim() == 4 else x
         elif self.architecture == "voxel_triplanar_2dcnn":
@@ -396,7 +410,29 @@ class VoxelAE(nn.Module):
             target = torch.stack([x[:, :, :, m], x[:, :, m, :], x[:, m, :, :]], dim=1)
         else:
             target = x.permute(0, 3, 1, 2)
-        return binary_reconstruction_loss(recon, target, pos_weight, focal_gamma)
+        loss = binary_reconstruction_loss(recon, target, pos_weight, focal_gamma)
+        if dice_weight > 0.0:
+            intersection = (recon * target).flatten(1).sum(1)
+            denominator = recon.flatten(1).sum(1) + target.flatten(1).sum(1)
+            dice_loss = 1.0 - ((2.0 * intersection + 1.0) / (denominator + 1.0)).mean()
+            loss = loss + dice_weight * dice_loss
+        if face_loss_weight > 0.0:
+            if self.face_head is None:
+                raise ValueError("face_loss_weight requires a configured face_head")
+            n = x.shape[-1]
+            c = n // 2
+            grid = x if x.dim() == 4 else x.squeeze(1)
+            face_target = torch.stack(
+                [
+                    grid[:, c - 1, c, c], grid[:, c + 1, c, c],
+                    grid[:, c, c - 1, c], grid[:, c, c + 1, c],
+                    grid[:, c, c, c - 1], grid[:, c, c, c + 1],
+                ],
+                dim=1,
+            )
+            face_loss = F.binary_cross_entropy_with_logits(self.face_head(latent), face_target)
+            loss = loss + face_loss_weight * face_loss
+        return loss
 
 
 class VoxelVAE(nn.Module):

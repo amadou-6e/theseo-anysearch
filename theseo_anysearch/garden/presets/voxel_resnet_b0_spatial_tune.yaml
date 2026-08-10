@@ -1,0 +1,67 @@
+# Representation-aligned B0 search preserving the final 2x2x2 spatial map.
+# Run: anysearch garden tune voxel_resnet_b0_spatial_tune --tag gpu-v1
+name: voxel_resnet_b0_spatial
+approach: autoencoder
+architecture: voxel_resnet_3d
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 150
+          num_boxes: [1, 8]
+          box_min_size: [2, 2, 2]
+          box_max_size: [14, 14, 14]
+          grid_size: 32
+          total_samples: 50000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 2.0
+
+encoder:
+  profile: b0
+  pooling: spatial_2x2x2
+  box_radius: 2
+  conv_channels: [24, 48, 64]
+  latent_dim: 64
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.025
+  translation_jitter: 1
+  morph_prob: 0.1
+  cutout:
+    count: 1
+    min_size: 1
+    max_size: 2
+
+training:
+  epochs: 20
+  batch_size: 128
+  optimizer: adam
+  lr: 7.4e-4
+  weight_decay: 6.0e-5
+  lr_scheduler: cosine
+  early_stop_patience: 8
+  focal_gamma: 0.0
+  dice_weight: 0.5
+  face_loss_weight: 0.25
+  loss_version: positive_bce_v2
+
+tune:
+  num_samples: 8
+  max_concurrent: 1
+  grace_period: 4
+  reduction_factor: 3
+  metric: representation_score
+  mode: max
+  search_space:
+    training:
+      lr: {loguniform: [2.0e-4, 1.5e-3]}
+      weight_decay: {loguniform: [1.0e-6, 5.0e-4]}
+      batch_size: {choice: [128, 256]}
+      dice_weight: {choice: [0.25, 0.5, 1.0]}
+      face_loss_weight: {choice: [0.1, 0.25, 0.5]}

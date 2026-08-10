@@ -215,6 +215,7 @@ def main() -> None:
             "latent_dim": meta["latent_dim"],
             "architecture": meta["architecture"],
             "profile": meta.get("profile"),
+            "pooling": meta.get("pooling", "global_avg"),
         }
         checkpoint = args.model_dir / "encoder.pt"
         model_name = f"{meta['name']}:{meta.get('tag') or 'untagged'}"
@@ -223,6 +224,7 @@ def main() -> None:
             **configs[args.preset],
             "architecture": "voxel_box_3dcnn",
             "profile": None,
+            "pooling": "global_avg",
         }
         checkpoint = Path(
             "theseo_anysearch", "garden", "pretrained", args.preset, "v1", "encoder.pt"
@@ -234,11 +236,11 @@ def main() -> None:
     ood_grids = make_ood_grids(600, n, 44)
 
     pretrained = build_encoder(
-        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"]
+        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"], cfg["pooling"]
     )
     pretrained.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
     random_encoder = build_encoder(
-        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"]
+        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"], cfg["pooling"]
     )
 
     results: dict[str, object] = {

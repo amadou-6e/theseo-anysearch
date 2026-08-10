@@ -332,6 +332,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
         conv_channels: list[int] = meta["conv_channels"]
         architecture: str = meta.get("architecture", "voxel_box_3dcnn")
         profile: str | None = meta.get("profile")
+        pooling: str = meta.get("pooling", "global_avg")
 
         self._n = 2 * box_radius + 1
         encoder = build_encoder(
@@ -340,6 +341,7 @@ class VoxelBox3DCNNPretrained(BaseVoxelTorchModel):
             channels=conv_channels,
             latent_dim=latent_dim,
             profile=profile,
+            pooling=pooling,
         )
         state = GardenStore(model_dir.parent).load_encoder_state(model_dir.name)
         encoder.load_state_dict(state)

@@ -112,14 +112,24 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
             if incoming_path.exists():
                 shutil.copy2(incoming_path, checkpoint_path)
 
-    def epoch_cb(epoch: int, train_loss: float, val_loss: float) -> None:
+    def epoch_cb(
+        epoch: int,
+        train_loss: float,
+        val_loss: float,
+        val_metrics: dict[str, float],
+    ) -> None:
         checkpoint = (
             ray_tune.Checkpoint.from_directory(checkpoint_dir)
             if checkpoint_path.exists()
             else None
         )
         ray_tune.report(
-            {"val_loss": val_loss, "train_loss": train_loss, "epoch": epoch},
+            {
+                "val_loss": val_loss,
+                "train_loss": train_loss,
+                "epoch": epoch,
+                **val_metrics,
+            },
             checkpoint=checkpoint,
         )
 
@@ -208,8 +218,8 @@ class GardenTuneRunner:
                 trainable,
                 param_space=search_space,
                 tune_config=ray_tune.TuneConfig(
-                    metric="val_loss",
-                    mode="min",
+                    metric=tc.metric,
+                    mode=tc.mode,
                     scheduler=scheduler,
                     num_samples=tc.num_samples,
                     max_concurrent_trials=tc.max_concurrent,
@@ -222,10 +232,12 @@ class GardenTuneRunner:
             )
 
         results = tuner.fit()
-        best = results.get_best_result(metric="val_loss", mode="min")
+        best = results.get_best_result(metric=tc.metric, mode=tc.mode)
         return {
             "best_config": best.config,
             "best_val_loss": best.metrics.get("val_loss"),
+            "best_metric": tc.metric,
+            "best_metric_value": best.metrics.get(tc.metric),
             "run_name": run_name,
             "num_trials": len(results),
         }

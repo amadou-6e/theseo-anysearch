@@ -51,6 +51,8 @@ def build_model(cfg: GardenConfig) -> nn.Module:
         channels=channels,
         latent_dim=latent_dim,
         profile=cfg.encoder.profile,
+        pooling=cfg.encoder.pooling,
+        face_loss_weight=cfg.training.face_loss_weight,
     )
 
 

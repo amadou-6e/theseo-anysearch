@@ -32,6 +32,13 @@ def test_b1_scales_depth_and_parameter_count_over_b0():
     assert b1_params > b0_params
 
 
+def test_spatial_pooling_preserves_final_two_cubed_map():
+    encoder = VoxelResNet3D(n=5, profile="b0", pooling="spatial_2x2x2")
+    output = encoder(torch.zeros(2, 5, 5, 5))
+    assert encoder.proj.in_features == 64 * 8
+    assert output.shape == (2, 64)
+
+
 def test_positive_weight_only_scales_occupied_voxels():
     reconstruction = torch.tensor([0.5, 0.5])
     target = torch.tensor([0.0, 1.0])
@@ -72,3 +79,22 @@ def test_b0_tuning_preset_keeps_objective_fixed():
     assert cfg.tune.max_concurrent == 1
     assert "focal_gamma" not in cfg.tune.search_space["training"]
     assert cfg.training.loss_version == "positive_bce_v2"
+
+
+def test_spatial_tuning_preset_uses_representation_score():
+    preset_path = Path(
+        "theseo_anysearch", "garden", "presets", "voxel_resnet_b0_spatial_tune.yaml"
+    )
+    cfg = load_garden_config(preset_path)
+    model = build_model(cfg)
+    loss = model.loss(
+        torch.zeros(2, 5, 5, 5),
+        pos_weight=torch.tensor([2.0]),
+        dice_weight=cfg.training.dice_weight,
+        face_loss_weight=cfg.training.face_loss_weight,
+    )
+    assert torch.isfinite(loss)
+    assert cfg.encoder.pooling == "spatial_2x2x2"
+    assert cfg.tune is not None
+    assert cfg.tune.metric == "representation_score"
+    assert cfg.tune.mode == "max"
