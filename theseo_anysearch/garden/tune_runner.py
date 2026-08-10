@@ -101,6 +101,8 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = build_model(cfg)
+    encoder_parameters = sum(parameter.numel() for parameter in model.encoder.parameters())
+    model_parameters = sum(parameter.numel() for parameter in model.parameters())
 
     checkpoint_dir = Path(ray_tune.get_context().get_trial_dir()) / "trainer_checkpoint"
     checkpoint_path = checkpoint_dir / "trainer.pt"
@@ -128,6 +130,9 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
                 "val_loss": val_loss,
                 "train_loss": train_loss,
                 "epoch": epoch,
+                "encoder_parameters": encoder_parameters,
+                "encoder_megabytes_fp32": encoder_parameters * 4 / (1024 * 1024),
+                "model_parameters": model_parameters,
                 **val_metrics,
             },
             checkpoint=checkpoint,

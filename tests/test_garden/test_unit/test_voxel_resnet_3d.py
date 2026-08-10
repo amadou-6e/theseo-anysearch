@@ -68,12 +68,39 @@ def test_profile_config_allows_latent_override(tmp_path: Path):
     assert build_model(cfg).encoder.latent_dim == 32
 
 
-def test_profile_config_rejects_channel_drift(tmp_path: Path):
+def test_profile_config_allows_width_and_depth_override(tmp_path: Path):
     preset_path = Path("theseo_anysearch", "garden", "presets", "voxel_resnet_b0.yaml")
-    raw = preset_path.read_text().replace("conv_channels: [24, 48, 64]", "conv_channels: [16, 32, 48]")
+    raw = preset_path.read_text().replace(
+        "conv_channels: [24, 48, 64]",
+        "conv_channels: [16, 32, 48]\n  residual_blocks: [1, 2, 1]",
+    )
     changed_path = tmp_path / "changed.yaml"
     changed_path.write_text(raw)
-    with pytest.raises(ValueError, match="requires conv_channels"):
+    cfg = load_garden_config(changed_path)
+    model = build_model(cfg)
+    assert model.encoder.proj.in_features == 48
+    assert len(model.encoder.stages[1]) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("conv_channels", "[16, 32]", "three positive conv_channels"),
+        ("residual_blocks", "[1, 0, 1]", "three positive residual_blocks"),
+    ],
+)
+def test_profile_config_rejects_invalid_topology(
+    tmp_path: Path, field: str, value: str, message: str
+):
+    preset_path = Path("theseo_anysearch", "garden", "presets", "voxel_resnet_b0.yaml")
+    raw = preset_path.read_text()
+    if field == "conv_channels":
+        raw = raw.replace("conv_channels: [24, 48, 64]", f"conv_channels: {value}")
+    else:
+        raw = raw.replace("latent_dim: 64", f"residual_blocks: {value}\n  latent_dim: 64")
+    changed_path = tmp_path / f"changed_{field}.yaml"
+    changed_path.write_text(raw)
+    with pytest.raises(ValueError, match=message):
         load_garden_config(changed_path)
 
 
@@ -119,3 +146,5 @@ def test_spatial_tuning_preset_uses_representation_score():
     assert cfg.tune.search_space["encoder"]["latent_dim"] == {
         "choice": [16, 24, 32, 48, 64]
     }
+    assert len(cfg.tune.search_space["encoder"]["conv_channels"]["choice"]) == 4
+    assert len(cfg.tune.search_space["encoder"]["residual_blocks"]["choice"]) == 3

@@ -25,6 +25,7 @@ encoder:
   pooling: spatial_2x2x2
   box_radius: 2
   conv_channels: [24, 48, 64]
+  residual_blocks: [1, 1, 1]
   latent_dim: 64
 
 augmentation:
@@ -60,6 +61,17 @@ tune:
   mode: max
   search_space:
     encoder:
+      conv_channels:
+        choice:
+          - [12, 24, 32]
+          - [16, 32, 48]
+          - [20, 40, 56]
+          - [24, 48, 64]
+      residual_blocks:
+        choice:
+          - [1, 1, 1]
+          - [1, 2, 1]
+          - [1, 1, 2]
       latent_dim: {choice: [16, 24, 32, 48, 64]}
     training:
       # gpu-v4's winner was in the lowest 18% of the previous log range.

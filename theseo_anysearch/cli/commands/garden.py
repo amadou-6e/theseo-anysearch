@@ -884,6 +884,7 @@ def _compute_reconstructions(grids: "np.ndarray", model_ref: str, box_radius: in
         profile=meta.get("profile"),
         pooling=meta.get("pooling", "global_avg"),
         face_loss_weight=meta.get("face_loss_weight", 0.0),
+        residual_blocks=meta.get("residual_blocks"),
     )
     ae.load_state_dict(torch.load(model_pt, map_location="cpu", weights_only=True))
     ae.eval()

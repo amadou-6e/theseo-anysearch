@@ -327,6 +327,7 @@ class EncoderConfig(BaseModel):
     box_radius: int = 2
     box_radii: list[int] | None = None  # if set, trains on all resolutions simultaneously
     conv_channels: list[int] = Field(default=[32, 64, 64])
+    residual_blocks: list[int] | None = None
     latent_dim: int = 128
     profile: Literal["b0", "b1"] | None = None
     pooling: Literal["global_avg", "spatial_2x2x2"] = "global_avg"
@@ -532,16 +533,13 @@ class GardenConfig(BaseModel):
             raise ValueError("voxel_resnet_3d currently supports approach='autoencoder'")
         if self.encoder.profile is None:
             raise ValueError("voxel_resnet_3d requires encoder.profile")
-        expected = {
-            "b0": ([24, 48, 64], 64),
-            "b1": ([32, 64, 80], 96),
-        }
-        channels, _default_latent_dim = expected[self.encoder.profile]
-        if self.encoder.conv_channels != channels:
-            raise ValueError(
-                f"voxel_resnet_3d profile {self.encoder.profile!r} requires "
-                f"conv_channels={channels}"
-            )
+        if len(self.encoder.conv_channels) != 3 or any(c <= 0 for c in self.encoder.conv_channels):
+            raise ValueError("voxel_resnet_3d requires three positive conv_channels")
+        if self.encoder.residual_blocks is not None:
+            if len(self.encoder.residual_blocks) != 3 or any(
+                count <= 0 for count in self.encoder.residual_blocks
+            ):
+                raise ValueError("voxel_resnet_3d requires three positive residual_blocks")
         return self
 
 

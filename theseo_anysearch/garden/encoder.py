@@ -53,6 +53,7 @@ def build_model(cfg: GardenConfig) -> nn.Module:
         profile=cfg.encoder.profile,
         pooling=cfg.encoder.pooling,
         face_loss_weight=cfg.training.face_loss_weight,
+        residual_blocks=cfg.encoder.residual_blocks,
     )
 
 

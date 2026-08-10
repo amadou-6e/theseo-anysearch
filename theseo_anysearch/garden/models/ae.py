@@ -156,6 +156,8 @@ class VoxelResNet3D(nn.Module):
         profile: str = "b0",
         pooling: str = "global_avg",
         latent_dim: int | None = None,
+        channels: list[int] | tuple[int, ...] | None = None,
+        block_counts: list[int] | tuple[int, ...] | None = None,
     ) -> None:
         super().__init__()
         del n  # Adaptive pooling keeps the encoder compatible with multiple radii.
@@ -163,9 +165,11 @@ class VoxelResNet3D(nn.Module):
             choices = ", ".join(sorted(VOXEL_RESNET_3D_PROFILES))
             raise ValueError(f"Unknown voxel_resnet_3d profile {profile!r}; expected one of: {choices}")
         spec = VOXEL_RESNET_3D_PROFILES[profile]
-        channels = tuple(spec["channels"])
-        block_counts = tuple(spec["blocks"])
+        channels = tuple(spec["channels"] if channels is None else channels)
+        block_counts = tuple(spec["blocks"] if block_counts is None else block_counts)
         strides = tuple(spec["strides"])
+        if len(channels) != len(strides) or len(block_counts) != len(strides):
+            raise ValueError("channels and block_counts must match the three-stage profile")
         latent_dim = int(spec["latent_dim"] if latent_dim is None else latent_dim)
         if latent_dim <= 0:
             raise ValueError(f"latent_dim must be positive, got {latent_dim}")
@@ -250,6 +254,7 @@ def build_encoder(
     latent_dim: int,
     profile: str | None = None,
     pooling: str = "global_avg",
+    residual_blocks: list[int] | None = None,
 ) -> nn.Module:
     """Build an encoder module for the requested garden architecture.
 
@@ -272,7 +277,14 @@ def build_encoder(
     if architecture == "voxel_box_3dcnn":
         return VoxelEncoder3D(n, channels, latent_dim)
     if architecture == "voxel_resnet_3d":
-        return VoxelResNet3D(n, profile or "b0", pooling, latent_dim)
+        return VoxelResNet3D(
+            n,
+            profile or "b0",
+            pooling,
+            latent_dim,
+            channels,
+            residual_blocks,
+        )
     if architecture == "voxel_box_2dcnn":
         return VoxelEncoder2D(n, channels, latent_dim)
     if architecture == "voxel_triplanar_2dcnn":
@@ -372,18 +384,22 @@ class VoxelAE(nn.Module):
         profile: str | None = None,
         pooling: str = "global_avg",
         face_loss_weight: float = 0.0,
+        residual_blocks: list[int] | None = None,
     ) -> None:
         super().__init__()
         self.architecture = architecture
-        self.encoder = build_encoder(architecture, n, channels, latent_dim, profile, pooling)
+        self.encoder = build_encoder(
+            architecture,
+            n,
+            channels,
+            latent_dim,
+            profile,
+            pooling,
+            residual_blocks,
+        )
         self.face_head = nn.Linear(latent_dim, 6) if face_loss_weight > 0.0 else None
         if architecture in ("voxel_box_3dcnn", "voxel_resnet_3d"):
-            decoder_channels = (
-                list(VOXEL_RESNET_3D_PROFILES[profile or "b0"]["channels"])
-                if architecture == "voxel_resnet_3d"
-                else channels
-            )
-            self.decoder = VoxelDecoder3D(n, decoder_channels, latent_dim)
+            self.decoder = VoxelDecoder3D(n, channels, latent_dim)
         elif architecture == "voxel_triplanar_2dcnn":
             self.decoder = VoxelDecoder2D(n, channels, latent_dim, out_channels=3)
         else:  # voxel_box_2dcnn

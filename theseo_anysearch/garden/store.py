@@ -193,6 +193,7 @@ class GardenStore:
             "box_radius": cfg.encoder.box_radius,
             "box_radii": cfg.encoder.box_radii,
             "conv_channels": cfg.encoder.conv_channels,
+            "residual_blocks": cfg.encoder.residual_blocks,
             "profile": cfg.encoder.profile,
             "pooling": cfg.encoder.pooling,
             "loss_version": cfg.training.loss_version,
