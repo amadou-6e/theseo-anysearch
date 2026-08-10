@@ -106,6 +106,7 @@ staging:
       completion:
         type: any
         max_iterations: 175
+        on_max_iterations: stop
         conditions:
           - type: performance
             metric: evaluation_success_rate

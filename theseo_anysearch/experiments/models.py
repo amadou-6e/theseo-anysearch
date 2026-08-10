@@ -303,6 +303,7 @@ class StageCompletionConfig(BaseModel):
     callable: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     max_iterations: int | None = Field(default=None, ge=1)
+    on_max_iterations: Literal["advance", "stop", "error"] | None = None
 
     @model_validator(mode="after")
     def validate_shape(self) -> "StageCompletionConfig":
@@ -318,6 +319,15 @@ class StageCompletionConfig(BaseModel):
             raise ValueError("not completion requires condition")
         if self.type == "python" and not self.callable:
             raise ValueError("python completion requires callable")
+        if self.max_iterations is not None and self.on_max_iterations is None:
+            raise ValueError(
+                "completion.max_iterations requires an explicit "
+                "on_max_iterations: advance, stop, or error"
+            )
+        if self.max_iterations is None and self.on_max_iterations is not None:
+            raise ValueError(
+                "completion.on_max_iterations requires max_iterations"
+            )
         return self
 
     def iteration_limit(self) -> int | None:
@@ -344,6 +354,7 @@ class TrainingStageConfig(BaseModel):
     name: str = Field(min_length=1)
     completion: StageCompletionConfig
     env: dict[str, Any] = Field(default_factory=dict)
+    training: dict[str, Any] = Field(default_factory=dict)
     evaluation: dict[str, Any] = Field(default_factory=dict)
     algorithm_config: dict[str, Any] = Field(default_factory=dict)
     replay_transition: Literal["clear", "preserve"] | None = None
@@ -441,6 +452,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
                 "observation",
                 "action",
             }
+            replay_algorithms = {"dqn", "rainbow", "sac", "td3", "ddpg"}
             for stage in self.staging.stages:
                 changed = immutable_env_paths.intersection(stage.env)
                 geometry = stage.env.get("geometry")
@@ -451,10 +463,49 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
                     raise ValueError(
                         f"stage '{stage.name}' changes policy-contract fields: {fields}"
                     )
-                merged_env = self.env.model_dump(mode="python")
-                _merge_stage_overrides(merged_env, stage.env)
-                EnvConfig.model_validate(merged_env)
+                changed_training = {"algorithm", "model"}.intersection(stage.training)
+                if changed_training:
+                    fields = ", ".join(sorted(changed_training))
+                    raise ValueError(
+                        f"stage '{stage.name}' changes policy-contract training "
+                        f"fields: {fields}"
+                    )
+                transition = stage.replay_transition or self.staging.replay_transition
+                if (
+                    transition == "preserve"
+                    and self.training.algorithm.lower() in replay_algorithms
+                ):
+                    raise ValueError(
+                        f"stage '{stage.name}' requests replay_transition='preserve', "
+                        f"but {self.training.algorithm} checkpoints do not guarantee "
+                        "replay-buffer preservation; use 'clear'"
+                    )
+                self._resolved_stage_payload(stage, completed_iterations=0)
         return self
+
+    def _resolved_stage_payload(
+        self,
+        stage: TrainingStageConfig,
+        *,
+        completed_iterations: int,
+    ) -> dict[str, Any]:
+        """Build and eagerly validate one base-relative stage configuration."""
+        raw = self.model_dump(by_alias=True, mode="python")
+        raw.pop("staging", None)
+        _merge_stage_overrides(raw["env"], stage.env)
+        _merge_stage_overrides(raw["training"], stage.training)
+        _merge_stage_overrides(raw["evaluation"], stage.evaluation)
+        _merge_stage_overrides(raw["algorithm_config"], stage.algorithm_config)
+        limit = stage.completion.iteration_limit()
+        if limit is None:
+            raise RuntimeError("stage completion has no finite iteration limit")
+        raw["training"]["iterations"] = completed_iterations + limit
+
+        from theseo_anysearch.experiments.loader import _resolve_typed_configs
+
+        resolved = _resolve_typed_configs(raw)
+        ExperimentConfig(**resolved)
+        return resolved
 
     def stage_experiment(
         self,
@@ -466,19 +517,10 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
         if self.staging is None or not self.staging.enabled:
             return self
         stage = self.staging.stages[stage_index]
-        raw = self.model_dump(by_alias=True, mode="python")
-        raw.pop("staging", None)
-        _merge_stage_overrides(raw["env"], stage.env)
-        _merge_stage_overrides(raw["evaluation"], stage.evaluation)
-        _merge_stage_overrides(raw["algorithm_config"], stage.algorithm_config)
-        limit = stage.completion.iteration_limit()
-        if limit is None:  # guarded by TrainingStageConfig validation
-            raise RuntimeError("stage completion has no finite iteration limit")
-        raw["training"]["iterations"] = completed_iterations + limit
-
-        from theseo_anysearch.experiments.loader import _resolve_typed_configs
-
-        return ExperimentConfig(**_resolve_typed_configs(raw))
+        return ExperimentConfig(**self._resolved_stage_payload(
+            stage,
+            completed_iterations=completed_iterations,
+        ))
 
     @property
     def run_output_dir(self) -> Path:
