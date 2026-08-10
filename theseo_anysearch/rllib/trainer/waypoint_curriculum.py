@@ -237,9 +237,14 @@ class WaypointCurriculum:
         return transition
     def sample(self, env_config: dict[str, Any]) -> tuple[Waypoint, Waypoint]:
         """Sample the next valid pair using the configured difficulty strategy."""
-        if self.config.difficulty.mode == "monotonic_distance":
+        mode = self.config.difficulty.mode
+        if mode == "random":
+            return self._sample_environment_pair(env_config)
+        if mode == "monotonic_distance":
             return self._sample_monotonic_distance(env_config)
-        return self._sample_environment_pair(env_config)
+        raise NotImplementedError(
+            f"difficulty.mode={mode!r} has no sampling implementation"
+        )
 
     def _sample_environment_pair(
         self,

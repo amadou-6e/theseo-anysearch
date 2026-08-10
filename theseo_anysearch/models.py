@@ -111,18 +111,27 @@ class WaypointCurriculumConfig(BaseModel):
                 "enabled waypoint_curriculum requires initial_start and initial_goal"
             )
         if self.completion_mode == "continue_route":
-            if self.enabled and self.initial_start is None:
-                raise ValueError("enabled waypoint_curriculum requires initial_start")
-            if self.route_length is None:
-                raise ValueError("continue_route requires route_length")
-            if self.difficulty.mode != "segment_distance":
-                raise ValueError(
-                    "continue_route requires difficulty.mode: segment_distance"
-                )
-            if self.difficulty.initial_distance is None:
-                raise ValueError("segment_distance requires initial_distance")
+            if self.enabled:
+                if self.initial_start is None:
+                    raise ValueError("enabled waypoint_curriculum requires initial_start")
+                if self.route_length is None:
+                    raise ValueError("continue_route requires route_length")
+                if self.difficulty.mode != "segment_distance":
+                    raise ValueError(
+                        "continue_route requires difficulty.mode: segment_distance"
+                    )
+                if self.difficulty.initial_distance is None:
+                    raise ValueError("segment_distance requires initial_distance")
         elif self.route_length is not None:
             raise ValueError("route_length is only valid with continue_route")
+        if (
+            self.difficulty.mode == "segment_distance"
+            and self.completion_mode != "continue_route"
+        ):
+            raise ValueError(
+                "difficulty.mode: segment_distance is only valid with "
+                "completion_mode: continue_route"
+            )
         if (
             self.initial_start is not None
             and self.initial_goal is not None

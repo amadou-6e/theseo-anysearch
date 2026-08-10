@@ -47,6 +47,51 @@ def test_sampled_route_has_exact_total_and_segment_lengths():
     assert route_distance(route, "discrete_18") == 17
 
 
+def test_disabled_continue_route_curriculum_does_not_require_route_fields():
+    """A disabled curriculum should not force route_length/difficulty setup,
+    matching the leniency already granted to a disabled terminate_episode
+    curriculum."""
+
+    config = WaypointCurriculumConfig.model_validate({
+        "enabled": False,
+        "completion_mode": "continue_route",
+    })
+    assert config.route_length is None
+
+
+def test_enabled_continue_route_curriculum_still_requires_route_fields():
+    with pytest.raises(ValueError, match="continue_route requires route_length"):
+        WaypointCurriculumConfig.model_validate({
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [16, 16, 16],
+        })
+
+
+def test_segment_distance_difficulty_requires_continue_route():
+    with pytest.raises(ValueError, match="segment_distance is only valid with"):
+        WaypointCurriculumConfig.model_validate({
+            "enabled": True,
+            "completion_mode": "terminate_episode",
+            "initial_start": [16, 16, 16],
+            "initial_goal": [18, 18, 18],
+            "difficulty": {"mode": "segment_distance", "initial_distance": 2},
+        })
+
+
+def test_unimplemented_difficulty_mode_raises_instead_of_falling_back():
+    config = WaypointCurriculumConfig.model_validate({
+        "enabled": True,
+        "initial_start": [16, 16, 16],
+        "initial_goal": [18, 18, 18],
+        "difficulty": {"mode": "goal_distance"},
+    })
+    curriculum = WaypointCurriculum(config)
+
+    with pytest.raises(NotImplementedError, match="goal_distance"):
+        curriculum.sample({"grid_size": 32})
+
+
 def test_continue_route_curriculum_generates_initial_stage():
     config = WaypointCurriculumConfig.model_validate({
         "enabled": True,
