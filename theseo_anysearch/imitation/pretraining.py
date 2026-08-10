@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,17 @@ from theseo_anysearch.imitation.dataset import (
     load_compatible_dataset,
     save_dataset,
 )
-from theseo_anysearch.imitation.models import ImitationConfig, ImitationResult
+from theseo_anysearch.imitation.models import (
+    DemonstrationManifest,
+    ImitationConfig,
+    ImitationResult,
+)
+from theseo_anysearch.imitation.cache import (
+    cache_key_lock,
+    load_cached_pretraining,
+    pretraining_cache_key,
+    publish_cached_pretraining,
+)
 
 
 def _parameter_part(name: str) -> str:
@@ -219,24 +230,41 @@ def _dataset_for_run(
 ) -> DemonstrationDataset:
     """Reuse a compatible run dataset or collect a new one."""
 
-    manifest_path = dataset_dir.joinpath("manifest.json")
-    arrays_path = dataset_dir.joinpath("demonstrations.npz")
-    if imitation.collection.reuse_dataset and manifest_path.exists() and arrays_path.exists():
-        env = VoxelEnv(env_config)
-        preprocessor = ModelCatalog.get_preprocessor_for_space(env.observation_space)
-        expected = dataset_fingerprint(
-            env_config,
-            imitation,
-            int(np.prod(preprocessor.shape)),
-            ([int(value) for value in env.action_space.nvec]
-             if hasattr(env.action_space, "nvec") else int(env.action_space.n)),
-        )
-        env.close()
-        return load_compatible_dataset(dataset_dir, expected)
+    env = VoxelEnv(env_config)
+    preprocessor = ModelCatalog.get_preprocessor_for_space(env.observation_space)
+    expected = dataset_fingerprint(
+        env_config,
+        imitation,
+        int(np.prod(preprocessor.shape)),
+        (
+            [int(value) for value in env.action_space.nvec]
+            if hasattr(env.action_space, "nvec")
+            else int(env.action_space.n)
+        ),
+    )
+    env.close()
+    lock_dir = dataset_dir.parent.joinpath(".imitation_dataset_locks")
+    with cache_key_lock(
+        lock_dir,
+        f"dataset-{expected}",
+        imitation.cache.lock_timeout_seconds,
+    ):
+        manifest_path = dataset_dir.joinpath("manifest.json")
+        arrays_path = dataset_dir.joinpath("demonstrations.npz")
+        if (
+            imitation.collection.reuse_dataset
+            and manifest_path.exists()
+            and arrays_path.exists()
+        ):
+            stored_manifest = DemonstrationManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if stored_manifest.fingerprint == expected:
+                return load_compatible_dataset(dataset_dir, expected)
 
-    dataset = collect_demonstrations(env_config, imitation)
-    save_dataset(dataset, dataset_dir)
-    return dataset
+        dataset = collect_demonstrations(env_config, imitation)
+        save_dataset(dataset, dataset_dir)
+        return dataset
 
 
 def _trainable_policy_or_module(algorithm: Any) -> tuple[Any, bool]:
@@ -280,12 +308,54 @@ def run_imitation_pretraining(
         dataset_dir,
     )
     policy_or_module, uses_modern_module = _trainable_policy_or_module(algorithm)
-    result = behavior_clone_policy(
-        policy_or_module,
-        dataset,
-        imitation,
-        imitation_dir,
-    )
+    model = getattr(policy_or_module, "model", policy_or_module)
+    result: ImitationResult | None = None
+    cache_key: str | None = None
+    cache = imitation.cache
+    if cache.enabled:
+        cache_dir = (
+            Path(cache.directory).resolve()
+            if cache.directory
+            else run_dir.parent.joinpath("imitation_cache")
+        )
+        cache_key, contract = pretraining_cache_key(
+            model,
+            dataset.manifest,
+            imitation,
+            policy_id="default_policy",
+        )
+        with cache_key_lock(cache_dir, cache_key, cache.lock_timeout_seconds):
+            entry = cache_dir.joinpath(cache_key)
+            if cache.refresh and entry.is_dir():
+                shutil.rmtree(entry)
+            if not cache.refresh:
+                result = load_cached_pretraining(
+                    model,
+                    cache_dir,
+                    cache_key,
+                    contract,
+                    imitation_dir,
+                )
+            if result is None:
+                result = behavior_clone_policy(
+                    policy_or_module,
+                    dataset,
+                    imitation,
+                    imitation_dir,
+                ).model_copy(update={"cache_key": cache_key})
+                publish_cached_pretraining(
+                    cache_dir,
+                    cache_key,
+                    contract,
+                    result,
+                )
+    else:
+        result = behavior_clone_policy(
+            policy_or_module,
+            dataset,
+            imitation,
+            imitation_dir,
+        )
     if uses_modern_module:
         algorithm.env_runner_group.sync_weights(
             from_worker_or_learner_group=algorithm.learner_group,

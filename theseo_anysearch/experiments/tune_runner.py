@@ -422,6 +422,29 @@ def _experiment_trainable(
             new_model,
             "env":
             trial_env,
+            "imitation": base_settings.imitation.model_copy(
+                update={
+                    "cache": base_settings.imitation.cache.model_copy(
+                        update={
+                            "enabled": (
+                                True
+                                if base_settings.imitation.cache.enabled is None
+                                else base_settings.imitation.cache.enabled
+                            ),
+                            "directory": (
+                                base_settings.imitation.cache.directory
+                                or str(
+                                    Path(
+                                        experiment_dict["experiment"]["output_dir"],
+                                        experiment_dict["experiment"]["name"],
+                                        "pretraining_cache",
+                                    )
+                                )
+                            ),
+                        }
+                    )
+                }
+            ),
         })
 
     # ------------------------------------------------------------------ #
@@ -465,6 +488,16 @@ def _experiment_trainable(
             "trial_id": output_trial_id,
             "evaluation_status": result.evaluation_status,
         }
+        imitation_result = getattr(trainer, "_imitation_result", None)
+        if imitation_result is not None:
+            payload.update(
+                {
+                    "imitation_cache_hit": float(imitation_result.cache_hit),
+                    "imitation_validation_accuracy": imitation_result.validation_accuracy,
+                    "imitation_validation_loss": imitation_result.best_validation_loss,
+                    "imitation_cache_key": imitation_result.cache_key or "",
+                }
+            )
         sanitized = _selected_metric(
             payload,
             metric,
