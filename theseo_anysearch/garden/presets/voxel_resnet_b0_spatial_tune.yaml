@@ -60,8 +60,12 @@ tune:
   mode: max
   search_space:
     training:
-      lr: {loguniform: [2.0e-4, 1.5e-3]}
-      weight_decay: {loguniform: [1.0e-6, 5.0e-4]}
-      batch_size: {choice: [128, 256]}
-      dice_weight: {choice: [0.25, 0.5, 1.0]}
+      # gpu-v4's winner was in the lowest 18% of the previous log range.
+      lr: {loguniform: [5.0e-5, 1.5e-3]}
+      # Its weight decay was in the highest 12% of the previous log range.
+      weight_decay: {loguniform: [1.0e-6, 2.0e-3]}
+      # All three leading trials selected the previous lower bound of 128.
+      batch_size: {choice: [64, 128, 256]}
+      # Two of the top three selected the previous lower bound of 0.25.
+      dice_weight: {choice: [0.0, 0.1, 0.25, 0.5, 1.0]}
       face_loss_weight: {choice: [0.1, 0.25, 0.5]}
