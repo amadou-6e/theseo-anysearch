@@ -715,7 +715,7 @@ class TestTrainerRegistry:
         from theseo_anysearch.rllib.algorithms.registry import registered_algorithms
 
         available = registered_algorithms()
-        for name in ("ppo", "appo", "sac", "dqn", "rainbow"):
+        for name in ("ppo", "sac", "dqn", "rainbow"):
             assert name in available, f"'{name}' not in the algorithm registry"
 
     def test_all_continuous_stubs_registered(self):
