@@ -9,6 +9,7 @@ from theseo_anysearch.environments.task import TaskConfig
 from theseo_anysearch.settings.compatibility import NestedFieldAccessMixin
 from theseo_anysearch.settings.environment.action import ActionConfig
 from theseo_anysearch.settings.environment.agent import AgentConfig, HunterAndHuntedConfig
+from theseo_anysearch.settings.environment.curriculum import WaypointCurriculumConfig
 from theseo_anysearch.settings.environment.geometry import GeometryConfig
 from theseo_anysearch.settings.environment.observation import ObservationConfig
 from theseo_anysearch.settings.environment.rewards import RewardConfig
@@ -60,6 +61,10 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     trail_mode: bool = Field(True, description="Fill each entered voxel for legacy trail behavior.")
     target_fill: int | None = Field(default=None, ge=0, description="Optional target number of agent-filled voxels.")
     waypoints_file: str | None = Field(None, description="Path to fixed start and goal waypoints.")
+    waypoint_curriculum: WaypointCurriculumConfig = Field(
+        default_factory=WaypointCurriculumConfig,
+        description="Progressive waypoint or segmented-route curriculum.",
+    )
     task: TaskConfig = Field(default_factory=TaskConfig, description="Task success and termination contract.")
     geometry: GeometryConfig = Field(default_factory=GeometryConfig, description="Geometry and voxel-grid settings.")
     observation: ObservationConfig = Field(default_factory=ObservationConfig, description="Policy observation settings.")
@@ -182,6 +187,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "trail_mode": self.trail_mode,
             "target_fill": self.target_fill,
             "waypoints_file": self.waypoints_file,
+            "waypoint_curriculum": self.waypoint_curriculum.model_dump(mode="json"),
             "step_cost": self.rewards__step_cost,
             "collision_cost": self.rewards__collision_cost,
             "goal_reward": self.rewards__goal_reward,

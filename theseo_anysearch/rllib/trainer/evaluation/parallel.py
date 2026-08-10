@@ -376,6 +376,7 @@ def configure_rllib_evaluation(
     *,
     num_env_runners: int,
     parallel_to_training: bool = False,
+    frequency: int = 1,
     env_config: dict[str, Any] | None = None,
     episodes: int = 1,
     seed: int = 42,
@@ -391,7 +392,7 @@ def configure_rllib_evaluation(
         num_envs_per_env_runner=num_envs_per_env_runner,
     )
     options = {
-        "evaluation_interval": 1,
+        "evaluation_interval": frequency,
         "evaluation_num_env_runners": num_env_runners,
         "evaluation_parallel_to_training": parallel_to_training,
         "evaluation_config": {"explore": False},

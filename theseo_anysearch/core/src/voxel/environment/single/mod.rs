@@ -55,6 +55,8 @@ pub struct VoxelEnv {
     trail_mode: bool,
     max_steps: u32,
     steps: u32,
+    segment_steps: u32,
+    segment_length: u32,
     /// Side length of the cubic grid (coords in [1, grid_size]³). Default 32.
     pub grid_size: u16,
     // --- Navigation state ---
@@ -108,6 +110,8 @@ impl VoxelEnv {
             trail_mode: false,
             max_steps,
             steps: 0,
+            segment_steps: 0,
+            segment_length: 0,
             grid_size: 32,
             cursor: (1, 1, 1),
             fixed_start: None,
@@ -256,10 +260,48 @@ impl VoxelEnv {
     }
     /// Fix start and goal positions (overrides random selection on reset).
     pub fn set_waypoints(&mut self, start: Coord, goal: Coord) {
-        self.fixed_start = Some(start);
-        self.fixed_goal = Some(goal);
+        self.set_waypoints_with_segment_length(start, goal, 0);
     }
 
+    pub fn set_waypoints_with_segment_length(
+        &mut self,
+        start: Coord,
+        goal: Coord,
+        segment_length: u32,
+    ) {
+        self.fixed_start = Some(start);
+        self.fixed_goal = Some(goal);
+        self.segment_steps = 0;
+        self.segment_length = segment_length;
+    }
+
+    pub fn set_active_goal_with_segment_length(
+        &mut self,
+        goal: Coord,
+        segment_length: u32,
+    ) -> VoxelObservation {
+        self.active_goal = Some(goal);
+        self.segment_steps = 0;
+        self.segment_length = segment_length;
+        self.prev_goal_dist_l2 = l2(self.cursor, goal);
+        let _ = self.world.set_block(
+            goal,
+            Block {
+                kind: BLOCK_KIND_GOAL,
+                active: false,
+                reward_weight: 0.0,
+            },
+        );
+        self.observation()
+    }
+
+    pub fn observation(&self) -> VoxelObservation {
+        VoxelObservation {
+            filled: self.agent_filled(),
+            steps_remaining: self.max_steps.saturating_sub(self.steps),
+            goal_distance: self.active_goal.map(|goal| manhattan(self.cursor, goal)),
+        }
+    }
     /// Clear fixed waypoints so random selection resumes.
     pub fn clear_waypoints(&mut self) {
         self.fixed_start = None;

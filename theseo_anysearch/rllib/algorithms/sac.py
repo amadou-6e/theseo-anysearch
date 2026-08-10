@@ -113,6 +113,7 @@ class SACTrainer(Trainer):
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
+            frequency=config.evaluation.frequency,
             env_config=env_config,
             episodes=config.evaluation.episodes,
             seed=config.evaluation.seed,

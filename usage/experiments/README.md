@@ -24,7 +24,7 @@ Environment representation is grouped by responsibility:
 env:
   seed: 42
   agent_count: 1
-  max_steps: 200
+  max_steps: 96  # 32 + 32 + 32
   trail_mode: true
   geometry:
     stl_path: usage/geometries/stepped_terrain.stl

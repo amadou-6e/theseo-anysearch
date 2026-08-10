@@ -8,7 +8,7 @@ experiment:
 
 env:
   agent_count: 1
-  max_steps: 300
+  max_steps: 96
   trail_mode: true
 
   geometry:

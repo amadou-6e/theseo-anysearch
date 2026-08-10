@@ -27,7 +27,7 @@ sweep:
       encoder_depth: 3
     env:
       agent_count: 4
-      max_steps: 200
+      max_steps: 96
 
       geometry:
         scale: 40.0
@@ -60,7 +60,7 @@ sweep:
 
     - name: ppo-ramp-spiral
       env:
-        max_steps: 400
+        max_steps: 96
         geometry:
           stl_path: usage/geometries/ramp_spiral.stl
           scale: 25.0

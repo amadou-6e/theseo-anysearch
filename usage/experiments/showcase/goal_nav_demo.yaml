@@ -8,7 +8,7 @@ experiment:
 
 env:
   agent_count: 1
-  max_steps: 200
+  max_steps: 96
   seed: 42
 
   # Navigation mode: no trail, agent must reach the goal position.

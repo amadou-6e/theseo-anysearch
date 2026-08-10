@@ -10,6 +10,7 @@ impl Environment for VoxelEnv {
 
     fn reset(&mut self, seed: u64) -> Self::Observation {
         self.steps = 0;
+        self.segment_steps = 0;
         self.consecutive_collisions = 0;
         self.action_history.clear();
         self.last_reward_breakdown.clear();
@@ -106,6 +107,7 @@ impl Environment for VoxelEnv {
     fn step(&mut self, action: Self::Action) -> StepResult<Self::Observation> {
         let is_collision = matches!(action, VoxelAction::Collision);
         self.steps += 1;
+        self.segment_steps += 1;
         if is_collision {
             self.consecutive_collisions += 1;
         } else {
@@ -237,6 +239,8 @@ impl Environment for VoxelEnv {
             previous_goal_distance: f64::from(self.prev_goal_dist_l2),
             goal_distance: f64::from(new_l2),
             standard_reward: f64::from(standard_reward),
+            segment_step: u64::from(self.segment_steps),
+            segment_length: u64::from(self.segment_length),
             parameters_json: std::ptr::null(),
             parameters_json_len: 0,
         };

@@ -8,7 +8,7 @@ experiment:
 
 env:
   agent_count: 1
-  max_steps: 300
+  max_steps: 96
   seed: 42
 
   # Trail mode: every cell the cursor moves into is automatically filled.

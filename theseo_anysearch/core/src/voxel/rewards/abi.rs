@@ -24,6 +24,8 @@ pub struct RewardContextV2 {
     pub previous_goal_distance: f64,
     pub goal_distance: f64,
     pub standard_reward: f64,
+    pub segment_step: u64,
+    pub segment_length: u64,
     pub parameters_json: *const u8,
     pub parameters_json_len: usize,
 }

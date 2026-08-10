@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.test_environments.test_integration._voxel_validity_support import (
+    ACTION_PLUS_X,
     ACTION_PLUS_Y,
     ACTION_PLUS_Z,
     GOAL_REWARD,
@@ -72,6 +73,38 @@ class TestTaskContract:
         assert info["termination_reason"] == "step_limit"
         assert info["reward_breakdown"]["distance_progress"] == 0.0
         assert info["unshaped_reward"] == pytest.approx(reward)
+
+    def test_consecutive_collision_limit_terminates_and_resets_after_movement(self, tmp_path):
+        env = make_radial_test_env(
+            tmp_path,
+            geometry_boxes=[[5, 4, 4, 5, 4, 5]],
+            reward_overrides={
+                "task": {"max_consecutive_collisions": 3},
+            },
+        )
+        env.reset(seed=0)
+
+        _, _, terminated, truncated, info = env.step(ACTION_PLUS_X)
+        assert terminated is False
+        assert truncated is False
+        assert info["consecutive_collisions"] == 1
+
+        _, _, terminated, _, info = env.step(ACTION_PLUS_Z)
+        assert terminated is False
+        assert info["consecutive_collisions"] == 0
+
+        for expected_count in (1, 2):
+            _, _, terminated, truncated, info = env.step(ACTION_PLUS_X)
+            assert terminated is False
+            assert truncated is False
+            assert info["consecutive_collisions"] == expected_count
+
+        _, _, terminated, truncated, info = env.step(ACTION_PLUS_X)
+        assert terminated is True
+        assert truncated is False
+        assert info["goal_reached"] is False
+        assert info["termination_reason"] == "consecutive_collisions"
+        assert info["consecutive_collisions"] == 3
 
     def test_invalid_action_is_separate_from_collision(self, tmp_path):
         env = make_radial_test_env(

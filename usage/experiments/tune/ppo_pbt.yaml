@@ -8,7 +8,7 @@ experiment:
 
 env:
   agent_count: 4
-  max_steps: 200
+  max_steps: 96
 
   geometry:
     stl_path: usage/geometries/pipe_junction.stl

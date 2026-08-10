@@ -11,7 +11,7 @@ experiment:
 
 env:
   waypoints_file: usage/experiments/showcase/hunter/waypoints.json
-  max_steps: 50
+  max_steps: 96
   seed: 42
   agent_count: 1
   trail_mode: false

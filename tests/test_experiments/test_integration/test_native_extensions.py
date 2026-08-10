@@ -33,6 +33,9 @@ def test_compile_load_execute_in_core_and_archive_native_extension(tmp_path: Pat
     loaded = NativeExtension.load(manifest_path)
     assert loaded is not None
     assert loaded.compute_metrics("training", {}) == {"native_hook_active": 1.0}
+    assert loaded.compute_metrics(
+        "evaluation", {"standard_metrics": {"reward_mean": float("nan")}}
+    ) == {"native_hook_active": 1.0}
 
     env = make_radial_test_env(
         tmp_path.joinpath("env"),
