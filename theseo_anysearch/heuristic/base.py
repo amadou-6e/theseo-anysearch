@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 import networkx as nx
 
+from theseo_anysearch.environments.action_spaces import offsets_for_mode
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic.models import (
     VoxelOraclePlan,
@@ -21,12 +22,8 @@ class BaseVoxelHeuristic(ABC):
     def __init__(self, env: VoxelEnv) -> None:
         self.env = env
         self.grid_size = int(env._config.get("grid_size", 32))
-        self.directions = tuple(
-            (dx, dy, dz)
-            for dx in range(-1, 2)
-            for dy in range(-1, 2)
-            for dz in range(-1, 2)
-            if (dx, dy, dz) != (0, 0, 0)
+        self.directions = offsets_for_mode(
+            str(env._config.get("action_mode", "discrete_26"))
         )
         self.direction_to_index = {
             direction: index for index, direction in enumerate(self.directions)

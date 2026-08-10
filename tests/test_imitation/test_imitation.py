@@ -227,3 +227,47 @@ def test_astar_collection_records_pre_action_observations(tmp_path):
     assert dataset.manifest.validation_samples == 2
     assert dataset.train_observations.shape[1] == dataset.manifest.observation_size
     assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < 26))
+
+
+def test_route_collection_uses_fast_discrete_18_plan() -> None:
+    env_config = {
+        "grid_size": 8,
+        "max_steps": 6,
+        "agent_count": 1,
+        "obs_mode": "box",
+        "box_radius": 1,
+        "action_mode": "discrete_18",
+        "trail_mode": True,
+        "geometry_boxes": [],
+        "waypoint_curriculum": {
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [4, 4, 4],
+            "seed": 42,
+            "route_length": {"mode": "fixed", "distance": 6},
+            "difficulty": {
+                "mode": "segment_distance",
+                "initial_distance": 1,
+                "distance_increment": 1,
+                "maximum_distance": 3,
+                "sampling_attempts": 64,
+            },
+        },
+    }
+    config = ImitationConfig(
+        enabled=True,
+        teacher={"type": "replanning_astar"},
+        collection={
+            "episodes": 2,
+            "seed_start": 10,
+            "max_attempts": 2,
+            "validation_fraction": 0.5,
+        },
+    )
+
+    dataset = collect_demonstrations(env_config, config)
+
+    assert dataset.manifest.successful_episodes == 2
+    assert dataset.manifest.training_samples == 6
+    assert dataset.manifest.validation_samples == 6
+    assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < 18))
