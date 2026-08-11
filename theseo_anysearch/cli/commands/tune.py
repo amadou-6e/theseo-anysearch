@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import typer
 
+from theseo_anysearch.imitation.models import ImitationConfig
 from theseo_anysearch.settings import AnyscaleConfig, EnvConfig, ModelConfig, Settings, TrainingConfig
 from theseo_anysearch.rllib.algorithms.models import PPOConfig
 
@@ -449,12 +450,14 @@ def _real_trainable(
     num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
+    imitation_config: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
     mlflow_experiment_name: str = "tune",
     mlflow_parent_run_id: str = "",
     run_tag: str = "latest",
     trajectory_every: int = 1,
     best_trajectory: bool = True,
+    num_env_runners: int = 0,
 ) -> None:
     import torch.version  # noqa — must be imported before RLlib accesses torch.version.hip
     from ray import tune as _tune
@@ -517,6 +520,7 @@ def _real_trainable(
             video_every=max_iterations,
             require_gpu=num_gpus > 0,
             num_gpus=num_gpus,
+            num_env_runners=num_env_runners,
         ),
         anyscale=AnyscaleConfig(cluster_env="", compute_config="", project=""),
         algorithm_config=PPOConfig(
@@ -536,6 +540,7 @@ def _real_trainable(
             hidden_sizes=[int(cfg.get("layer_size", 256))]
                          * int(cfg.get("num_layers", cfg.get("encoder_depth", 2))),
         ),
+        imitation=ImitationConfig.model_validate(imitation_config or {}),
     )
 
     import yaml
@@ -639,12 +644,14 @@ def _make_trainable(
     num_gpus: float = 0,
     base_config: dict[str, Any] | None = None,
     env_base: dict[str, Any] | None = None,
+    imitation_config: dict[str, Any] | None = None,
     mlflow_tracking_uri: str = "",
     mlflow_experiment_name: str = "tune",
     mlflow_parent_run_id: str = "",
     run_tag: str = "latest",
     trajectory_every: int = 1,
     best_trajectory: bool = True,
+    num_env_runners: int = 0,
 ) -> Any:
     from ray import tune
 
@@ -661,17 +668,28 @@ def _make_trainable(
         num_gpus=num_gpus,
         base_config=base_config,
         env_base=env_base,
+        imitation_config=imitation_config,
         mlflow_tracking_uri=mlflow_tracking_uri,
         mlflow_experiment_name=mlflow_experiment_name,
         mlflow_parent_run_id=mlflow_parent_run_id,
         run_tag=run_tag,
         trajectory_every=trajectory_every,
         best_trajectory=best_trajectory,
+        num_env_runners=num_env_runners,
     )
-    # Tell Ray to allocate GPU resources per trial so CUDA_VISIBLE_DEVICES is
-    # set before RLlib tries to claim GPU IDs from the Ray resource pool.
-    if num_gpus > 0:
-        trainable = tune.with_resources(trainable, resources={"gpu": num_gpus})
+    # Reserve a learner bundle plus one CPU bundle for every remote rollout
+    # worker. RLlib assigns workers to child placement-group bundles; a single
+    # GPU-only bundle makes every worker index invalid during algorithm setup.
+    if num_gpus > 0 or num_env_runners > 0:
+        learner_bundle: dict[str, float] = {"CPU": 1.0}
+        if num_gpus > 0:
+            learner_bundle["GPU"] = float(num_gpus)
+        resources = tune.PlacementGroupFactory(
+            [learner_bundle]
+            + [{"CPU": 1.0} for _ in range(num_env_runners)],
+            strategy="PACK",
+        )
+        trainable = tune.with_resources(trainable, resources=resources)
     return trainable
 
 
@@ -1030,12 +1048,14 @@ def tune(
                 num_gpus=num_gpus,
                 base_config=base_config,
                 env_base=env_base,
+                imitation_config=raw_cfg.get("imitation", {}),
                 mlflow_tracking_uri=mlflow_tracking_uri,
                 mlflow_experiment_name=experiment_name,
                 mlflow_parent_run_id=parent_run_id,
                 run_tag=run_tag,
                 trajectory_every=trajectory_every,
                 best_trajectory=best_trajectory,
+                num_env_runners=int(training_cfg.get("num_env_runners", 0)),
             ),
             param_space=search_space,
             tune_config=ray_tune.TuneConfig(

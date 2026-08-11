@@ -289,6 +289,11 @@ class _VoxelEpisodeState:
             from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
             env = VoxelEnv(env_config)
+        from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+            configure_initial_waypoint_curriculum,
+        )
+
+        configure_initial_waypoint_curriculum(env, env_config)
         obs, _ = env.reset(seed=seed)
         init_filled: list[tuple[int, int, int]] = []
         start_pos: tuple[int, int, int] | None = None
@@ -397,6 +402,22 @@ def _unwrap_policy_action(raw_action: Any) -> Any:
     return raw_action
 
 
+def _single_agent_policy_adapter(algo: Any, observation_space: Any | None = None) -> Any:
+    """Use RLModule inference when the algorithm runs on RLlib's modern stack."""
+
+    env_runner = getattr(algo, "env_runner", None)
+    if env_runner is None:
+        return algo
+    module = getattr(env_runner, "module", None)
+    if module is None and hasattr(env_runner, "get_module"):
+        module = env_runner.get_module()
+    if module is None:
+        return algo
+    from theseo_anysearch.rllib.trainer.evaluation.parallel import _PolicyAdapter
+
+    return _PolicyAdapter(env_runner, observation_space=observation_space)
+
+
 def collect_eval_episode(
     algo: Any,
     env_config: dict,
@@ -406,9 +427,13 @@ def collect_eval_episode(
 ) -> VoxelEpisodeData:
     """Run one deterministic single-agent evaluation episode."""
     state = _VoxelEpisodeState.create(env_config, env=env, seed=seed)
+    policy = _single_agent_policy_adapter(
+        algo,
+        getattr(state.env, "observation_space", None),
+    )
     try:
         while not state.done:
-            action = algo.compute_single_action(
+            action = policy.compute_single_action(
                 state.obs,
                 policy_id="default_policy",
                 explore=False,

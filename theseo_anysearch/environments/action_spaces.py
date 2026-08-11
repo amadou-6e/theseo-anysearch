@@ -49,6 +49,48 @@ def action_step_distance(
         return max(deltas)
     raise ValueError(f"unsupported action mode for waypoint route: {mode!r}")
 
+
+def shortest_action_indices(
+    start: tuple[int, int, int],
+    goal: tuple[int, int, int],
+    mode: str,
+) -> tuple[int, ...]:
+    """Return a deterministic shortest empty-grid action sequence."""
+
+    offsets = offsets_for_mode(mode)
+    index_by_offset = {offset: index for index, offset in enumerate(offsets)}
+    remaining = [goal[index] - start[index] for index in range(3)]
+    axes_per_step = {"discrete_6": 1, "discrete_18": 2, "discrete_26": 3}[mode]
+    actions: list[int] = []
+    while any(remaining):
+        active_axes = sorted(
+            (index for index, value in enumerate(remaining) if value),
+            key=lambda index: (-abs(remaining[index]), index),
+        )[:axes_per_step]
+        offset = [0, 0, 0]
+        for axis in active_axes:
+            offset[axis] = 1 if remaining[axis] > 0 else -1
+            remaining[axis] -= offset[axis]
+        actions.append(index_by_offset[tuple(offset)])
+    return tuple(actions)
+
+
+def shortest_actions(
+    start: tuple[int, int, int],
+    goal: tuple[int, int, int],
+    mode: str,
+) -> tuple[int | tuple[int, int, int], ...]:
+    """Return shortest actions in the representation consumed by ``mode``."""
+
+    planning_mode = "discrete_26" if mode == "vector_3" else mode
+    indices = shortest_action_indices(start, goal, planning_mode)
+    if mode != "vector_3":
+        return indices
+    return tuple(
+        tuple(value + 1 for value in ACTION_OFFSETS_26[index])
+        for index in indices
+    )
+
 def maximum_movement_distance(mode: str) -> float:
     """Return the largest Euclidean displacement selectable by ``mode``."""
     if mode == "vector_3":

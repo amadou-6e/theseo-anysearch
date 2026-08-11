@@ -16,6 +16,22 @@ from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample
 Waypoint = tuple[int, int, int]
 
 
+def configure_initial_waypoint_curriculum(
+    env: Any,
+    env_config: dict[str, Any],
+) -> None:
+    """Activate stage zero on a directly constructed environment."""
+
+    raw_curriculum = env_config.get("waypoint_curriculum") or {}
+    if not raw_curriculum.get("enabled", False):
+        return
+    curriculum = WaypointCurriculum(
+        WaypointCurriculumConfig.model_validate(raw_curriculum),
+        env_config,
+    )
+    env.set_waypoint_curriculum(curriculum.stages(), [1.0])
+
+
 class WaypointTransition(BaseModel):
     """One recorded curriculum-stage transition."""
 

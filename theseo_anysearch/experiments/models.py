@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from theseo_anysearch.imitation.models import ImitationConfig
 from theseo_anysearch.settings import (
     AlgorithmEnvCompatibilityMixin,
     AlgorithmConfig,
@@ -425,6 +426,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     model_cfg: ModelConfig = Field(alias="model_config", default_factory=ModelConfig)
     renders: RendersConfig = Field(default_factory=RendersConfig)
     heuristic: HeuristicConfig = Field(default_factory=HeuristicConfig)
+    imitation: ImitationConfig = Field(default_factory=ImitationConfig)
     mlflow: MLflowConfig | None = None    # None → tracking disabled
     tune_config: TuneConfig | None = None
     staging: StagingConfig | None = None
@@ -481,6 +483,13 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
                         "replay-buffer preservation; use 'clear'"
                     )
                 self._resolved_stage_payload(stage, completed_iterations=0)
+        if self.imitation.enabled:
+            if standalone:
+                raise ValueError("imitation requires a trainable RL algorithm")
+            if self.training.algorithm.lower() != "ppo":
+                raise ValueError("imitation currently supports PPO only")
+            if self.env.agent_count != 1:
+                raise ValueError("imitation currently requires env.agent_count: 1")
         return self
 
     def _resolved_stage_payload(
@@ -536,6 +545,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
             anyscale=self.anyscale,
             algorithm_config=self.algorithm_config,
             model_config=self.model_cfg,
+            imitation=self.imitation,
         )
 
 

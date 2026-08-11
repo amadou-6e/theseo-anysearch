@@ -47,6 +47,24 @@ def test_astar_plan_replays_to_goal(tmp_path, trail_mode):
     assert replay.positions == plan.positions
 
 
+def test_astar_plan_replays_vector_3_actions(tmp_path):
+    env = make_radial_test_env(
+        tmp_path,
+        start=(4, 4, 4),
+        goal=(5, 5, 6),
+        reward_overrides={"action_mode": "vector_3", "trail_mode": False},
+    )
+    env.reset(seed=0)
+
+    heuristic = VoxelAStarOracle(env)
+    plan = heuristic.plan()
+    replay = heuristic.replay(plan)
+
+    assert all(len(action) == 3 for action in plan.action_indices)
+    assert replay.goal_reached is True
+    assert replay.mismatch is None
+
+
 def test_astar_reports_unsolvable_geometry(tmp_path):
     env = make_radial_test_env(
         tmp_path,

@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from theseo_anysearch.imitation.models import ImitationConfig
 from theseo_anysearch.settings.algorithm import AlgorithmConfig, AlgorithmEnvCompatibilityMixin, ModelConfig
 from theseo_anysearch.settings.environment import EnvConfig
 from theseo_anysearch.settings.evaluation import EvaluationConfig
@@ -34,3 +35,7 @@ class Settings(AlgorithmEnvCompatibilityMixin, BaseModel):
     anyscale: AnyscaleConfig = Field(description="Anyscale execution configuration.")
     algorithm_config: AlgorithmConfig = Field(description="Algorithm-specific hyperparameters.")
     model_cfg: ModelConfig = Field(alias="model_config", description="Policy model configuration loaded from model_config.")
+    imitation: ImitationConfig = Field(
+        default_factory=ImitationConfig,
+        description="Heuristic imitation pretraining configuration.",
+    )

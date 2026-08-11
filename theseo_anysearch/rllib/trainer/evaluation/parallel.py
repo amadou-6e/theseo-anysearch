@@ -73,8 +73,9 @@ class AnySearchEvaluationFunction:
 class _PolicyAdapter:
     """Expose either an RLModule or legacy Policy for deterministic inference."""
 
-    def __init__(self, env_runner: Any) -> None:
+    def __init__(self, env_runner: Any, observation_space: Any | None = None) -> None:
         self._env_runner = env_runner
+        self._observation_space = observation_space
 
     def _rl_module(self) -> Any | None:
         """Return the new-stack inference module when one is available."""
@@ -87,9 +88,11 @@ class _PolicyAdapter:
         """Apply the same structured-observation flattening as Connector V2."""
         from gymnasium.spaces import flatten
 
-        runner = getattr(self._env_runner, "env_runner", self._env_runner)
-        env = getattr(runner, "env", None)
-        space = getattr(env, "single_observation_space", None)
+        space = self._observation_space
+        if space is None:
+            runner = getattr(self._env_runner, "env_runner", self._env_runner)
+            env = getattr(runner, "env", None)
+            space = getattr(env, "single_observation_space", None)
         if space is None:
             return observations
         return [flatten(space, observation) for observation in observations]
@@ -302,10 +305,18 @@ def collect_rllib_evaluation_episodes(
                 )
                 for episode_index in range(count)
             ]
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        probe_env = VoxelEnv(env_config)
+        observation_space = probe_env.observation_space
+        probe_env.close()
+        policy = _PolicyAdapter(
+            algorithm,
+            observation_space=observation_space,
+        )
         if num_envs_per_env_runner > 1:
             episodes: list[Any] = []
             seeds = tuple(seed + episode_index for episode_index in range(count))
-            policy = _PolicyAdapter(algorithm)
             for offset in range(0, count, num_envs_per_env_runner):
                 episodes.extend(collect_vectorized_eval_episodes(
                     policy,
@@ -313,7 +324,7 @@ def collect_rllib_evaluation_episodes(
                     seeds[offset:offset + num_envs_per_env_runner],
                 ))
             return episodes
-        return collect_eval_episodes(_PolicyAdapter(algorithm), env_config, count, seed=seed)
+        return collect_eval_episodes(policy, env_config, count, seed=seed)
 
     active_worker_ids = worker_ids[: min(len(worker_ids), count)]
     assignments: list[list[int]] = [[] for _ in active_worker_ids]

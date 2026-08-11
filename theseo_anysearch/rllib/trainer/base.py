@@ -12,70 +12,28 @@ if TYPE_CHECKING:
 
 
 class BaseTrainer(ABC):
-    """Define the public lifecycle implemented by project trainers.
-
-    Notes
-    -----
-    This interface contains no RLlib algorithm construction or training-loop
-    implementation. Those responsibilities belong to algorithm adapters and
-    the concrete trainer module.
-    """
+    """Define the public lifecycle implemented by project trainers."""
 
     @classmethod
     @abstractmethod
     def from_settings(cls, config: "Settings") -> "BaseTrainer":
-        """Construct a trainer from validated project settings.
-
-        Parameters
-        ----------
-        config : Settings
-            Validated experiment settings.
-
-        Returns
-        -------
-        BaseTrainer
-            Configured trainer instance.
-        """
+        """Construct a trainer from validated project settings."""
 
     @abstractmethod
     def train(self) -> list["TrainResult"]:
-        """Execute the configured training lifecycle.
-
-        Returns
-        -------
-        list[TrainResult]
-            Results produced for completed training iterations.
-        """
+        """Execute the configured training lifecycle."""
 
     @abstractmethod
     def checkpoint(self) -> Path:
-        """Persist trainer state and return its checkpoint path.
-
-        Returns
-        -------
-        pathlib.Path
-            Created checkpoint directory.
-        """
+        """Persist trainer state and return its checkpoint path."""
 
     @abstractmethod
     def restore(self, checkpoint_dir: Path) -> None:
-        """Restore trainer state from a checkpoint.
-
-        Parameters
-        ----------
-        checkpoint_dir : pathlib.Path
-            Checkpoint directory to restore.
-        """
+        """Restore trainer state from a checkpoint."""
 
     @abstractmethod
     def resume(self) -> bool:
-        """Restore the latest checkpoint when one exists.
-
-        Returns
-        -------
-        bool
-            True when state was restored, otherwise False.
-        """
+        """Restore the latest checkpoint when one exists."""
 
 
 __all__ = ["BaseTrainer"]

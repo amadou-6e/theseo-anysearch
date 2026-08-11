@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 VoxelPosition = tuple[int, int, int]
+VoxelAction = int | tuple[int, int, int]
 
 
 class VoxelOraclePlan(BaseModel):
@@ -13,7 +14,7 @@ class VoxelOraclePlan(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     positions: tuple[VoxelPosition, ...]
-    action_indices: tuple[int, ...]
+    action_indices: tuple[VoxelAction, ...]
     graph_nodes: int
     graph_edges: int
 
@@ -34,8 +35,8 @@ class VoxelOracleReplay(BaseModel):
     steps_executed: int
     positions: tuple[VoxelPosition, ...]
     rewards: tuple[float, ...]
-    action_indices: tuple[int, ...] = ()
+    action_indices: tuple[VoxelAction, ...] = ()
     mismatch: str | None = None
 
 
-__all__ = ["VoxelOraclePlan", "VoxelOracleReplay", "VoxelPosition"]
+__all__ = ["VoxelAction", "VoxelOraclePlan", "VoxelOracleReplay", "VoxelPosition"]
