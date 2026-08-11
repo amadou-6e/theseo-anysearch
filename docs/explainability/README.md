@@ -77,3 +77,25 @@ Attribution is relative to `chosen Q-value - best-safe Q-value`. A positive grou
 ## Current scope
 
 Checkpoint restoration supports DQN with discrete voxel action spaces. The available method is grouped occlusion. Unsupported algorithms, vector actions, malformed scenarios, and divergent traces raise explicit errors.
+
+## Interactive UI
+
+Build the native replayer once, then launch a checkpoint session:
+
+```powershell
+cargo build --manifest-path theseo_anysearch/core/Cargo.toml --release --bin voxel-replay
+anysearch explain-ui dqn-waypoints:4d312abc --checkpoint latest
+```
+
+The native `egui/eframe` interface restores the policy once through a persistent
+Python scoring process. The trajectory panel provides **Explain current step**
+for the selected replay step and **Open observation editor** for a dedicated
+fictional-observation window. The editor provides X/Y/Z voxel slices and
+schema-derived controls for every non-spatial field. Editing a voxel cell or
+scalar control clears the current result; press **Explain policy decision**
+to score the edited observation and update action scores, the selected
+movement vector, the safe-action margin, and grouped attribution.
+
+The same controls are available from a normal `anysearch replay <run-ref>`
+session. UI-created observations are explicitly `not_environment_validated`;
+editing a value does not claim the environment could naturally produce it.

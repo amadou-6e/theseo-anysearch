@@ -20,13 +20,14 @@ from typing import Any, Optional
 import typer
 
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
-from theseo_anysearch.cli.commands.explain import run_explain
 from theseo_anysearch.cli.commands import garden as garden_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
 from theseo_anysearch.cli.commands import ray_cmd
 from theseo_anysearch.cli.commands import replay as replay_cmd
 from theseo_anysearch.cli.commands import train as train_cmd
 from theseo_anysearch.cli.commands import tune as tune_cmd
+from theseo_anysearch.cli.commands.explain import run_explain
+from theseo_anysearch.cli.commands.explain_ui import launch_explain_ui
 
 app = typer.Typer(
     name="anysearch",
@@ -56,6 +57,17 @@ def explain(
         run, checkpoint, trace, scenario, request, method, focus, steps,
         max_steps, background, output, seed,
     )
+
+
+@app.command("explain-ui")
+def explain_ui(
+    run: str = typer.Argument(..., help="Run directory or registered name:run-id."),
+    checkpoint: str = typer.Option("latest", help="Checkpoint selector."),
+) -> None:
+    """Launch the native replay and policy-observation explanation interface."""
+
+    launch_explain_ui(run, checkpoint)
+
 
 def _restore_archived_output_root(experiment: Any, run_dir: Path) -> Any:
     """Restore the output root after loading a run-local YAML snapshot.

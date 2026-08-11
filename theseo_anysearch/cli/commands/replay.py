@@ -13,6 +13,7 @@ Browse all trajectories in a sweep::
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -82,6 +83,26 @@ def _find_binary() -> Path:
         f"voxel-replay binary not found. Build it with:\n"
         f"  cd theseo_anysearch/core && cargo build --bin voxel-replay"
     )
+
+
+def _supports_native_explain(run_dir: Path) -> bool:
+    """Return whether run_dir holds a DQN run the native explain bridge can restore.
+
+    Interactive explanations only support DQN (see
+    PolicyExplanationService.__init__), so plain replay of every other
+    algorithm must not attempt to launch the explain bridge at all.
+    """
+    config_path = run_dir / "experiment.yaml"
+    if not config_path.exists():
+        return False
+    try:
+        import yaml as _yaml
+
+        raw = _yaml.safe_load(config_path.read_text()) or {}
+        algorithm = raw.get("training", {}).get("algorithm")
+    except Exception:
+        return False
+    return algorithm == "dqn"
 
 
 def _find_trajectory(run_dir: Path, iteration: int) -> Path:
@@ -315,7 +336,14 @@ def replay(
         files = _all_iter_trajectories(run_dir)
         typer.echo(f"Replaying {len(files)} iteration(s) from {traj_dir}")
 
-    subprocess.run([str(binary)] + [str(f) for f in files], check=True)
+    environment = dict(os.environ)
+    environment["ANYSEARCH_PYTHON"] = sys.executable
+    launch_args = [str(binary)]
+    if _supports_native_explain(run_dir):
+        checkpoint_selector = str(iteration) if iteration is not None else "latest"
+        launch_args += ["--explain-run", str(run_dir), "--checkpoint", checkpoint_selector]
+    launch_args += [str(path) for path in files]
+    subprocess.run(launch_args, env=environment, check=True)
     raise typer.Exit()
 
 

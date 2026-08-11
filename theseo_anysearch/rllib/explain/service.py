@@ -176,6 +176,32 @@ class PolicyExplanationService:
             validity="environment_validated",
         )
 
+    def initial_observation(self, seed: int | None = None) -> dict[str, np.ndarray]:
+        """Return one validated initial observation from the restored run settings."""
+
+        env = self._build_env()
+        try:
+            observation, _ = env.reset(
+                seed=seed if seed is not None else self.experiment.env.seed
+            )
+            result = self._copy_observation(observation)
+            for name, space in env.observation_space.spaces.items():
+                if name not in result:
+                    result[name] = np.zeros(space.shape, dtype=space.dtype)
+        finally:
+            env.close()
+        return result
+
+    def observation_space(self) -> Any:
+        """Return the authoritative policy observation space."""
+
+        env = self._build_env()
+        try:
+            observation_space = env.observation_space
+        finally:
+            env.close()
+        return observation_space
+
     def explain_scenario(
         self,
         path: Path,

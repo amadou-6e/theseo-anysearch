@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
+use theseo_core::replay::explain::NativeExplainUi;
 
 // ---------------------------------------------------------------------------
 // JSON data model — must match the Python TrajectoryWriter output
@@ -131,6 +132,7 @@ fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
 fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
     let json = std::fs::read_to_string(path).ok()?;
     let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
+    traj.source_path = path.to_path_buf();
     if traj.episode.init_filled.is_empty() {
         if let Some(sidecar) = &traj.episode.init_filled_file {
             let npy_path = path.parent().unwrap_or(std::path::Path::new(".")).join(sidecar);
@@ -143,6 +145,8 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
 
 #[derive(Deserialize, Clone)]
 struct TrajectoryData {
+    #[serde(skip)]
+    source_path: PathBuf,
     experiment_name: String,
     run_id: String,
     iteration: u32,
@@ -524,6 +528,9 @@ struct VoxelReplayApp {
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
     current_trial: usize,
+    /// Optional checkpoint-backed native explanation windows.
+    explain_ui: Option<NativeExplainUi>,
+    explain_tab: bool,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -548,7 +555,8 @@ struct UiEvents {
 }
 
 impl VoxelReplayApp {
-    fn new(trajectories: Vec<TrajectoryData>) -> Self {
+    fn new(trajectories: Vec<TrajectoryData>, explain_ui: Option<NativeExplainUi>) -> Self {
+        let explain_tab = explain_ui.as_ref().map(|ui| ui.observation_open).unwrap_or(false);
         let geo_voxels = trajectories.iter().map(|t| {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
@@ -562,6 +570,8 @@ impl VoxelReplayApp {
             playing: false,
             tune_trials: Vec::new(),
             current_trial: 0,
+            explain_ui,
+            explain_tab,
         }
     }
 
@@ -576,6 +586,8 @@ impl VoxelReplayApp {
             playing: false,
             tune_trials: trials,
             current_trial: 0,
+            explain_ui: None,
+            explain_tab: false,
         };
         app.load_trial(0);
         app
@@ -711,6 +723,31 @@ impl eframe::App for VoxelReplayApp {
                 traj.agent_count,
             )
         };
+        let current_trajectory_path = self.trajectories[iter_idx].source_path.clone();
+
+        let explain_available = self.explain_ui.as_ref()
+            .map(NativeExplainUi::available).unwrap_or(false);
+        let explain_configured = self.explain_ui.is_some();
+        egui::TopBottomPanel::top("application_tabs").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.explain_tab, false, "Replay");
+                ui.add_enabled_ui(explain_configured, |ui| {
+                    ui.selectable_value(&mut self.explain_tab, true, "Explain");
+                });
+            });
+        });
+
+        let drag_delta = ctx.input(|i| i.pointer.delta());
+        let dragging = ctx.input(|i| i.pointer.primary_down());
+        let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+
+        if self.explain_tab {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                if let Some(explain) = self.explain_ui.as_mut() {
+                    explain.show_embedded(ui);
+                }
+            });
+        } else {
 
         // ---- Left panel -----------------------------------------------------
         egui::SidePanel::left("controls").min_width(260.0).show(ctx, |ui| {
@@ -838,6 +875,23 @@ impl eframe::App for VoxelReplayApp {
             ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
             ui.separator();
 
+            ui.label(egui::RichText::new("Explainability").strong());
+            if ui.add_enabled(explain_available, egui::Button::new("Explain current step")).clicked() {
+                if let Some(explain) = self.explain_ui.as_mut() {
+                    explain.explain_trajectory(&current_trajectory_path, step_idx);
+                }
+                self.explain_tab = true;
+            }
+            if ui.add_enabled(explain_available, egui::Button::new("Open Explain tab")).clicked() {
+                self.explain_tab = true;
+            }
+            if !explain_available {
+                ui.label(egui::RichText::new(
+                    "Open this replay from a run reference to attach a checkpoint."
+                ).small().weak());
+            }
+            ui.separator();
+
             // Reward curve
             ui.label("-- Reward curve (this iteration) --");
             let desired = Vec2::new(ui.available_width(), 60.0);
@@ -885,10 +939,6 @@ impl eframe::App for VoxelReplayApp {
         let geo_list = &self.geo_voxels[iter_idx];
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
-        let drag_delta = ctx.input(|i| i.pointer.delta());
-        let dragging   = ctx.input(|i| i.pointer.primary_down());
-        let scroll_y   = ctx.input(|i| i.smooth_scroll_delta.y);
-
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
@@ -1071,6 +1121,7 @@ impl eframe::App for VoxelReplayApp {
             );
         });
 
+        }
         // ---- Apply collected events to state --------------------------------
         // Extract trial nav flags before ev is consumed by apply_events.
         let (trial_first, trial_last, trial_next, trial_prev) =
@@ -1129,7 +1180,43 @@ impl eframe::App for VoxelReplayApp {
 // ---------------------------------------------------------------------------
 
 fn main() -> eframe::Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args = Vec::new();
+    let mut explain_run: Option<PathBuf> = None;
+    let mut checkpoint = "latest".to_string();
+    let mut open_observation_editor = false;
+    let mut index = 0;
+    while index < raw_args.len() {
+        match raw_args[index].as_str() {
+            "--explain-run" => {
+                index += 1;
+                match raw_args.get(index) {
+                    Some(value) if !value.starts_with("--") => {
+                        explain_run = Some(PathBuf::from(value));
+                    }
+                    _ => {
+                        eprintln!("--explain-run requires a run directory path");
+                        return Ok(());
+                    }
+                }
+            }
+            "--checkpoint" => {
+                index += 1;
+                match raw_args.get(index) {
+                    Some(value) if !value.starts_with("--") => {
+                        checkpoint = value.clone();
+                    }
+                    _ => {
+                        eprintln!("--checkpoint requires a value, e.g. latest or an iteration number");
+                        return Ok(());
+                    }
+                }
+            }
+            "--open-observation-editor" => open_observation_editor = true,
+            value => args.push(value.to_string()),
+        }
+        index += 1;
+    }
     if args.is_empty() {
         eprintln!("Usage:");
         eprintln!("  voxel-replay --tune-dir <tune-run-dir>     Navigate tune trials");
@@ -1206,9 +1293,11 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
+    let explain_ui = explain_run.as_deref()
+        .map(|run| NativeExplainUi::start(run, &checkpoint, open_observation_editor));
     eframe::run_native(
         "Voxel Replay",
         options,
-        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories)))),
+        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories, explain_ui)))),
     )
 }
