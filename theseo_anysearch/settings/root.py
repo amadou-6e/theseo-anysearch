@@ -35,4 +35,7 @@ class Settings(AlgorithmEnvCompatibilityMixin, BaseModel):
     anyscale: AnyscaleConfig = Field(description="Anyscale execution configuration.")
     algorithm_config: AlgorithmConfig = Field(description="Algorithm-specific hyperparameters.")
     model_cfg: ModelConfig = Field(alias="model_config", description="Policy model configuration loaded from model_config.")
-    imitation: ImitationConfig = Field(default_factory=ImitationConfig)
+    imitation: ImitationConfig = Field(
+        default_factory=ImitationConfig,
+        description="Heuristic imitation pretraining configuration.",
+    )
