@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from threading import Lock, Thread
 import time
 
 import torch
+
+from theseo_anysearch.imitation import cache as cache_module
 
 from theseo_anysearch.imitation.cache import (
     cache_key_lock,
@@ -139,3 +142,58 @@ def test_cache_key_lock_serializes_concurrent_publishers(tmp_path: Path) -> None
         thread.join()
 
     assert maximum_active == 1
+
+
+def test_cache_key_lock_heartbeat_protects_a_slow_holder_past_its_timeout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A holder still working past ``timeout_seconds`` must not be evicted.
+
+    Regresses a bug where staleness was judged by each waiter's own elapsed
+    wait time: a holder whose work legitimately outlived the timeout (e.g. a
+    long behavior-cloning run) would be forcibly evicted by a waiter, and
+    both would then believe they held the lock simultaneously.
+    """
+    monkeypatch.setattr(cache_module, "_LOCK_HEARTBEAT_INTERVAL_SECONDS", 0.02)
+    events: list[str] = []
+    events_lock = Lock()
+
+    def slow_holder() -> None:
+        with cache_key_lock(tmp_path, "slow", 0.2):
+            time.sleep(0.5)
+            with events_lock:
+                events.append("holder-done")
+
+    def impatient_waiter() -> None:
+        time.sleep(0.05)
+        try:
+            with cache_key_lock(tmp_path, "slow", 0.2):
+                with events_lock:
+                    events.append("waiter-entered")
+        except TimeoutError:
+            with events_lock:
+                events.append("waiter-timed-out")
+
+    holder = Thread(target=slow_holder)
+    waiter = Thread(target=impatient_waiter)
+    holder.start()
+    waiter.start()
+    holder.join()
+    waiter.join()
+
+    assert "waiter-timed-out" in events
+    assert "waiter-entered" not in events
+    assert events.index("holder-done") < len(events)
+
+
+def test_cache_key_lock_reclaims_a_genuinely_abandoned_lock(tmp_path: Path) -> None:
+    lock_path = tmp_path.joinpath("abandoned.lock")
+    lock_path.write_text("dead-token", encoding="ascii")
+    stale_time = time.time() - 10.0
+    os.utime(lock_path, (stale_time, stale_time))
+
+    entered = False
+    with cache_key_lock(tmp_path, "abandoned", 0.2):
+        entered = True
+
+    assert entered
