@@ -1,6 +1,6 @@
 use pyo3::{exceptions::PyValueError, prelude::*};
 
-use crate::voxel::world::{World, BLOCK_KIND_BOUNDARY, BLOCK_KIND_GOAL};
+use crate::voxel::world::{World, BLOCK_KIND_GOAL, BLOCK_KIND_OCCUPIED};
 
 use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
@@ -206,7 +206,7 @@ impl PyMultiVoxelEnv {
                                 .map_or(0.0, |block| f32::from(block.kind))
                         }
                     } else {
-                        f32::from(BLOCK_KIND_BOUNDARY)
+                        f32::from(BLOCK_KIND_OCCUPIED)
                     };
                     result.push(kind);
                 }

@@ -307,7 +307,7 @@ impl NativeExplainUi {
             [140.0, 18.0],
             egui::Slider::new(&mut self.slice_index, 0..=side - 1).text("index"),
         );
-        ui.small("Valid voxel kinds: 0 empty · 1 occupied · 2 start · 3 goal · 4 boundary · 5 filled/trail");
+        ui.small("Policy voxel kinds: 0 empty · 1 occupied/boundary · 2 start · 3 goal · 5 filled/trail (4 is reserved)");
         let mut grid: Vec<u8> = values.iter()
             .map(|value| network_value_to_voxel_kind(value.as_f64().unwrap_or(0.0)))
             .collect();

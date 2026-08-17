@@ -4,7 +4,7 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
     environments::Environment,
-    voxel::world::{World, WorldState, BLOCK_KIND_BOUNDARY},
+    voxel::world::{World, WorldState, BLOCK_KIND_OCCUPIED},
     voxel::VoxelEnv,
 };
 
@@ -86,7 +86,7 @@ impl PyVoxelEnv {
                             .get_block((x as u16, y as u16, z as u16))
                             .map_or(0.0, |block| f32::from(block.kind))
                     } else {
-                        f32::from(BLOCK_KIND_BOUNDARY)
+                        f32::from(BLOCK_KIND_OCCUPIED)
                     };
                     result.push(kind);
                 }
@@ -386,7 +386,7 @@ impl PyVoxelEnv {
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
                         if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
-                            kind = f32::from(BLOCK_KIND_BOUNDARY);
+                                kind = f32::from(BLOCK_KIND_OCCUPIED);
                             break;
                         }
                         if let Some(block) = self
@@ -559,8 +559,8 @@ mod tests {
         // cell at (1-2, 1, 1) = (-1, 1, 1) â€” out of bounds (negative i32)
         let env = env_at_cursor((1, 1, 1)); // (1,1,1)
         let obs = env.box_obs(2).unwrap();
-        // first element is outside the configured grid and retains boundary kind 4.
-        assert_eq!(obs[0], 4.0);
+        // Outside-grid cells intentionally look identical to occupied geometry.
+        assert_eq!(obs[0], 1.0);
     }
 
     #[test]
@@ -682,6 +682,6 @@ mod tests {
         let obs = env.radial_obs(16);
         let types = env.radial_obs_types(16);
         assert_eq!(obs[4], 1.0);
-        assert_eq!(types[4], f32::from(BLOCK_KIND_BOUNDARY));
+        assert_eq!(types[4], f32::from(BLOCK_KIND_OCCUPIED));
     }
 }
