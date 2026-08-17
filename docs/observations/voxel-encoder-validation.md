@@ -14,6 +14,7 @@ python scripts/validate_voxel_encoder.py --preset r2 --epochs 30
 python scripts/validate_voxel_encoder.py --preset r3 --epochs 30
 python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_tuned/gpu-v3 --epochs 30
 python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_spatial/gpu-v4 --epochs 30
+python scripts/validate_voxel_encoder.py --model-dir runtime/garden/models/voxel_resnet_b0_spatial/gpu-v6 --epochs 30
 ```
 
 The encoder is frozen. A small decoder is trained on its latent vectors, then
@@ -92,6 +93,28 @@ also validates the representation-oriented search metric: it selected a model
 that generalizes better even though raw reconstruction loss was no longer the
 optimization criterion.
 
+### Compact S0 search
+
+The 100-trial width, depth, and latent search selected the architecture now
+named `voxel_resnet_s0`: channels `[20, 40, 56]`, one block per stage, spatial
+`2x2x2` pooling, and a 48-dimensional latent. At 257,188 parameters it is 28%
+smaller than spatial B0 and 40% smaller than `r2:v1`.
+
+| Metric | S0 clean retrain | S0 trial epoch 14 | Spatial B0 |
+|---|---:|---:|---:|
+| Parameters | **257,188** | **257,188** | 356,248 |
+| Held-out reconstruction IoU | 0.802 | **0.843** | **0.933** |
+| OOD reconstruction IoU | 0.661 | **0.696** | **0.777** |
+| Fill-fraction linear-probe R² | **0.969** | 0.966 | **0.977** |
+| Center-face probe accuracy | 99.81% | **100.00%** | **100.00%** |
+| Relative latent change from one voxel | 0.598 | **0.600** | **0.634** |
+
+S0 is adopted as the smallest named Garden model, but not as the high-fidelity
+default. Its strong in-search probe score did not transfer fully to the
+independent reconstruction protocol. This also shows that clean retraining must
+select checkpoints by the representation metric rather than reconstruction
+validation loss alone.
+
 Single-threaded warm inference on the validation machine measured approximately
 2.4 ms for one r2 grid and 2.8 ms for one r3 grid on CPU. Warm GPU batches of
 128 took approximately 3.0 ms for r2 and 2.2 ms for r3, excluding host/device
@@ -109,7 +132,7 @@ Pretraining is effective and necessary. Both checkpoints retain substantially
 more occupied structure than a random encoder and respond strongly to a
 single-voxel change. The movement-relevant face probe is nearly perfect.
 
-The spatial B0 checkpoint is now the strongest 5x5x5 representation and should
+The spatial B0 checkpoint remains the strongest 5x5x5 representation and should
 be the primary frozen-policy candidate. Its 0.933 held-out IoU and 0.777 OOD IoU
 surpass `r2:v1`, while using fewer parameters. Keep `r2:v1` as the established
 baseline for policy ablations.

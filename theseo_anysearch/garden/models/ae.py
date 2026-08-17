@@ -100,6 +100,12 @@ class VoxelEncoder3D(nn.Module):
 
 
 VOXEL_RESNET_3D_PROFILES: dict[str, dict[str, object]] = {
+    "s0": {
+        "channels": (20, 40, 56),
+        "blocks": (1, 1, 1),
+        "strides": (1, 2, 2),
+        "latent_dim": 48,
+    },
     "b0": {
         "channels": (24, 48, 64),
         "blocks": (1, 1, 1),

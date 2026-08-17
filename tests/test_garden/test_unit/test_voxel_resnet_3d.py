@@ -13,7 +13,9 @@ from theseo_anysearch.garden.models.ae import (
 )
 
 
-@pytest.mark.parametrize(("profile", "latent_dim"), [("b0", 64), ("b1", 96)])
+@pytest.mark.parametrize(
+    ("profile", "latent_dim"), [("s0", 48), ("b0", 64), ("b1", 96)]
+)
 def test_profile_output_shape_for_supported_grid_sizes(profile: str, latent_dim: int):
     encoder = VoxelResNet3D(n=5, profile=profile)
     for n in (5, 7):
@@ -104,7 +106,9 @@ def test_profile_config_rejects_invalid_topology(
         load_garden_config(changed_path)
 
 
-@pytest.mark.parametrize("preset", ["voxel_resnet_b0", "voxel_resnet_b1"])
+@pytest.mark.parametrize(
+    "preset", ["voxel_resnet_s0", "voxel_resnet_b0", "voxel_resnet_b1"]
+)
 def test_builtin_profile_preset_builds_reconstruction_model(preset: str):
     preset_path = Path("theseo_anysearch", "garden", "presets", f"{preset}.yaml")
     cfg = load_garden_config(preset_path)
@@ -114,6 +118,15 @@ def test_builtin_profile_preset_builds_reconstruction_model(preset: str):
 
     assert reconstruction.shape == (2, 1, n, n, n)
     assert latent.shape == (2, cfg.encoder.latent_dim)
+
+
+def test_s0_is_the_smallest_named_voxel_resnet_profile():
+    s0 = VoxelResNet3D(n=5, profile="s0", pooling="spatial_2x2x2")
+    b0 = VoxelResNet3D(n=5, profile="b0", pooling="spatial_2x2x2")
+    s0_params = sum(parameter.numel() for parameter in s0.parameters())
+    b0_params = sum(parameter.numel() for parameter in b0.parameters())
+    assert s0_params == 257_188
+    assert s0_params < b0_params
 
 
 def test_b0_tuning_preset_keeps_objective_fixed():

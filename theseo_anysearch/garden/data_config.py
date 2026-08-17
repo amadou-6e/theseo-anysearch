@@ -329,7 +329,7 @@ class EncoderConfig(BaseModel):
     conv_channels: list[int] = Field(default=[32, 64, 64])
     residual_blocks: list[int] | None = None
     latent_dim: int = 128
-    profile: Literal["b0", "b1"] | None = None
+    profile: Literal["s0", "b0", "b1"] | None = None
     pooling: Literal["global_avg", "spatial_2x2x2"] = "global_avg"
 
 

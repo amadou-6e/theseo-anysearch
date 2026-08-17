@@ -197,6 +197,11 @@ def main() -> None:
         type=Path,
         help="Garden model directory containing meta.json and encoder.pt.",
     )
+    parser.add_argument(
+        "--trainer-checkpoint",
+        type=Path,
+        help="Optional Garden trainer.pt checkpoint whose model state is evaluated.",
+    )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--output", type=Path, default=Path("runtime", "encoder_validation.json"))
     args = parser.parse_args()
@@ -237,11 +242,33 @@ def main() -> None:
     test_grids = make_box_grids(600, n, 43)
     ood_grids = make_ood_grids(600, n, 44)
 
-    pretrained = build_encoder(
-        cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"],
-        cfg["pooling"], cfg["residual_blocks"]
-    )
-    pretrained.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+    if args.trainer_checkpoint is not None:
+        if args.model_dir is None:
+            parser.error("--trainer-checkpoint requires --model-dir for architecture metadata")
+        from theseo_anysearch.garden.models.ae import VoxelAE
+
+        autoencoder = VoxelAE(
+            architecture=cfg["architecture"],
+            n=n,
+            channels=cfg["channels"],
+            latent_dim=cfg["latent_dim"],
+            profile=cfg["profile"],
+            pooling=cfg["pooling"],
+            residual_blocks=cfg["residual_blocks"],
+            face_loss_weight=meta.get("face_loss_weight", 0.0),
+        )
+        trainer_state = torch.load(
+            args.trainer_checkpoint, map_location="cpu", weights_only=True
+        )
+        autoencoder.load_state_dict(trainer_state["model"])
+        pretrained = autoencoder.encoder
+        model_name = f"{model_name}:epoch-{trainer_state['epoch']}"
+    else:
+        pretrained = build_encoder(
+            cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"],
+            cfg["pooling"], cfg["residual_blocks"]
+        )
+        pretrained.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
     random_encoder = build_encoder(
         cfg["architecture"], n, cfg["channels"], cfg["latent_dim"], cfg["profile"],
         cfg["pooling"], cfg["residual_blocks"]
