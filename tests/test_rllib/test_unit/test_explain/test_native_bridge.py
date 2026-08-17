@@ -50,6 +50,12 @@ def test_schema_exposes_authoritative_bounds_and_shapes() -> None:
     assert payload["goal_direction"]["shape"] == [3]
     assert payload["goal_direction"]["low"] == [-1.0, -1.0, -1.0]
     assert payload["local_grid"]["high"] == [1.0] * 27
+    assert "input_encoding" not in payload["goal_direction"]
+    assert payload["local_grid"]["input_encoding"] == {
+        "type": "integer_scaled",
+        "scale": 5.0,
+        "valid_values": [0, 1, 2, 3, 5],
+    }
 
 
 def test_load_observation_file_detects_json(tmp_path: Path) -> None:

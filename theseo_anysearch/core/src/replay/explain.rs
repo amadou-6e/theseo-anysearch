@@ -9,14 +9,33 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, RichText};
 use serde_json::{json, Map, Value};
 
-const MAX_VOXEL_KIND: u8 = 5;
-
-fn voxel_kind_to_network_value(kind: u8) -> f32 {
-    f32::from(kind) / f32::from(MAX_VOXEL_KIND)
+fn encode_scaled_integer(value: u8, scale: f32, valid_values: &[u8]) -> Result<f32, String> {
+    if scale <= 0.0 || !scale.is_finite() {
+        return Err(format!("categorical input scale must be positive and finite, got {scale}"));
+    }
+    if !valid_values.contains(&value) {
+        return Err(format!("categorical value {value} is not valid; expected one of {valid_values:?}"));
+    }
+    Ok(f32::from(value) / scale)
 }
 
-fn network_value_to_voxel_kind(value: f64) -> u8 {
-    (value.clamp(0.0, 1.0) * f64::from(MAX_VOXEL_KIND)).round() as u8
+fn decode_scaled_integer(value: f64, scale: f32, valid_values: &[u8]) -> Result<u8, String> {
+    if !value.is_finite() {
+        return Err("categorical network value must be finite".into());
+    }
+    if scale <= 0.0 || !scale.is_finite() {
+        return Err(format!("categorical input scale must be positive and finite, got {scale}"));
+    }
+    let raw = value * f64::from(scale);
+    let rounded = raw.round();
+    if (raw - rounded).abs() > 1e-5 || !(0.0..=f64::from(u8::MAX)).contains(&rounded) {
+        return Err(format!("network value {value} does not represent an integer scaled by {scale}"));
+    }
+    let decoded = rounded as u8;
+    if !valid_values.contains(&decoded) {
+        return Err(format!("decoded categorical value {decoded} is not valid; expected one of {valid_values:?}"));
+    }
+    Ok(decoded)
 }
 
 #[derive(Default)]
@@ -67,7 +86,12 @@ fn draw_explanation_face(
 }
 
 #[derive(Clone, Default)]
-struct FieldSchema { low: Vec<f32>, high: Vec<f32> }
+struct FieldSchema {
+    low: Vec<f32>,
+    high: Vec<f32>,
+    integer_scale: Option<f32>,
+    valid_integers: Vec<u8>,
+}
 
 struct ExplanationBridge {
     _child: Child,
@@ -197,7 +221,24 @@ impl NativeExplainUi {
             let floats = |key: &str| raw.get(key).and_then(Value::as_array).map(|values| {
                 values.iter().filter_map(|value| value.as_f64().map(|v| v as f32)).collect()
             }).unwrap_or_default();
-            self.fields.insert(name.clone(), FieldSchema { low: floats("low"), high: floats("high") });
+            let encoding = raw.get("input_encoding").and_then(Value::as_object);
+            let integer_scale = encoding
+                .filter(|value| value.get("type").and_then(Value::as_str) == Some("integer_scaled"))
+                .and_then(|value| value.get("scale"))
+                .and_then(Value::as_f64)
+                .map(|value| value as f32);
+            let valid_integers = encoding
+                .and_then(|value| value.get("valid_values"))
+                .and_then(Value::as_array)
+                .map(|values| values.iter().filter_map(Value::as_u64)
+                    .filter_map(|value| u8::try_from(value).ok()).collect())
+                .unwrap_or_default();
+            self.fields.insert(name.clone(), FieldSchema {
+                low: floats("low"),
+                high: floats("high"),
+                integer_scale,
+                valid_integers,
+            });
         }
     }
 
@@ -293,6 +334,14 @@ impl NativeExplainUi {
         let Some(values) = self.observation.get("local_grid").and_then(Value::as_array) else {
             ui.label("This policy has no local_grid field."); return false;
         };
+        let Some(field) = self.fields.get("local_grid").cloned() else {
+            ui.colored_label(Color32::LIGHT_RED, "local_grid has no field schema");
+            return false;
+        };
+        let Some(scale) = field.integer_scale else {
+            ui.colored_label(Color32::LIGHT_RED, "local_grid has no categorical input encoding");
+            return false;
+        };
         let side = (values.len() as f64).cbrt().round() as usize;
         if side == 0 || side.pow(3) != values.len() {
             ui.colored_label(Color32::LIGHT_RED, "local_grid is not cubic");
@@ -307,10 +356,18 @@ impl NativeExplainUi {
             [140.0, 18.0],
             egui::Slider::new(&mut self.slice_index, 0..=side - 1).text("index"),
         );
-        ui.small("Policy voxel kinds: 0 empty · 1 occupied/boundary · 2 start · 3 goal · 5 filled/trail (4 is reserved)");
-        let mut grid: Vec<u8> = values.iter()
-            .map(|value| network_value_to_voxel_kind(value.as_f64().unwrap_or(0.0)))
-            .collect();
+        ui.small("Policy voxel kinds: 0 empty · 1 occupied/boundary · 2 start · 3 goal · 5 filled/trail");
+        let decoded: Result<Vec<u8>, String> = values.iter().map(|value| {
+            let number = value.as_f64().ok_or("local_grid contains a non-number")?;
+            decode_scaled_integer(number, scale, &field.valid_integers)
+        }).collect();
+        let mut grid = match decoded {
+            Ok(grid) => grid,
+            Err(error) => {
+                ui.colored_label(Color32::LIGHT_RED, error);
+                return false;
+            }
+        };
         let mut changed = false;
         egui::ScrollArea::horizontal().id_salt("observation_voxel_slice_scroll").show(ui, |ui| {
             egui::Grid::new("observation_voxel_slice").spacing([3.0, 3.0]).show(ui, |ui| {
@@ -322,21 +379,31 @@ impl NativeExplainUi {
                         _ => row * side * side + column * side + self.slice_index,
                     };
                     let value = &mut grid[index];
-                    changed |= ui.add_sized(
-                        [(180.0 / side as f32).clamp(36.0, 58.0), 27.0],
-                        egui::DragValue::new(value)
-                            .range(0..=MAX_VOXEL_KIND)
-                            .speed(0.1),
-                    ).changed();
+                    egui::ComboBox::from_id_salt(("voxel_kind", self.axis, self.slice_index, index))
+                        .width((180.0 / side as f32).clamp(36.0, 58.0))
+                        .selected_text(value.to_string())
+                        .show_ui(ui, |ui| {
+                            for candidate in &field.valid_integers {
+                                changed |= ui.selectable_value(value, *candidate, candidate.to_string()).changed();
+                            }
+                        });
                 }
                 ui.end_row();
             }
             });
         });
-        let normalized: Vec<f32> = grid.into_iter()
-            .map(voxel_kind_to_network_value)
+        let normalized: Result<Vec<f32>, String> = grid.into_iter()
+            .map(|value| encode_scaled_integer(value, scale, &field.valid_integers))
             .collect();
-        self.observation.insert("local_grid".into(), json!(normalized));
+        match normalized {
+            Ok(normalized) => {
+                self.observation.insert("local_grid".into(), json!(normalized));
+            }
+            Err(error) => {
+                ui.colored_label(Color32::LIGHT_RED, error);
+                return false;
+            }
+        }
         ui.small("Click and type, or drag, to set an integer voxel kind. The policy receives kind / 5.");
         changed
     }
@@ -351,6 +418,25 @@ impl NativeExplainUi {
             ui.colored_label(Color32::LIGHT_RED, "local_grid is not cubic");
             return;
         }
+        let Some(field) = self.fields.get("local_grid") else {
+            ui.colored_label(Color32::LIGHT_RED, "local_grid has no field schema");
+            return;
+        };
+        let Some(scale) = field.integer_scale else {
+            ui.colored_label(Color32::LIGHT_RED, "local_grid has no categorical input encoding");
+            return;
+        };
+        let decoded: Result<Vec<u8>, String> = values.iter().map(|value| {
+            let number = value.as_f64().ok_or("local_grid contains a non-number")?;
+            decode_scaled_integer(number, scale, &field.valid_integers)
+        }).collect();
+        let kinds = match decoded {
+            Ok(kinds) => kinds,
+            Err(error) => {
+                ui.colored_label(Color32::LIGHT_RED, error);
+                return;
+            }
+        };
         ui.label(format!(
             "{} slice {} / {} · non-selected slices remain translucent",
             ["X", "Y", "Z"][self.axis.min(2)],
@@ -370,10 +456,9 @@ impl NativeExplainUi {
         let center_index = side / 2;
         let mut voxels = Vec::new();
         for x in 0..side { for y in 0..side { for z in 0..side {
-            let value = values[x * side * side + y * side + z]
-                .as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32;
-            if value > 0.0 || (x == center_index && y == center_index && z == center_index) {
-                voxels.push((x, y, z, value));
+            let kind = kinds[x * side * side + y * side + z];
+            if kind > 0 || (x == center_index && y == center_index && z == center_index) {
+                voxels.push((x, y, z, kind));
             }
         }}}
         let occupied: HashSet<(usize, usize, usize)> = voxels.iter()
@@ -384,14 +469,13 @@ impl NativeExplainUi {
             self.camera_yaw.cos() * self.camera_pitch.cos(),
         );
         voxels.sort_by(|a, b| {
-            let depth = |v: &(usize, usize, usize, f32)|
+            let depth = |v: &(usize, usize, usize, u8)|
                 v.0 as f32 * view.0 + v.1 as f32 * view.1 + v.2 as f32 * view.2;
             depth(a).partial_cmp(&depth(b)).unwrap_or(std::cmp::Ordering::Equal)
         });
         let cube_size = (frame.width() / (side as f32 * 1.9)).min(72.0);
-        for (x, y, z, value) in voxels {
+        for (x, y, z, kind) in voxels {
             let is_agent = x == center_index && y == center_index && z == center_index;
-            let kind = network_value_to_voxel_kind(f64::from(value));
             let base = if is_agent || kind == 2 || kind == 5 {
                 Color32::from_rgb(70, 140, 210)
             } else if kind == 3 {
@@ -453,6 +537,43 @@ impl NativeExplainUi {
             let mut edited: Vec<f32> = values.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
             let bounds = self.fields.get(&name).cloned().unwrap_or_default();
             ui.label(RichText::new(&name).strong());
+            if let Some(scale) = bounds.integer_scale {
+                ui.small(format!("Valid integers: {:?}", bounds.valid_integers));
+                let decoded: Result<Vec<u8>, String> = edited.iter()
+                    .map(|value| decode_scaled_integer(
+                        f64::from(*value), scale, &bounds.valid_integers))
+                    .collect();
+                let mut integers = match decoded {
+                    Ok(integers) => integers,
+                    Err(error) => {
+                        ui.colored_label(Color32::LIGHT_RED, error);
+                        continue;
+                    }
+                };
+                for (index, value) in integers.iter_mut().enumerate() {
+                    egui::ComboBox::from_id_salt(("categorical_field", &name, index))
+                        .selected_text(format!("[{index}]  {value}"))
+                        .show_ui(ui, |ui| {
+                            for candidate in &bounds.valid_integers {
+                                changed |= ui.selectable_value(
+                                    value, *candidate, candidate.to_string()).changed();
+                            }
+                        });
+                }
+                let normalized: Result<Vec<f32>, String> = integers.into_iter()
+                    .map(|value| encode_scaled_integer(
+                        value, scale, &bounds.valid_integers))
+                    .collect();
+                match normalized {
+                    Ok(normalized) => {
+                        self.observation.insert(name, json!(normalized));
+                    }
+                    Err(error) => {
+                        ui.colored_label(Color32::LIGHT_RED, error);
+                    }
+                }
+                continue;
+            }
             for (index, value) in edited.iter_mut().enumerate() {
                 let low = bounds.low.get(index).or(bounds.low.first()).copied().unwrap_or(-1.0);
                 let high = bounds.high.get(index).or(bounds.high.first()).copied().unwrap_or(1.0);
@@ -508,21 +629,26 @@ impl NativeExplainUi {
 
 #[cfg(test)]
 mod tests {
-    use super::{network_value_to_voxel_kind, voxel_kind_to_network_value};
+    use super::{decode_scaled_integer, encode_scaled_integer};
+
+    const VALID_VOXEL_KINDS: &[u8] = &[0, 1, 2, 3, 5];
 
     #[test]
     fn voxel_kind_editor_round_trips_all_valid_values() {
-        for kind in 0..=5 {
+        for kind in VALID_VOXEL_KINDS {
+            let encoded = encode_scaled_integer(*kind, 5.0, VALID_VOXEL_KINDS).unwrap();
             assert_eq!(
-                network_value_to_voxel_kind(f64::from(voxel_kind_to_network_value(kind))),
-                kind,
+                decode_scaled_integer(f64::from(encoded), 5.0, VALID_VOXEL_KINDS).unwrap(),
+                *kind,
             );
         }
     }
 
     #[test]
-    fn voxel_kind_editor_clamps_network_values() {
-        assert_eq!(network_value_to_voxel_kind(-1.0), 0);
-        assert_eq!(network_value_to_voxel_kind(2.0), 5);
+    fn categorical_editor_rejects_invalid_values_without_coercion() {
+        assert!(encode_scaled_integer(4, 5.0, VALID_VOXEL_KINDS).is_err());
+        assert!(decode_scaled_integer(0.8, 5.0, VALID_VOXEL_KINDS).is_err());
+        assert!(decode_scaled_integer(0.1, 5.0, VALID_VOXEL_KINDS).is_err());
+        assert!(decode_scaled_integer(f64::NAN, 5.0, VALID_VOXEL_KINDS).is_err());
     }
 }
