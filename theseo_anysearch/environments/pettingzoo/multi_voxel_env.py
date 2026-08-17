@@ -16,6 +16,7 @@ from theseo_anysearch.environments.action_spaces import build_action_space, enco
 from theseo_anysearch.environments.pettingzoo.base import RustParallelEnv
 
 log = logging.getLogger(__name__)
+MAX_VOXEL_KIND = 5.0
 
 
 def _max_manhattan(grid_size: int) -> float:
@@ -259,7 +260,7 @@ class MultiVoxelEnv(RustParallelEnv):
                     ),
                     "local_grid":     np.array(
                         self._rust_env.box_obs(i, radius), dtype=np.float32
-                    ),
+                    ) / MAX_VOXEL_KIND,
                     "ray_cast":       np.array(
                         self._rust_env.ray_cast(i, ray_max_len), dtype=np.float32
                     ),

@@ -9,7 +9,7 @@
 
 use crate::voxel::actions::OFFSETS_26;
 use crate::voxel::rewards::RewardConfig;
-use crate::voxel::world::{Coord, WorldState};
+use crate::voxel::world::{Block, Coord, World, WorldState, BLOCK_KIND_OCCUPIED};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
 use super::multi_action::AgentActionPipeline;
@@ -113,7 +113,16 @@ impl MultiAgentVoxelEnv {
     pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
         self.world.clear();
         for &coord in &geometry {
-            self.world.set(coord, true);
+            self.world
+                .set_block(
+                    coord,
+                    Block {
+                        kind: BLOCK_KIND_OCCUPIED,
+                        active: true,
+                        reward_weight: 0.0,
+                    },
+                )
+                .expect("geometry coordinates must be inside the voxel world");
         }
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
@@ -129,7 +138,16 @@ impl MultiAgentVoxelEnv {
         self.steps = 0;
         self.world.clear();
         for &coord in &self.geometry {
-            self.world.set(coord, true);
+            self.world
+                .set_block(
+                    coord,
+                    Block {
+                        kind: BLOCK_KIND_OCCUPIED,
+                        active: true,
+                        reward_weight: 0.0,
+                    },
+                )
+                .expect("geometry coordinates must be inside the voxel world");
         }
 
         for pipeline in &mut self.pipelines {

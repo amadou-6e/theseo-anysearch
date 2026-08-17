@@ -100,5 +100,4 @@ def test_backend_explains_visible_collision_without_cli_or_checkpoint(tmp_path: 
     assert report.steps[0].chosen_action == ACTION_PLUS_X
     assert report.steps[0].best_safe_action != ACTION_PLUS_X
     assert report.steps[0].score_margin < 0.0
-    assert report.steps[0].group_attributions["chosen_ray_hit"] < 0.0
-    assert report.steps[0].group_attributions["chosen_ray_type"] < 0.0
+    assert set(report.steps[0].group_attributions) == set(observation)

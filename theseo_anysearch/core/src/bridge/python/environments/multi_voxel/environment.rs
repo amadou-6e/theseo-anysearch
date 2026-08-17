@@ -1,5 +1,7 @@
 use pyo3::{exceptions::PyValueError, prelude::*};
 
+use crate::voxel::world::{World, BLOCK_KIND_BOUNDARY, BLOCK_KIND_GOAL};
+
 use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
 /// Upper bound on `box_radius`: keeps `2 * r + 1` well within `i32` range so
@@ -193,12 +195,20 @@ impl PyMultiVoxelEnv {
                     let x = cx as i32 + dx;
                     let y = cy as i32 + dy;
                     let z = cz as i32 + dz;
-                    let filled = if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
-                        self.inner.world.is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                    let kind = if x >= 1 && y >= 1 && z >= 1 && x <= g && y <= g && z <= g {
+                        let coord = (x as u16, y as u16, z as u16);
+                        if self.inner.agents[agent_idx].goal == Some(coord) {
+                            f32::from(BLOCK_KIND_GOAL)
+                        } else {
+                            self.inner
+                                .world
+                                .get_block(coord)
+                                .map_or(0.0, |block| f32::from(block.kind))
+                        }
                     } else {
-                        1.0
+                        f32::from(BLOCK_KIND_BOUNDARY)
                     };
-                    result.push(filled);
+                    result.push(kind);
                 }
             }
         }
