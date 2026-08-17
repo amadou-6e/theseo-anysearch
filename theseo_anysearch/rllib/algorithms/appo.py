@@ -6,10 +6,7 @@ from typing import Any
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.rllib.algorithms.models import APPOConfig
-from theseo_anysearch.rllib.algorithms.ppo import (
-    _configure_rllib_env_runners,
-    _ensure_ray_runtime,
-)
+from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     bind_anysearch_evaluation_function,
     configure_rllib_evaluation,
@@ -94,7 +91,16 @@ class APPOTrainer(Trainer):
             .framework("torch")
         )
         rllib_config.rollout_fragment_length = algo_cfg.rollout_fragment_length
-        rllib_config = _configure_rllib_env_runners(rllib_config, config.training)
+        # APPO runs on the legacy API stack (enable_env_runner_and_connector_v2
+        # above), which never invokes connector-v2 pipelines, so env runner
+        # parallelism is set directly rather than via _configure_rllib_env_runners
+        # (whose env_to_module_connector is a connector-v2-only mechanism).
+        rllib_config.num_env_runners = config.training.num_env_runners
+        rllib_config.num_envs_per_env_runner = config.training.num_envs_per_env_runner
+        rllib_config.num_gpus_per_env_runner = config.training.num_gpus_per_env_runner
+        rllib_config.max_requests_in_flight_per_env_runner = (
+            config.training.max_requests_in_flight_per_env_runner
+        )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
