@@ -71,6 +71,25 @@ This replaces the earlier binary box encoding, which collapsed every non-empty
 kind and the boundary to `1.0`. Existing binary-box checkpoints must be
 retrained.
 
+## Categorical input scaling
+
+Categorical observations expose raw integer values to editing tools and are
+normalized only at the policy boundary:
+
+| Observation | Valid raw values | Policy conversion |
+|---|---|---|
+| `local_grid` | `0, 1, 2, 3, 5` | `value / 5` |
+| `ray_hit_types` | `0, 1, 2, 3, 5` | `value / 5` |
+| `action_mask` | `0, 1` | unchanged |
+
+The native explanation bridge publishes this encoding as field metadata, so
+the UI presents only valid integer choices. It rejects non-integral, reserved,
+and non-finite categorical values rather than rounding or clamping them.
+
+Continuous fields—including `goal_direction`, `goal_distance`, `ray_hits`, and
+multi-agent direction vectors—remain floating-point observations with their
+declared observation-space bounds.
+
 ## No absolute-position or time-budget inputs
 
 Policy observations do not include `cursor_pos` or `steps_remaining`. The
