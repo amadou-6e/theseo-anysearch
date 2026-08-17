@@ -63,6 +63,11 @@ class VoxelEnv(RustGymnasiumEnv):
             config.get("custom_reward"),
         )
         self._reward_parameters = dict(config.get("custom_reward_parameters") or {})
+        from theseo_anysearch.environments.lifecycle import build_lifecycle_rules
+
+        self._lifecycle_rules = build_lifecycle_rules(
+            config.get("lifecycle_rules") or [{"name": "native"}]
+        )
         self._episode_steps = 0
         self._consecutive_collisions = 0
         self._episode_reward_breakdown: dict[str, float] = {}
@@ -543,7 +548,8 @@ class VoxelEnv(RustGymnasiumEnv):
                 self._episode_reward_breakdown.get(name, 0.0) + value
             )
 
-        final_success = success and not self._route_remaining
+        route_complete = not self._route_remaining
+        final_success = success and route_complete
         waypoint_reached = success
         if waypoint_reached:
             self._route_waypoints_reached += 1
@@ -560,6 +566,38 @@ class VoxelEnv(RustGymnasiumEnv):
             reason = "in_progress"
         else:
             reason = str(result.termination_reason)
+        from theseo_anysearch.environments.lifecycle import (
+            LifecycleContext,
+            evaluate_lifecycle,
+        )
+
+        lifecycle = evaluate_lifecycle(
+            self._lifecycle_rules,
+            LifecycleContext(
+                step=self._episode_steps,
+                action=action,
+                action_index=int(action_index),
+                cursor=cursor,
+                goal=tuple(fallback) if fallback is not None else None,
+                goal_distance=current_distance,
+                collision=collision,
+                invalid_action=invalid_action,
+                native_success=success,
+                native_terminated=terminated,
+                native_truncated=truncated,
+                native_reason=reason,
+                route_complete=route_complete,
+                diagnostics={
+                    "consecutive_collisions": int(result.consecutive_collisions),
+                    "construction_residual": residual,
+                    "construction_overshoot": overshoot,
+                },
+            ),
+        )
+        final_success = lifecycle.success
+        terminated = lifecycle.terminated
+        truncated = lifecycle.truncated
+        reason = lifecycle.reason
         self._minimum_distance = min(self._minimum_distance, current_distance)
         self._previous_task_distance = current_distance
         self._last_observation = observation
@@ -576,6 +614,8 @@ class VoxelEnv(RustGymnasiumEnv):
             ),
             "route_waypoints_remaining": len(self._route_remaining),
             "termination_reason": reason,
+            "failure": lifecycle.failure,
+            "lifecycle_diagnostics": lifecycle.diagnostics,
             "reward_breakdown": breakdown,
             "episode_reward_breakdown": dict(self._episode_reward_breakdown),
             "unshaped_reward": unshaped_reward,
