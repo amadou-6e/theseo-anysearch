@@ -607,7 +607,7 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         }
 
         mock_rust = MagicMock()
-        mock_rust.box_obs.side_effect = lambda r: [0.1] * (2 * r + 1) ** 3
+        mock_rust.box_obs.side_effect = lambda r: [1.0] * (2 * r + 1) ** 3
         mock_rust.cursor_pos.return_value = (5, 5, 5)
         env._rust_env = mock_rust
         env._init_obs_cache(env._config)
@@ -619,8 +619,27 @@ class TestVoxelEnvHierarchicalBoxObsMode:
         result = env._obs_to_numpy(mock_obs)
         assert "local_grid" in result
         assert result["local_grid"].shape == (756,)
+        np.testing.assert_allclose(result["local_grid"], 0.2)
         # box_obs called once per radius
         assert mock_rust.box_obs.call_count == 2
+
+    def test_obs_to_numpy_normalizes_raw_voxel_kinds(self):
+        """Box block kinds are divided by five only at the policy boundary."""
+        from unittest.mock import MagicMock
+        from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+        env = VoxelEnv.__new__(VoxelEnv)
+        env._config = {"obs_mode": "box", "box_radius": 1, "max_steps": 10}
+        env._rust_env = MagicMock()
+        env._init_obs_cache(env._config)
+
+        raw_kinds = np.resize(np.arange(6, dtype=np.float32), 27)
+        rust_observation = MagicMock()
+        rust_observation.local_grid = raw_kinds
+
+        observation = env._obs_to_numpy(rust_observation)
+
+        np.testing.assert_allclose(observation["local_grid"], raw_kinds / 5.0)
 
     def test_obs_to_numpy_unknown_mode_raises(self):
         from unittest.mock import MagicMock as MM

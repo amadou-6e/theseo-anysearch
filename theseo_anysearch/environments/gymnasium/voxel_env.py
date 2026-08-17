@@ -31,6 +31,7 @@ from theseo_anysearch.environments.task import (
 log = logging.getLogger(__name__)
 
 MAX_RAY_HIT_TYPE = 5.0
+MAX_VOXEL_KIND = 5.0
 
 
 def _max_manhattan(grid_size: int) -> float:
@@ -687,6 +688,7 @@ class VoxelEnv(RustGymnasiumEnv):
             if local_grid is None:
                 local_grid = self._rust_env.box_obs(self._box_radius)
             self._buf_grid[:] = local_grid
+            self._buf_grid *= 1.0 / MAX_VOXEL_KIND
             base["local_grid"] = self._buf_grid.copy()
         elif self._obs_mode == "radial":
             self._buf_rays[:] = self._rust_env.radial_obs(self._ray_max_len)
@@ -701,6 +703,7 @@ class VoxelEnv(RustGymnasiumEnv):
                 n = (2 * r + 1) ** 3
                 self._buf_grid[offset:offset + n] = seg
                 offset += n
+            self._buf_grid *= 1.0 / MAX_VOXEL_KIND
             base["local_grid"] = self._buf_grid.copy()
         else:
             raise ValueError(

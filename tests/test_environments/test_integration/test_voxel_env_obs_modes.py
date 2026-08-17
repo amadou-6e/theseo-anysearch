@@ -29,10 +29,12 @@ class TestVoxelEnvObsModesIntegration:
         obs, *_ = env.step(2)
         assert obs["local_grid"].shape == (125,)
 
-    def test_box_obs_values_binary(self):
+    def test_box_obs_values_are_normalized_block_kinds(self):
         env = self.make(obs_mode="box", box_radius=2)
         obs, _ = env.reset()
-        assert np.all((obs["local_grid"] == 0.0) | (obs["local_grid"] == 1.0))
+        valid = np.arange(6, dtype=np.float32) / 5.0
+        assert np.all(np.isin(obs["local_grid"], valid))
+        assert 0.8 in obs["local_grid"]  # outside-grid boundary
 
     def test_box_obs_dtype(self):
         env = self.make(obs_mode="box")
@@ -123,9 +125,9 @@ class TestVoxelEnvObsModesIntegration:
             for dy in range(-2, 3):
                 for dz in range(-2, 3):
                     x, y, z = 1 + dx, 1 + dy, 1 + dz
-                    expected.append(1.0 if x < 1 or y < 1 or z < 1 else 0.0)
+                    expected.append(4.0 if x < 1 or y < 1 or z < 1 else 0.0)
         expected = np.array(expected, dtype=np.float32)
-        expected[62] = 1.0
+        expected[62] = 2.0
         assert len(obs) == 125
         assert np.array_equal(obs, expected)
 

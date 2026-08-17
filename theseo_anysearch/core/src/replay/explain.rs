@@ -9,6 +9,16 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, RichText};
 use serde_json::{json, Map, Value};
 
+const MAX_VOXEL_KIND: u8 = 5;
+
+fn voxel_kind_to_network_value(kind: u8) -> f32 {
+    f32::from(kind) / f32::from(MAX_VOXEL_KIND)
+}
+
+fn network_value_to_voxel_kind(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * f64::from(MAX_VOXEL_KIND)).round() as u8
+}
+
 #[derive(Default)]
 pub struct NativeExplainUi {
     bridge: Option<ExplanationBridge>,
@@ -248,7 +258,7 @@ impl NativeExplainUi {
         let mut explain = false;
         let mut changed = false;
         let mut import_path = None;
-        ui.label("Edit normalized network inputs. Fictional observations are not environment-validated.");
+        ui.label("Edit raw observation values. Values are normalized only when sent to the policy.");
         if ui.button("Load fictional observation...").clicked() {
             import_path = rfd::FileDialog::new()
                 .add_filter("Observation", &["json", "npy", "npz", "pb", "tensor"])
@@ -297,7 +307,10 @@ impl NativeExplainUi {
             [140.0, 18.0],
             egui::Slider::new(&mut self.slice_index, 0..=side - 1).text("index"),
         );
-        let mut grid: Vec<f32> = values.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+        ui.small("Valid voxel kinds: 0 empty · 1 occupied · 2 start · 3 goal · 4 boundary · 5 filled/trail");
+        let mut grid: Vec<u8> = values.iter()
+            .map(|value| network_value_to_voxel_kind(value.as_f64().unwrap_or(0.0)))
+            .collect();
         let mut changed = false;
         egui::ScrollArea::horizontal().id_salt("observation_voxel_slice_scroll").show(ui, |ui| {
             egui::Grid::new("observation_voxel_slice").spacing([3.0, 3.0]).show(ui, |ui| {
@@ -312,17 +325,19 @@ impl NativeExplainUi {
                     changed |= ui.add_sized(
                         [(180.0 / side as f32).clamp(36.0, 58.0), 27.0],
                         egui::DragValue::new(value)
-                            .range(0.0..=1.0)
-                            .speed(0.01)
-                            .fixed_decimals(2),
+                            .range(0..=MAX_VOXEL_KIND)
+                            .speed(0.1),
                     ).changed();
                 }
                 ui.end_row();
             }
             });
         });
-        self.observation.insert("local_grid".into(), json!(grid));
-        ui.small("Click and type, or drag, to set an exact normalized value from 0 to 1.");
+        let normalized: Vec<f32> = grid.into_iter()
+            .map(voxel_kind_to_network_value)
+            .collect();
+        self.observation.insert("local_grid".into(), json!(normalized));
+        ui.small("Click and type, or drag, to set an integer voxel kind. The policy receives kind / 5.");
         changed
     }
 
@@ -376,8 +391,11 @@ impl NativeExplainUi {
         let cube_size = (frame.width() / (side as f32 * 1.9)).min(72.0);
         for (x, y, z, value) in voxels {
             let is_agent = x == center_index && y == center_index && z == center_index;
-            let base = if is_agent || (value > 0.0 && value < 0.99) {
+            let kind = network_value_to_voxel_kind(f64::from(value));
+            let base = if is_agent || kind == 2 || kind == 5 {
                 Color32::from_rgb(70, 140, 210)
+            } else if kind == 3 {
+                Color32::from_rgb(70, 190, 110)
             } else {
                 Color32::from_rgb(120, 120, 130)
             };
@@ -486,4 +504,25 @@ impl NativeExplainUi {
         });
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{network_value_to_voxel_kind, voxel_kind_to_network_value};
+
+    #[test]
+    fn voxel_kind_editor_round_trips_all_valid_values() {
+        for kind in 0..=5 {
+            assert_eq!(
+                network_value_to_voxel_kind(f64::from(voxel_kind_to_network_value(kind))),
+                kind,
+            );
+        }
+    }
+
+    #[test]
+    fn voxel_kind_editor_clamps_network_values() {
+        assert_eq!(network_value_to_voxel_kind(-1.0), 0);
+        assert_eq!(network_value_to_voxel_kind(2.0), 5);
+    }
 }

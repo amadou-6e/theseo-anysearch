@@ -74,18 +74,21 @@ impl PyVoxelEnv {
                     let x = i32::from(cx) + dx;
                     let y = i32::from(cy) + dy;
                     let z = i32::from(cz) + dz;
-                    let filled = if x >= 1
+                    let kind = if x >= 1
                         && y >= 1
                         && z >= 1
                         && x <= grid_size
                         && y <= grid_size
                         && z <= grid_size
                     {
-                        self.inner.world().is_filled((x as u16, y as u16, z as u16)) as u8 as f32
+                        self.inner
+                            .world()
+                            .get_block((x as u16, y as u16, z as u16))
+                            .map_or(0.0, |block| f32::from(block.kind))
                     } else {
-                        1.0
+                        f32::from(BLOCK_KIND_BOUNDARY)
                     };
-                    result.push(filled);
+                    result.push(kind);
                 }
             }
         }
@@ -437,6 +440,25 @@ mod tests {
         }
     }
 
+    fn env_with_block_kind(cursor: (u16, u16, u16), coord: Coord, kind: u8) -> PyVoxelEnv {
+        let mut world = WorldState::new();
+        world
+            .set_block(
+                coord,
+                Block {
+                    kind,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        let mut inner = VoxelEnv::new(world, 100);
+        inner.set_cursor(cursor);
+        PyVoxelEnv {
+            inner,
+            box_radius: None,
+        }
+    }
+
     #[test]
     fn action_26_is_noop_not_collision() {
         let reward_config = crate::voxel::RewardConfig {
@@ -508,12 +530,12 @@ mod tests {
     }
 
     #[test]
-    fn box_obs_single_filled_at_cursor() {
+    fn box_obs_preserves_filled_kind_at_cursor() {
         // cursor at (1,1,1)
         let env = env_with_block((5, 5, 5), (5, 5, 5));
         let obs = env.box_obs(2).unwrap(); // 5Â³ = 125 cells
                                   // centre element: dx=0,dy=0,dz=0 â†’ flat index = 2*25 + 2*5 + 2 = 62
-        assert_eq!(obs[62], 1.0);
+        assert_eq!(obs[62], 5.0);
         let non_centre: Vec<f32> = obs
             .iter()
             .enumerate()
@@ -524,13 +546,21 @@ mod tests {
     }
 
     #[test]
+    fn box_obs_preserves_every_stored_block_kind() {
+        for kind in 1..=5 {
+            let env = env_with_block_kind((5, 5, 5), (5, 5, 5), kind);
+            assert_eq!(env.box_obs(0).unwrap(), vec![f32::from(kind)]);
+        }
+    }
+
+    #[test]
     fn box_obs_out_of_grid_is_blocked() {
         // cursor at (1,1,1); radius 2 â†’ cells at coord 0 and -1 are OOB or edge
         // cell at (1-2, 1, 1) = (-1, 1, 1) â€” out of bounds (negative i32)
         let env = env_at_cursor((1, 1, 1)); // (1,1,1)
         let obs = env.box_obs(2).unwrap();
-        // first element: dx=-2,dy=-2,dz=-2 â†’ (1-2,1-2,1-2) = (-1,-1,-1) â†’ 0.0
-        assert_eq!(obs[0], 1.0);
+        // first element is outside the configured grid and retains boundary kind 4.
+        assert_eq!(obs[0], 4.0);
     }
 
     #[test]

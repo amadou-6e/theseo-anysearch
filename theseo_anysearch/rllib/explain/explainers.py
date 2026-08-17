@@ -75,26 +75,6 @@ class OcclusionExplainer(Explainer):
             masked[group.name] = self._baseline[group.name].copy()
             masked_margin = self._margin(masked, chosen_action, best_safe_action)
             attributions[group.name] = float(original_margin - masked_margin)
-        if "local_grid" in observation:
-            direction = self._schema.action_directions[chosen_action]
-            grid_index = self._schema.local_grid_index(direction)
-            attributions["chosen_destination_cell"] = self._single_feature_attribution(
-                observation,
-                "local_grid",
-                grid_index,
-                original_margin,
-                chosen_action,
-                best_safe_action,
-            )
-        elif "ray_hits" in observation and "ray_hit_types" in observation:
-            attributions["chosen_ray_hit"] = self._single_feature_attribution(
-                observation, "ray_hits", chosen_action, original_margin,
-                chosen_action, best_safe_action,
-            )
-            attributions["chosen_ray_type"] = self._single_feature_attribution(
-                observation, "ray_hit_types", chosen_action, original_margin,
-                chosen_action, best_safe_action,
-            )
         return attributions
 
     def _masked_observation(self, observation: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -115,19 +95,3 @@ class OcclusionExplainer(Explainer):
 
         scores = self._scorer.score_all([observation]).values[0]
         return float(scores[chosen_action] - scores[best_safe_action])
-
-    def _single_feature_attribution(
-        self,
-        observation: Mapping[str, np.ndarray],
-        group_name: str,
-        feature_index: int,
-        original_margin: float,
-        chosen_action: int,
-        best_safe_action: int,
-    ) -> float:
-        """Return occlusion attribution for one action-aligned feature."""
-
-        masked = self._masked_observation(observation)
-        masked[group_name][feature_index] = self._baseline[group_name][feature_index]
-        masked_margin = self._margin(masked, chosen_action, best_safe_action)
-        return float(original_margin - masked_margin)

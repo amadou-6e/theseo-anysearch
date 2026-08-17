@@ -53,6 +53,24 @@ This unit-vector encoding replaces the earlier grid-scaled displacement.
 Existing policy checkpoints trained with the earlier encoding are therefore
 not observation-compatible and should be retrained.
 
+## Box voxel kinds
+
+Rust emits raw integer block kinds and the Python environment normalizes them
+with `kind / 5` immediately before constructing the policy observation.
+
+| Raw kind | Network value | Meaning |
+|---:|---:|---|
+| `0` | `0.0` | Empty voxel |
+| `1` | `0.2` | Occupied geometry |
+| `2` | `0.4` | Episode start |
+| `3` | `0.6` | Active goal |
+| `4` | `0.8` | Outside-grid boundary |
+| `5` | `1.0` | Filled/trail voxel |
+
+This replaces the earlier binary box encoding, which collapsed every non-empty
+kind and the boundary to `1.0`. Existing binary-box checkpoints must be
+retrained.
+
 ## No absolute-position or time-budget inputs
 
 Policy observations do not include `cursor_pos` or `steps_remaining`. The
