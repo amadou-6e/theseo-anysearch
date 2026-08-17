@@ -718,6 +718,28 @@ def tune(
                                   cfg=best_cfg.training, approach=best_cfg.approach,
                                   device=device, epoch_cb=epoch_cb)
 
+        if tc.validity_gates:
+            from theseo_anysearch.garden.tune_runner import _validity_metrics
+
+            selected_epoch = max(
+                result_tr.loss_curve,
+                key=lambda item: item[best_cfg.training.checkpoint_metric]
+                if best_cfg.training.checkpoint_mode == "max"
+                else -item[best_cfg.training.checkpoint_metric],
+            )
+            validity = _validity_metrics(selected_epoch, tc.validity_gates)
+            if not validity["valid_trial"]:
+                failed = [
+                    f"{metric}={selected_epoch.get(metric, 0.0):.4f} < {threshold:.4f}"
+                    for metric, threshold in tc.validity_gates.items()
+                    if selected_epoch.get(metric, 0.0) < threshold
+                ]
+                err_console.print(
+                    "\n[red]Best-config retrain failed validity gates; model was not saved:[/red] "
+                    + ", ".join(failed)
+                )
+                raise typer.Exit(1)
+
         store = GardenStore(gdir)
         ckpt = store.save(name=best_cfg.name, model=model, cfg=best_cfg,
                           epochs_trained=result_tr.epochs_trained,

@@ -9,6 +9,21 @@ _VALID_TUNE_FNS = {"choice", "grid_search", "loguniform", "uniform", "randint", 
 _CHOICE_FNS = {"choice", "grid_search"}
 
 
+def _validity_metrics(metrics: dict[str, float], gates: dict[str, float]) -> dict[str, float]:
+    """Build a strict validity flag and a smooth score for constrained tuning."""
+    if not gates:
+        return {
+            "valid_trial": 1.0,
+            "valid_representation_score": metrics["representation_score"],
+        }
+    ratios = [metrics.get(name, 0.0) / threshold for name, threshold in gates.items()]
+    valid = all(ratio >= 1.0 for ratio in ratios)
+    # Every valid score is positive; every invalid score is negative.  The
+    # ratio term still lets ASHA distinguish promising invalid checkpoints.
+    score = metrics["representation_score"] if valid else min(ratios) - 1.0
+    return {"valid_trial": float(valid), "valid_representation_score": score}
+
+
 def _parse_garden_search_space(raw: dict[str, Any], tune_module: Any) -> dict[str, Any]:
     """Convert garden YAML search_space to ray.tune samplers.
 
@@ -89,6 +104,7 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
     merged.pop("tune", None)
 
     cfg = GardenConfig.model_validate(merged)
+    tune_cfg = GardenConfig.model_validate(garden_dict).tune
 
     if isinstance(cfg.data, Path):
         data_cfg = load_data_config(cfg.data)
@@ -125,16 +141,18 @@ def _garden_trainable(config: dict[str, Any], *, garden_dict: dict[str, Any]) ->
             if checkpoint_path.exists()
             else None
         )
+        reported_metrics = {
+            "val_loss": val_loss,
+            "train_loss": train_loss,
+            "epoch": epoch,
+            "encoder_parameters": encoder_parameters,
+            "encoder_megabytes_fp32": encoder_parameters * 4 / (1024 * 1024),
+            "model_parameters": model_parameters,
+            **val_metrics,
+        }
+        reported_metrics.update(_validity_metrics(reported_metrics, tune_cfg.validity_gates if tune_cfg else {}))
         ray_tune.report(
-            {
-                "val_loss": val_loss,
-                "train_loss": train_loss,
-                "epoch": epoch,
-                "encoder_parameters": encoder_parameters,
-                "encoder_megabytes_fp32": encoder_parameters * 4 / (1024 * 1024),
-                "model_parameters": model_parameters,
-                **val_metrics,
-            },
+            reported_metrics,
             checkpoint=checkpoint,
         )
 
@@ -238,6 +256,8 @@ class GardenTuneRunner:
 
         results = tuner.fit()
         best = results.get_best_result(metric=tc.metric, mode=tc.mode)
+        if tc.validity_gates and not best.metrics.get("valid_trial", 0.0):
+            raise RuntimeError("No tuning trial satisfied all representation validity gates")
         return {
             "best_config": best.config,
             "best_val_loss": best.metrics.get("val_loss"),

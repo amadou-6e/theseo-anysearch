@@ -38,6 +38,11 @@ class TrainResult(BaseModel):
     stopped_early: bool = False
 
 
+def _metric_improved(value: float, best: float, mode: str) -> bool:
+    """Return whether a checkpoint-selection metric improved."""
+    return value < best if mode == "min" else value > best
+
+
 def _compute_pos_weight(train_ds: GardenDataset, n_samples: int = 512, device: str = "cpu") -> torch.Tensor:
     """Estimate fill rate from a sample of the dataset and return pos_weight tensor."""
     indices = list(range(min(n_samples, len(train_ds))))
@@ -251,6 +256,7 @@ def train(
         log.info("pos_weight=%.2f  focal_gamma=%.1f", pos_weight.item(), focal_gamma)
 
     best_val = float("inf")
+    best_metric = float("inf") if cfg.checkpoint_mode == "min" else float("-inf")
     best_state: dict[str, torch.Tensor] | None = None
     patience_counter = 0
     loss_curve: list[dict] = []
@@ -263,6 +269,7 @@ def train(
         optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch = ckpt.get("epoch", 0) + 1
         best_val = ckpt.get("best_val", float("inf"))
+        best_metric = ckpt.get("best_metric", best_val)
         loss_curve = ckpt.get("loss_curve", [])
         best_state = deepcopy(model.state_dict())
         log.info("Resumed from epoch %d", start_epoch - 1)
@@ -308,7 +315,9 @@ def train(
 
         # Early stopping
         should_stop = False
-        if val_loss < best_val:
+        selection_value = val_loss if cfg.checkpoint_metric == "val_loss" else val_metrics[cfg.checkpoint_metric]
+        if _metric_improved(selection_value, best_metric, cfg.checkpoint_mode):
+            best_metric = selection_value
             best_val = val_loss
             best_state = deepcopy(model.state_dict())
             patience_counter = 0
@@ -319,6 +328,7 @@ def train(
                     "model": model.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "best_val": best_val,
+                    "best_metric": best_metric,
                     "loss_curve": loss_curve,
                 }, checkpoint_path)
         else:

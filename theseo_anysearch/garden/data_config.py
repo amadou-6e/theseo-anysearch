@@ -437,6 +437,8 @@ class GardenTrainingConfig(BaseModel):
     dice_weight: float = 0.0
     face_loss_weight: float = 0.0
     loss_version: Literal["positive_bce_v2"] = "positive_bce_v2"
+    checkpoint_metric: Literal["val_loss", "representation_score"] = "val_loss"
+    checkpoint_mode: Literal["min", "max"] = "min"
 
 
 # ---------------------------------------------------------------------------
@@ -465,8 +467,9 @@ class GardenTuneConfig(BaseModel):
     max_concurrent: int = 4
     grace_period: int = 5         # ASHA: min epochs before pruning
     reduction_factor: int = 3     # ASHA reduction factor
-    metric: Literal["val_loss", "representation_score"] = "val_loss"
+    metric: Literal["val_loss", "representation_score", "valid_representation_score"] = "val_loss"
     mode: Literal["min", "max"] = "min"
+    validity_gates: dict[str, float] = Field(default_factory=dict)
     # search_space keys mirror GardenConfig sections: encoder.*, training.*
     search_space: dict[str, Any] = Field(default_factory=dict)
 

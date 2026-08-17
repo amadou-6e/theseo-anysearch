@@ -1,0 +1,85 @@
+# Compact encoder search whose winner must pass held-out latent-probe gates.
+# Run: anysearch garden tune voxel_resnet_s0_valid_tune --tag gpu-v1
+name: voxel_resnet_s0_valid
+approach: autoencoder
+architecture: voxel_resnet_3d
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 150
+          num_boxes: [1, 8]
+          box_min_size: [2, 2, 2]
+          box_max_size: [14, 14, 14]
+          grid_size: 32
+          total_samples: 50000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 2.0
+
+encoder:
+  profile: s0
+  pooling: spatial_2x2x2
+  box_radius: 2
+  conv_channels: [20, 40, 56]
+  residual_blocks: [1, 1, 1]
+  latent_dim: 48
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.025
+  translation_jitter: 1
+  morph_prob: 0.1
+  cutout:
+    count: 1
+    min_size: 1
+    max_size: 2
+
+training:
+  epochs: 24
+  batch_size: 64
+  optimizer: adam
+  lr: 2.5e-4
+  weight_decay: 1.0e-3
+  lr_scheduler: cosine
+  early_stop_patience: 8
+  dice_weight: 0.5
+  face_loss_weight: 0.1
+  loss_version: positive_bce_v2
+  checkpoint_metric: representation_score
+  checkpoint_mode: max
+
+tune:
+  num_samples: 100
+  max_concurrent: 1
+  grace_period: 8
+  reduction_factor: 3
+  metric: valid_representation_score
+  mode: max
+  validity_gates:
+    probe_iou: 0.80
+    probe_ood_iou: 0.65
+    probe_ood_recall: 0.75
+    probe_face_accuracy: 0.90
+  search_space:
+    encoder:
+      conv_channels:
+        choice:
+          - [12, 24, 32]
+          - [16, 32, 48]
+          - [20, 40, 56]
+      residual_blocks:
+        choice:
+          - [1, 1, 1]
+          - [1, 2, 1]
+      latent_dim: {choice: [16, 24, 32, 48]}
+    training:
+      lr: {loguniform: [5.0e-5, 8.0e-4]}
+      weight_decay: {loguniform: [1.0e-5, 3.0e-3]}
+      batch_size: {choice: [64, 128]}
+      dice_weight: {choice: [0.25, 0.5, 1.0]}
+      face_loss_weight: {choice: [0.1, 0.25, 0.5]}

@@ -161,3 +161,15 @@ def test_spatial_tuning_preset_uses_representation_score():
     }
     assert len(cfg.tune.search_space["encoder"]["conv_channels"]["choice"]) == 4
     assert len(cfg.tune.search_space["encoder"]["residual_blocks"]["choice"]) == 3
+
+
+def test_valid_tuning_preset_aligns_selection_and_validity_gates():
+    preset_path = Path(
+        "theseo_anysearch", "garden", "presets", "voxel_resnet_s0_valid_tune.yaml"
+    )
+    cfg = load_garden_config(preset_path)
+    assert cfg.training.checkpoint_metric == "representation_score"
+    assert cfg.training.checkpoint_mode == "max"
+    assert cfg.tune is not None
+    assert cfg.tune.metric == "valid_representation_score"
+    assert cfg.tune.validity_gates["probe_ood_iou"] == 0.65
