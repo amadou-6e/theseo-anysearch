@@ -16,6 +16,10 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
+from theseo_anysearch.environment_rules.registry import (
+    built_in_environment_rule_registry,
+)
+
 ABI_VERSION = 2
 CAP_REWARD = 1
 CAP_TRAINING_METRICS = 2
@@ -173,8 +177,9 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
         current = NativeExtensionManifest.model_validate_json(stable_manifest.read_text(encoding="utf-8"))
         candidate = stable_manifest.parent.joinpath(current.library)
         expected_rewards = (reward_name,) if "reward" in current.capabilities and reward_name else ()
-        built_in_predicates = {"valid_action", "bounds", "unoccupied"}
-        built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+        rule_registry = built_in_environment_rule_registry()
+        built_in_predicates = set(rule_registry.names("predicate"))
+        built_in_outcomes = set(rule_registry.names("outcome"))
         expected_predicates = tuple(
             name for name in predicate_names if name not in built_in_predicates
         )
@@ -215,8 +220,9 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
             )
         probe.validate_reward(reward_name)
         rewards = (reward_name,)
-    built_in_predicates = {"valid_action", "bounds", "unoccupied"}
-    built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+    rule_registry = built_in_environment_rule_registry()
+    built_in_predicates = set(rule_registry.names("predicate"))
+    built_in_outcomes = set(rule_registry.names("outcome"))
     predicates = tuple(name for name in predicate_names if probe.has_predicate(name))
     outcomes = tuple(name for name in outcome_names if probe.has_outcome(name))
     missing_predicates = set(predicate_names) - set(predicates) - built_in_predicates
@@ -256,8 +262,9 @@ def discover_native_manifest(config_path: Path | None) -> Path | None:
             f"'anysearch compile {config_path.parent}'"
         )
     selected_predicates, selected_outcomes = _selected_action_names(config_path.parent)
-    built_in_predicates = {"valid_action", "bounds", "unoccupied"}
-    built_in_outcomes = {"cursor_movement", "trail_placement", "place", "remove"}
+    rule_registry = built_in_environment_rule_registry()
+    built_in_predicates = set(rule_registry.names("predicate"))
+    built_in_outcomes = set(rule_registry.names("outcome"))
     expected_predicates = tuple(
         name for name in selected_predicates if name not in built_in_predicates
     )

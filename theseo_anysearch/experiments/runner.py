@@ -353,6 +353,9 @@ class ExperimentRunner:
     """
 
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
+        from theseo_anysearch.environment_rules import preflight_environment_rules
+
+        preflight_environment_rules(config, config_path)
         self._config = config
         self._config_path = config_path
 
