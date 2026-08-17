@@ -81,7 +81,9 @@ class _PolicyAdapter:
         """Return the new-stack inference module when one is available."""
         module = getattr(self._env_runner, "module", None)
         if module is None and hasattr(self._env_runner, "get_module"):
-            module = self._env_runner.get_module()
+            env_runner = getattr(self._env_runner, "env_runner", None)
+            if env_runner is None or hasattr(env_runner, "module"):
+                module = self._env_runner.get_module()
         return module
 
     def _module_observations(self, observations: list[Any]) -> list[Any]:

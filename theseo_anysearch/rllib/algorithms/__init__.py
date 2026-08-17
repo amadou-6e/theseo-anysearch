@@ -6,6 +6,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
+    "APPOTrainer": ("theseo_anysearch.rllib.algorithms.appo", "APPOTrainer"),
     "DDPGTrainer": ("theseo_anysearch.rllib.algorithms.ddpg", "DDPGTrainer"),
     "DQNTrainer": ("theseo_anysearch.rllib.algorithms.dqn", "DQNTrainer"),
     "MultiAgentVoxelPPOTrainer": (

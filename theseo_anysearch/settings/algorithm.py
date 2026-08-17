@@ -56,7 +56,7 @@ class AlgorithmEnvCompatibilityMixin:
             raise ValueError(
                 "training.early_stop.min_goal_finishes cannot exceed evaluation.episodes"
             )
-        single_agent_algorithms = {"ppo", "dqn", "sac", "rainbow"}
+        single_agent_algorithms = {"ppo", "appo", "dqn", "sac", "rainbow"}
         algorithm = self.training.algorithm.lower()
         imitation = getattr(self, "imitation", None)
         if imitation is not None and imitation.enabled:

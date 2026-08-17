@@ -359,6 +359,25 @@ class TestRainbowConfig:
             self.RainbowConfig(unknown=1)
 
 
+class TestAPPOConfig:
+    """Tests APPOConfig."""
+
+    def test_async_defaults(self):
+        from theseo_anysearch.rllib.algorithms.models import APPOConfig
+
+        cfg = APPOConfig()
+        assert cfg.vtrace is True
+        assert cfg.rollout_fragment_length == 32
+        assert cfg.circular_buffer_num_batches == 8
+        assert cfg.circular_buffer_iterations_per_batch == 2
+
+    def test_rejects_extra(self):
+        from theseo_anysearch.rllib.algorithms.models import APPOConfig
+
+        with pytest.raises(ValidationError):
+            APPOConfig(unknown=1)
+
+
 class TestTD3Config:
     """Tests TD3Config."""
     def setup_method(self):

@@ -229,6 +229,16 @@ def test_policy_adapter_batches_observations_for_policy(monkeypatch) -> None:
     assert received["explore"] is False
 
 
+def test_policy_adapter_uses_policy_for_legacy_rollout_worker() -> None:
+    class _LegacyAlgorithm:
+        env_runner = SimpleNamespace()
+
+        def get_module(self):
+            raise AssertionError("legacy RolloutWorker has no RLModule")
+
+    assert _PolicyAdapter(_LegacyAlgorithm())._rl_module() is None
+
+
 class _FakeRllibConfig:
     def __init__(self) -> None:
         self.options = None
