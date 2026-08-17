@@ -61,10 +61,10 @@ with `kind / 5` immediately before constructing the policy observation.
 | Raw kind | Network value | Meaning |
 |---:|---:|---|
 | `0` | `0.0` | Empty voxel |
-| `1` | `0.2` | Occupied geometry |
+| `1` | `0.2` | Occupied geometry or outside-grid boundary |
 | `2` | `0.4` | Episode start |
 | `3` | `0.6` | Active goal |
-| `4` | `0.8` | Outside-grid boundary |
+| `4` | `0.8` | Reserved internal boundary kind; not emitted to the policy |
 | `5` | `1.0` | Filled/trail voxel |
 
 This replaces the earlier binary box encoding, which collapsed every non-empty

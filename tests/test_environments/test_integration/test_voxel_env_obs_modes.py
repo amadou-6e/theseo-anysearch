@@ -34,7 +34,7 @@ class TestVoxelEnvObsModesIntegration:
         obs, _ = env.reset()
         valid = np.arange(6, dtype=np.float32) / 5.0
         assert np.all(np.isin(obs["local_grid"], valid))
-        assert 0.8 in obs["local_grid"]  # outside-grid boundary
+        assert 0.2 in obs["local_grid"]  # occupied geometry or outside-grid boundary
 
     def test_box_obs_dtype(self):
         env = self.make(obs_mode="box")
@@ -125,7 +125,7 @@ class TestVoxelEnvObsModesIntegration:
             for dy in range(-2, 3):
                 for dz in range(-2, 3):
                     x, y, z = 1 + dx, 1 + dy, 1 + dz
-                    expected.append(4.0 if x < 1 or y < 1 or z < 1 else 0.0)
+                    expected.append(1.0 if x < 1 or y < 1 or z < 1 else 0.0)
         expected = np.array(expected, dtype=np.float32)
         expected[62] = 2.0
         assert len(obs) == 125
