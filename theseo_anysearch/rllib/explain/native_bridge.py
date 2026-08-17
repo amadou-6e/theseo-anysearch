@@ -17,6 +17,25 @@ from theseo_anysearch.rllib.explain.service import resolve_run_dir
 from theseo_anysearch.rllib.explain.ui.session import InteractiveExplanationSession
 
 
+_CATEGORICAL_INPUT_ENCODINGS: dict[str, dict[str, Any]] = {
+    "local_grid": {
+        "type": "integer_scaled",
+        "scale": 5.0,
+        "valid_values": [0, 1, 2, 3, 5],
+    },
+    "ray_hit_types": {
+        "type": "integer_scaled",
+        "scale": 5.0,
+        "valid_values": [0, 1, 2, 3, 5],
+    },
+    "action_mask": {
+        "type": "integer_scaled",
+        "scale": 1.0,
+        "valid_values": [0, 1],
+    },
+}
+
+
 def _json_observation(observation: dict[str, np.ndarray]) -> dict[str, list[float]]:
     """Convert an observation into the flat JSON representation edited by Rust."""
 
@@ -36,6 +55,8 @@ def _schema(session: InteractiveExplanationSession) -> dict[str, Any]:
             "low": np.asarray(space.low, dtype=np.float32).reshape(-1).tolist(),
             "high": np.asarray(space.high, dtype=np.float32).reshape(-1).tolist(),
         }
+        if name in _CATEGORICAL_INPUT_ENCODINGS:
+            fields[name]["input_encoding"] = _CATEGORICAL_INPUT_ENCODINGS[name]
     return fields
 
 
