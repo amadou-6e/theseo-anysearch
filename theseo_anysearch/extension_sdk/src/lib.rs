@@ -3,11 +3,96 @@ extern crate self as anysearch_extension;
 use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-pub use anysearch_extension_macros::{anysearch_outcome, anysearch_predicate, anysearch_reward};
+pub use anysearch_extension_macros::{
+    anysearch_outcome, anysearch_predicate, anysearch_reward, anysearch_scenario,
+};
 
 pub const ABI_VERSION: u32 = 2;
 pub const MAX_REWARD_COMPONENTS: usize = 8;
 pub const MAX_COMPONENT_NAME_BYTES: usize = 63;
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ScenarioContext {
+    pub seed: u64,
+    pub episode_index: u64,
+    pub scope: String,
+    pub grid_size: u16,
+    pub filled_voxels: Vec<[i32; 3]>,
+    pub action_mode: String,
+    pub action_offsets: Vec<[i32; 3]>,
+    pub previous_scenario: Option<serde_json::Value>,
+    pub curriculum: serde_json::Value,
+    pub parameters: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ScenarioResult {
+    pub start: [i32; 3],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<[i32; 3]>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub route: Vec<[i32; 3]>,
+    pub scenario_id: String,
+    pub metadata: serde_json::Map<String, serde_json::Value>,
+}
+
+impl ScenarioResult {
+    pub fn goal(start: [i32; 3], goal: [i32; 3], scenario_id: impl Into<String>) -> Self {
+        Self {
+            start,
+            goal: Some(goal),
+            route: Vec::new(),
+            scenario_id: scenario_id.into(),
+            metadata: serde_json::Map::new(),
+        }
+    }
+
+    pub fn route(start: [i32; 3], route: Vec<[i32; 3]>, scenario_id: impl Into<String>) -> Self {
+        Self {
+            start,
+            goal: None,
+            route,
+            scenario_id: scenario_id.into(),
+            metadata: serde_json::Map::new(),
+        }
+    }
+}
+
+/// Convert an ergonomic scenario function into the variable-length JSON ABI.
+///
+/// # Safety
+/// All pointer/length pairs must identify readable or writable buffers.
+pub unsafe fn export_scenario_v1(
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+    output_len: *mut usize,
+    function: fn(&ScenarioContext) -> ScenarioResult,
+) -> i32 {
+    if input.is_null() || output.is_null() || output_len.is_null() {
+        return 1;
+    }
+    let context: ScenarioContext =
+        match serde_json::from_slice(std::slice::from_raw_parts(input, input_len)) {
+            Ok(value) => value,
+            Err(_) => return 2,
+        };
+    let result = match catch_unwind(AssertUnwindSafe(|| function(&context))) {
+        Ok(value) => value,
+        Err(_) => return 3,
+    };
+    let encoded = match serde_json::to_vec(&result) {
+        Ok(value) => value,
+        Err(_) => return 4,
+    };
+    if encoded.len() > output_capacity {
+        return 5;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len());
+    *output_len = encoded.len();
+    0
+}
 
 #[repr(C)]
 pub struct RewardContextV2 {
@@ -496,6 +581,35 @@ mod tests {
         mutations.set_cursor(context.destination);
         mutations.place_voxel(context.destination);
         OutcomeResult::applied()
+    }
+
+    #[anysearch_scenario]
+    fn adjacent_scenario(context: &ScenarioContext) -> ScenarioResult {
+        ScenarioResult::goal(
+            [4, 4, 4],
+            [5, 4, 4],
+            format!("episode-{}", context.episode_index),
+        )
+    }
+
+    #[test]
+    fn scenario_attribute_exports_json_result() {
+        let input = br#"{"seed":42,"episode_index":7,"scope":"evaluation","grid_size":8,"filled_voxels":[],"action_mode":"discrete_26","action_offsets":[[1,0,0]],"previous_scenario":null,"curriculum":{},"parameters":{}}"#;
+        let mut output = [0_u8; 1024];
+        let mut output_len = 0_usize;
+        let status = unsafe {
+            anysearch_scenario_adjacent_scenario_v1(
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_len,
+            )
+        };
+        assert_eq!(status, 0);
+        let value: serde_json::Value = serde_json::from_slice(&output[..output_len]).unwrap();
+        assert_eq!(value["scenario_id"], "episode-7");
+        assert_eq!(value["goal"], serde_json::json!([5, 4, 4]));
     }
 
     #[test]

@@ -13,11 +13,13 @@ import gymnasium
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
+    ACTION_OFFSETS_26,
     NOOP_ACTION_INDEX,
     action_step_distance,
     build_action_space,
     encode_action,
     maximum_movement_distance,
+    offsets_for_mode,
 )
 
 from theseo_anysearch.environments.gymnasium.base import RustGymnasiumEnv
@@ -86,6 +88,11 @@ class VoxelEnv(RustGymnasiumEnv):
         self._route_waypoints_reached = 0
         self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
         self._curriculum_stage_probabilities: list[float] = []
+        self._scenario_provider = None
+        self._scenario_parameters = dict(config.get("scenario_parameters") or {})
+        self._scenario_scope = str(config.get("scenario_scope", "training"))
+        self._previous_scenario: dict[str, Any] | None = None
+        self._scenario_geometry: tuple[tuple[int, int, int], ...] = ()
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -97,7 +104,38 @@ class VoxelEnv(RustGymnasiumEnv):
             self._geo_pool = None
             self._augmentation_config = {}
         super().__init__(config)
+        self._scenario_provider = self._load_scenario_provider(config)
         self._init_obs_cache(config)
+
+    def _load_scenario_provider(self, config: dict):
+        """Resolve the selected Python or Rust scenario without fallback."""
+        name = config.get("scenario_provider")
+        if not name:
+            return None
+        from theseo_anysearch.experiments.custom_scenarios import (
+            load_native_scenario_provider,
+            load_scenario_provider,
+        )
+
+        native_manifest_path = config.get("native_extension_manifest")
+        if native_manifest_path:
+            from theseo_anysearch.experiments.native_extensions import NativeExtensionManifest
+
+            manifest_path = Path(native_manifest_path)
+            manifest = NativeExtensionManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if name in manifest.scenarios:
+                return load_native_scenario_provider(
+                    manifest_path.parent.joinpath(manifest.library).resolve(), name
+                )
+        source = config.get("scenario_module_path")
+        provider = load_scenario_provider(Path(source) if source else None, name)
+        if provider is None:
+            raise ValueError(
+                f"scenario provider {name!r} has no compiled Rust export or scenarios.py source"
+            )
+        return provider
 
     def _init_obs_cache(self, config: dict) -> None:
         """Cache config values and pre-allocate obs buffers. Called from __init__
@@ -148,6 +186,7 @@ class VoxelEnv(RustGymnasiumEnv):
                     for by in range(ymin, ymax + 1):
                         for bz in range(zmin, zmax + 1):
                             geometry.append((bx, by, bz))
+        self._scenario_geometry = tuple(geometry)
 
         native_reward_path = None
         native_action_path = None
@@ -349,12 +388,14 @@ class VoxelEnv(RustGymnasiumEnv):
                 grid = paste_boxes(grid, paste_cfg, self._obs_rng)
             cells = GeometryPool.grid_to_cells(grid)
             self._rust_env.set_geometry(cells)
+            self._scenario_geometry = tuple(cells)
             log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
             if self._configured_route:
                 self._activate_route(self._configured_route)
             self._apply_pending_waypoints()
             self._apply_pending_route()
             self._sample_curriculum_waypoints()
+            self._apply_scenario(seed)
             return self._reset_task_state(super().reset(seed=seed, options=options))
 
         scale_range = self._config.get("scale_range")
@@ -371,7 +412,50 @@ class VoxelEnv(RustGymnasiumEnv):
         self._apply_pending_waypoints()
         self._apply_pending_route()
         self._sample_curriculum_waypoints()
+        self._apply_scenario(seed)
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _apply_scenario(self, seed: int | None) -> None:
+        """Invoke the configured reset hook and install its validated route."""
+        if self._scenario_provider is None:
+            return
+        from theseo_anysearch.experiments.custom_scenarios import (
+            ScenarioContext,
+            validate_scenario,
+        )
+
+        episode_index = self._reset_count
+        resolved_seed = (
+            int(seed)
+            if seed is not None
+            else int(self._config.get("seed", 42)) + episode_index + 1
+        )
+        action_mode = self._config.get("action_mode", "discrete_26")
+        offsets = ACTION_OFFSETS_26 if action_mode == "vector_3" else offsets_for_mode(action_mode)
+        context = ScenarioContext(
+            seed=resolved_seed,
+            episode_index=episode_index,
+            scope=self._scenario_scope,
+            grid_size=int(self._config.get("grid_size", 32)),
+            filled_voxels=self._scenario_geometry,
+            action_mode=action_mode,
+            action_offsets=offsets,
+            previous_scenario=self._previous_scenario,
+            curriculum=dict(self._config.get("waypoint_curriculum") or {}),
+            parameters=self._scenario_parameters,
+        )
+        scenario = validate_scenario(
+            self._scenario_provider.generate(context),
+            grid_size=context.grid_size,
+            filled_voxels=set(context.filled_voxels),
+        )
+        self._activate_route({"start": scenario.start, "waypoints": scenario.waypoints})
+        self._previous_scenario = {
+            "scenario_id": scenario.scenario_id,
+            "start": scenario.start,
+            "waypoints": scenario.waypoints,
+            "metadata": scenario.metadata,
+        }
 
     def _segment_length(
         self,
@@ -477,10 +561,13 @@ class VoxelEnv(RustGymnasiumEnv):
         self._episode_reward_breakdown = {}
         self._initial_filled = {tuple(coord) for coord in self._rust_env.filled_voxels()}
         self._last_observation = observation
-        return observation, {
+        info = {
             "task_version": self._task.version,
             "initial_goal_distance": distance,
         }
+        if self._previous_scenario is not None:
+            info["scenario"] = dict(self._previous_scenario)
+        return observation, info
 
     def step(self, action):
         """Apply one action and expose task-owned reward and termination data."""
@@ -628,6 +715,8 @@ class VoxelEnv(RustGymnasiumEnv):
             "construction_residual": residual,
             "construction_overshoot": overshoot,
         }
+        if self._previous_scenario is not None:
+            info["scenario"] = dict(self._previous_scenario)
         return observation, reward, terminated, truncated, info
 
     def action_mask(self) -> np.ndarray:
@@ -656,6 +745,7 @@ class VoxelEnv(RustGymnasiumEnv):
             or (self._config.get("waypoint_curriculum") or {}).get("enabled")
             or self._config.get("stl_path")
             or self._config.get("geometry_pool")
+            or self._config.get("scenario_provider")
         )
 
     def _observation_space(self) -> gymnasium.Space:

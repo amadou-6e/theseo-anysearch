@@ -336,6 +336,16 @@ class PolicyExplanationService:
         """Build an environment from authoritative run settings and state overrides."""
 
         config = self.experiment.env.to_runtime_dict()
+        native_manifest = self.run_dir.joinpath("native_extension", "extension.json")
+        if native_manifest.is_file():
+            config["native_extension_manifest"] = str(native_manifest.resolve())
+        else:
+            reward_source = self.run_dir.joinpath("rewards.py")
+            if reward_source.is_file():
+                config["reward_module_path"] = str(reward_source.resolve())
+        scenario_source = self.run_dir.joinpath("scenarios.py")
+        if scenario_source.is_file():
+            config["scenario_module_path"] = str(scenario_source.resolve())
         config.update(dict(overrides or {}))
         return VoxelEnv(config)
 
@@ -413,7 +423,11 @@ class PolicyExplanationService:
             json.dumps({"start": list(start), "goal": list(goal)}), encoding="utf-8"
         )
         env = self._build_env(
-            {"geometry_boxes": boxes, "waypoints_file": str(waypoint_path)}
+            {
+                "geometry_boxes": boxes,
+                "waypoints_file": str(waypoint_path),
+                "scenario_provider": None,
+            }
         )
         try:
             observation, _ = env.reset(

@@ -26,6 +26,7 @@ CAP_TRAINING_METRICS = 2
 CAP_EVALUATION_METRICS = 4
 CAP_PREDICATE = 8
 CAP_OUTCOME = 16
+CAP_SCENARIO = 32
 METRIC_BUFFER_SIZE = 65536
 
 
@@ -58,6 +59,7 @@ class NativeExtensionManifest(BaseModel):
     rewards: tuple[str, ...] = ()
     predicates: tuple[str, ...] = ()
     outcomes: tuple[str, ...] = ()
+    scenarios: tuple[str, ...] = ()
     platform: str
     machine: str
 
@@ -153,6 +155,57 @@ def _selected_action_names(experiment_dir: Path) -> tuple[tuple[str, ...], tuple
         predicate_names.extend(names(agent_action.get("predicates")))
         outcome_names.extend(names(agent_action.get("outcomes")))
     return tuple(dict.fromkeys(predicate_names)), tuple(dict.fromkeys(outcome_names))
+
+
+def _selected_scenario_names(experiment_dir: Path) -> tuple[str, ...]:
+    """Return distinct training and evaluation scenario provider names."""
+    import yaml
+
+    candidates = [experiment_dir.joinpath("experiment.yaml"), experiment_dir.joinpath("config.yaml")]
+    candidates.extend(sorted(experiment_dir.glob("*.yaml")))
+    config_path = next((path for path in candidates if path.is_file()), None)
+    if config_path is None:
+        return ()
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    names: list[str] = []
+    owners = [raw.get("env") or {}, raw.get("evaluation") or {}]
+    for stage in ((raw.get("staging") or {}).get("stages") or []):
+        owners.extend((stage.get("env") or {}, stage.get("evaluation") or {}))
+    for owner in owners:
+        selected = ((owner.get("scenarios") or {}).get("provider"))
+        if isinstance(selected, str):
+            names.append(selected)
+        elif isinstance(selected, dict) and selected.get("name"):
+            names.append(str(selected["name"]))
+    return tuple(dict.fromkeys(names))
+
+
+def _selected_python_scenario_names(
+    experiment_dir: Path,
+    scenario_names: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return selected scenario names supplied by sibling ``scenarios.py``."""
+    from theseo_anysearch.experiments.custom_scenarios import (
+        available_python_scenario_names,
+        discover_scenario_source,
+    )
+
+    config_path = next(
+        (
+            path
+            for path in (
+                experiment_dir.joinpath("experiment.yaml"),
+                experiment_dir.joinpath("config.yaml"),
+                *sorted(experiment_dir.glob("*.yaml")),
+            )
+            if path.is_file()
+        ),
+        None,
+    )
+    source = discover_scenario_source(config_path, None) if config_path else None
+    return available_python_scenario_names(source, scenario_names)
+
+
 def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Path:
     """Compile ``extension/`` and return its stable manifest path."""
     root = experiment_dir.resolve()
@@ -171,6 +224,8 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     source_sha = _source_digest(extension_dir)
     reward_name = _selected_reward_name(root)
     predicate_names, outcome_names = _selected_action_names(root)
+    scenario_names = _selected_scenario_names(root)
+    python_scenario_names = _selected_python_scenario_names(root, scenario_names)
     build_dir = root.joinpath(".anysearch", "build", source_sha)
     stable_manifest = root.joinpath(".anysearch", "extension.json")
     if stable_manifest.is_file() and not force:
@@ -186,11 +241,17 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
         expected_outcomes = tuple(
             name for name in outcome_names if name not in built_in_outcomes
         )
+        expected_scenarios = tuple(
+            name
+            for name in scenario_names
+            if name not in python_scenario_names or name in current.scenarios
+        )
         if (
             current.source_sha256 == source_sha
             and current.rewards == expected_rewards
             and current.predicates == expected_predicates
             and current.outcomes == expected_outcomes
+            and current.scenarios == expected_scenarios
             and candidate.is_file()
         ):
             loaded = NativeExtension.load(stable_manifest)
@@ -225,6 +286,11 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     built_in_outcomes = set(rule_registry.names("outcome"))
     predicates = tuple(name for name in predicate_names if probe.has_predicate(name))
     outcomes = tuple(name for name in outcome_names if probe.has_outcome(name))
+    scenarios = tuple(name for name in scenario_names if probe.has_scenario(name))
+    if scenarios and "scenario" not in capabilities:
+        raise NativeExtensionError(
+            "A scenario-capable extension must include capability bit 32"
+        )
     missing_predicates = set(predicate_names) - set(predicates) - built_in_predicates
     missing_outcomes = set(outcome_names) - set(outcomes) - built_in_outcomes
     if missing_predicates or missing_outcomes:
@@ -232,11 +298,18 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
             f"Missing native action exports: predicates={sorted(missing_predicates)}, "
             f"outcomes={sorted(missing_outcomes)}"
         )
+    missing_scenarios = (
+        set(scenario_names) - set(scenarios) - set(python_scenario_names)
+    )
+    if missing_scenarios:
+        raise NativeExtensionError(
+            f"Missing native scenario exports: {sorted(missing_scenarios)}"
+        )
     manifest = NativeExtensionManifest(
         abi_version=ABI_VERSION, source_sha256=source_sha,
         binary_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
         library=relative, capabilities=capabilities, rewards=rewards,
-        predicates=predicates, outcomes=outcomes,
+        predicates=predicates, outcomes=outcomes, scenarios=scenarios,
         platform=sys.platform, machine=platform.machine(),
     )
     stable_content = manifest.model_dump_json(indent=2)
@@ -271,7 +344,17 @@ def discover_native_manifest(config_path: Path | None) -> Path | None:
     expected_outcomes = tuple(
         name for name in selected_outcomes if name not in built_in_outcomes
     )
-    if manifest.predicates != expected_predicates or manifest.outcomes != expected_outcomes:
+    expected_scenarios = _selected_scenario_names(config_path.parent)
+    python_scenarios = _selected_python_scenario_names(
+        config_path.parent, expected_scenarios
+    )
+    expected_native_scenarios = tuple(
+        name
+        for name in expected_scenarios
+        if name not in python_scenarios or name in manifest.scenarios
+    )
+    if (manifest.predicates != expected_predicates or manifest.outcomes != expected_outcomes
+            or manifest.scenarios != expected_native_scenarios):
         raise NativeExtensionError(
             "Selected YAML action extensions changed; run "
             f"'anysearch compile {config_path.parent}'"
@@ -315,7 +398,8 @@ class NativeExtension:
     def capability_names(self) -> tuple[str, ...]:
         pairs = ((CAP_REWARD, "reward"), (CAP_TRAINING_METRICS, "training_metrics"),
                  (CAP_EVALUATION_METRICS, "evaluation_metrics"),
-                 (CAP_PREDICATE, "predicate"), (CAP_OUTCOME, "outcome"))
+                 (CAP_PREDICATE, "predicate"), (CAP_OUTCOME, "outcome"),
+                 (CAP_SCENARIO, "scenario"))
         return tuple(name for flag, name in pairs if self.capabilities & flag)
 
     def validate_reward(self, name: str) -> None:
@@ -334,6 +418,9 @@ class NativeExtension:
 
     def has_outcome(self, name: str) -> bool:
         return hasattr(self._library, f"anysearch_outcome_{name}_v2")
+
+    def has_scenario(self, name: str) -> bool:
+        return hasattr(self._library, f"anysearch_scenario_{name}_v1")
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":
         library = ctypes.CDLL(str(path))

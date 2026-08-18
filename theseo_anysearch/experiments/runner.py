@@ -593,6 +593,19 @@ class ExperimentRunner:
                     else None
                 ),
             )
+            from theseo_anysearch.experiments.custom_scenarios import (
+                copy_scenario_source,
+            )
+
+            copy_scenario_source(
+                self._config_path,
+                run_dir,
+                (
+                    self._config.env.scenarios.provider.name
+                    if self._config.env.scenarios.provider
+                    else None
+                ),
+            )
             from theseo_anysearch.experiments.native_extensions import copy_native_extension
 
             copy_native_extension(self._config_path, run_dir)

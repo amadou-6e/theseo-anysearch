@@ -76,13 +76,20 @@ class DQNTrainer(Trainer):
         return cls(config)
 
     @staticmethod
-    def build_algorithm_from_settings(config: Settings) -> Any:
+    def build_algorithm_from_settings(
+        config: Settings,
+        env_config: dict[str, Any] | None = None,
+    ) -> Any:
         """Build the configured RLlib algorithm.
 
         Parameters
         ----------
         config : Settings
             Validated experiment settings.
+        env_config : dict[str, Any] or None, optional
+            Fully resolved runtime environment configuration, including copied
+            extension paths. When omitted, build the basic environment mapping
+            directly from ``config``.
 
         Returns
         -------
@@ -106,7 +113,7 @@ class DQNTrainer(Trainer):
         if not isinstance(algo_cfg, DQNConfig):
             algo_cfg = DQNConfig(**algo_cfg.model_dump())
 
-        env_config = env.to_runtime_dict()
+        env_config = env_config or env.to_runtime_dict()
         env_config["geometry_pool"] = _resolve_pool_dir(env.geometry.pool)
         if env.waypoint_curriculum.enabled:
             from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
@@ -189,4 +196,7 @@ class DQNTrainer(Trainer):
         return bind_anysearch_evaluation_function(rllib_config.build_algo())
 
     def _build_algorithm(self) -> Any:
-        return self.build_algorithm_from_settings(self._config)
+        return self.build_algorithm_from_settings(
+            self._config,
+            env_config=self._env_config_dict(),
+        )
