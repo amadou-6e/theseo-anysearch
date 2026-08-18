@@ -958,6 +958,9 @@ class TuneRunner:
         resume: bool = False,
         extra_trials: int = 0,
     ) -> None:
+        from theseo_anysearch.environment_rules import preflight_environment_rules
+
+        preflight_environment_rules(config, config_path)
         self._config = config
         self._config_path = config_path
         self._tag = tag
