@@ -221,23 +221,16 @@ class TrainResult(BaseModel):
     def standard_metrics(self) -> dict[str, float]:
         """Return the shared numeric metric contract for every reporter."""
         metrics = {
-            "episode_reward_mean": self.episode_reward_mean,
-            "episode_len_mean": self.episode_len_mean,
-            "episodes_total": float(self.episodes_total),
-            "episodes_this_iter": float(self.episodes_this_iter),
-            "goals_reached_this_iter": float(self.goals_reached_this_iter),
-            "goals_reached_total": float(self.goals_reached_total),
-            "training_success_rate": self.training_success_rate,
-            "evaluation_episodes": float(self.evaluation_episodes),
-            "evaluation_goals_reached": float(self.evaluation_goals_reached),
-            "evaluation_success_rate": self.evaluation_success_rate,
-            "elapsed_s": self.elapsed_s,
-            "environment_steps_total": float(self.environment_steps_total),
+            "train/task/return_mean": self.episode_reward_mean,
+            "train/task/episode_len_mean": self.episode_len_mean,
+            "train/task/episodes_total": float(self.episodes_total),
+            "performance/rllib_wall_time_s": self.elapsed_s,
+            "performance/environment_steps_total": float(self.environment_steps_total),
         }
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
-            if key.startswith(("evaluation_", "training_"))
+            if key.startswith(("eval/", "train/", "curriculum/"))
             and isinstance(value, (int, float))
         })
         return metrics

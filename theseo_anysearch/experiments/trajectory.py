@@ -248,14 +248,9 @@ class EpisodeRunMetrics:
             ),
         )
     def as_scalar_dict(self) -> dict[str, float]:
-        """Return scalar TensorBoard tags and values."""
+        """Return non-redundant task diagnostics for TensorBoard."""
         return {
-            "eval/collision_count": float(self.collision_count),
-            "eval/collision_rate": self.collision_rate,
-            "eval/finish_count": float(self.finish_count),
-            "eval/finish_rate": self.finish_rate,
-            "eval/mean_steps_on_success": self.mean_steps_on_success,
-            "eval/goal_progress_mean": self.goal_progress_mean,
+            "eval/task/collision_rate": self.collision_rate,
         }
 
 

@@ -476,8 +476,8 @@ class TestOutputSanity:
         assert len(FakeSummaryWriter.instances) == 1
         writer = FakeSummaryWriter.instances[0]
         assert Path(writer.log_dir) == Path(trainer_settings.training.output_dir).joinpath("tensorboard")
-        assert ("train/episode_reward_mean", 1.0, 1) in writer.scalars
-        assert ("train/episode_reward_mean", 4.0, 4) in writer.scalars
+        assert ("train/task/return_mean", 1.0, 1) in writer.scalars
+        assert ("train/task/return_mean", 4.0, 4) in writer.scalars
         assert any(
             tag == "performance/anysearch_evaluation_s"
             for tag, _, _ in writer.scalars
@@ -538,11 +538,8 @@ class TestOutputSanity:
             t.train()
 
         writer = FakeSummaryWriter.instances[0]
-        assert ("eval/collision_count", 0.0, 1) in writer.scalars
-        assert ("eval/finish_count", 1.0, 1) in writer.scalars
-        assert ("eval/finish_rate", 1.0, 1) in writer.scalars
-        assert ("eval/mean_steps_on_success", 2.0, 1) in writer.scalars
-        assert ("eval/goal_progress_mean", 2.0, 1) in writer.scalars
+        assert ("eval/task/collision_rate", 0.0, 1) in writer.scalars
+        assert ("eval/task/success_rate", 1.0, 1) in writer.scalars
 
     def test_checkpoint_creates_state_json(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)

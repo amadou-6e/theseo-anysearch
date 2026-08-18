@@ -79,23 +79,18 @@ class _TensorBoardRunWriter:
             return
 
         self._writer.add_scalar(
-            "train/episode_reward_mean",
+            "train/task/return_mean",
             result.episode_reward_mean,
             result.iteration,
         )
         self._writer.add_scalar(
-            "train/episode_len_mean",
+            "train/task/episode_len_mean",
             result.episode_len_mean,
             result.iteration,
         )
         self._writer.add_scalar(
-            "train/episodes_total",
+            "train/task/episodes_total",
             result.episodes_total,
-            result.iteration,
-        )
-        self._writer.add_scalar(
-            "train/elapsed_s",
-            result.elapsed_s,
             result.iteration,
         )
         for tag, value in result.timings.tensorboard_scalars(result.elapsed_s).items():
