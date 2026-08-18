@@ -11,6 +11,7 @@ from theseo_anysearch.settings.environment.action import ActionConfig
 from theseo_anysearch.settings.environment.agent import AgentConfig, HunterAndHuntedConfig
 from theseo_anysearch.settings.environment.curriculum import WaypointCurriculumConfig
 from theseo_anysearch.settings.environment.geometry import GeometryConfig
+from theseo_anysearch.settings.environment.lifecycle import LifecycleConfig
 from theseo_anysearch.settings.environment.observation import ObservationConfig
 from theseo_anysearch.settings.environment.rewards import RewardConfig
 
@@ -70,6 +71,10 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
     observation: ObservationConfig = Field(default_factory=ObservationConfig, description="Policy observation settings.")
     action: ActionConfig = Field(default_factory=ActionConfig, description="Policy action-space settings.")
     rewards: RewardConfig = Field(default_factory=RewardConfig, description="Reward terms and provider selection.")
+    lifecycle: LifecycleConfig = Field(
+        default_factory=LifecycleConfig,
+        description="Ordered rules that resolve episode outcomes and diagnostics.",
+    )
     agents: tuple[AgentConfig, ...] | None = Field(
         None, description="Ordered per-agent settings for heterogeneous environments."
     )
@@ -205,4 +210,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 self.rewards__provider.parameters if self.rewards__provider else {}
             ),
             "task": self.task.model_dump(mode="json"),
+            "lifecycle_rules": [
+                rule.model_dump(mode="json") for rule in self.lifecycle.rules
+            ],
         }

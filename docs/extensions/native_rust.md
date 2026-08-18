@@ -162,3 +162,8 @@ the exported symbol names, capability flags, ABI version, and `#[repr(C)]` layou
 and evaluation metric scheduling remains in the experiment layer because only that layer owns
 complete trainer and evaluator results; the voxel metric module owns the native invocation
 contract, not evaluation scheduling.
+
+Episode success, failure, termination, truncation, and diagnostic composition are
+handled after the Rust transition by [environment lifecycle rules](lifecycle.md).
+Those rules are read-only; action outcomes remain the only extension point that
+mutates Rust simulation state.

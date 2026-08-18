@@ -9,10 +9,14 @@ from theseo_anysearch.settings.environment.curriculum import (
     WaypointRouteLengthConfig, WaypointTrainingSamplingConfig,
 )
 from theseo_anysearch.settings.environment.geometry import GeometryConfig
+from theseo_anysearch.settings.environment.lifecycle import (
+    LifecycleConfig,
+    LifecycleRuleSelector,
+)
 from theseo_anysearch.settings.environment.observation import ObservationConfig
 from theseo_anysearch.settings.environment.rewards import RewardConfig, RewardSelector
 
 __all__ = [
     "ActionConfig", "ActionExtensionSelector", "AgentConfig", "EnvConfig", "GeometryConfig", "HunterAndHuntedConfig", "NestedFieldAccessMixin",
-    "ObservationConfig", "RewardConfig", "RewardSelector", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
+    "LifecycleConfig", "LifecycleRuleSelector", "ObservationConfig", "RewardConfig", "RewardSelector", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
 ]
