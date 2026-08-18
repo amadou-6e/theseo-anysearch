@@ -171,7 +171,14 @@ def fit_contention_correction(
     1``, since the exponent cannot be estimated from a single data point.
 
     The fit is linear regression through the origin in log-log space:
-    ``log(measured / naive) = -exponent * log(num_env_runners)``.
+    ``log(measured / naive) = -exponent * log(num_env_runners)``. The result is
+    clamped to 0.6 rather than the theoretical 1.0 ceiling: with only a
+    handful of calibration probes (often just one usable pair), a single noisy
+    measurement can otherwise saturate the exponent at 1.0, which makes the
+    parallel-stage rate constant in num_env_runners and erases any predicted
+    benefit from more env-runners entirely. Real-hardware validation (see
+    docs/superpowers/specs/2026-08-18-adaptive-benchmark-prediction-design.md)
+    hit exactly this failure mode.
     """
     numerator = 0.0
     denominator = 0.0
@@ -189,7 +196,7 @@ def fit_contention_correction(
 
     if denominator == 0.0:
         return 0.0
-    return max(0.0, min(1.0, numerator / denominator))
+    return max(0.0, min(0.6, numerator / denominator))
 
 
 SweepAxis = Literal["num_env_runners", "num_envs_per_env_runner"]

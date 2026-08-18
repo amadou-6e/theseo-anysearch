@@ -128,6 +128,14 @@ class TestFitContentionCorrection:
         without_noise = fit_contention_correction(costs, [(4, 1, naive_at_4)])
         assert with_noise == pytest.approx(without_noise)
 
+    def test_clamps_to_0_6_even_for_an_extreme_single_noisy_probe(self) -> None:
+        # A single probe implying near-total collapse (e.g. a one-off stall)
+        # must not be allowed to zero out all predicted parallelism benefit.
+        costs = _costs(learner_seconds_per_batch=1e-6)
+        naive_at_2 = predict_throughput(costs, 2, 1).predicted_steps_per_second
+        fitted = fit_contention_correction(costs, [(2, 1, naive_at_2 * 0.001)])
+        assert fitted == pytest.approx(0.6)
+
 
 class TestRecommendSearchRange:
 

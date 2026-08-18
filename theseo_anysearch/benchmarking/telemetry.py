@@ -184,6 +184,11 @@ def scheduler_queue_delay(samples: int = 5) -> float | None:
     def _noop() -> None:
         return None
 
+    # The first dispatch of a newly defined remote function pays a one-time
+    # registration/pickling cost that can dwarf steady-state queue delay by
+    # orders of magnitude; warm it up once and discard that sample.
+    ray.get(_noop.remote())
+
     delays: list[float] = []
     for _ in range(max(1, samples)):
         started = time.perf_counter()
