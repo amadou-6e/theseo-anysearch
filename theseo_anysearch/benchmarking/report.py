@@ -225,19 +225,26 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
+    has_prediction = result.prediction is not None
+    row_count = 5 if has_prediction else 4
+    specs = [[{"secondary_y": True}] for _ in range(4)]
+    subplot_titles = [
+        "Environment vectorization",
+        "Environment sweep resources",
+        "Rollout worker scaling",
+        "Worker sweep resources",
+    ]
+    if has_prediction:
+        specs.append([{"secondary_y": False}])
+        subplot_titles.append(
+            "Calibration: predicted vs. confirmed throughput")
+
     figure = make_subplots(
-        rows=4,
+        rows=row_count,
         cols=1,
-        specs=[[{
-            "secondary_y": True
-        }] for _ in range(4)],
-        subplot_titles=(
-            "Environment vectorization",
-            "Environment sweep resources",
-            "Rollout worker scaling",
-            "Worker sweep resources",
-        ),
-        vertical_spacing=0.08,
+        specs=specs,
+        subplot_titles=tuple(subplot_titles),
+        vertical_spacing=0.06,
     )
 
     for throughput_row, resource_row, sweep, x_title in (
@@ -410,6 +417,9 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
             secondary_y=True,
         )
 
+    if has_prediction:
+        _add_prediction_panel(figure, result, row=5)
+
     recommendation = result.recommendation
     environment_rule = (
         "Automatic environment sweep: stop after "
@@ -423,7 +433,7 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
         f"Wall-clock budget: {result.max_duration_minutes:g} minutes; "
         f"elapsed {result.elapsed_seconds / 60.0:.1f} minutes")
     legends = {}
-    for row in range(1, 5):
+    for row in range(1, row_count + 1):
         subplot = figure.get_subplot(row, 1)
         legend_name = "legend" if row == 1 else f"legend{row}"
         legends[legend_name] = {
@@ -454,8 +464,9 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
             0.03,
         },
         template="plotly_white",
-        height=1680,
+        height=1680 + (360 if has_prediction else 0),
         hovermode="x unified",
+        barmode="group",
         **legends,
         margin={
             "l": 80,
@@ -479,6 +490,95 @@ def _write_html(result: ResourceBenchmarkResult, path: Path) -> None:
     )
     figure.write_html(path, include_plotlyjs=True, full_html=True)
     _add_diagnostic_links(path)
+
+
+def _add_prediction_panel(
+    figure: "go.Figure",
+    result: ResourceBenchmarkResult,
+    *,
+    row: int,
+) -> None:
+    """Chart the roofline calibration's guess against what the sweep confirmed.
+
+    Helps a user judge, at a glance, how much to trust the calibration on
+    their hardware: bars close together mean the prediction that narrowed
+    the sweep was a good guess; a large gap means the confirming sweep did
+    most of the real work, which is exactly what it is there for.
+    """
+    import plotly.graph_objects as go
+
+    prediction = result.prediction
+    assert prediction is not None
+    legend_name = f"legend{row}"
+
+    phases = ["Environments", "Workers"]
+    predicted = [
+        prediction.environment_predicted.predicted_steps_per_second,
+        prediction.worker_predicted.predicted_steps_per_second,
+    ]
+    confirmed = [
+        result.environment_sweep.peak_steps_per_second,
+        result.worker_sweep.peak_steps_per_second,
+    ]
+    bottlenecks = [
+        prediction.environment_predicted.bottleneck,
+        prediction.worker_predicted.bottleneck,
+    ]
+    figure.add_trace(
+        go.Bar(
+            x=phases,
+            y=predicted,
+            name="Calibration prediction",
+            legend=legend_name,
+            marker_color="rgba(230,119,0,0.55)",
+            text=[
+                f"{value:.1f} steps/s<br>bottleneck: {bottleneck}"
+                for value, bottleneck in zip(predicted, bottlenecks)
+            ],
+            textposition="outside",
+        ),
+        row=row,
+        col=1,
+    )
+    figure.add_trace(
+        go.Bar(
+            x=phases,
+            y=confirmed,
+            name="Confirmed sweep peak",
+            legend=legend_name,
+            marker_color="rgba(8,127,91,0.75)",
+            text=[f"{value:.1f} steps/s" for value in confirmed],
+            textposition="outside",
+        ),
+        row=row,
+        col=1,
+    )
+    figure.update_yaxes(title_text="Sampled steps / second", row=row, col=1)
+
+    costs = prediction.stage_costs
+    gil_text = (f"{costs.gil_contention_ratio:.1%}"
+                if costs.gil_contention_ratio is not None else "n/a")
+    scheduler_text = (f"{costs.scheduler_queue_seconds * 1000:.2f} ms"
+                      if costs.scheduler_queue_seconds is not None else "n/a")
+    summary = (
+        f"Calibration took {prediction.calibration_seconds:.1f}s · "
+        f"env step {costs.env_step_seconds * 1000:.2f} ms · "
+        f"inference {costs.inference_seconds_per_env * 1000:.2f} ms · "
+        f"learner {costs.learner_seconds_per_batch * 1000:.1f} ms/batch · "
+        f"transfer {costs.transfer_seconds_per_mb * 1000:.2f} ms/MB · "
+        f"GIL contention {gil_text} · "
+        f"scheduler queue {scheduler_text} · "
+        f"oversubscription correction {prediction.correction_exponent:.2f}")
+    figure.add_annotation(
+        text=summary,
+        xref=f"x{row} domain",
+        yref=f"y{row} domain",
+        x=0.02,
+        y=1.12,
+        showarrow=False,
+        align="left",
+        font={"size": 11, "color": "#495057"},
+    )
 
 
 def _add_diagnostic_links(path: Path) -> None:
