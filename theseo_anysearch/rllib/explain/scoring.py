@@ -210,6 +210,17 @@ class DQNPolicyScorer(PolicyScorer):
         from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
         env_config = experiment.env.to_runtime_dict()
+        native_manifest = run_dir.joinpath("native_extension", "extension.json")
+        if native_manifest.is_file():
+            env_config["native_extension_manifest"] = str(native_manifest.resolve())
+        else:
+            reward_source = run_dir.joinpath("rewards.py")
+            if reward_source.is_file():
+                env_config["reward_module_path"] = str(reward_source.resolve())
+        scenario_source = run_dir.joinpath("scenarios.py")
+        if scenario_source.is_file():
+            env_config["scenario_module_path"] = str(scenario_source.resolve())
+
         env = VoxelEnv(env_config)
         try:
             observation_space = env.observation_space

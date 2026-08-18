@@ -39,6 +39,17 @@ def _configure_rllib_env_runners(rllib_config: Any, training: Any) -> Any:
     )
 
 
+def _evaluation_env_config(config: Settings, env_config: dict[str, Any]) -> dict[str, Any]:
+    """Apply an evaluation-only scenario provider to a copied env config."""
+    result = dict(env_config)
+    provider = config.evaluation.scenarios.provider
+    if provider is not None:
+        result["scenario_provider"] = provider.name
+        result["scenario_parameters"] = dict(provider.parameters)
+    result["scenario_scope"] = "evaluation"
+    return result
+
+
 def _log_stage(message: str) -> None:
     """Print a timestamped PPO startup message for foreground debugging."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -308,7 +319,7 @@ class PPOTrainer(Trainer):
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
             frequency=config.evaluation.frequency,
-            env_config=env_config,
+            env_config=_evaluation_env_config(config, env_config),
             episodes=config.evaluation.episodes,
             seed=config.evaluation.seed,
             num_envs_per_env_runner=config.evaluation.num_envs_per_env_runner,
@@ -447,7 +458,7 @@ class MultiAgentVoxelPPOTrainer(Trainer):
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
             frequency=config.evaluation.frequency,
-            env_config=env_config,
+            env_config=_evaluation_env_config(config, env_config),
             episodes=config.evaluation.episodes,
             seed=config.evaluation.seed,
             multi_agent=True,

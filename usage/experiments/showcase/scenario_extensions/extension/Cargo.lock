@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "anysearch_scenario_showcase"
+version = "0.1.0"
+dependencies = [
+ "anysearch-extension",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

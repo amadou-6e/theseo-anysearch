@@ -15,8 +15,9 @@ from theseo_anysearch.settings.environment.lifecycle import (
 )
 from theseo_anysearch.settings.environment.observation import ObservationConfig
 from theseo_anysearch.settings.environment.rewards import RewardConfig, RewardSelector
+from theseo_anysearch.settings.environment.scenarios import ScenarioConfig, ScenarioProviderSelector
 
 __all__ = [
     "ActionConfig", "ActionExtensionSelector", "AgentConfig", "EnvConfig", "GeometryConfig", "HunterAndHuntedConfig", "NestedFieldAccessMixin",
-    "LifecycleConfig", "LifecycleRuleSelector", "ObservationConfig", "RewardConfig", "RewardSelector", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
+    "LifecycleConfig", "LifecycleRuleSelector", "ObservationConfig", "RewardConfig", "RewardSelector", "ScenarioConfig", "ScenarioProviderSelector", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
 ]

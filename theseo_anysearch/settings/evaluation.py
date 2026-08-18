@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from theseo_anysearch.settings.environment.curriculum import WaypointAdvanceConfig
+from theseo_anysearch.settings.environment.scenarios import ScenarioConfig
 
 
 class WaypointCurriculumEvaluationConfig(BaseModel):
@@ -34,6 +35,10 @@ class EvaluationConfig(BaseModel):
     waypoint_curriculum: WaypointCurriculumEvaluationConfig = Field(
         default_factory=WaypointCurriculumEvaluationConfig,
         description="Retention evaluation and optional evaluation-gated advancement.",
+    )
+    scenarios: ScenarioConfig = Field(
+        default_factory=ScenarioConfig,
+        description="Optional deterministic scenario provider used only for evaluation.",
     )
     parallel_to_training: bool = Field(
         default=False,

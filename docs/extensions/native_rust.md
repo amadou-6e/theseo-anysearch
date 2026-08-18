@@ -1,6 +1,6 @@
 # Native Rust extensions
 
-AnySearch experiments can define reward and metric hooks in Rust. Put a Cargo
+AnySearch experiments can define reward, metric, action, and scenario hooks in Rust. Put a Cargo
 `cdylib` crate in the experiment's `extension/` directory. Its `Cargo.toml` uses
 the SDK version bundled with AnySearch:
 
@@ -34,6 +34,9 @@ Every library exports `anysearch_extension_abi_version` and
 - `anysearch_reward_<yaml-name>_v2`
 - `anysearch_compute_training_metrics_v1`
 - `anysearch_compute_evaluation_metrics_v1`
+- `anysearch_predicate_<yaml-name>_v2`
+- `anysearch_outcome_<yaml-name>_v2`
+- `anysearch_scenario_<yaml-name>_v1`
 
 Rewards use fixed-layout C-compatible context/result structs because this call is
 made on every environment step. A result contains add/replace mode, a finite
@@ -50,9 +53,14 @@ metric with the same scoped name. This makes partial migrations possible.
 
 Native extensions are trusted code loaded into the training process. Only compile
 and run extension sources you trust. See
-`usage/experiments/showcase/native_extension` for a runnable example using the
+`usage/experiments/showcase/native_extension` for reward, metric, and action examples using the
 `anysearch-extension` SDK. The `#[anysearch_reward]` macro generates the stable,
 versioned ABI export; extension authors do not write that wrapper themselves.
+
+Scenario providers use JSON because reset-time results may contain variable-length
+routes and metadata. The `#[anysearch_scenario]` macro generates their wrapper;
+libraries advertise scenario capability bit `32`. The dedicated runnable example
+is `usage/experiments/showcase/scenario_extensions`. See [scenarios.md](scenarios.md).
 
 ## Action predicates and outcomes
 

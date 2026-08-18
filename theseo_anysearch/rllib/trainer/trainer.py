@@ -155,18 +155,22 @@ class Trainer(BaseTrainer):
             CAP_OUTCOME,
             CAP_PREDICATE,
             CAP_REWARD,
+            CAP_SCENARIO,
         )
 
         if (
             native_manifest.is_file()
             and self._native_extension is not None
-            and self._native_extension.capabilities & (CAP_REWARD | CAP_PREDICATE | CAP_OUTCOME)
+            and self._native_extension.capabilities & (CAP_REWARD | CAP_PREDICATE | CAP_OUTCOME | CAP_SCENARIO)
         ):
             runtime["native_extension_manifest"] = str(native_manifest.resolve())
         else:
             reward_source = self._output_dir.joinpath("rewards.py")
             if reward_source.is_file():
                 runtime["reward_module_path"] = str(reward_source.resolve())
+        scenario_source = self._output_dir.joinpath("scenarios.py")
+        if scenario_source.is_file():
+            runtime["scenario_module_path"] = str(scenario_source.resolve())
         return runtime
 
     # ------------------------------------------------------------------

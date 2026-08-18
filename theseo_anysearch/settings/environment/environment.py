@@ -14,6 +14,7 @@ from theseo_anysearch.settings.environment.geometry import GeometryConfig
 from theseo_anysearch.settings.environment.lifecycle import LifecycleConfig
 from theseo_anysearch.settings.environment.observation import ObservationConfig
 from theseo_anysearch.settings.environment.rewards import RewardConfig
+from theseo_anysearch.settings.environment.scenarios import ScenarioConfig
 
 _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
     "stl_path": ("geometry", "stl_path"),
@@ -75,6 +76,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
         default_factory=LifecycleConfig,
         description="Ordered rules that resolve episode outcomes and diagnostics.",
     )
+    scenarios: ScenarioConfig = Field(default_factory=ScenarioConfig, description="Episode scenario provider.")
     agents: tuple[AgentConfig, ...] | None = Field(
         None, description="Ordered per-agent settings for heterogeneous environments."
     )
@@ -209,6 +211,8 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "custom_reward_parameters": (
                 self.rewards__provider.parameters if self.rewards__provider else {}
             ),
+            "scenario_provider": self.scenarios.provider.name if self.scenarios.provider else None,
+            "scenario_parameters": self.scenarios.provider.parameters if self.scenarios.provider else {},
             "task": self.task.model_dump(mode="json"),
             "lifecycle_rules": [
                 rule.model_dump(mode="json") for rule in self.lifecycle.rules
