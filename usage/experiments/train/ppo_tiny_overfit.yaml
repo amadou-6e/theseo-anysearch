@@ -32,7 +32,7 @@ env:
 
 training:
   algorithm: ppo
-  model: radial_grouped_encoder
+  model: voxel_encoder
   runner: local
   iterations: 50
   checkpoint_interval: 50

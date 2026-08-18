@@ -117,7 +117,7 @@ def test_quiet_mode_suppresses_foreground_ppo_stage_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from theseo_anysearch.rllib.trainer.ppo import _log_stage
+    from theseo_anysearch.rllib.algorithms.ppo import _log_stage
 
     monkeypatch.setenv("ANYSEARCH_QUIET", "1")
 
@@ -130,7 +130,7 @@ def test_quiet_mode_writes_ppo_stage_output_to_redirected_log(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from theseo_anysearch.rllib.trainer.ppo import _log_stage
+    from theseo_anysearch.rllib.algorithms.ppo import _log_stage
 
     log_path = tmp_path / "benchmark.stdout.log"
     monkeypatch.setenv("ANYSEARCH_QUIET", "1")

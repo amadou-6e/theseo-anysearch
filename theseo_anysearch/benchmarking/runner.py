@@ -193,169 +193,171 @@ class ResourceBenchmarkRunner:
         stdout_log = self._output_dir / "benchmark.stdout.log"
         stderr_log = self._output_dir / "benchmark.stderr.log"
         output_stack = ExitStack()
-        stdout_handle = output_stack.enter_context(
-            stdout_log.open("w", encoding="utf-8", buffering=1))
-        stderr_handle = output_stack.enter_context(
-            stderr_log.open("w", encoding="utf-8", buffering=1))
-        native_stderr = sys.stderr
         try:
-            self._foreground_stderr = output_stack.enter_context(
-                os.fdopen(
-                    os.dup(native_stderr.fileno()),
-                    "w",
-                    encoding=getattr(sys.stderr, "encoding", None) or "utf-8",
-                    errors="replace",
-                    buffering=1,
+            stdout_handle = output_stack.enter_context(
+                stdout_log.open("w", encoding="utf-8", buffering=1))
+            stderr_handle = output_stack.enter_context(
+                stderr_log.open("w", encoding="utf-8", buffering=1))
+            native_stderr = sys.stderr
+            try:
+                self._foreground_stderr = output_stack.enter_context(
+                    os.fdopen(
+                        os.dup(native_stderr.fileno()),
+                        "w",
+                        encoding=getattr(sys.stderr, "encoding", None) or "utf-8",
+                        errors="replace",
+                        buffering=1,
+                    ))
+            except (AttributeError, OSError):
+                self._foreground_stderr = sys.stderr
+            stdout_stream = (_TeeTextIO(sys.stdout, stdout_handle)
+                             if self._debug else stdout_handle)
+            stderr_stream = (_TeeTextIO(self._foreground_stderr, stderr_handle)
+                             if self._debug else stderr_handle)
+            output_stack.enter_context(redirect_stdout(stdout_stream))
+            output_stack.enter_context(redirect_stderr(stderr_stream))
+            output_stack.enter_context(
+                _capture_stderr_fd(
+                    stderr_handle,
+                    native_stderr,
+                    tee=self._debug,
                 ))
-        except (AttributeError, OSError):
-            self._foreground_stderr = sys.stderr
-        stdout_stream = (_TeeTextIO(sys.stdout, stdout_handle)
-                         if self._debug else stdout_handle)
-        stderr_stream = (_TeeTextIO(self._foreground_stderr, stderr_handle)
-                         if self._debug else stderr_handle)
-        output_stack.enter_context(redirect_stdout(stdout_stream))
-        output_stack.enter_context(redirect_stderr(stderr_stream))
-        output_stack.enter_context(
-            _capture_stderr_fd(
-                stderr_handle,
-                native_stderr,
-                tee=self._debug,
-            ))
-        self._tracker = MLflowTracker(
-            self._config.mlflow,
-            f"benchmark/{self._config.experiment.name}",
-        )
-        self._tracker.start_run(
-            run_name=self._output_dir.name,
-            tags={"anysearch.run_type": "resource_benchmark"},
-        )
-        self._tracker.log_params({
-            "decline_patience":
-            self._decline_patience,
-            "decline_tolerance":
-            self._decline_tolerance,
-            "warmup_iterations":
-            self._warmup_iterations,
-            "measure_iterations":
-            self._measure_iterations,
-            "repeats":
-            self._repeats,
-            "max_envs_per_worker":
-            self._max_envs_per_worker,
-            "max_workers":
-            self._max_workers,
-            "max_gpu_utilization":
-            self._max_gpu_utilization,
-            "max_duration_minutes":
-            self._max_duration_minutes,
-        })
+            self._tracker = MLflowTracker(
+                self._config.mlflow,
+                f"benchmark/{self._config.experiment.name}",
+            )
+            self._tracker.start_run(
+                run_name=self._output_dir.name,
+                tags={"anysearch.run_type": "resource_benchmark"},
+            )
+            self._tracker.log_params({
+                "decline_patience":
+                self._decline_patience,
+                "decline_tolerance":
+                self._decline_tolerance,
+                "warmup_iterations":
+                self._warmup_iterations,
+                "measure_iterations":
+                self._measure_iterations,
+                "repeats":
+                self._repeats,
+                "max_envs_per_worker":
+                self._max_envs_per_worker,
+                "max_workers":
+                self._max_workers,
+                "max_gpu_utilization":
+                self._max_gpu_utilization,
+                "max_duration_minutes":
+                self._max_duration_minutes,
+            })
 
-        ray_was_initialized = False
-        previous_quiet = os.environ.get("ANYSEARCH_QUIET")
-        previous_quiet_log = os.environ.get("ANYSEARCH_QUIET_LOG")
-        ray_logger = logging.getLogger("ray")
-        previous_ray_level = ray_logger.level
-        if not self._debug:
-            os.environ["ANYSEARCH_QUIET"] = "1"
-            os.environ["ANYSEARCH_QUIET_LOG"] = str(stdout_log)
-            ray_logger.setLevel(logging.INFO)
-        try:
-            import ray
+            ray_was_initialized = False
+            previous_quiet = os.environ.get("ANYSEARCH_QUIET")
+            previous_quiet_log = os.environ.get("ANYSEARCH_QUIET_LOG")
+            ray_logger = logging.getLogger("ray")
+            previous_ray_level = ray_logger.level
+            if not self._debug:
+                os.environ["ANYSEARCH_QUIET"] = "1"
+                os.environ["ANYSEARCH_QUIET_LOG"] = str(stdout_log)
+                ray_logger.setLevel(logging.INFO)
+            try:
+                import ray
 
-            ray_was_initialized = ray.is_initialized()
-            if not ray_was_initialized:
-                from theseo_anysearch.rllib.trainer.ppo import _ensure_ray_runtime
+                ray_was_initialized = ray.is_initialized()
+                if not ray_was_initialized:
+                    from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
 
-                _ensure_ray_runtime(
-                    str(self._output_dir),
-                    num_env_runners=self._max_workers,
+                    _ensure_ray_runtime(
+                        str(self._output_dir),
+                        num_env_runners=self._max_workers,
+                    )
+                cluster_worker_limit = max(
+                    1,
+                    int(ray.cluster_resources().get("CPU", 1.0)) - 1,
                 )
-            cluster_worker_limit = max(
-                1,
-                int(ray.cluster_resources().get("CPU", 1.0)) - 1,
-            )
-            self._max_workers = min(self._max_workers, cluster_worker_limit)
-            environment_sweep = adaptive_sweep(
-                phase="environments",
-                evaluate=lambda candidate: self._evaluate_candidate(
+                self._max_workers = min(self._max_workers, cluster_worker_limit)
+                environment_sweep = adaptive_sweep(
                     phase="environments",
-                    candidate=candidate,
-                    num_env_runners=1,
-                    num_envs_per_env_runner=candidate,
-                ),
-                maximum=self._max_envs_per_worker,
-                decline_patience=self._decline_patience,
-                decline_tolerance=self._decline_tolerance,
-                stop_requested=stop_requested,
-                on_candidate_completed=self._candidate_completed,
-            )
-            best_envs = environment_sweep.peak_candidate
-            worker_sweep = gpu_saturation_sweep(
-                evaluate=lambda candidate: self._evaluate_candidate(
-                    phase="workers",
-                    candidate=candidate,
-                    num_env_runners=candidate,
-                    num_envs_per_env_runner=best_envs,
-                ),
-                maximum=self._max_workers,
-                max_gpu_utilization=self._max_gpu_utilization,
-                stop_requested=stop_requested,
-                on_candidate_completed=self._candidate_completed,
-            )
-            final_steps = worker_sweep.peak_steps_per_second
-            baseline_steps = environment_sweep.candidates[0].steps_per_second
-            result = ResourceBenchmarkResult(
-                created_at=datetime.now(timezone.utc).isoformat(),
-                config_path=str(self._config_path),
-                machine=machine_metadata(),
-                decline_patience=self._decline_patience,
-                decline_tolerance=self._decline_tolerance,
-                max_gpu_utilization=self._max_gpu_utilization,
-                max_duration_minutes=self._max_duration_minutes,
-                elapsed_seconds=time.perf_counter() - benchmark_started,
-                environment_sweep=environment_sweep,
-                worker_sweep=worker_sweep,
-                recommendation=BenchmarkRecommendation(
-                    num_env_runners=worker_sweep.peak_candidate,
-                    num_envs_per_env_runner=best_envs,
-                    steps_per_second=final_steps,
-                    speedup=(final_steps /
-                             baseline_steps if baseline_steps > 0 else 0.0),
-                ),
-            )
-            artifacts = write_benchmark_artifacts(result, self._output_dir)
-            stdout_handle.flush()
-            stderr_handle.flush()
-            artifacts["stdout_log"] = stdout_log
-            artifacts["stderr_log"] = stderr_log
-            for artifact in artifacts.values():
-                self._tracker.log_artifact(artifact)
-            self._tracker.set_tag("benchmark.stop.environments",
-                                  environment_sweep.stop_reason)
-            self._tracker.set_tag("benchmark.stop.workers",
-                                  worker_sweep.stop_reason)
-            self._tracker.end_run("FINISHED")
-            return result, artifacts
-        except BaseException:
-            self._tracker.end_run("FAILED")
-            raise
-        finally:
-            ray_logger.setLevel(previous_ray_level)
-            if previous_quiet is None:
-                os.environ.pop("ANYSEARCH_QUIET", None)
-            else:
-                os.environ["ANYSEARCH_QUIET"] = previous_quiet
-            if previous_quiet_log is None:
-                os.environ.pop("ANYSEARCH_QUIET_LOG", None)
-            else:
-                os.environ["ANYSEARCH_QUIET_LOG"] = previous_quiet_log
-            if not ray_was_initialized:
-                try:
-                    import ray
+                    evaluate=lambda candidate: self._evaluate_candidate(
+                        phase="environments",
+                        candidate=candidate,
+                        num_env_runners=1,
+                        num_envs_per_env_runner=candidate,
+                    ),
+                    maximum=self._max_envs_per_worker,
+                    decline_patience=self._decline_patience,
+                    decline_tolerance=self._decline_tolerance,
+                    stop_requested=stop_requested,
+                    on_candidate_completed=self._candidate_completed,
+                )
+                best_envs = environment_sweep.peak_candidate
+                worker_sweep = gpu_saturation_sweep(
+                    evaluate=lambda candidate: self._evaluate_candidate(
+                        phase="workers",
+                        candidate=candidate,
+                        num_env_runners=candidate,
+                        num_envs_per_env_runner=best_envs,
+                    ),
+                    maximum=self._max_workers,
+                    max_gpu_utilization=self._max_gpu_utilization,
+                    stop_requested=stop_requested,
+                    on_candidate_completed=self._candidate_completed,
+                )
+                final_steps = worker_sweep.peak_steps_per_second
+                baseline_steps = environment_sweep.candidates[0].steps_per_second
+                result = ResourceBenchmarkResult(
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    config_path=str(self._config_path),
+                    machine=machine_metadata(),
+                    decline_patience=self._decline_patience,
+                    decline_tolerance=self._decline_tolerance,
+                    max_gpu_utilization=self._max_gpu_utilization,
+                    max_duration_minutes=self._max_duration_minutes,
+                    elapsed_seconds=time.perf_counter() - benchmark_started,
+                    environment_sweep=environment_sweep,
+                    worker_sweep=worker_sweep,
+                    recommendation=BenchmarkRecommendation(
+                        num_env_runners=worker_sweep.peak_candidate,
+                        num_envs_per_env_runner=best_envs,
+                        steps_per_second=final_steps,
+                        speedup=(final_steps /
+                                 baseline_steps if baseline_steps > 0 else 0.0),
+                    ),
+                )
+                artifacts = write_benchmark_artifacts(result, self._output_dir)
+                stdout_handle.flush()
+                stderr_handle.flush()
+                artifacts["stdout_log"] = stdout_log
+                artifacts["stderr_log"] = stderr_log
+                for artifact in artifacts.values():
+                    self._tracker.log_artifact(artifact)
+                self._tracker.set_tag("benchmark.stop.environments",
+                                      environment_sweep.stop_reason)
+                self._tracker.set_tag("benchmark.stop.workers",
+                                      worker_sweep.stop_reason)
+                self._tracker.end_run("FINISHED")
+                return result, artifacts
+            except BaseException:
+                self._tracker.end_run("FAILED")
+                raise
+            finally:
+                ray_logger.setLevel(previous_ray_level)
+                if previous_quiet is None:
+                    os.environ.pop("ANYSEARCH_QUIET", None)
+                else:
+                    os.environ["ANYSEARCH_QUIET"] = previous_quiet
+                if previous_quiet_log is None:
+                    os.environ.pop("ANYSEARCH_QUIET_LOG", None)
+                else:
+                    os.environ["ANYSEARCH_QUIET_LOG"] = previous_quiet_log
+                if not ray_was_initialized:
+                    try:
+                        import ray
 
-                    ray.shutdown()
-                except Exception:
-                    pass
+                        ray.shutdown()
+                    except Exception:
+                        pass
+        finally:
             output_stack.close()
 
     def _evaluate_candidate(

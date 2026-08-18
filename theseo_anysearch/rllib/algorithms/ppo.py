@@ -116,12 +116,7 @@ def _ensure_ray_runtime(output_dir: str, num_env_runners: int = 0) -> None:
         include_dashboard=False,
         log_to_driver=False,
         logging_level=(
-            "ERROR"
-            if (
-                _os.environ.get("ANYSEARCH_QUIET") == "1"
-                and not _os.environ.get("ANYSEARCH_QUIET_LOG")
-            )
-            else "INFO"
+            "ERROR" if _os.environ.get("ANYSEARCH_QUIET") == "1" else "INFO"
         ),
         _temp_dir=str(ray_root),
     )
