@@ -6,7 +6,10 @@ from typing import Any
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.rllib.algorithms.models import APPOConfig
-from theseo_anysearch.rllib.algorithms.ppo import _ensure_ray_runtime
+from theseo_anysearch.rllib.algorithms.ppo import (
+    _configure_rllib_env_runners,
+    _ensure_ray_runtime,
+)
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     bind_anysearch_evaluation_function,
     configure_rllib_evaluation,
@@ -49,14 +52,14 @@ class APPOTrainer(Trainer):
         action_space = probe_env.action_space
         probe_env.close()
 
-        from theseo_anysearch.rllib.models import build_rllib_model_dict
+        from theseo_anysearch.rllib.models import build_rllib_rl_module_model_config
 
-        rllib_model = build_rllib_model_dict(config.model_cfg)
+        rllib_model = build_rllib_rl_module_model_config(config.model_cfg)
         rllib_config = (
             RllibAPPOConfig()
             .api_stack(
-                enable_rl_module_and_learner=False,
-                enable_env_runner_and_connector_v2=False,
+                enable_rl_module_and_learner=True,
+                enable_env_runner_and_connector_v2=True,
             )
             .environment(
                 env=env_id,
@@ -67,7 +70,7 @@ class APPOTrainer(Trainer):
             .training(
                 lr=algo_cfg.lr,
                 gamma=algo_cfg.gamma,
-                train_batch_size=algo_cfg.train_batch_size,
+                train_batch_size_per_learner=algo_cfg.train_batch_size,
                 vtrace=algo_cfg.vtrace,
                 use_gae=algo_cfg.use_gae,
                 lambda_=algo_cfg.lambda_,
@@ -80,27 +83,19 @@ class APPOTrainer(Trainer):
                 circular_buffer_iterations_per_batch=(
                     algo_cfg.circular_buffer_iterations_per_batch
                 ),
-                model=rllib_model,
             )
-            .resources(
-                num_gpus=_detect_num_gpus(
+            .rl_module(model_config=rllib_model)
+            .learners(
+                num_learners=0,
+                num_gpus_per_learner=_detect_num_gpus(
                     config.training.require_gpu,
                     num_gpus=config.training.num_gpus,
-                )
+                ),
             )
             .framework("torch")
         )
         rllib_config.rollout_fragment_length = algo_cfg.rollout_fragment_length
-        # APPO runs on the legacy API stack (enable_env_runner_and_connector_v2
-        # above), which never invokes connector-v2 pipelines, so env runner
-        # parallelism is set directly rather than via _configure_rllib_env_runners
-        # (whose env_to_module_connector is a connector-v2-only mechanism).
-        rllib_config.num_env_runners = config.training.num_env_runners
-        rllib_config.num_envs_per_env_runner = config.training.num_envs_per_env_runner
-        rllib_config.num_gpus_per_env_runner = config.training.num_gpus_per_env_runner
-        rllib_config.max_requests_in_flight_per_env_runner = (
-            config.training.max_requests_in_flight_per_env_runner
-        )
+        rllib_config = _configure_rllib_env_runners(rllib_config, config.training)
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
