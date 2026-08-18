@@ -16,14 +16,23 @@ def gpu_saturation_sweep(
     evaluate: CandidateEvaluator,
     maximum: int,
     max_gpu_utilization: float,
+    start: int = 1,
     stop_requested: StopRequested | None = None,
     on_candidate_completed: CandidateCompleted | None = None,
 ) -> SweepResult:
-    """Increase workers until measured GPU utilization reaches the target."""
+    """Increase workers until measured GPU utilization reaches the target.
+
+    ``start`` lets a calibration prediction seed the sweep at a promising
+    candidate instead of always scanning from 1; candidates below ``start``
+    are simply never measured. Baseline speedup is still computed against the
+    first candidate actually measured (i.e. ``start``, not 1).
+    """
     if maximum < 1:
         raise ValueError("maximum must be at least 1")
     if not 0.0 < max_gpu_utilization <= 100.0:
         raise ValueError("max_gpu_utilization must be in (0, 100]")
+    if not 1 <= start <= maximum:
+        raise ValueError("start must be within [1, maximum]")
 
     candidates: list[CandidateSummary] = []
     best: CandidateSummary | None = None
@@ -32,7 +41,7 @@ def gpu_saturation_sweep(
         f"maximum candidate {maximum} reached before GPU utilization reached "
         f"{max_gpu_utilization:g}%")
 
-    for candidate in range(1, maximum + 1):
+    for candidate in range(start, maximum + 1):
         if candidates and stop_requested is not None and stop_requested():
             stop_reason = "wall-clock budget reached before next candidate"
             break
@@ -77,6 +86,7 @@ def adaptive_sweep(
     maximum: int,
     decline_patience: int,
     decline_tolerance: float,
+    start: int = 1,
     stop_requested: StopRequested | None = None,
     on_candidate_completed: CandidateCompleted | None = None,
 ) -> SweepResult:
@@ -85,6 +95,10 @@ def adaptive_sweep(
     A decline is measured against the running best. Values within
     ``decline_tolerance`` of that best are treated as noise rather than declines.
     The recommendation is always the highest-throughput candidate observed.
+
+    ``start`` lets a calibration prediction seed the sweep at a promising
+    candidate instead of always scanning from 1; candidates below ``start``
+    are simply never measured.
     """
     if maximum < 1:
         raise ValueError("maximum must be at least 1")
@@ -92,6 +106,8 @@ def adaptive_sweep(
         raise ValueError("decline_patience must be at least 1")
     if not 0.0 <= decline_tolerance < 1.0:
         raise ValueError("decline_tolerance must be in [0, 1)")
+    if not 1 <= start <= maximum:
+        raise ValueError("start must be within [1, maximum]")
 
     candidates: list[CandidateSummary] = []
     best: CandidateSummary | None = None
@@ -99,7 +115,7 @@ def adaptive_sweep(
     consecutive_declines = 0
     stop_reason = f"maximum candidate {maximum} reached"
 
-    for candidate in range(1, maximum + 1):
+    for candidate in range(start, maximum + 1):
         if candidates and stop_requested is not None and stop_requested():
             stop_reason = "wall-clock budget reached before next candidate"
             break

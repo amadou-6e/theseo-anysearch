@@ -8,6 +8,7 @@ import os
 import platform
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 
 
@@ -138,3 +139,54 @@ def gpu_snapshot() -> GpuSnapshot:
         memory_mb=sum(row[1] for row in parsed),
         power_watts=sum(row[2] for row in parsed),
     )
+
+
+def gil_contention(duration_seconds: float = 0.5) -> float | None:
+    """Measure the fraction of ``duration_seconds`` this process held the GIL.
+
+    Uses ``gilknocker`` (a canary thread that reports how much of the wall
+    clock it was starved of the GIL) when available. Returns ``None`` on
+    platforms or interpreters where GIL contention cannot be measured (e.g.
+    PyPy, or ``gilknocker`` not installed), so callers must treat the signal
+    as optional.
+    """
+    try:
+        from gilknocker import KnockKnock
+    except ImportError:
+        return None
+
+    knocker = KnockKnock(polling_interval_micros=100)
+    knocker.start()
+    try:
+        time.sleep(duration_seconds)
+    finally:
+        knocker.stop()
+    return float(knocker.contention_metric)
+
+
+def scheduler_queue_delay(samples: int = 5) -> float | None:
+    """Measure Ray task-dispatch latency as a proxy for CPU oversubscription.
+
+    Submits trivial no-op remote tasks and measures the wall time between
+    submission and completion, minus the task's own (near-zero) execution
+    time. A rising delay across candidates indicates the Ray scheduler is
+    queuing work because more tasks are competing for CPU than are
+    available. Returns ``None`` if Ray is not initialized.
+    """
+    try:
+        import ray
+    except ImportError:
+        return None
+    if not ray.is_initialized():
+        return None
+
+    @ray.remote(num_cpus=0)
+    def _noop() -> None:
+        return None
+
+    delays: list[float] = []
+    for _ in range(max(1, samples)):
+        started = time.perf_counter()
+        ray.get(_noop.remote())
+        delays.append(time.perf_counter() - started)
+    return sum(delays) / len(delays)

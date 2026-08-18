@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from theseo_anysearch.benchmarking.model import PredictedCandidate, StageCosts
+
 BenchmarkPhase = Literal["environments", "workers"]
 
 
@@ -72,6 +74,24 @@ class BenchmarkRecommendation(BaseModel):
     speedup: float = Field(ge=0.0)
 
 
+class PredictionSummary(BaseModel):
+    """Roofline calibration used to narrow the confirming sweeps.
+
+    Derived from two cheap real candidate probes (reusing the same
+    machinery the sweeps use) rather than isolated per-stage RLlib timers,
+    so treat ``environment_predicted``/``worker_predicted`` as a hint the
+    confirming sweep validates, not a certainty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_costs: StageCosts
+    correction_exponent: float = Field(ge=0.0, le=1.0)
+    environment_predicted: PredictedCandidate
+    worker_predicted: PredictedCandidate
+    calibration_seconds: float = Field(ge=0.0)
+
+
 class ResourceBenchmarkResult(BaseModel):
     """Serializable result document for a complete resource benchmark."""
 
@@ -88,3 +108,6 @@ class ResourceBenchmarkResult(BaseModel):
     environment_sweep: SweepResult
     worker_sweep: SweepResult
     recommendation: BenchmarkRecommendation
+    prediction: PredictionSummary | None = Field(
+        default=None,
+        description="Roofline calibration, absent if calibration was skipped or failed.")

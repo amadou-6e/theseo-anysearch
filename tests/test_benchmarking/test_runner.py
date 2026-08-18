@@ -62,6 +62,65 @@ def test_candidate_summary_uses_repeat_medians(
     runner._tracker.log_metrics.assert_called_once()
 
 
+def _candidate(phase: str, candidate: int, num_env_runners: int,
+                num_envs_per_env_runner: int, throughput: float) -> CandidateSummary:
+    return CandidateSummary(
+        phase=phase,
+        candidate=candidate,
+        num_env_runners=num_env_runners,
+        num_envs_per_env_runner=num_envs_per_env_runner,
+        steps_per_second=throughput,
+        iteration_seconds=1.0,
+    )
+
+
+def test_calibrate_returns_prediction_from_three_cheap_probes(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = object.__new__(ResourceBenchmarkRunner)
+    runner._max_envs_per_worker = 16
+    runner._max_workers = 20
+    runner._config = MagicMock()
+    runner._config.algorithm_config.train_batch_size = 4000
+
+    probes = {
+        ("environments", 1): _candidate("environments", 1, 1, 1, 100.0),
+        ("environments", 2): _candidate("environments", 2, 1, 2, 190.0),
+        ("workers", 2): _candidate("workers", 2, 2, 2, 180.0),
+    }
+    monkeypatch.setattr(
+        runner, "_evaluate_candidate",
+        lambda *, phase, candidate, **_: probes[(phase, candidate)])
+    monkeypatch.setattr(runner, "_measure_transfer_seconds_per_mb", lambda: 0.001)
+    monkeypatch.setattr(
+        "theseo_anysearch.benchmarking.telemetry.gil_contention", lambda *_a, **_k: 0.1)
+    monkeypatch.setattr(
+        "theseo_anysearch.benchmarking.telemetry.scheduler_queue_delay", lambda *_a, **_k: 0.01)
+
+    prediction = runner._calibrate()
+
+    assert prediction is not None
+    assert prediction.stage_costs.gil_contention_ratio == 0.1
+    assert prediction.stage_costs.scheduler_queue_seconds == 0.01
+    assert prediction.stage_costs.transfer_seconds_per_mb == 0.001
+    assert 0.0 <= prediction.correction_exponent <= 1.0
+    assert prediction.calibration_seconds >= 0.0
+
+
+def test_calibrate_returns_none_when_a_probe_fails(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = object.__new__(ResourceBenchmarkRunner)
+    runner._max_envs_per_worker = 16
+    runner._max_workers = 20
+    runner._config = MagicMock()
+
+    def _raise(**_: object) -> CandidateSummary:
+        raise RuntimeError("simulated probe failure")
+
+    monkeypatch.setattr(runner, "_evaluate_candidate", _raise)
+
+    assert runner._calibrate() is None
+
+
 def test_cpu_only_config_disables_gpu_telemetry() -> None:
     config = MagicMock()
     config.training.algorithm = "ppo"

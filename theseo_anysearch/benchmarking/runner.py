@@ -19,12 +19,14 @@ from theseo_anysearch.benchmarking.models import (
     BenchmarkRecommendation,
     BenchmarkSample,
     CandidateSummary,
+    PredictionSummary,
     ResourceBenchmarkResult,
 )
 from theseo_anysearch.benchmarking.report import (
     write_benchmark_artifacts,
     write_progress_report,
 )
+from theseo_anysearch.benchmarking.model import recommend_search_range
 from theseo_anysearch.benchmarking.search import (
     adaptive_sweep,
     gpu_saturation_sweep,
@@ -137,6 +139,7 @@ class ResourceBenchmarkRunner:
         max_gpu_utilization: float = 95.0,
         max_duration_minutes: float = 30.0,
         debug: bool = False,
+        enable_prediction: bool = True,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         if config.training.algorithm.lower() != "ppo":
@@ -169,6 +172,7 @@ class ResourceBenchmarkRunner:
         self._max_gpu_utilization = max_gpu_utilization
         self._max_duration_minutes = max_duration_minutes
         self._debug = debug
+        self._enable_prediction = enable_prediction
         self._progress_callback = progress_callback
         self._environment_candidates: list[CandidateSummary] = []
         self._worker_candidates: list[CandidateSummary] = []
@@ -276,6 +280,15 @@ class ResourceBenchmarkRunner:
                     int(ray.cluster_resources().get("CPU", 1.0)) - 1,
                 )
                 self._max_workers = min(self._max_workers, cluster_worker_limit)
+
+                prediction = self._calibrate() if self._enable_prediction else None
+                env_start = 1
+                if prediction is not None:
+                    env_start, _ = recommend_search_range(
+                        prediction.stage_costs,
+                        axis="num_envs_per_env_runner",
+                        maximum=self._max_envs_per_worker,
+                    )
                 environment_sweep = adaptive_sweep(
                     phase="environments",
                     evaluate=lambda candidate: self._evaluate_candidate(
@@ -287,10 +300,20 @@ class ResourceBenchmarkRunner:
                     maximum=self._max_envs_per_worker,
                     decline_patience=self._decline_patience,
                     decline_tolerance=self._decline_tolerance,
+                    start=env_start,
                     stop_requested=stop_requested,
                     on_candidate_completed=self._candidate_completed,
                 )
                 best_envs = environment_sweep.peak_candidate
+                worker_start = 1
+                if prediction is not None:
+                    worker_start, _ = recommend_search_range(
+                        prediction.stage_costs,
+                        axis="num_env_runners",
+                        maximum=self._max_workers,
+                        fixed=best_envs,
+                        correction=prediction.correction_exponent,
+                    )
                 worker_sweep = gpu_saturation_sweep(
                     evaluate=lambda candidate: self._evaluate_candidate(
                         phase="workers",
@@ -300,6 +323,7 @@ class ResourceBenchmarkRunner:
                     ),
                     maximum=self._max_workers,
                     max_gpu_utilization=self._max_gpu_utilization,
+                    start=worker_start,
                     stop_requested=stop_requested,
                     on_candidate_completed=self._candidate_completed,
                 )
@@ -323,6 +347,7 @@ class ResourceBenchmarkRunner:
                         speedup=(final_steps /
                                  baseline_steps if baseline_steps > 0 else 0.0),
                     ),
+                    prediction=prediction,
                 )
                 artifacts = write_benchmark_artifacts(result, self._output_dir)
                 stdout_handle.flush()
@@ -359,6 +384,102 @@ class ResourceBenchmarkRunner:
                         pass
         finally:
             output_stack.close()
+
+    def _measure_transfer_seconds_per_mb(self) -> float | None:
+        """Time a Ray object-store round trip for a 1 MB payload."""
+        try:
+            import numpy as np
+            import ray
+        except ImportError:
+            return None
+        if not ray.is_initialized():
+            return None
+
+        payload = np.zeros((256 * 1024,), dtype=np.float32)
+        payload_mb = payload.nbytes / (1024 * 1024)
+        started = time.perf_counter()
+        ray.get(ray.put(payload))
+        elapsed = time.perf_counter() - started
+        return elapsed / payload_mb if payload_mb > 0 else None
+
+    def _calibrate(self) -> PredictionSummary | None:
+        """Best-effort roofline calibration from two cheap real candidate probes.
+
+        Reuses the same candidate-evaluation machinery the sweeps use, so this
+        costs no more than the first couple of sweep steps a full scan would
+        run anyway. This is deliberately an approximation: per-env cost and
+        learner cost are derived from the aggregate steps_per_second already
+        measured by _evaluate_candidate rather than isolated RLlib timer
+        breakdowns, so the bottleneck label is a hint the confirming sweep
+        validates, not a certainty. Returns None on any failure (missing
+        gilknocker, a probe erroring, etc.), so the caller falls back to an
+        unrestricted sweep -- calibration only ever makes this faster, never
+        less correct.
+        """
+        from theseo_anysearch.benchmarking.model import (
+            StageCosts,
+            fit_contention_correction,
+            predict_throughput,
+        )
+        from theseo_anysearch.benchmarking.telemetry import (
+            gil_contention,
+            scheduler_queue_delay,
+        )
+
+        started = time.perf_counter()
+        try:
+            probe_single = self._evaluate_candidate(
+                phase="environments",
+                candidate=1,
+                num_env_runners=1,
+                num_envs_per_env_runner=1,
+            )
+            probe_double = self._evaluate_candidate(
+                phase="environments",
+                candidate=2,
+                num_env_runners=1,
+                num_envs_per_env_runner=2,
+            )
+            probe_workers = self._evaluate_candidate(
+                phase="workers",
+                candidate=2,
+                num_env_runners=2,
+                num_envs_per_env_runner=2,
+            )
+
+            transfer_seconds_per_mb = self._measure_transfer_seconds_per_mb()
+            train_batch_size = int(
+                getattr(self._config.algorithm_config, "train_batch_size", 0)) or 4000
+
+            costs = StageCosts(
+                env_step_seconds=2.0 / max(probe_double.steps_per_second, 1e-9),
+                inference_seconds_per_env=1e-9,
+                gil_contention_ratio=gil_contention(0.2),
+                transfer_seconds_per_mb=transfer_seconds_per_mb or 1e-4,
+                avg_sample_mb=max(1e-6, train_batch_size * 4 / (1024 * 1024)),
+                learner_seconds_per_batch=train_batch_size / max(
+                    probe_single.steps_per_second, 1e-9),
+                train_batch_size=train_batch_size,
+                scheduler_queue_seconds=scheduler_queue_delay(),
+            )
+            correction = fit_contention_correction(
+                costs,
+                [
+                    (1, 1, probe_single.steps_per_second),
+                    (2, 2, probe_workers.steps_per_second),
+                ],
+            )
+            return PredictionSummary(
+                stage_costs=costs,
+                correction_exponent=correction,
+                environment_predicted=predict_throughput(
+                    costs, 1, self._max_envs_per_worker),
+                worker_predicted=predict_throughput(
+                    costs, self._max_workers, 2, correction=correction),
+                calibration_seconds=time.perf_counter() - started,
+            )
+        except Exception:
+            return None
 
     def _evaluate_candidate(
         self,
