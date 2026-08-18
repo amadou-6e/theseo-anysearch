@@ -403,15 +403,18 @@ class ResourceBenchmarkRunner:
         return elapsed / payload_mb if payload_mb > 0 else None
 
     def _calibrate(self) -> PredictionSummary | None:
-        """Best-effort roofline calibration from two cheap real candidate probes.
+        """Roofline calibration from two cheap real candidate probes.
 
         Reuses the same candidate-evaluation machinery the sweeps use, so this
         costs no more than the first couple of sweep steps a full scan would
-        run anyway. This is deliberately an approximation: per-env cost and
-        learner cost are derived from the aggregate steps_per_second already
-        measured by _evaluate_candidate rather than isolated RLlib timer
-        breakdowns, so the bottleneck label is a hint the confirming sweep
-        validates, not a certainty. Returns None on any failure (missing
+        run anyway. Per-stage costs are read directly from RLlib's own
+        env_step_timer / rlmodule_inference_timer / learner_update_timer EMAs
+        (see theseo_anysearch.rllib.trainer.results.IterationTimings) when
+        the running RLlib version reports them; where a timer is absent (an
+        older API stack, or a metric key RLlib renamed), the corresponding
+        cost falls back to a coarser estimate derived from aggregate
+        steps_per_second, and the bottleneck label should be treated as a
+        weaker hint in that case. Returns None on any failure (missing
         gilknocker, a probe erroring, etc.), so the caller falls back to an
         unrestricted sweep -- calibration only ever makes this faster, never
         less correct.
@@ -451,14 +454,22 @@ class ResourceBenchmarkRunner:
             train_batch_size = int(
                 getattr(self._config.algorithm_config, "train_batch_size", 0)) or 4000
 
+            env_step_seconds = (
+                _median_sample_field(probe_double, "env_step_seconds")
+                or 2.0 / max(probe_double.steps_per_second, 1e-9))
+            inference_seconds_per_env = (
+                _median_sample_field(probe_double, "inference_seconds") or 1e-9)
+            learner_seconds_per_batch = (
+                _median_sample_field(probe_single, "learner_update_seconds")
+                or train_batch_size / max(probe_single.steps_per_second, 1e-9))
+
             costs = StageCosts(
-                env_step_seconds=2.0 / max(probe_double.steps_per_second, 1e-9),
-                inference_seconds_per_env=1e-9,
+                env_step_seconds=env_step_seconds,
+                inference_seconds_per_env=inference_seconds_per_env,
                 gil_contention_ratio=gil_contention(0.2),
                 transfer_seconds_per_mb=transfer_seconds_per_mb or 1e-4,
                 avg_sample_mb=max(1e-6, train_batch_size * 4 / (1024 * 1024)),
-                learner_seconds_per_batch=train_batch_size / max(
-                    probe_single.steps_per_second, 1e-9),
+                learner_seconds_per_batch=learner_seconds_per_batch,
                 train_batch_size=train_batch_size,
                 scheduler_queue_seconds=scheduler_queue_delay(),
             )
@@ -622,6 +633,7 @@ class ResourceBenchmarkRunner:
             process_after = process_snapshot(pids)
             ending_steps = _sampled_steps(last_result)
             sampled_steps = max(0, ending_steps - starting_steps)
+            timings = _iteration_timings(last_result)
             if sampled_steps == 0:
                 batch_size = int(
                     getattr(self._config.algorithm_config, "train_batch_size",
@@ -653,6 +665,10 @@ class ResourceBenchmarkRunner:
                 gpu_utilization_percent=gpu_average("utilization_percent"),
                 gpu_memory_mb=gpu_average("memory_mb"),
                 gpu_power_watts=gpu_average("power_watts"),
+                env_step_seconds=timings.env_step_ema_s,
+                inference_seconds=timings.inference_ema_s,
+                learner_update_seconds=timings.learner_update_ema_s,
+                sync_weights_seconds=timings.sync_weights_ema_s,
             )
         except BaseException:
             if not self._debug:
@@ -683,6 +699,22 @@ def _sampled_steps(result: dict[str, Any]) -> int:
         if value is not None:
             return int(value)
     return 0
+
+
+def _median_sample_field(candidate: CandidateSummary, field: str) -> float | None:
+    """Median of a per-sample timing field across a candidate's repeats."""
+    values = [
+        float(value) for sample in candidate.samples
+        if (value := getattr(sample, field, None)) is not None
+    ]
+    return statistics.median(values) if values else None
+
+
+def _iteration_timings(result: dict[str, Any]) -> "IterationTimings":
+    """Parse RLlib's own per-stage timers from a train() result, if present."""
+    from theseo_anysearch.rllib.trainer.results import IterationTimings
+
+    return IterationTimings.from_rllib(result)
 
 
 def _effective_worker_limit(requested: int) -> int:

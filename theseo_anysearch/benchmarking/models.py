@@ -29,6 +29,18 @@ class BenchmarkSample(BaseModel):
     gpu_utilization_percent: float | None = Field(default=None, ge=0.0)
     gpu_memory_mb: float | None = Field(default=None, ge=0.0)
     gpu_power_watts: float | None = Field(default=None, ge=0.0)
+    env_step_seconds: float | None = Field(
+        default=None, ge=0.0,
+        description="RLlib's own env_step_timer EMA (seconds/env-step), when available.")
+    inference_seconds: float | None = Field(
+        default=None, ge=0.0,
+        description="RLlib's own rlmodule_inference_timer EMA (seconds/env-step), when available.")
+    learner_update_seconds: float | None = Field(
+        default=None, ge=0.0,
+        description="RLlib's own learner_update_timer EMA (seconds/batch), when available.")
+    sync_weights_seconds: float | None = Field(
+        default=None, ge=0.0,
+        description="RLlib's own synch_weights timer EMA (seconds), when available.")
 
 
 class CandidateSummary(BaseModel):
