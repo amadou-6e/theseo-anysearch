@@ -31,7 +31,7 @@ export default function RunHistorySidebar({
     <div style={{ width: 280, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
       <div style={groupLabel()}>Run history</div>
       {!index ? (
-        <div style={{ fontSize: 12, color: "var(--text-faint)" }}>No workspace open yet — open one from the Runs tab.</div>
+        <div style={{ fontSize: 12, color: "var(--text-faint)" }}>No workspace open yet — open one from the Overview tab.</div>
       ) : (
         <>
           <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
@@ -40,6 +40,11 @@ export default function RunHistorySidebar({
           {index.runs.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
               No run.json manifests found yet — runs appear here after `anysearch run`.
+            </div>
+          )}
+          {index.runs.length > 0 && (
+            <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-faint)", textTransform: "uppercase", marginBottom: 6 }}>
+              Run / state / progress
             </div>
           )}
           {index.runs.map((run) => (
@@ -106,11 +111,15 @@ export default function RunHistorySidebar({
                   </button>
                 </div>
               ))}
-              <div style={{ fontSize: 10.5, color: "var(--text-faint)", marginTop: 10 }}>
-                Select a run to open Replay or Explain.
-              </div>
             </>
           )}
+
+          {/* Static footer hint, always shown once a workspace is open --
+              per the spec, not conditioned on a run already being selected
+              (that reads backwards: "select a run" after one is selected). */}
+          <div style={{ fontSize: 10.5, color: "var(--text-faint)", marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border-soft)" }}>
+            Select a run to open Overview, Replay, or Explain.
+          </div>
         </>
       )}
     </div>

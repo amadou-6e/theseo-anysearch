@@ -14,8 +14,15 @@ import {
 
 type Tab = "runs" | "replay" | "explain";
 
+// Labeled "Overview" per spec/ui-design/replayer-current.drawio's "All
+// Windows" tab (the tab bar reads "Overview | Replay | Explain" there).
+// Note: docs/ui/workspace.md, also ported from feat/197, calls this same
+// tab "Runs" in prose -- the two spec sources disagree with each other,
+// not just with this app. Internal id kept as "runs" (matches the Rust
+// commands / this codebase's own vocabulary); only the display label
+// changed to follow the visual spec.
 const TABS: { id: Tab; label: string }[] = [
-  { id: "runs", label: "Runs" },
+  { id: "runs", label: "Overview" },
   { id: "replay", label: "Replay" },
   { id: "explain", label: "Explain" },
 ];
@@ -128,7 +135,7 @@ export default function App() {
 
         {selectedRun && (
           <div style={{ fontSize: 11, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Selected run — {selectedRun.run_id} [{selectedRun.status}]
+            Selected run - {selectedRun.run_id} - {selectedRun.status}
           </div>
         )}
 

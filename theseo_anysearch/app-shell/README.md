@@ -114,6 +114,40 @@ data under `usage/experiments/`, not just compiling it.
   `encode_scaled_integer`/`decode_scaled_integer` are simple round-trippable
   math) but this is the one area to double-check against real data first.
 
+## Known deviations from the draw.io "All Windows" spec
+
+A pixel/element-level pass against `spec/ui-design/replayer-current.drawio`'s
+"All Windows" tab (fixed): the first tab is labeled **"Overview"** there
+(this app used "Runs" — note `docs/ui/workspace.md`, also from feat/197,
+calls it "Runs" in prose, so the two spec sources disagree with each
+other); the sidebar's "select a run" hint was worded/placed to only appear
+*after* a run was already selected (backwards) and dropped "Overview" from
+its own text; the run-history pane was missing its "RUN / STATE / PROGRESS"
+column header; and workspace controls (root path, Rescan, Change workspace)
+lived in a full-width top bar this app invented, instead of inside the
+file-tree pane header where the spec puts them.
+
+Not fixed — genuine missing features, not alignment nits:
+- "Start a new run [expand]" quick-create panel and the live
+  `[running] ... 37%` progress banner.
+- "All states ▾" run-status filter dropdown.
+- Per-run-card **Stop / Resume / Run again / Details** actions. Checked
+  whether these could be wired honestly: `stop_run` kills a `Child` handle
+  *this process* spawned via Start run — it has no way to stop an arbitrary
+  already-running training process discovered via `run.json` (no PID is
+  recorded in the manifest). Left undone rather than shipping buttons that
+  don't work.
+- Drag-and-drop a folder onto the window to open it as the workspace.
+
+Added but not in the spec at all (kept, flagged rather than hidden):
+- The raw "Workspace root" text-path input — the spec only shows the native
+  folder picker + drag-and-drop. Kept as a secondary "or paste a path"
+  affordance (useful for scripting/testing) rather than the primary action.
+- The entire "Open trajectories folder" control in the sidebar — added to
+  work around `trajectories/` being deliberately excluded from the scanned
+  file tree (see Runs tab notes above); without it, legacy Tune trials with
+  no `run.json` have no way into Replay at all.
+
 ## Known tech debt
 
 - `StepData`/`EpisodeData`/`TrajectoryData` are duplicated across

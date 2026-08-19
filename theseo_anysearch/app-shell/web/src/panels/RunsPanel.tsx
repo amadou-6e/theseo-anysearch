@@ -186,31 +186,48 @@ export default function RunsPanel({
   const isEditable = selectedFile && EDITABLE_KINDS.includes(selectedFile.kind);
   const dirty = editorText !== savedText;
 
+  const workspaceName = root.split(/[/\\]/).pop() || root;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", gap: 8, padding: 14, borderBottom: "1px solid var(--border-soft)", flexShrink: 0 }}>
-        <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
-        <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("var(--blue)")}>
-          {scanning ? "Scanning…" : "Rescan"}
-        </button>
-        <button onClick={onChangeWorkspace} style={btnStyle("#232323")}>
-          Change workspace
-        </button>
-      </div>
-
       {error && <div style={{ color: "var(--red)", fontSize: 12, padding: "8px 14px", fontFamily: "var(--mono)" }}>{error}</div>}
+      {!index && !error && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 14, flexShrink: 0 }}>
+          <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)")}>
+            Change workspace
+          </button>
+          <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>or paste a path:</span>
+          <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
+          <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("#232323")}>
+            {scanning ? "Scanning…" : "Open"}
+          </button>
+        </div>
+      )}
 
       {index ? (
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* Workspace file tree, collapsible, with config classification markers. */}
+          {/* Workspace file tree, collapsible, with config classification markers. --
+              header (workspace name + Change workspace/Rescan) lives in this pane,
+              matching the spec's placement rather than a separate top bar. */}
           <div style={{ width: 300, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
-            <div style={groupLabel()}>Workspace files</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{workspaceName}</div>
+              <span style={{ fontSize: 10, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>workspace</span>
+            </div>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search files…"
               style={{ ...inputStyle(), width: "100%", marginBottom: 10 }}
             />
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button onClick={onChangeWorkspace} style={{ ...btnStyle("#232323", true), flex: 1 }}>
+                Change workspace
+              </button>
+              <button onClick={() => onRescan(root)} disabled={scanning} style={{ ...btnStyle("#232323", true), flex: 1 }}>
+                {scanning ? "Scanning…" : "↻ Rescan"}
+              </button>
+            </div>
             <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
               {index.file_count} files · {index.yaml_count} yaml · {index.invalid_configuration_count} invalid
             </div>
@@ -340,11 +357,7 @@ export default function RunsPanel({
             </div>
           </div>
         </div>
-      ) : (
-        <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 12.5 }}>
-          Enter a workspace root and click Rescan, or Change workspace to pick one.
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
