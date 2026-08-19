@@ -201,7 +201,7 @@ def test_environment_step_budget_metric_supports_new_and_legacy_rllib() -> None:
 
     assert current.environment_steps_total == 123
     assert legacy.environment_steps_total == 456
-    assert current.standard_metrics()["environment_steps_total"] == 123.0
+    assert current.standard_metrics()["performance/environment_steps_total"] == 123.0
 
 
 def test_asha_stops_a_deliberately_poor_trial_before_budget() -> None:

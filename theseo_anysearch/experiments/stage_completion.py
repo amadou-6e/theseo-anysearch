@@ -19,6 +19,29 @@ _COMPARISONS: dict[str, Callable[[float, float], bool]] = {
 }
 
 
+
+def _resolve_performance_metric(
+    metric: str,
+    result: TrainResult,
+    metrics: dict[str, float],
+) -> float | None:
+    """Look up a performance-condition metric, falling back to TrainResult fields.
+
+    standard_metrics() (see #195) now only emits canonically-namespaced
+    metrics (``eval/task/...``, ``train/task/...``), so it no longer
+    unconditionally includes every legacy top-level TrainResult field (e.g.
+    ``evaluation_success_rate``). Existing experiment YAML configs may still
+    reference those field names directly, and the fields themselves are
+    still populated, so fall back to reading them straight off ``result``.
+    """
+    if metric in metrics:
+        return metrics[metric]
+    value = getattr(result, metric, None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _load_callable(reference: str) -> Callable[[dict[str, Any]], bool]:
     module_name, separator, attribute = reference.partition(":")
     if not separator or not module_name or not attribute:
@@ -86,13 +109,14 @@ class StageCompletionController:
         if config.type == "iterations":
             matched = local_iteration >= int(config.iterations or 0)
         elif config.type == "performance":
-            if config.metric not in metrics:
+            value = _resolve_performance_metric(config.metric, result, metrics)
+            if value is None:
                 available = ", ".join(sorted(metrics))
                 raise KeyError(
                     f"unknown completion metric '{config.metric}'; available: {available}"
                 )
             matched_now = _COMPARISONS[config.comparison](
-                metrics[config.metric], float(config.threshold)
+                value, float(config.threshold)
             )
             consecutive_key = f"{path}.consecutive"
             consecutive = int(self.state.get(consecutive_key, 0))
