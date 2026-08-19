@@ -1,0 +1,22 @@
+[package]
+name = "anysearch-shell"
+version = "0.1.0"
+edition = "2021"
+
+# Tauri backend for the React UI shell (feat/200 — replacing the egui frontend
+# except for the simulation/voxel viewport, which stays in egui and is
+# embedded via ../viewer-web's WebAssembly build instead of native windowing).
+#
+# This does NOT depend on `theseo-core` yet: that crate builds as a PyO3
+# extension module (crate-type cdylib, `extension-module` feature always on),
+# which is not linkable as a normal binary dependency. The data types/loading
+# logic below are a deliberate short-term duplication until a shared
+# `theseo-core-data` library crate is factored out for both to depend on.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -1,0 +1,30 @@
+[package]
+name = "viewer-web"
+version = "0.1.0"
+edition = "2021"
+
+# Wasm build of the voxel trajectory viewport. This is a trimmed port of the
+# camera/painter code in `theseo_anysearch/core/src/bin/voxel_replay.rs` — same
+# projection math and drawing order, targeting eframe's web (WebAssembly) backend
+# instead of native, so it can be mounted as a <canvas> inside the React shell
+# (see ../web/src/panels/ReplayPanel.tsx). Trajectory/geometry data is not read
+# from disk here (wasm has no filesystem) — it is pushed in from JS via
+# `load_trajectories_json`, sourced from the Tauri `list_runs`/`load_trajectory`
+# commands in ../src-tauri.
+#
+# TODO(feat/200): once this proves out, factor StepData/EpisodeData/TrajectoryData
+# and the camera/painter functions into a shared crate so this and voxel_replay.rs
+# stop duplicating them.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
+egui = "0.31"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "console"] }

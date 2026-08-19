@@ -1,0 +1,35 @@
+/* VS Code dark tokens — carried over from spec/ui-design/replayer-current.drawio
+   and the sidebar_mock.html canvas, so the shell matches the agreed design. */
+:root {
+  --bg: #0e0e0e;
+  --panel: #181818;
+  --panel-raised: #1f232b;
+  --border: #2b2b2b;
+  --border-soft: #232323;
+  --text: #e6e6e6;
+  --text-dim: #8a929c;
+  --text-faint: #5b6470;
+  --blue: #3b93ff;
+  --blue-soft: #1d3150;
+  --green: #3ecf83;
+  --red: #f2555a;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Cascadia Code", monospace;
+  --sans: -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
