@@ -49,6 +49,8 @@ Everything below was verified by actually launching the app (WebView2
 remote debugging + CDP) and driving it against real workspace/trajectory
 data under `usage/experiments/`, not just compiling it.
 
+**Shared shell** — a persistent left "Run history" sidebar (`RunHistorySidebar.tsx`) is shown on Runs/Replay/Explain alike, per `docs/ui/workspace.md`'s "the run history is the left pane and remains present ... so run context does not move when tabs change" and `spec/ui-design/replayer-current.drawio`'s "All Windows" tab (which shows the same run-history column across all three window mockups). The header shows the workspace name and, once a run is selected, "SELECTED RUN — …" next to the tab bar. Workspace scan state (`root`/`index`/selected run) lives in `App.tsx`, not inside any one tab panel. Verified live: selecting a run in Runs, then switching to Replay/Explain, kept the same sidebar with the run still highlighted.
+
 **Runs tab**
 - `scan_workspace`/`validate_configuration` shell out to the real
   `theseo_anysearch.ui.service` backend — verified against a live workspace:
@@ -94,11 +96,12 @@ data under `usage/experiments/`, not just compiling it.
 **Explain tab**
 - Full port of `NativeExplainUi`'s `ExplanationBridge` protocol (same
   `theseo_anysearch.rllib.explain.native_bridge` subprocess, same
-  line-delimited JSON-RPC) plus a React reimplementation of the 3-pane UI:
-  scalar-field editor, `local_grid` voxel-kind grid editor with slice/axis
-  controls, a canvas-based isometric geometry preview with drag-to-rotate,
-  and the policy-explanation result panel (action-score bars, margin,
-  grouped attribution).
+  line-delimited JSON-RPC) plus a React reimplementation of the UI: a large
+  main area (geometry preview stacked above the policy-explanation result)
+  with a narrower right sidebar for editing the observation (scalar fields,
+  `local_grid` voxel-kind grid with slice/axis controls, "Explain policy
+  decision") — matches the "All Windows" spec's Explain window layout, not
+  three equal columns.
 - Verified live for the connect → error path: attempting to connect against
   a real run surfaced a genuine backend error (a Pydantic schema mismatch
   in that run's own config) and the UI recovered cleanly (no stuck spinner,

@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  scanWorkspace,
-  pickWorkspaceFolder,
-  listTrajectoryFiles,
   readTextFile,
   writeTextFile,
   validateConfiguration,
@@ -12,19 +9,17 @@ import {
   onRunOutput,
   onRunExited,
   type WorkspaceIndex,
-  type WorkspaceRun,
   type WorkspaceFile,
   type FileKind,
   type Diagnostic,
   type TrajectoryFile,
 } from "../lib/tauri";
 
-// Runs tab: workspace-level, matches theseo_anysearch/ui/workspace.py's
-// WorkspaceIndex contract and workspace.rs's WorkspaceUi (both feat/197) --
-// run history reconstructed from run.json manifests (left pane), a
-// collapsible workspace file tree with config classification (middle pane),
-// and a YAML editor with Validate/Save/Start run/Stop plus streamed terminal
-// output (right pane), same operations as the native egui shell.
+// Runs tab: the workspace file tree (with config classification) and the
+// YAML editor with Validate/Save/Start run/Stop plus streamed terminal
+// output -- matches workspace.rs's WorkspaceUi (feat/197) right pane. Run
+// history is a separate, persistent sidebar (see App.tsx/RunHistorySidebar)
+// shared across Runs/Replay/Explain, per docs/ui/workspace.md.
 
 const KIND_MARKER: Record<FileKind, string> = {
   anysearch: "◆",
@@ -62,18 +57,28 @@ function buildTree(files: WorkspaceFile[]): TreeDir {
   return root;
 }
 
-export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (file: TrajectoryFile) => void }) {
-  const [root, setRoot] = useState("");
-  const [index, setIndex] = useState<WorkspaceIndex | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
+export default function RunsPanel({
+  root,
+  index,
+  scanning,
+  error,
+  onRescan,
+  onChangeWorkspace,
+  onOpenTrajectory,
+}: {
+  root: string;
+  index: WorkspaceIndex | null;
+  scanning: boolean;
+  error: string | null;
+  onRescan: (root: string) => void;
+  onChangeWorkspace: () => void;
+  onOpenTrajectory: (file: TrajectoryFile) => void;
+}) {
+  const [rootInput, setRootInput] = useState(root);
+  useEffect(() => setRootInput(root), [root]);
+
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
-  const [runTrajectories, setRunTrajectories] = useState<TrajectoryFile[]>([]);
-  const [manualTrajDir, setManualTrajDir] = useState("");
-  const [manualTrajError, setManualTrajError] = useState<string | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
   const [editorText, setEditorText] = useState("");
@@ -93,7 +98,7 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
     onRunExited((status) => {
       setRunActive(false);
       setTerminal((t) => [...t.slice(-1999), `[process exited: ${status}]`]);
-      if (root) rescan(root);
+      if (root) onRescan(root);
     }).then((fn) => (unlistenExited = fn));
     runIsActive().then(setRunActive);
     return () => {
@@ -102,61 +107,6 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function rescan(nextRoot: string) {
-    if (!nextRoot) return;
-    setScanning(true);
-    setError(null);
-    try {
-      setIndex(await scanWorkspace(nextRoot));
-    } catch (e) {
-      setError(String(e));
-      setIndex(null);
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function changeWorkspace() {
-    const folder = await pickWorkspaceFolder();
-    if (folder) {
-      setRoot(folder);
-      setSelectedRun(null);
-      setRunTrajectories([]);
-      setSelectedFile(null);
-      await rescan(folder);
-    }
-  }
-
-  async function selectRun(run: WorkspaceRun) {
-    setSelectedRun(run);
-    try {
-      setRunTrajectories(await listTrajectoryFiles(`${root}/${run.path}`));
-    } catch {
-      setRunTrajectories([]);
-    }
-  }
-
-  // Run artifacts (trajectories/) are deliberately excluded from the scanned
-  // workspace tree (theseo_anysearch/ui/workspace.py's `_workspace_files`:
-  // "loaded on demand from the selected run rather than held in the index"),
-  // and Tune-trial sweep dirs (ray_runtime.json-keyed, no run.json) never
-  // get a WorkspaceRun entry at all -- so they have no Run history row to
-  // click. This mirrors the native CLI's `--tune-dir`/file-mode entry point:
-  // open any directory's trajectories directly by path.
-  async function openTrajectoriesDir() {
-    if (!manualTrajDir) return;
-    setManualTrajError(null);
-    setSelectedRun(null);
-    try {
-      const files = await listTrajectoryFiles(manualTrajDir);
-      if (files.length === 0) setManualTrajError("No trajectory files found under that path.");
-      setRunTrajectories(files);
-    } catch (e) {
-      setManualTrajError(String(e));
-      setRunTrajectories([]);
-    }
-  }
 
   async function selectFile(f: WorkspaceFile) {
     setSelectedFile(f);
@@ -192,8 +142,6 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
     try {
       const result = await validateConfiguration(root, `${root}/${selectedFile.path}`);
       setDiagnostics(result.diagnostics);
-    } catch (e) {
-      setError(String(e));
     } finally {
       setValidating(false);
     }
@@ -205,9 +153,7 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
     try {
       await writeTextFile(`${root}/${selectedFile.path}`, editorText);
       setSavedText(editorText);
-      await rescan(root);
-    } catch (e) {
-      setError(String(e));
+      onRescan(root);
     } finally {
       setSaving(false);
     }
@@ -216,12 +162,8 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
   async function start() {
     if (!selectedFile) return;
     setTerminal([]);
-    try {
-      await startRun(root, `${root}/${selectedFile.path}`);
-      setRunActive(true);
-    } catch (e) {
-      setError(String(e));
-    }
+    await startRun(root, `${root}/${selectedFile.path}`);
+    setRunActive(true);
   }
 
   async function stop() {
@@ -247,99 +189,20 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ display: "flex", gap: 8, padding: 14, borderBottom: "1px solid var(--border-soft)", flexShrink: 0 }}>
-        <input value={root} onChange={(e) => setRoot(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
-        <button onClick={() => rescan(root)} disabled={!root || scanning} style={btnStyle("var(--blue)")}>
+        <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
+        <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("var(--blue)")}>
           {scanning ? "Scanning…" : "Rescan"}
         </button>
-        <button onClick={changeWorkspace} style={btnStyle("#232323")}>
+        <button onClick={onChangeWorkspace} style={btnStyle("#232323")}>
           Change workspace
         </button>
       </div>
 
       {error && <div style={{ color: "var(--red)", fontSize: 12, padding: "8px 14px", fontFamily: "var(--mono)" }}>{error}</div>}
 
-      {index && (
+      {index ? (
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* Left: run history, reconstructed from run.json manifests. */}
-          <div style={{ width: 300, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
-            <div style={groupLabel()}>Run history</div>
-            <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
-              {index.configuration_count} configurations · {index.runs.length} runs
-            </div>
-            {index.runs.length === 0 && (
-              <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
-                No run.json manifests found yet — runs appear here after `anysearch run`.
-              </div>
-            )}
-            {index.runs.map((run) => (
-              <div
-                key={run.path}
-                onClick={() => selectRun(run)}
-                style={{
-                  padding: "10px 12px",
-                  marginBottom: 6,
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  background: selectedRun?.path === run.path ? "var(--blue-soft, #1d3150)" : "var(--panel)",
-                  border: `1px solid ${selectedRun?.path === run.path ? "var(--blue)" : "var(--border-soft)"}`,
-                  fontSize: 11.5,
-                }}
-              >
-                <div style={{ fontWeight: 600, color: "var(--text)" }}>{run.run_id}</div>
-                <div style={{ color: "var(--text-dim)", marginTop: 2 }}>
-                  {run.status} · {run.algorithm ?? "unknown algorithm"}
-                </div>
-                <div style={{ color: "var(--text-faint)", fontFamily: "var(--mono)", marginTop: 2 }}>{run.path}</div>
-              </div>
-            ))}
-
-            <div style={{ ...groupLabel(), marginTop: 18 }}>Open trajectories folder</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-faint)", marginBottom: 6 }}>
-              For runs/Tune trials with no run.json manifest (not shown above) -- paste a run or trial directory.
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                value={manualTrajDir}
-                onChange={(e) => setManualTrajDir(e.target.value)}
-                placeholder="Run or trial directory"
-                style={{ ...inputStyle(), fontSize: 11 }}
-              />
-              <button onClick={openTrajectoriesDir} disabled={!manualTrajDir} style={btnStyle("#232323", true)}>
-                Open
-              </button>
-            </div>
-            {manualTrajError && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 6 }}>{manualTrajError}</div>}
-
-            {(selectedRun || runTrajectories.length > 0) && (
-              <>
-                <div style={{ ...groupLabel(), marginTop: 18 }}>Trajectories</div>
-                {runTrajectories.length === 0 && <div style={{ fontSize: 12, color: "var(--text-faint)" }}>None found.</div>}
-                {runTrajectories.map((f) => (
-                  <div
-                    key={f.path}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "6px 10px",
-                      marginBottom: 4,
-                      borderRadius: 4,
-                      background: "var(--panel)",
-                      border: "1px solid var(--border-soft)",
-                      fontSize: 11.5,
-                    }}
-                  >
-                    <span style={{ fontFamily: "var(--mono)" }}>{f.name}</span>
-                    <button onClick={() => onOpenTrajectory(f)} style={btnStyle("#232323", true)}>
-                      Open
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-
-          {/* Middle: collapsible workspace file tree, with config classification markers. */}
+          {/* Workspace file tree, collapsible, with config classification markers. */}
           <div style={{ width: 300, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
             <div style={groupLabel()}>Workspace files</div>
             <input
@@ -362,7 +225,7 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
             />
           </div>
 
-          {/* Right: editor (for recognized/invalid configs) or read-only preview, plus terminal. */}
+          {/* Editor (for recognized/invalid configs) or read-only preview, plus terminal. */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ flex: "1 1 55%", minHeight: 0, display: "flex", flexDirection: "column", padding: 14, borderBottom: "1px solid var(--border-soft)" }}>
               {selectedFile ? (
@@ -476,6 +339,10 @@ export default function RunsPanel({ onOpenTrajectory }: { onOpenTrajectory: (fil
               </div>
             </div>
           </div>
+        </div>
+      ) : (
+        <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 12.5 }}>
+          Enter a workspace root and click Rescan, or Change workspace to pick one.
         </div>
       )}
     </div>

@@ -150,9 +150,35 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
           <span style={{ fontFamily: "var(--mono)" }}>{file.name}</span>.
         </div>
       ) : (
+        // Layout matches spec/ui-design/replayer-current.drawio's "All Windows"
+        // Explain window: a large left/main area with the geometry preview
+        // stacked above the policy-explanation result, and a narrower right
+        // sidebar for editing the observation (source, local_grid, actions) --
+        // not three equal columns.
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <div style={{ width: 320, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
-            <div style={groupLabel()}>Edit observation</div>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, borderRight: "1px solid var(--border-soft)", overflowY: "auto" }}>
+            <div style={groupLabel()}>Observation geometry</div>
+            <GeometryPreview
+              observation={observation}
+              fields={fields}
+              axis={axis}
+              sliceIndex={sliceIndex}
+              yaw={cameraYaw}
+              pitch={cameraPitch}
+              onDrag={(dx, dy) => {
+                setCameraYaw((y) => y + dx * 0.008);
+                setCameraPitch((p) => Math.max(-1.35, Math.min(1.35, p - dy * 0.008)));
+              }}
+            />
+
+            <div style={{ ...groupLabel(), marginTop: 18, flexShrink: 0 }}>Policy explanation</div>
+            <div style={{ flexShrink: 0 }}>
+              <ResultPanel result={result} />
+            </div>
+          </div>
+
+          <div style={{ width: 340, overflowY: "auto", padding: 14, flexShrink: 0 }}>
+            <div style={groupLabel()}>Explain policy</div>
             <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 8 }}>
               Values are normalized only when sent to the policy.
             </div>
@@ -179,27 +205,6 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
             >
               Explain policy decision
             </button>
-          </div>
-
-          <div style={{ flex: 1, borderRight: "1px solid var(--border-soft)", padding: 14, display: "flex", flexDirection: "column" }}>
-            <div style={groupLabel()}>Observation geometry</div>
-            <GeometryPreview
-              observation={observation}
-              fields={fields}
-              axis={axis}
-              sliceIndex={sliceIndex}
-              yaw={cameraYaw}
-              pitch={cameraPitch}
-              onDrag={(dx, dy) => {
-                setCameraYaw((y) => y + dx * 0.008);
-                setCameraPitch((p) => Math.max(-1.35, Math.min(1.35, p - dy * 0.008)));
-              }}
-            />
-          </div>
-
-          <div style={{ width: 300, overflowY: "auto", padding: 14, flexShrink: 0 }}>
-            <div style={groupLabel()}>Policy explanation</div>
-            <ResultPanel result={result} />
           </div>
         </div>
       )}

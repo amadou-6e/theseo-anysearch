@@ -1,8 +1,16 @@
 import { useState } from "react";
+import RunHistorySidebar from "./panels/RunHistorySidebar";
 import RunsPanel from "./panels/RunsPanel";
 import ReplayPanel from "./panels/ReplayPanel";
 import ExplainPanel from "./panels/ExplainPanel";
-import type { TrajectoryFile } from "./lib/tauri";
+import {
+  scanWorkspace,
+  pickWorkspaceFolder,
+  listTrajectoryFiles,
+  type WorkspaceIndex,
+  type WorkspaceRun,
+  type TrajectoryFile,
+} from "./lib/tauri";
 
 type Tab = "runs" | "replay" | "explain";
 
@@ -22,6 +30,75 @@ export default function App() {
   const [selected, setSelected] = useState<TrajectoryFile | null>(null);
   const [explainSeed, setExplainSeed] = useState<ExplainSeed | null>(null);
 
+  // Workspace state lives here, not inside RunsPanel, because the run
+  // history it drives is a *persistent* sidebar shown on every tab (see
+  // RunHistorySidebar / docs/ui/workspace.md), not scoped to one tab.
+  const [root, setRoot] = useState("");
+  const [index, setIndex] = useState<WorkspaceIndex | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
+  const [runTrajectories, setRunTrajectories] = useState<TrajectoryFile[]>([]);
+  const [manualTrajDir, setManualTrajDir] = useState("");
+  const [manualTrajError, setManualTrajError] = useState<string | null>(null);
+
+  async function rescan(nextRoot: string) {
+    if (!nextRoot) return;
+    setScanning(true);
+    setScanError(null);
+    try {
+      setRoot(nextRoot);
+      setIndex(await scanWorkspace(nextRoot));
+    } catch (e) {
+      setScanError(String(e));
+      setIndex(null);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function changeWorkspace() {
+    const folder = await pickWorkspaceFolder();
+    if (folder) {
+      setSelectedRun(null);
+      setRunTrajectories([]);
+      await rescan(folder);
+    }
+  }
+
+  async function selectRun(run: WorkspaceRun) {
+    setSelectedRun(run);
+    try {
+      setRunTrajectories(await listTrajectoryFiles(`${root}/${run.path}`));
+    } catch {
+      setRunTrajectories([]);
+    }
+  }
+
+  // Run artifacts (trajectories/) are deliberately excluded from the
+  // scanned workspace tree, and Tune-trial sweep dirs (ray_runtime.json
+  // keyed, no run.json) never get a WorkspaceRun row -- mirrors the native
+  // CLI's --tune-dir/file-mode entry points. See RunHistorySidebar.
+  async function openTrajectoriesDir() {
+    if (!manualTrajDir) return;
+    setManualTrajError(null);
+    setSelectedRun(null);
+    try {
+      const files = await listTrajectoryFiles(manualTrajDir);
+      if (files.length === 0) setManualTrajError("No trajectory files found under that path.");
+      setRunTrajectories(files);
+    } catch (e) {
+      setManualTrajError(String(e));
+      setRunTrajectories([]);
+    }
+  }
+
+  function openTrajectory(file: TrajectoryFile) {
+    setSelected(file);
+    setExplainSeed(null);
+    setTab("replay");
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <header
@@ -36,7 +113,26 @@ export default function App() {
         }}
       >
         <div style={{ fontSize: 20, fontWeight: 600 }}>AnySearch</div>
-        <nav style={{ display: "flex", gap: 4, marginLeft: 24 }}>
+        <div
+          style={{
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 5,
+            padding: "8px 14px",
+            fontSize: 12,
+            color: "var(--text-dim)",
+          }}
+        >
+          Workspace: {index ? (root.split(/[/\\]/).pop() ?? root) : "none"}
+        </div>
+
+        {selectedRun && (
+          <div style={{ fontSize: 11, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Selected run — {selectedRun.run_id} [{selectedRun.status}]
+          </div>
+        )}
+
+        <nav style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -60,27 +156,43 @@ export default function App() {
         </nav>
       </header>
 
-      <main style={{ flex: 1, minHeight: 0 }}>
-        {tab === "runs" && (
-          <RunsPanel
-            onOpenTrajectory={(file) => {
-              setSelected(file);
-              setExplainSeed(null);
-              setTab("replay");
-            }}
-          />
-        )}
-        {tab === "replay" && selected && (
-          <ReplayPanel
-            file={selected}
-            onExplainStep={(trajectorySourcePath, step) => {
-              setExplainSeed({ trajectorySourcePath, step });
-              setTab("explain");
-            }}
-          />
-        )}
-        {tab === "explain" && selected && <ExplainPanel file={selected} seed={explainSeed} />}
-      </main>
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <RunHistorySidebar
+          index={index}
+          selectedRun={selectedRun}
+          runTrajectories={runTrajectories}
+          manualTrajDir={manualTrajDir}
+          onManualTrajDirChange={setManualTrajDir}
+          manualTrajError={manualTrajError}
+          onSelectRun={selectRun}
+          onOpenTrajectoriesDir={openTrajectoriesDir}
+          onOpenTrajectory={openTrajectory}
+        />
+
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {tab === "runs" && (
+            <RunsPanel
+              root={root}
+              index={index}
+              scanning={scanning}
+              error={scanError}
+              onRescan={rescan}
+              onChangeWorkspace={changeWorkspace}
+              onOpenTrajectory={openTrajectory}
+            />
+          )}
+          {tab === "replay" && selected && (
+            <ReplayPanel
+              file={selected}
+              onExplainStep={(trajectorySourcePath, step) => {
+                setExplainSeed({ trajectorySourcePath, step });
+                setTab("explain");
+              }}
+            />
+          )}
+          {tab === "explain" && selected && <ExplainPanel file={selected} seed={explainSeed} />}
+        </main>
+      </div>
     </div>
   );
 }
