@@ -16,17 +16,17 @@ const CANVAS_ID = "voxel-viewport";
 export default function ReplayPanel({ file }: { file: TrajectoryFile }) {
   const [traj, setTraj] = useState<TrajectoryData | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
+  const [viewerReady, setViewerReady] = useState(false);
   const [viewerError, setViewerError] = useState<string | null>(null);
   const viewerRef = useRef<ViewerModule | null>(null);
 
-  // Load the trajectory from disk via Tauri, then hand it to the wasm viewer.
+  // Load the trajectory from disk via Tauri.
   useEffect(() => {
     let cancelled = false;
     loadTrajectory(file.path).then((data) => {
       if (cancelled) return;
       setTraj(data);
       setStepIdx(0);
-      viewerRef.current?.load_trajectories_json(JSON.stringify([data]));
     });
     return () => {
       cancelled = true;
@@ -46,14 +46,21 @@ export default function ReplayPanel({ file }: { file: TrajectoryFile }) {
         const viewer = mod as ViewerModule;
         viewer.start(CANVAS_ID);
         viewerRef.current = viewer;
-        if (traj) viewer.load_trajectories_json(JSON.stringify([traj]));
+        setViewerReady(true);
       })
       .catch((e) => setViewerError(String(e?.message ?? e)));
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Hand data to the viewer whenever both the trajectory and the viewer are
+  // ready (mount order between the two async loads above isn't guaranteed).
+  useEffect(() => {
+    if (viewerReady && traj) {
+      viewerRef.current?.load_trajectories_json(JSON.stringify([traj]));
+    }
+  }, [viewerReady, traj]);
 
   useEffect(() => {
     viewerRef.current?.set_position(0, stepIdx);
