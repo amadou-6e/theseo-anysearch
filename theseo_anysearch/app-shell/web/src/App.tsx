@@ -12,9 +12,15 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "explain", label: "Explain" },
 ];
 
+interface ExplainSeed {
+  trajectorySourcePath: string;
+  step: number;
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("runs");
   const [selected, setSelected] = useState<TrajectoryFile | null>(null);
+  const [explainSeed, setExplainSeed] = useState<ExplainSeed | null>(null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -59,12 +65,21 @@ export default function App() {
           <RunsPanel
             onOpenTrajectory={(file) => {
               setSelected(file);
+              setExplainSeed(null);
               setTab("replay");
             }}
           />
         )}
-        {tab === "replay" && selected && <ReplayPanel file={selected} />}
-        {tab === "explain" && selected && <ExplainPanel file={selected} />}
+        {tab === "replay" && selected && (
+          <ReplayPanel
+            file={selected}
+            onExplainStep={(trajectorySourcePath, step) => {
+              setExplainSeed({ trajectorySourcePath, step });
+              setTab("explain");
+            }}
+          />
+        )}
+        {tab === "explain" && selected && <ExplainPanel file={selected} seed={explainSeed} />}
       </main>
     </div>
   );

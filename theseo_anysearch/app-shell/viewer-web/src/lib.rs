@@ -182,14 +182,21 @@ fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16, rect: Rect, c
 // eframe App on every repaint.
 // ---------------------------------------------------------------------------
 
-#[derive(Default)]
 struct ViewerState {
     trajectories: Vec<TrajectoryData>,
     iter_idx: usize,
     step_idx: usize,
-    // Not wired up yet — occlusion toggle in the React sidebar isn't built (see README).
-    #[allow(dead_code)]
+    /// Whether geometry is drawn depth-sorted together with the cursor
+    /// marker (so geometry can occlude it) rather than the cursor always
+    /// drawn last/on top. Matches `voxel_replay.rs`'s `occlude_agent`,
+    /// default `true`.
     occlude_agent: bool,
+}
+
+impl Default for ViewerState {
+    fn default() -> Self {
+        Self { trajectories: Vec::new(), iter_idx: 0, step_idx: 0, occlude_agent: true }
+    }
 }
 
 struct ViewerApp {
@@ -228,12 +235,33 @@ impl eframe::App for ViewerApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, &self.camera))
                     .unwrap()
             });
-            for (x, y, z) in voxels {
-                draw_voxel(&painter, x, y, z, rect, &self.camera, &bounds, Color32::from_rgb(90, 140, 220));
-            }
 
-            if let Some(step) = traj.episode.steps.get(state.step_idx) {
-                draw_cursor(&painter, step.cursor_x, step.cursor_y, step.cursor_z, rect, &self.camera, &bounds);
+            let cursor = traj.episode.steps.get(state.step_idx).map(|s| (s.cursor_x, s.cursor_y, s.cursor_z));
+
+            if state.occlude_agent {
+                // Depth-sort the cursor marker together with geometry, so
+                // voxels between the camera and the cursor draw over it.
+                let cursor_depth = cursor.map(|(x, y, z)| depth_key(x, y, z, &self.camera));
+                let mut cut = voxels.len();
+                if let Some(d) = cursor_depth {
+                    cut = voxels.partition_point(|&(x, y, z)| depth_key(x, y, z, &self.camera) < d);
+                }
+                for (x, y, z) in &voxels[..cut] {
+                    draw_voxel(&painter, *x, *y, *z, rect, &self.camera, &bounds, Color32::from_rgb(90, 140, 220));
+                }
+                if let Some((x, y, z)) = cursor {
+                    draw_cursor(&painter, x, y, z, rect, &self.camera, &bounds);
+                }
+                for (x, y, z) in &voxels[cut..] {
+                    draw_voxel(&painter, *x, *y, *z, rect, &self.camera, &bounds, Color32::from_rgb(90, 140, 220));
+                }
+            } else {
+                for (x, y, z) in voxels {
+                    draw_voxel(&painter, x, y, z, rect, &self.camera, &bounds, Color32::from_rgb(90, 140, 220));
+                }
+                if let Some((x, y, z)) = cursor {
+                    draw_cursor(&painter, x, y, z, rect, &self.camera, &bounds);
+                }
             }
         });
 
@@ -300,5 +328,14 @@ pub fn set_position(iter_idx: usize, step_idx: usize) {
         let mut state = s.borrow_mut();
         state.iter_idx = iter_idx;
         state.step_idx = step_idx;
+    });
+}
+
+/// Toggle whether geometry occludes the cursor marker (driven by the
+/// React sidebar's occlusion toggle).
+#[wasm_bindgen]
+pub fn set_occlude_agent(occlude: bool) {
+    SHARED_STATE.with(|s| {
+        s.borrow_mut().occlude_agent = occlude;
     });
 }

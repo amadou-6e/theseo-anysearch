@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
 // ---------------------------------------------------------------------------
@@ -56,10 +57,39 @@ export function readTextFile(path: string): Promise<string> {
   return invoke("read_text_file", { path });
 }
 
+export function writeTextFile(path: string, contents: string): Promise<void> {
+  return invoke("write_text_file", { path, contents });
+}
+
 /** Native directory picker (Tauri dialog plugin). Returns null if cancelled. */
 export async function pickWorkspaceFolder(): Promise<string | null> {
   const result = await open({ directory: true, multiple: false });
   return typeof result === "string" ? result : null;
+}
+
+// ---------------------------------------------------------------------------
+// Run lifecycle — `anysearch run <config>`, streamed to `run-output` /
+// `run-exited` events (see src-tauri/src/workspace.rs).
+// ---------------------------------------------------------------------------
+
+export function startRun(root: string, configPath: string): Promise<void> {
+  return invoke("start_run", { root, configPath });
+}
+
+export function stopRun(): Promise<void> {
+  return invoke("stop_run");
+}
+
+export function runIsActive(): Promise<boolean> {
+  return invoke("run_is_active");
+}
+
+export function onRunOutput(handler: (line: string) => void): Promise<UnlistenFn> {
+  return listen<string>("run-output", (event) => handler(event.payload));
+}
+
+export function onRunExited(handler: (status: string) => void): Promise<UnlistenFn> {
+  return listen<string>("run-exited", (event) => handler(event.payload));
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +123,7 @@ export interface TrajectoryData {
   iteration: number;
   grid_size: number;
   episode: EpisodeData;
+  source_path: string;
 }
 
 /** List `.json` trajectory files under a run/workspace root (shallow, 2 levels). */
@@ -100,7 +131,64 @@ export function listTrajectoryFiles(root: string): Promise<TrajectoryFile[]> {
   return invoke("list_trajectory_files", { root });
 }
 
-/** Load one trajectory file's full JSON contents. */
+/** Load one trajectory file's full JSON contents (geometry sidecar resolved). */
 export function loadTrajectory(path: string): Promise<TrajectoryData> {
   return invoke("load_trajectory", { path });
+}
+
+/** Load every iter_*.json (or best.json) in a run's trajectories/ dir, sorted by iteration. */
+export function loadIterationHistory(trajectoriesDir: string): Promise<TrajectoryData[]> {
+  return invoke("load_iteration_history", { trajectoriesDir });
+}
+
+// ---------------------------------------------------------------------------
+// Tune-mode trial scanning (Tune trial navigation)
+// ---------------------------------------------------------------------------
+
+export interface TrialInfo {
+  trial_id: string;
+  trial_name: string;
+  best_reward: number;
+  params: Record<string, unknown>;
+  trajectory_dir: string;
+  sort_key: number;
+}
+
+export function scanTuneTrials(dir: string): Promise<TrialInfo[]> {
+  return invoke("scan_tune_trials", { dir });
+}
+
+// ---------------------------------------------------------------------------
+// Explain tab — checkpoint-backed policy explanation bridge.
+// ---------------------------------------------------------------------------
+
+export interface FieldSchema {
+  low: number[];
+  high: number[];
+  input_encoding?: { type: string; scale?: number; valid_values?: number[] };
+}
+
+export interface ExplainReady {
+  observation: Record<string, unknown>;
+  fields: Record<string, FieldSchema>;
+}
+
+export function explainStart(run: string, checkpoint: string): Promise<ExplainReady> {
+  return invoke("explain_start", { run, checkpoint });
+}
+
+export function explainAvailable(): Promise<boolean> {
+  return invoke("explain_available");
+}
+
+export function explainTrajectoryStep(trajectory: string, step: number): Promise<{ report: unknown }> {
+  return invoke("explain_trajectory_step", { trajectory, step });
+}
+
+export function explainObservation(observation: Record<string, unknown>): Promise<{ report: unknown }> {
+  return invoke("explain_observation", { observation });
+}
+
+export function explainImportObservation(path: string): Promise<{ observation: Record<string, unknown>; format: string }> {
+  return invoke("explain_import_observation", { path });
 }
