@@ -8,6 +8,10 @@ import {
   scanWorkspace,
   pickWorkspaceFolder,
   listTrajectoryFiles,
+  startRun,
+  stopRun,
+  runIsActive,
+  onRunExited,
   type WorkspaceIndex,
   type WorkspaceRun,
   type TrajectoryFile,
@@ -48,6 +52,36 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
   const [manualTrajDir, setManualTrajDir] = useState("");
   const [manualTrajError, setManualTrajError] = useState<string | null>(null);
+
+  // Run-lifecycle state lives here too (not just inside RunsPanel) so the
+  // sidebar's "[running] <name>" progress banner -- shown per the spec on
+  // every tab -- can reflect it. RunsPanel keeps its own terminal-output
+  // buffer locally; this is only the "is something running, and what" bit.
+  const [runActive, setRunActive] = useState(false);
+  const [activeRunLabel, setActiveRunLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    runIsActive().then(setRunActive);
+    const unlisten = onRunExited(() => {
+      setRunActive(false);
+      setActiveRunLabel(null);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  async function startRunFor(configPath: string) {
+    await startRun(root, configPath);
+    setRunActive(true);
+    setActiveRunLabel(configPath.split(/[/\\]/).pop() ?? configPath);
+  }
+
+  async function stopActiveRun() {
+    await stopRun();
+    setRunActive(false);
+    setActiveRunLabel(null);
+  }
 
   // ReplayPanel loads the *entire* iteration history for a trajectory's
   // directory regardless of which file within it you hand it (see
@@ -201,6 +235,7 @@ export default function App() {
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <RunHistorySidebar
+          root={root}
           index={index}
           selectedRun={selectedRun}
           hasReplayData={!!selected}
@@ -209,6 +244,9 @@ export default function App() {
           manualTrajError={manualTrajError}
           onSelectRun={selectRun}
           onOpenTrajectoriesDir={openTrajectoriesDir}
+          runActive={runActive}
+          activeRunLabel={activeRunLabel}
+          onStartRun={startRunFor}
         />
 
         <main style={{ flex: 1, minWidth: 0 }}>
@@ -221,6 +259,9 @@ export default function App() {
               onRescan={rescan}
               onChangeWorkspace={changeWorkspace}
               onOpenTrajectory={openTrajectory}
+              runActive={runActive}
+              onStartRun={startRunFor}
+              onStopRun={stopActiveRun}
             />
           )}
           {tab === "replay" && selected && (

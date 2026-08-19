@@ -3,9 +3,6 @@ import {
   readTextFile,
   writeTextFile,
   validateConfiguration,
-  startRun,
-  stopRun,
-  runIsActive,
   onRunOutput,
   onRunExited,
   type WorkspaceIndex,
@@ -77,6 +74,9 @@ export default function RunsPanel({
   onRescan,
   onChangeWorkspace,
   onOpenTrajectory,
+  runActive,
+  onStartRun,
+  onStopRun,
 }: {
   root: string;
   index: WorkspaceIndex | null;
@@ -85,6 +85,9 @@ export default function RunsPanel({
   onRescan: (root: string) => void;
   onChangeWorkspace: () => void;
   onOpenTrajectory: (file: TrajectoryFile) => void;
+  runActive: boolean;
+  onStartRun: (configPath: string) => Promise<void>;
+  onStopRun: () => Promise<void>;
 }) {
   const [rootInput, setRootInput] = useState(root);
   useEffect(() => setRootInput(root), [root]);
@@ -100,7 +103,6 @@ export default function RunsPanel({
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [runActive, setRunActive] = useState(false);
   const [terminal, setTerminal] = useState<string[]>([]);
 
   useEffect(() => {
@@ -108,11 +110,9 @@ export default function RunsPanel({
     let unlistenExited: (() => void) | undefined;
     onRunOutput((line) => setTerminal((t) => [...t.slice(-1999), line])).then((fn) => (unlistenOutput = fn));
     onRunExited((status) => {
-      setRunActive(false);
       setTerminal((t) => [...t.slice(-1999), `[process exited: ${status}]`]);
       if (root) onRescan(root);
     }).then((fn) => (unlistenExited = fn));
-    runIsActive().then(setRunActive);
     return () => {
       unlistenOutput?.();
       unlistenExited?.();
@@ -174,13 +174,7 @@ export default function RunsPanel({
   async function start() {
     if (!selectedFile) return;
     setTerminal([]);
-    await startRun(root, `${root}/${selectedFile.path}`);
-    setRunActive(true);
-  }
-
-  async function stop() {
-    await stopRun();
-    setRunActive(false);
+    await onStartRun(`${root}/${selectedFile.path}`);
   }
 
   function toggleDir(path: string) {
@@ -311,7 +305,7 @@ export default function RunsPanel({
                           <button onClick={start} disabled={runActive} style={btnStyle("var(--blue)", true)}>
                             Start run
                           </button>
-                          <button onClick={stop} disabled={!runActive} style={btnStyle("#3b272b", true)}>
+                          <button onClick={onStopRun} disabled={!runActive} style={btnStyle("#3b272b", true)}>
                             Stop
                           </button>
                         </>

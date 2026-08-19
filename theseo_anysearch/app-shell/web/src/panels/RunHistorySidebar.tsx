@@ -27,6 +27,7 @@ function statusColor(status: string): string {
 // the whole interaction. Iteration/step navigation happens with the
 // Iterations/Steps sliders inside Replay itself.
 export default function RunHistorySidebar({
+  root,
   index,
   selectedRun,
   hasReplayData,
@@ -35,7 +36,11 @@ export default function RunHistorySidebar({
   manualTrajError,
   onSelectRun,
   onOpenTrajectoriesDir,
+  runActive,
+  activeRunLabel,
+  onStartRun,
 }: {
+  root: string;
   index: WorkspaceIndex | null;
   selectedRun: WorkspaceRun | null;
   hasReplayData: boolean;
@@ -44,13 +49,75 @@ export default function RunHistorySidebar({
   manualTrajError: string | null;
   onSelectRun: (run: WorkspaceRun) => void;
   onOpenTrajectoriesDir: () => void;
+  runActive: boolean;
+  activeRunLabel: string | null;
+  onStartRun: (configPath: string) => Promise<void>;
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [newRunExpanded, setNewRunExpanded] = useState(false);
+  const [newRunConfig, setNewRunConfig] = useState("");
+  const [newRunError, setNewRunError] = useState<string | null>(null);
   const statuses = index ? [...new Set(index.runs.map((r) => r.status))].sort() : [];
   const visibleRuns = index ? index.runs.filter((r) => statusFilter === "all" || r.status === statusFilter) : [];
+  const startableConfigs = index ? index.files.filter((f) => f.kind === "anysearch") : [];
+
+  async function handleStartNewRun() {
+    if (!newRunConfig) return;
+    setNewRunError(null);
+    try {
+      await onStartRun(`${root}/${newRunConfig}`);
+      setNewRunExpanded(false);
+    } catch (e) {
+      setNewRunError(String(e));
+    }
+  }
 
   return (
     <div style={{ width: 220, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
+      {index && index.runs.length > 0 && !!startableConfigs.length && (
+        <div style={{ marginBottom: 14 }}>
+          <button onClick={() => setNewRunExpanded((v) => !v)} style={{ ...btnStyle("#232323", true), width: "100%" }}>
+            Start a new run {newRunExpanded ? "▴" : "[expand]"}
+          </button>
+          {newRunExpanded && (
+            <div style={{ marginTop: 8 }}>
+              <select
+                value={newRunConfig}
+                onChange={(e) => setNewRunConfig(e.target.value)}
+                style={{ width: "100%", background: "#1f1f1f", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-dim)", fontSize: 11, padding: "5px 4px", marginBottom: 6 }}
+              >
+                <option value="">Pick a config…</option>
+                {startableConfigs.map((f) => (
+                  <option key={f.path} value={f.path}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+              <button onClick={handleStartNewRun} disabled={!newRunConfig || runActive} style={{ ...btnStyle("var(--blue)", true), width: "100%" }}>
+                Start run
+              </button>
+              {newRunError && <div style={{ color: "var(--red)", fontSize: 10.5, marginTop: 4 }}>{newRunError}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {runActive && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "8px 10px",
+            borderRadius: 5,
+            background: "#173e2b",
+            border: "1px solid #2d8b5b",
+            color: "#b9e7cd",
+            fontSize: 11,
+          }}
+        >
+          [running] {activeRunLabel ?? "…"}
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
         <div style={{ ...groupLabel(), marginBottom: 0 }}>Run history</div>
         {index && index.runs.length > 0 && (

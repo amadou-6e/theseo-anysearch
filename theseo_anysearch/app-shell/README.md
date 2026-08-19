@@ -186,12 +186,28 @@ Fixed since (this round):
   alongside it, matching the spec (which shows both surfaces editing the
   same "Active slice values").
 
+Also fixed (this round): **"Start a new run [expand]"** quick-create panel
+in the sidebar — expands to a real dropdown of every `anysearch`-classified
+config in the workspace and a "Start run" button wired to the same
+`startRun` command the Overview tab's editor uses, plus a green
+`[running] <config-name>` banner while a run is active (state lifted from
+`RunsPanel` to `App.tsx` so the banner can show on every tab, matching the
+spec). **Not live-verified past expanding the panel** — clicking "Start
+run" for real would launch an actual `anysearch run` training process
+against the user's workspace, which this session deliberately avoided
+doing the whole way through (same reason Start run/Save were never fired
+live in earlier passes).
+
 Still not fixed — genuine missing features/engineering, not alignment nits:
 - YAML syntax highlighting and the hover autocomplete tooltip (spec shows
   a real code editor experience; this is a plain `<textarea>`). The
   original `CLAUDE.md` doc names Monaco for this — not attempted here.
-- "Start a new run [expand]" quick-create panel and the live
-  `[running] ... 37%` progress banner.
+- The progress banner shows `[running] <config-name>` only, not the
+  spec's `iteration 37 / 100 - 37%` — that needs progress data (current/
+  total iteration) this app doesn't have a source for yet: `run.json`
+  manifests don't record it in a standard field, and the only live number
+  available is parsed terminal output for the run *this app itself*
+  started, not arbitrary discovered runs.
 - Per-run-card **Stop / Resume / Run again / Details** actions. Checked
   whether these could be wired honestly: `stop_run` kills a `Child` handle
   *this process* spawned via Start run — it has no way to stop an arbitrary
