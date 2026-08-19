@@ -564,6 +564,7 @@ def _real_trainable(
 
     trainer = PPOTrainer(settings)
     from theseo_anysearch.experiments.tune_runner import (
+        _add_legacy_metric_fields,
         _append_tune_history,
         _ray_checkpoint,
         _restore_reported_checkpoint,
@@ -594,6 +595,7 @@ def _real_trainable(
             "trial_id": trial_id,
             "evaluation_status": result.evaluation_status,
         }
+        _add_legacy_metric_fields(payload, result)
         sanitized = _selected_metric(
             payload,
             metric,

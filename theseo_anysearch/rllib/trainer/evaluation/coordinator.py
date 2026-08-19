@@ -303,12 +303,14 @@ class EvaluationCoordinator:
             **metrics.as_scalar_dict(),
             **success_metrics.tensorboard_metrics(),
             **{
-                f"eval/custom/{key.removeprefix('evaluation_')}": value
+                (
+                    "eval/task/waypoint/" + key.removeprefix("evaluation_")
+                    if "waypoint" in key
+                    else "eval/custom/" + key.removeprefix("evaluation_")
+                ): value
                 for key, value in evaluation_custom.items()
             },
-
-            "eval/reward_mean": evaluation_reward_mean,
-            "eval/episode_len_mean": evaluation_len_mean,
+            "eval/task/episode_len_mean": evaluation_len_mean,
         }
         tb_writer.log_scalars(iteration, scalar_metrics)
         _store.write_json(

@@ -6,6 +6,9 @@ or other runtime settings, see [staged training](staging.md).
 See [performance metrics](performance.md) for the per-iteration RLlib and
 AnySearch timing breakdown available in TensorBoard.
 
+See [canonical metrics](metrics.md) for task, waypoint, curriculum, and
+algorithm-specific optimization metric names.
+
 The top-level `training` block controls execution of one resolved experiment. Algorithm hyperparameters remain in `algorithm_config`, and neural-network settings remain in `model_config`.
 
 ```yaml

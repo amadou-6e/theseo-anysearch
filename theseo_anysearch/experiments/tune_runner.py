@@ -14,6 +14,35 @@ from theseo_anysearch.experiments.models import ExperimentConfig
 _tune: Any | None = None
 Trainer: Any | None = None
 
+# Pre-rationalization TrainResult field names (see #195) that existing
+# experiment YAML configs may still reference as tune_config.metric or
+# target_success_rate stop criteria. standard_metrics() no longer includes
+# these flat names unconditionally in its returned dict, but the underlying
+# TrainResult fields are still populated, so they are read directly and
+# added back into the per-iteration Tune payload -- Ray Tune's own stop=
+# matching and ASHA scheduling need the literal reported key present.
+_LEGACY_METRIC_FIELDS: tuple[str, ...] = (
+    "evaluation_success_rate",
+    "episode_reward_mean",
+    "episode_len_mean",
+    "episodes_total",
+    "environment_steps_total",
+)
+
+
+def _add_legacy_metric_fields(
+    payload: dict[str, Any],
+    result: Any,
+) -> None:
+    """Add still-populated legacy TrainResult fields to a reported payload."""
+    for name in _LEGACY_METRIC_FIELDS:
+        if name in payload:
+            continue
+        value = getattr(result, name, None)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        payload[name] = float(value)
+
 
 def _tune_stop_criteria(
     tune_config: Any,
@@ -510,6 +539,7 @@ def _experiment_trainable(
             "trial_id": output_trial_id,
             "evaluation_status": result.evaluation_status,
         }
+        _add_legacy_metric_fields(payload, result)
         imitation_result = getattr(trainer, "_imitation_result", None)
         if imitation_result is not None:
             payload.update(

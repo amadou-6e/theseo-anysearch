@@ -77,6 +77,12 @@ class CurriculumController:
                 num_envs_per_env_runner=self.evaluation.num_envs_per_env_runner,
             )
             metrics = EpisodeRunMetrics.from_voxel_episodes(episodes)
+            completion_values = [
+                float((episode.final_info or {}).get(
+                    "route_waypoint_completion_fraction", 0.0
+                ))
+                for episode in episodes
+            ]
             total_finishes += metrics.finish_count
             total_episodes += len(episodes)
             stage_results.append(
@@ -87,6 +93,10 @@ class CurriculumController:
                     "episodes": len(episodes),
                     "goals_reached": metrics.finish_count,
                     "success_rate": metrics.finish_rate,
+                    "completion_fraction": (
+                        sum(completion_values) / len(completion_values)
+                        if completion_values else 0.0
+                    ),
                 }
             )
 
@@ -117,12 +127,19 @@ class CurriculumController:
                 "training_sampling_probabilities": self.curriculum.sampling_probabilities(),
             },
         )
-        return {
+        sampling = self.curriculum.sampling_probabilities()
+        scalars = {
             "curriculum/stage": float(self.curriculum.state.stage),
-            "curriculum/transition": float(transitioned),
             "curriculum/retention_success_rate": overall_rate,
-            "curriculum/retention_pass": float(passed),
         }
+        for item, probability in zip(stage_results, sampling):
+            prefix = f"curriculum/stage_{item['stage']}"
+            scalars[f"{prefix}/success_rate"] = float(item["success_rate"])
+            scalars[f"{prefix}/completion_fraction"] = float(
+                item["completion_fraction"]
+            )
+            scalars[f"{prefix}/sampling_probability"] = float(probability)
+        return scalars
 
     def _apply_state(self, env_config: dict[str, Any]) -> None:
         state = self.curriculum.state

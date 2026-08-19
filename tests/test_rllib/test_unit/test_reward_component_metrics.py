@@ -40,6 +40,6 @@ def test_reward_breakdown_is_flattened_for_reporters():
         min_success_rate=1.0,
     ).scalar_metrics()
 
-    assert metrics["evaluation_reward_step_cost_mean"] == -0.01
-    assert metrics["evaluation_reward_distance_progress_mean"] == 0.2
-    assert metrics["evaluation_unshaped_return_mean"] == -0.01
+    assert metrics["eval/task/reward/step_cost_mean"] == -0.01
+    assert metrics["eval/task/reward/distance_progress_mean"] == 0.2
+    assert metrics["eval/task/unshaped_return_mean"] == -0.01

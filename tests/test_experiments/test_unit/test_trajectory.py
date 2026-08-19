@@ -459,12 +459,7 @@ class TestEpisodeRunMetrics:
         )
 
         assert metrics.as_scalar_dict() == {
-            "eval/collision_count": 2.0,
-            "eval/collision_rate": 0.25,
-            "eval/finish_count": 1.0,
-            "eval/finish_rate": 1.0,
-            "eval/mean_steps_on_success": 8.0,
-            "eval/goal_progress_mean": 5.0,
+            "eval/task/collision_rate": 0.25,
         }
 
 

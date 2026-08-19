@@ -120,6 +120,34 @@ def test_success_batch_is_classified_solved() -> None:
     assert metrics.success_rate == 0.75
     assert metrics.status == "solved"
 
+
+def test_waypoint_routes_emit_route_metrics_without_point_goal_aliases() -> None:
+    episode = _episode(
+        [(1, 0, 0), (2, 0, 0), (3, 0, 0)],
+        success=True,
+        total_reward=1.0,
+    )
+    episode.final_info = {
+        "route_waypoints_total": 3,
+        "route_waypoint_completion_fraction": 1.0,
+    }
+    metrics = EvaluationMetrics.from_voxel_episodes(
+        [episode],
+        {
+            "action_mode": "discrete_6",
+            "waypoint_route": {
+                "start": [0, 0, 0],
+                "waypoints": [[1, 0, 0], [2, 0, 0], [3, 0, 0]],
+            },
+        },
+        min_success_rate=1.0,
+    ).scalar_metrics()
+
+    assert metrics["eval/task/waypoint/route_success_rate"] == 1.0
+    assert metrics["eval/task/waypoint/completion_fraction_mean"] == 1.0
+    assert metrics["eval/task/waypoint/route_efficiency_mean"] == 1.0
+    assert "evaluation_goals_reached" not in metrics
+
 def test_multi_agent_batch_uses_same_success_contract() -> None:
     episode = MultiVoxelEpisodeData(
         agent_count=2,
