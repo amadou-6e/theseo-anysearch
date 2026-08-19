@@ -54,6 +54,11 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
   const [cameraPitch, setCameraPitch] = useState(30 * (Math.PI / 180));
 
   const [result, setResult] = useState<any>(null);
+  // "Observation source" toggle, matching the spec's "● Current replay step
+  // / ○ Fictional observation" radio choice -- picking "current" reloads
+  // the seeded trajectory step (discarding any fictional edits); "fictional"
+  // reveals the import/manual-edit controls.
+  const [observationSource, setObservationSource] = useState<"current" | "fictional">(seed ? "current" : "fictional");
 
   useEffect(() => {
     explainAvailable().then(setAvailable);
@@ -115,10 +120,14 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
 
   // Auto-run the seeded step once connected (e.g. from Replay's "Explain
   // current step" button); re-runs if the seed changes while connected.
+  // Only while "Current replay step" is the selected observation source --
+  // matches explain.rs's run_request, which computes the report for a
+  // trajectory step without overwriting the editable observation fields
+  // (those keep whatever was loaded at connect-time or last imported).
   useEffect(() => {
-    if (available && seed) runExplainStep(seed.trajectorySourcePath, seed.step);
+    if (available && seed && observationSource === "current") runExplainStep(seed.trajectorySourcePath, seed.step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [available, seed?.trajectorySourcePath, seed?.step]);
+  }, [available, seed?.trajectorySourcePath, seed?.step, observationSource]);
 
   function updateField(name: string, values: unknown[]) {
     const next = { ...observation, [name]: values };
@@ -169,6 +178,7 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
                 setCameraYaw((y) => y + dx * 0.008);
                 setCameraPitch((p) => Math.max(-1.35, Math.min(1.35, p - dy * 0.008)));
               }}
+              onGridChange={(vals) => updateField("local_grid", vals)}
             />
 
             <div style={{ ...groupLabel(), marginTop: 18, flexShrink: 0 }}>Policy explanation</div>
@@ -179,14 +189,40 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
 
           <div style={{ width: 340, overflowY: "auto", padding: 14, flexShrink: 0 }}>
             <div style={groupLabel()}>Explain policy</div>
-            <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 8 }}>
-              Values are normalized only when sent to the policy.
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
+              Edit a recorded observation or construct a fictional one.
             </div>
-            <button onClick={loadFictionalObservation} style={{ ...btnStyle("#232323", true), marginBottom: 4 }}>
-              Load fictional observation…
-            </button>
-            {importedFrom && <div style={{ color: "var(--green)", fontSize: 10.5, marginBottom: 8 }}>Loaded: {importedFrom}</div>}
 
+            <div style={{ ...groupLabel(), marginBottom: 6, fontSize: 9.5 }}>Observation source</div>
+            <RadioRow
+              label="Current replay step"
+              active={observationSource === "current"}
+              disabled={!seed}
+              onClick={() => setObservationSource("current")}
+            />
+            <RadioRow
+              label="Fictional observation"
+              active={observationSource === "fictional"}
+              onClick={() => setObservationSource("fictional")}
+            />
+
+            {observationSource === "fictional" ? (
+              <div style={{ marginTop: 10 }}>
+                <button onClick={loadFictionalObservation} style={{ ...btnStyle("#232323", true), marginBottom: 4 }}>
+                  Load fictional observation…
+                </button>
+                <div style={{ fontSize: 10, color: "var(--text-faint)" }}>Fictional input — format auto-detected.</div>
+                {importedFrom && <div style={{ color: "var(--green)", fontSize: 10.5, marginTop: 4 }}>Loaded: {importedFrom}</div>}
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-faint)" }}>
+                {seed ? `Step ${seed.step} of the selected trajectory.` : "Open Replay and pick a step to explain it here."}
+              </div>
+            )}
+
+            <div style={{ marginTop: 14, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-faint)", textTransform: "uppercase" }}>
+              Edit geometry
+            </div>
             <ScalarFields observation={observation} fields={fields} onChange={updateField} />
 
             <LocalGridEditor
@@ -199,12 +235,14 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
               onChange={(values) => updateField("local_grid", values)}
             />
 
-            <button
-              onClick={() => runExplainObservation(observation)}
-              style={{ ...btnStyle("var(--blue)"), width: "100%", marginTop: 12 }}
-            >
-              Explain policy decision
-            </button>
+            {observationSource === "fictional" && (
+              <button
+                onClick={() => runExplainObservation(observation)}
+                style={{ ...btnStyle("var(--blue)"), width: "100%", marginTop: 12 }}
+              >
+                Explain policy decision
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -412,6 +450,15 @@ function LocalGridEditor({
 // Same projection math as explain.rs's project_explanation_point.
 // ---------------------------------------------------------------------------
 
+/** Same isometric projection the canvas draw uses -- factored out so the
+ * clickable cell overlay can compute identical screen positions. */
+function projectPoint(x: number, y: number, z: number, yaw: number, pitch: number, center: { x: number; y: number }, cubeSize: number) {
+  const xr = x * Math.cos(yaw) - z * Math.sin(yaw);
+  const zr = x * Math.sin(yaw) + z * Math.cos(yaw);
+  const yr = y * Math.cos(pitch) - zr * Math.sin(pitch);
+  return { x: center.x + xr * cubeSize, y: center.y - yr * cubeSize };
+}
+
 function GeometryPreview({
   observation,
   fields,
@@ -420,6 +467,7 @@ function GeometryPreview({
   yaw,
   pitch,
   onDrag,
+  onGridChange,
 }: {
   observation: Record<string, unknown>;
   fields: Record<string, FieldSchema>;
@@ -428,10 +476,13 @@ function GeometryPreview({
   yaw: number;
   pitch: number;
   onDrag: (dx: number, dy: number) => void;
+  onGridChange: (values: unknown[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragging = useRef(false);
+  const dragged = useRef(false);
   const last = useRef({ x: 0, y: 0 });
+  const [renderSize, setRenderSize] = useState(320);
 
   const values = observation.local_grid as unknown[] | undefined;
   const field = fields.local_grid;
@@ -448,10 +499,55 @@ function GeometryPreview({
     }
   }, [values, scale, validValues, side]);
 
+  // Editable cells for the *active slice only*, projected to the same
+  // screen coordinates the canvas draws at -- this is what the spec shows
+  // (the numeric grid overlaid directly on the geometry view), not a
+  // separate disconnected control.
+  const overlayCells = useMemo(() => {
+    if (!kinds || side === 0) return [];
+    const center = { x: renderSize / 2, y: renderSize / 2 };
+    const cubeSize = Math.min(renderSize / (side * 1.9), 72);
+    const centerIndex = Math.floor(side / 2);
+    const cells: { index: number; value: number; screenX: number; screenY: number }[] = [];
+    for (let row = 0; row < side; row++) {
+      for (let col = 0; col < side; col++) {
+        let x: number, y: number, z: number;
+        if (axis === 0) {
+          x = sliceIndex;
+          y = row;
+          z = col;
+        } else if (axis === 1) {
+          x = row;
+          y = sliceIndex;
+          z = col;
+        } else {
+          x = row;
+          y = col;
+          z = sliceIndex;
+        }
+        const index = x * side * side + y * side + z;
+        const p = projectPoint(x - centerIndex, y - centerIndex, z - centerIndex, yaw, pitch, center, cubeSize);
+        cells.push({ index, value: kinds[index], screenX: p.x, screenY: p.y });
+      }
+    }
+    return cells;
+  }, [kinds, side, axis, sliceIndex, yaw, pitch, renderSize]);
+
+  function cycleCell(index: number) {
+    if (!kinds || !scale || validValues.length === 0) return;
+    const current = kinds[index];
+    const at = validValues.indexOf(current);
+    const next = validValues[(at + 1) % validValues.length];
+    const nextKinds = kinds.slice();
+    nextKinds[index] = next;
+    onGridChange(nextKinds.map((k) => encodeScaledInteger(k, scale, validValues)));
+  }
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !kinds) return;
     const size = Math.min(canvas.clientWidth, canvas.clientHeight) || 320;
+    setRenderSize(size);
     canvas.width = size * devicePixelRatio;
     canvas.height = size * devicePixelRatio;
     const ctx = canvas.getContext("2d");
@@ -463,12 +559,7 @@ function GeometryPreview({
     const center = { x: size / 2, y: size / 2 };
     const cubeSize = Math.min(size / (side * 1.9), 72);
     const centerIndex = Math.floor(side / 2);
-    const project = (x: number, y: number, z: number) => {
-      const xr = x * Math.cos(yaw) - z * Math.sin(yaw);
-      const zr = x * Math.sin(yaw) + z * Math.cos(yaw);
-      const yr = y * Math.cos(pitch) - zr * Math.sin(pitch);
-      return { x: center.x + xr * cubeSize, y: center.y - yr * cubeSize };
-    };
+    const project = (x: number, y: number, z: number) => projectPoint(x, y, z, yaw, pitch, center, cubeSize);
 
     type V = { x: number; y: number; z: number; kind: number };
     const voxels: V[] = [];
@@ -563,17 +654,57 @@ function GeometryPreview({
       style={{ flex: 1, minHeight: 240, position: "relative" }}
       onPointerDown={(e) => {
         dragging.current = true;
+        dragged.current = false;
         last.current = { x: e.clientX, y: e.clientY };
       }}
       onPointerMove={(e) => {
         if (!dragging.current) return;
-        onDrag(e.clientX - last.current.x, e.clientY - last.current.y);
+        const dx = e.clientX - last.current.x;
+        const dy = e.clientY - last.current.y;
+        if (Math.abs(dx) + Math.abs(dy) > 2) dragged.current = true;
+        onDrag(dx, dy);
         last.current = { x: e.clientX, y: e.clientY };
       }}
       onPointerUp={() => (dragging.current = false)}
       onPointerLeave={() => (dragging.current = false)}
     >
-      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", cursor: "grab", borderRadius: 8 }} />
+      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", cursor: "grab", borderRadius: 8, display: "block" }} />
+      {/* Editable numeric grid, overlaid on the geometry view -- click a
+          cell to cycle its voxel kind. Matches the spec's Explain window,
+          where the active-slice values are edited directly on the 3D
+          preview rather than only in a separate sidebar control. */}
+      {overlayCells.map((cell) => (
+        <div
+          key={cell.index}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!dragged.current) cycleCell(cell.index);
+          }}
+          title="Click to cycle this cell's voxel kind"
+          style={{
+            position: "absolute",
+            left: cell.screenX,
+            top: cell.screenY,
+            transform: "translate(-50%, -50%)",
+            width: 26,
+            height: 26,
+            borderRadius: 5,
+            background: "rgba(15, 18, 24, 0.85)",
+            border: "1px solid rgba(59, 147, 255, 0.55)",
+            color: "#dfe6ee",
+            fontSize: 11,
+            fontFamily: "var(--mono)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            userSelect: "none",
+            pointerEvents: "auto",
+          }}
+        >
+          {cell.value}
+        </div>
+      ))}
     </div>
   );
 }
@@ -624,6 +755,42 @@ function ResultPanel({ result }: { result: any }) {
           ))}
         </>
       )}
+    </div>
+  );
+}
+
+function RadioRow({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={disabled ? undefined : onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 8px",
+        borderRadius: 5,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        background: active ? "var(--panel-raised)" : "transparent",
+        fontSize: 12,
+        color: active ? "var(--text)" : "var(--text-dim)",
+      }}
+    >
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: "50%",
+          border: `1.5px solid ${active ? "var(--blue)" : "var(--border)"}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        {active && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--blue)" }} />}
+      </span>
+      {label}
     </div>
   );
 }

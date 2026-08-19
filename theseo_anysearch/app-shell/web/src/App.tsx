@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import RunHistorySidebar from "./panels/RunHistorySidebar";
 import RunsPanel from "./panels/RunsPanel";
 import ReplayPanel from "./panels/ReplayPanel";
@@ -83,6 +84,27 @@ export default function App() {
       await rescan(folder);
     }
   }
+
+  // "Drop a folder to open it as the workspace" -- the spec's Overview
+  // window shows this as a drop zone; wired here at the window level so it
+  // works from any tab, not just Overview. `scanWorkspace` fails (and
+  // surfaces the error) harmlessly if the dropped path isn't a directory.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === "drop") {
+        const folder = event.payload.paths[0];
+        if (folder) {
+          setSelectedRun(null);
+          setSelected(null);
+          rescan(folder);
+        }
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function selectRun(run: WorkspaceRun) {
     setSelectedRun(run);

@@ -205,15 +205,33 @@ export default function RunsPanel({
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {error && <div style={{ color: "var(--red)", fontSize: 12, padding: "8px 14px", fontFamily: "var(--mono)" }}>{error}</div>}
       {!index && !error && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 14, flexShrink: 0 }}>
-          <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)")}>
-            Change workspace
-          </button>
-          <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>or paste a path:</span>
-          <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
-          <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("#232323")}>
-            {scanning ? "Scanning…" : "Open"}
-          </button>
+        <div style={{ padding: 14, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)")}>
+              Change workspace
+            </button>
+            <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>or paste a path:</span>
+            <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
+            <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("#232323")}>
+              {scanning ? "Scanning…" : "Open"}
+            </button>
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              padding: "18px 14px",
+              border: "1px dashed var(--border)",
+              borderRadius: 6,
+              textAlign: "center",
+              fontSize: 11.5,
+              color: "var(--text-faint)",
+              maxWidth: 340,
+            }}
+          >
+            Drop a folder anywhere in the window to open it as the workspace
+            <br />
+            One workspace is active at a time
+          </div>
         </div>
       )}
 

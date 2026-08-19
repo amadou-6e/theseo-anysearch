@@ -159,16 +159,37 @@ compared side by side; that surfaced a lot more. Fixed:
   the top-level template files shown — that's the real data, not a bug).
 - Sidebar was wider than the spec's proportions (280px → 220px).
 
-Not fixed — genuine missing features/engineering, not alignment nits:
+Fixed since (this round):
+- **Drag-and-drop a folder onto the window to open it as the workspace** —
+  wired via Tauri's `getCurrentWebview().onDragDropEvent`, listened at the
+  window level in `App.tsx` so it works from any tab, not just Overview.
+  A matching dashed drop-zone hint (spec: "Drop a folder to open it as the
+  workspace / One workspace is active at a time") shows in the empty
+  Overview state. **Not live-verified** — this is a native OS-level drop
+  event, not a browser DOM event, and there's no way to simulate an actual
+  OS file drop through CDP from this environment. Compiles and follows the
+  documented API; someone should drag a real folder onto the window once
+  to confirm.
+- **"Observation source: ● Current replay step / ○ Fictional observation"**
+  radio toggle on the Explain tab — built. Picking "Current replay step"
+  re-runs the seeded trajectory-step explanation (and is disabled when
+  there's no seed); "Fictional observation" reveals the import/manual-edit
+  controls. Matches `explain.rs`'s actual behavior: explaining a trajectory
+  step computes a report without overwriting the editable observation
+  fields, so the toggle governs *which backend call runs*, not what the
+  editor displays.
+- **The Explain tab's numeric grid editor is now overlaid directly on the
+  geometry canvas**, not a separate sidebar-only control — small clickable
+  chips are projected onto the active slice's cells using the same
+  isometric math the canvas draws with, and click-to-cycle their voxel
+  kind. The sidebar's grid-of-dropdowns editor (`LocalGridEditor`) is kept
+  alongside it, matching the spec (which shows both surfaces editing the
+  same "Active slice values").
+
+Still not fixed — genuine missing features/engineering, not alignment nits:
 - YAML syntax highlighting and the hover autocomplete tooltip (spec shows
   a real code editor experience; this is a plain `<textarea>`). The
   original `CLAUDE.md` doc names Monaco for this — not attempted here.
-- The Explain tab's numeric grid editor is overlaid *directly on the
-  geometry canvas* in the spec; this build renders it as a separate
-  control in the right sidebar, disconnected from the 3D view.
-- "Observation source: ● Current replay step / ○ Fictional observation"
-  radio toggle on the Explain tab — not built; "Load fictional
-  observation…" exists but isn't framed as a source-selection choice.
 - "Start a new run [expand]" quick-create panel and the live
   `[running] ... 37%` progress banner.
 - Per-run-card **Stop / Resume / Run again / Details** actions. Checked
@@ -177,7 +198,11 @@ Not fixed — genuine missing features/engineering, not alignment nits:
   already-running training process discovered via `run.json` (no PID is
   recorded in the manifest). Left undone rather than shipping buttons that
   don't work.
-- Drag-and-drop a folder onto the window to open it as the workspace.
+
+Also unverified for the same reason as before: the Explain tab's editing
+surfaces (scalar fields, the new overlay, `LocalGridEditor`) still haven't
+been exercised against a real "ready" payload — no run in this repo has
+both a saved checkpoint and a schema-compatible config.
 
 Added but not in the spec at all (kept, flagged rather than hidden):
 - The raw "Workspace root" text-path input — the spec only shows the native
