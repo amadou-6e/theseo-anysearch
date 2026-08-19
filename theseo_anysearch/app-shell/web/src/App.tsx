@@ -5,6 +5,7 @@ import RunsPanel from "./panels/RunsPanel";
 import ReplayPanel from "./panels/ReplayPanel";
 import ExplainPanel from "./panels/ExplainPanel";
 import {
+  initialWorkspace,
   scanWorkspace,
   pickWorkspaceFolder,
   listTrajectoryFiles,
@@ -109,6 +110,16 @@ export default function App() {
       setScanning(false);
     }
   }
+
+  // Open on a workspace the same way the native shell does -- via
+  // `anysearch ui <path>` (--workspace arg, or the process cwd) -- not an
+  // in-app "type a path" entry point. See src-tauri/src/workspace.rs.
+  useEffect(() => {
+    initialWorkspace().then((path) => {
+      if (path) rescan(path);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function changeWorkspace() {
     const folder = await pickWorkspaceFolder();

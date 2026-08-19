@@ -40,6 +40,14 @@ cd web && npm install && npm run build:viewer
 #    workspace scan, Start-run, and Explain — set ANYSEARCH_PYTHON if
 #    `python` on PATH isn't the right interpreter, same convention as
 #    feat/197's native shell)
+#
+#    There is no in-app "type a path" entry point — the window opens on a
+#    workspace via `--workspace <path>`, falling back to the process's cwd.
+#    `tauri dev`'s dev-server orchestration doesn't forward extra argv, so
+#    for a workspace to auto-load in dev mode either run the built binary
+#    directly with the flag, or `cd` into the workspace first:
+./src-tauri/target/debug/anysearch-shell --workspace /path/to/workspace
+# or: (cd /path/to/workspace && npx tauri dev)   # cwd fallback
 npx tauri dev   # from src-tauri/, or `cargo tauri dev` if the Tauri CLI is installed
 ```
 
@@ -220,10 +228,24 @@ surfaces (scalar fields, the new overlay, `LocalGridEditor`) still haven't
 been exercised against a real "ready" payload — no run in this repo has
 both a saved checkpoint and a schema-compatible config.
 
+Fixed since (this round): the raw "Workspace root" text-path input --
+removed entirely. It was flagged in an earlier pass as "not in the spec,
+kept as a secondary affordance," but the actual spec assumption is that the
+window already opens inside a workspace, launched the same way the native
+shell is (`anysearch ui <path>`, i.e. `cli/main.py`'s `native_ui` command
+on feat/197 -- not yet ported to this branch's CLI -- invoking the binary
+as `<binary> --workspace <path>` with `cwd=workspace`). Added a real
+`initial_workspace` Tauri command that reads `--workspace <path>` from
+argv, falling back to the process's current directory (`anysearch ui .`
+semantics), and `App.tsx` calls it once on mount and auto-scans. "Change
+workspace" (native picker) and drag-and-drop are the only ways to switch
+workspaces now, matching the spec. Verified live: launching
+`anysearch-shell.exe --workspace <path>` opens straight into that
+workspace with no manual entry anywhere. **Not yet wired**: the Python
+`anysearch ui` command itself still launches the old egui binary, not this
+one -- that CLI change is out of this pass's scope.
+
 Added but not in the spec at all (kept, flagged rather than hidden):
-- The raw "Workspace root" text-path input — the spec only shows the native
-  folder picker + drag-and-drop. Kept as a secondary "or paste a path"
-  affordance (useful for scripting/testing) rather than the primary action.
 - The entire "Open trajectories folder" control in the sidebar — added to
   work around `trajectories/` being deliberately excluded from the scanned
   file tree (see Runs tab notes above); without it, legacy Tune trials with

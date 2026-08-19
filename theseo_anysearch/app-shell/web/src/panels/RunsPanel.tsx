@@ -89,9 +89,6 @@ export default function RunsPanel({
   onStartRun: (configPath: string) => Promise<void>;
   onStopRun: () => Promise<void>;
 }) {
-  const [rootInput, setRootInput] = useState(root);
-  useEffect(() => setRootInput(root), [root]);
-
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -200,16 +197,18 @@ export default function RunsPanel({
       {error && <div style={{ color: "var(--red)", fontSize: 12, padding: "8px 14px", fontFamily: "var(--mono)" }}>{error}</div>}
       {!index && !error && (
         <div style={{ padding: 14, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* No in-app "type a path" entry point -- this window opens on a
+              workspace the same way the native shell does, via
+              `anysearch ui <path>` (see App.tsx's initialWorkspace() call).
+              "Change workspace" (native picker) and drag-and-drop are the
+              only ways to switch, matching the spec. */}
+          {scanning ? (
+            <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Opening workspace…</div>
+          ) : (
             <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)")}>
               Change workspace
             </button>
-            <span style={{ fontSize: 11.5, color: "var(--text-faint)" }}>or paste a path:</span>
-            <input value={rootInput} onChange={(e) => setRootInput(e.target.value)} placeholder="Workspace root" style={inputStyle()} />
-            <button onClick={() => onRescan(rootInput)} disabled={!rootInput || scanning} style={btnStyle("#232323")}>
-              {scanning ? "Scanning…" : "Open"}
-            </button>
-          </div>
+          )}
           <div
             style={{
               marginTop: 12,

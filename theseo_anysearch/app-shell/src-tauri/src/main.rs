@@ -18,6 +18,7 @@ fn main() {
         .manage(workspace::RunProcessState::default())
         .manage(explain_bridge::ExplainState::default())
         .invoke_handler(tauri::generate_handler![
+            workspace::initial_workspace,
             workspace::scan_workspace,
             workspace::validate_configuration,
             workspace::read_text_file,

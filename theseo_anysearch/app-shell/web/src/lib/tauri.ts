@@ -42,6 +42,14 @@ export interface WorkspaceIndex {
   invalid_configuration_count: number;
 }
 
+/** The workspace this window should open on, resolved from `--workspace
+ * <path>` or the process cwd (see src-tauri/src/workspace.rs) -- there is
+ * no in-app "type a path" entry point; the app opens on a workspace the
+ * same way the native shell does, via `anysearch ui <path>`. */
+export function initialWorkspace(): Promise<string | null> {
+  return invoke("initial_workspace");
+}
+
 export function scanWorkspace(root: string): Promise<WorkspaceIndex> {
   return invoke("scan_workspace", { root });
 }

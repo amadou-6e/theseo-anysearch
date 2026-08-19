@@ -33,6 +33,30 @@ fn ui_backend(root: &str, operation: &str, path: &str) -> Result<serde_json::Val
     serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
 }
 
+/// The workspace this window should open on, resolved once at startup --
+/// there is no in-app "type a path" entry point (see App.tsx/RunsPanel.tsx):
+/// per docs/ui/workspace.md and cli/main.py's `native_ui` command (feat/197,
+/// not yet ported to this branch's CLI), the native shell is launched as
+/// `<binary> --workspace <path>` with the process cwd already set to that
+/// workspace. Accepts either convention: an explicit `--workspace <path>`
+/// argument, or (absent that) the process's current directory, matching
+/// `anysearch ui .` semantics. Returns `None` only if neither resolves to
+/// an existing directory, so the "Change workspace"/drop-zone empty state
+/// still applies when launched with no context (e.g. during development).
+#[tauri::command]
+pub fn initial_workspace() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    let mut from_flag: Option<String> = None;
+    while let Some(arg) = args.next() {
+        if arg == "--workspace" {
+            from_flag = args.next();
+            break;
+        }
+    }
+    let candidate = from_flag.map(std::path::PathBuf::from).or_else(|| std::env::current_dir().ok());
+    candidate.filter(|p| p.is_dir()).map(|p| p.to_string_lossy().to_string())
+}
+
 /// Rebuild the workspace index (files + run.json-backed runs) for `root`.
 #[tauri::command]
 pub fn scan_workspace(root: String) -> Result<serde_json::Value, String> {
