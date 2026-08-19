@@ -1,4 +1,4 @@
-import type { WorkspaceIndex, WorkspaceRun, TrajectoryFile } from "../lib/tauri";
+import type { WorkspaceIndex, WorkspaceRun } from "../lib/tauri";
 
 // Persistent left pane, present on Runs/Replay/Explain alike (per
 // docs/ui/workspace.md, ported from feat/197: "The run history is the left
@@ -6,26 +6,32 @@ import type { WorkspaceIndex, WorkspaceRun, TrajectoryFile } from "../lib/tauri"
 // not move when tabs change") -- matches spec/ui-design/replayer-current.drawio's
 // "All Windows" tab, which shows the same run-history column at x=40 across
 // all three window mockups.
+//
+// Selecting a run does NOT show a list of its trajectory files to pick from
+// -- ReplayPanel loads the *entire* iteration history for a trajectory
+// directory regardless of which file within it it's handed, so there is no
+// real "pick a file" step. Per docs/ui/workspace.md: "Replay becomes
+// available after selecting a run containing saved trajectories" -- that's
+// the whole interaction. Iteration/step navigation happens with the
+// Iterations/Steps sliders inside Replay itself.
 export default function RunHistorySidebar({
   index,
   selectedRun,
-  runTrajectories,
+  hasReplayData,
   manualTrajDir,
   onManualTrajDirChange,
   manualTrajError,
   onSelectRun,
   onOpenTrajectoriesDir,
-  onOpenTrajectory,
 }: {
   index: WorkspaceIndex | null;
   selectedRun: WorkspaceRun | null;
-  runTrajectories: TrajectoryFile[];
+  hasReplayData: boolean;
   manualTrajDir: string;
   onManualTrajDirChange: (v: string) => void;
   manualTrajError: string | null;
   onSelectRun: (run: WorkspaceRun) => void;
   onOpenTrajectoriesDir: () => void;
-  onOpenTrajectory: (f: TrajectoryFile) => void;
 }) {
   return (
     <div style={{ width: 280, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
@@ -86,32 +92,20 @@ export default function RunHistorySidebar({
           </div>
           {manualTrajError && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 6 }}>{manualTrajError}</div>}
 
-          {(selectedRun || runTrajectories.length > 0) && (
-            <>
-              <div style={{ ...groupLabel(), marginTop: 18 }}>Trajectories</div>
-              {runTrajectories.length === 0 && <div style={{ fontSize: 12, color: "var(--text-faint)" }}>None found.</div>}
-              {runTrajectories.map((f) => (
-                <div
-                  key={f.path}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "6px 10px",
-                    marginBottom: 4,
-                    borderRadius: 4,
-                    background: "var(--panel)",
-                    border: "1px solid var(--border-soft)",
-                    fontSize: 11.5,
-                  }}
-                >
-                  <span style={{ fontFamily: "var(--mono)" }}>{f.name}</span>
-                  <button onClick={() => onOpenTrajectory(f)} style={btnStyle("#232323", true)}>
-                    Open
-                  </button>
-                </div>
-              ))}
-            </>
+          {selectedRun && (
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 11.5,
+                color: hasReplayData ? "var(--green)" : "var(--red)",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              <span style={{ fontSize: 8 }}>●</span>
+              {hasReplayData ? "Trajectories found — open Replay or Explain above." : "No trajectories found for this run."}
+            </div>
           )}
 
           {/* Static footer hint, always shown once a workspace is open --

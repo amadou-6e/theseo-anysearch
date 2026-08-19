@@ -45,9 +45,20 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
-  const [runTrajectories, setRunTrajectories] = useState<TrajectoryFile[]>([]);
   const [manualTrajDir, setManualTrajDir] = useState("");
   const [manualTrajError, setManualTrajError] = useState<string | null>(null);
+
+  // ReplayPanel loads the *entire* iteration history for a trajectory's
+  // directory regardless of which file within it you hand it (see
+  // ReplayPanel.tsx's loadIterationHistory) -- so there is no real "pick
+  // which trajectory file to open" step. Selecting a run should just make
+  // Replay/Explain available, per docs/ui/workspace.md: "Replay becomes
+  // available after selecting a run containing saved trajectories." This
+  // resolves one representative file (preferring best.json, the run's
+  // summary) purely to get a valid directory + display name.
+  function pickRepresentative(files: TrajectoryFile[]): TrajectoryFile | null {
+    return files.find((f) => f.name === "best.json") ?? files[0] ?? null;
+  }
 
   async function rescan(nextRoot: string) {
     if (!nextRoot) return;
@@ -68,17 +79,19 @@ export default function App() {
     const folder = await pickWorkspaceFolder();
     if (folder) {
       setSelectedRun(null);
-      setRunTrajectories([]);
+      setSelected(null);
       await rescan(folder);
     }
   }
 
   async function selectRun(run: WorkspaceRun) {
     setSelectedRun(run);
+    setManualTrajError(null);
     try {
-      setRunTrajectories(await listTrajectoryFiles(`${root}/${run.path}`));
+      const files = await listTrajectoryFiles(`${root}/${run.path}`);
+      setSelected(pickRepresentative(files));
     } catch {
-      setRunTrajectories([]);
+      setSelected(null);
     }
   }
 
@@ -92,11 +105,12 @@ export default function App() {
     setSelectedRun(null);
     try {
       const files = await listTrajectoryFiles(manualTrajDir);
-      if (files.length === 0) setManualTrajError("No trajectory files found under that path.");
-      setRunTrajectories(files);
+      const entry = pickRepresentative(files);
+      if (!entry) setManualTrajError("No trajectory files found under that path.");
+      setSelected(entry);
     } catch (e) {
       setManualTrajError(String(e));
-      setRunTrajectories([]);
+      setSelected(null);
     }
   }
 
@@ -167,13 +181,12 @@ export default function App() {
         <RunHistorySidebar
           index={index}
           selectedRun={selectedRun}
-          runTrajectories={runTrajectories}
+          hasReplayData={!!selected}
           manualTrajDir={manualTrajDir}
           onManualTrajDirChange={setManualTrajDir}
           manualTrajError={manualTrajError}
           onSelectRun={selectRun}
           onOpenTrajectoriesDir={openTrajectoriesDir}
-          onOpenTrajectory={openTrajectory}
         />
 
         <main style={{ flex: 1, minWidth: 0 }}>

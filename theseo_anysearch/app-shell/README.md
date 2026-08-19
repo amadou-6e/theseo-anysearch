@@ -51,6 +51,18 @@ data under `usage/experiments/`, not just compiling it.
 
 **Shared shell** — a persistent left "Run history" sidebar (`RunHistorySidebar.tsx`) is shown on Runs/Replay/Explain alike, per `docs/ui/workspace.md`'s "the run history is the left pane and remains present ... so run context does not move when tabs change" and `spec/ui-design/replayer-current.drawio`'s "All Windows" tab (which shows the same run-history column across all three window mockups). The header shows the workspace name and, once a run is selected, "SELECTED RUN — …" next to the tab bar. Workspace scan state (`root`/`index`/selected run) lives in `App.tsx`, not inside any one tab panel. Verified live: selecting a run in Runs, then switching to Replay/Explain, kept the same sidebar with the run still highlighted.
 
+Clicking a run card does **not** show a list of its trajectory files to
+choose from (an earlier pass here added exactly that, which wasn't in the
+spec and was redundant besides: `ReplayPanel` loads the *entire* iteration
+history for a trajectory's directory regardless of which file inside it
+it's handed). One click resolves a representative file (preferring
+`best.json`) purely to get a valid directory, and Replay/Explain become
+available immediately — matching `docs/ui/workspace.md`'s "Replay becomes
+available after selecting a run containing saved trajectories." Iteration/
+step navigation happens with the Iterations/Steps sliders inside Replay.
+Verified live: one click on a run card, then Replay tab, showed the full
+5-iteration history with no intermediate file-picking step.
+
 **Runs tab**
 - `scan_workspace`/`validate_configuration` shell out to the real
   `theseo_anysearch.ui.service` backend — verified against a live workspace:
