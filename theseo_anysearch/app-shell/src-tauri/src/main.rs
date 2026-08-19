@@ -1,13 +1,16 @@
-// AnySearch UI shell (feat/200). Tauri backend exposing trajectory data to the
-// React frontend over `invoke()`. Scope note: this is the first real vertical
-// slice of the shell — file listing + single-trajectory loading — proving the
-// Tauri <-> React <-> viewer-web (wasm) data path end to end. It intentionally
-// does NOT yet reimplement the full Runs-tab workspace index (run states,
-// MLflow linkage, config editor, terminal streaming) from the draw.io design;
-// those are tracked as follow-up work on feat/200.
+// AnySearch UI shell (feat/200). Tauri backend exposing workspace and
+// trajectory data to the React frontend over `invoke()`.
+//
+// `scan_workspace`/`validate_configuration` are thin wrappers around the same
+// `theseo_anysearch.ui.service` Python backend that feat/197's native egui
+// shell uses (see theseo_anysearch/core/src/replay/workspace.rs on that
+// branch) — ported here rather than reimplemented, per that module's own
+// stated principle: "The UI intentionally receives structured data from this
+// module instead of reimplementing YAML or Pydantic validation in Rust."
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use serde::Serialize;
 
@@ -17,15 +20,52 @@ struct TrajectoryFile {
     path: String,
 }
 
+fn python() -> String {
+    std::env::var("ANYSEARCH_PYTHON").unwrap_or_else(|_| "python".to_owned())
+}
+
+/// Run `python -m theseo_anysearch.ui.service <operation> <path>` with cwd
+/// `root`, matching workspace.rs's `Self::backend`.
+fn ui_backend(root: &str, operation: &str, path: &str) -> Result<serde_json::Value, String> {
+    let output = Command::new(python())
+        .args(["-m", "theseo_anysearch.ui.service", operation, path])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("UI backend could not start: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
+}
+
+/// Rebuild the workspace index (files + run.json-backed runs) for `root`.
+#[tauri::command]
+fn scan_workspace(root: String) -> Result<serde_json::Value, String> {
+    ui_backend(&root, "scan", &root)
+}
+
+/// Validate one AnySearch YAML configuration with the same loader used by
+/// CLI training (`path` is absolute).
+#[tauri::command]
+fn validate_configuration(root: String, path: String) -> Result<serde_json::Value, String> {
+    ui_backend(&root, "validate", &path)
+}
+
+/// Read one file's raw text contents (workspace file-tree preview / YAML editor).
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
 /// List `.json` files under `root` that look like trajectory files (they
 /// deserialize with an `episode` key). Shallow: one level of subdirectories.
+/// Used to populate Replay once a run is selected in the Runs tab.
 #[tauri::command]
 fn list_trajectory_files(root: String) -> Result<Vec<TrajectoryFile>, String> {
     let root_path = Path::new(&root);
     if !root_path.is_dir() {
         return Err(format!("{root} is not a directory"));
     }
-
     let mut out = Vec::new();
     collect_json_files(root_path, 0, &mut out)?;
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -68,7 +108,14 @@ fn load_trajectory(path: String) -> Result<serde_json::Value, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![list_trajectory_files, load_trajectory])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            scan_workspace,
+            validate_configuration,
+            read_text_file,
+            list_trajectory_files,
+            load_trajectory,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running AnySearch shell");
 }

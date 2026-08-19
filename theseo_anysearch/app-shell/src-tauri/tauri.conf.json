@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.theseo.anysearch",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ../web",
-    "beforeBuildCommand": "npm run build --prefix ../web",
+    "beforeDevCommand": "npm run dev --prefix web",
+    "beforeBuildCommand": "npm run build --prefix web",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../web/dist"
   },
