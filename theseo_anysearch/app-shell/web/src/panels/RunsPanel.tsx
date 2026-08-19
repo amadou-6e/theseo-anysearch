@@ -42,6 +42,18 @@ interface TreeDir {
   files: WorkspaceFile[];
 }
 
+/** Config filename -> number of runs whose manifest names it as source_yaml. */
+function countRunsByConfigBasename(runs: { source_yaml: string | null }[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const run of runs) {
+    if (!run.source_yaml) continue;
+    const base = run.source_yaml.split(/[/\\]/).pop();
+    if (!base) continue;
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function buildTree(files: WorkspaceFile[]): TreeDir {
   const root: TreeDir = { dirs: new Map(), files: [] };
   for (const file of files) {
@@ -187,6 +199,7 @@ export default function RunsPanel({
   const dirty = editorText !== savedText;
 
   const workspaceName = root.split(/[/\\]/).pop() || root;
+  const runCounts = index ? countRunsByConfigBasename(index.runs) : new Map<string, number>();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -239,7 +252,18 @@ export default function RunsPanel({
               selectedPath={selectedFile?.path ?? null}
               onSelectFile={selectFile}
               forceOpen={!!search}
+              runCounts={runCounts}
             />
+
+            {/* Workspace-level summary, matching the spec's "WORKSPACE INDEX" box. */}
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border-soft)" }}>
+              <div style={groupLabel()}>Workspace index</div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.7 }}>
+                {index.configuration_count} configurations · {index.runs.length} runs indexed
+                <br />
+                {index.file_count} files · {index.invalid_configuration_count} invalid configs
+              </div>
+            </div>
           </div>
 
           {/* Editor (for recognized/invalid configs) or read-only preview, plus terminal. */}
@@ -331,8 +355,24 @@ export default function RunsPanel({
             {/* Terminal output — streamed from `start_run` via run-output/run-exited events. */}
             <div style={{ flex: "1 1 45%", minHeight: 0, display: "flex", flexDirection: "column", padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ ...groupLabel(), marginBottom: 0 }}>
-                  Terminal output {runActive && <span style={{ color: "var(--green)" }}>· running</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ ...groupLabel(), marginBottom: 0 }}>Terminal output</div>
+                  {runActive && selectedFile && (
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: "0.05em",
+                        color: "var(--green)",
+                        background: "#173e2b",
+                        border: "1px solid #2d8b5b",
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                      }}
+                    >
+                      {selectedFile.path.split("/").pop()} · LIVE
+                    </span>
+                  )}
                 </div>
                 <button onClick={() => setTerminal([])} style={btnStyle("#232323", true)}>
                   Clear
@@ -370,6 +410,7 @@ function DirTree({
   selectedPath,
   onSelectFile,
   forceOpen,
+  runCounts,
 }: {
   node: TreeDir;
   prefix: string;
@@ -378,6 +419,7 @@ function DirTree({
   selectedPath: string | null;
   onSelectFile: (f: WorkspaceFile) => void;
   forceOpen: boolean;
+  runCounts: Map<string, number>;
 }) {
   const dirNames = [...node.dirs.keys()].sort();
   return (
@@ -404,6 +446,7 @@ function DirTree({
                   selectedPath={selectedPath}
                   onSelectFile={onSelectFile}
                   forceOpen={forceOpen}
+                  runCounts={runCounts}
                 />
               </div>
             )}
@@ -413,27 +456,34 @@ function DirTree({
       {node.files
         .slice()
         .sort((a, b) => a.path.localeCompare(b.path))
-        .map((f) => (
-          <div
-            key={f.path}
-            onClick={() => onSelectFile(f)}
-            style={{
-              display: "flex",
-              gap: 6,
-              padding: "3px 4px",
-              borderRadius: 4,
-              cursor: "pointer",
-              background: selectedPath === f.path ? "var(--panel-raised)" : "transparent",
-              fontSize: 11.5,
-              fontFamily: "var(--mono)",
-            }}
-          >
-            <span style={{ color: KIND_COLOR[f.kind], width: 12 }}>{KIND_MARKER[f.kind]}</span>
-            <span style={{ color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {f.path.split("/").pop()}
-            </span>
-          </div>
-        ))}
+        .map((f) => {
+          const name = f.path.split("/").pop() ?? f.path;
+          const count = runCounts.get(name);
+          return (
+            <div
+              key={f.path}
+              onClick={() => onSelectFile(f)}
+              style={{
+                display: "flex",
+                gap: 6,
+                padding: "3px 4px",
+                borderRadius: 4,
+                cursor: "pointer",
+                background: selectedPath === f.path ? "var(--panel-raised)" : "transparent",
+                fontSize: 11.5,
+                fontFamily: "var(--mono)",
+              }}
+            >
+              <span style={{ color: KIND_COLOR[f.kind], width: 12 }}>{KIND_MARKER[f.kind]}</span>
+              <span style={{ color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+              {!!count && (
+                <span style={{ color: "var(--text-faint)", marginLeft: "auto", flexShrink: 0 }}>
+                  · {count} run{count === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+          );
+        })}
     </div>
   );
 }

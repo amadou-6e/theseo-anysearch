@@ -1,4 +1,16 @@
+import { useState } from "react";
 import type { WorkspaceIndex, WorkspaceRun } from "../lib/tauri";
+
+const STATUS_COLOR: Record<string, string> = {
+  running: "var(--green)",
+  completed: "var(--blue)",
+  stopped: "var(--text-faint)",
+  failed: "var(--red)",
+};
+
+function statusColor(status: string): string {
+  return STATUS_COLOR[status.toLowerCase()] ?? "var(--text-faint)";
+}
 
 // Persistent left pane, present on Runs/Replay/Explain alike (per
 // docs/ui/workspace.md, ported from feat/197: "The run history is the left
@@ -33,9 +45,29 @@ export default function RunHistorySidebar({
   onSelectRun: (run: WorkspaceRun) => void;
   onOpenTrajectoriesDir: () => void;
 }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const statuses = index ? [...new Set(index.runs.map((r) => r.status))].sort() : [];
+  const visibleRuns = index ? index.runs.filter((r) => statusFilter === "all" || r.status === statusFilter) : [];
+
   return (
-    <div style={{ width: 280, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
-      <div style={groupLabel()}>Run history</div>
+    <div style={{ width: 220, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <div style={{ ...groupLabel(), marginBottom: 0 }}>Run history</div>
+        {index && index.runs.length > 0 && (
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ background: "#1f1f1f", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-dim)", fontSize: 10, padding: "2px 3px" }}
+          >
+            <option value="all">All states</option>
+            {statuses.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       {!index ? (
         <div style={{ fontSize: 12, color: "var(--text-faint)" }}>No workspace open yet — open one from the Overview tab.</div>
       ) : (
@@ -53,7 +85,7 @@ export default function RunHistorySidebar({
               Run / state / progress
             </div>
           )}
-          {index.runs.map((run) => (
+          {visibleRuns.map((run) => (
             <div
               key={run.path}
               onClick={() => onSelectRun(run)}
@@ -68,10 +100,11 @@ export default function RunHistorySidebar({
               }}
             >
               <div style={{ fontWeight: 600, color: "var(--text)" }}>{run.run_id}</div>
-              <div style={{ color: "var(--text-dim)", marginTop: 2 }}>
+              <div style={{ color: "var(--text-dim)", marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ color: statusColor(run.status), fontSize: 8 }}>●</span>
                 {run.status} · {run.algorithm ?? "unknown algorithm"}
               </div>
-              <div style={{ color: "var(--text-faint)", fontFamily: "var(--mono)", marginTop: 2 }}>{run.path}</div>
+              <div style={{ color: "var(--text-faint)", fontFamily: "var(--mono)", marginTop: 2, fontSize: 10, wordBreak: "break-all" }}>{run.path}</div>
             </div>
           ))}
 

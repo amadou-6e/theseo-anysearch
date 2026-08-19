@@ -128,21 +128,49 @@ Verified live: one click on a run card, then Replay tab, showed the full
 
 ## Known deviations from the draw.io "All Windows" spec
 
-A pixel/element-level pass against `spec/ui-design/replayer-current.drawio`'s
-"All Windows" tab (fixed): the first tab is labeled **"Overview"** there
-(this app used "Runs" — note `docs/ui/workspace.md`, also from feat/197,
-calls it "Runs" in prose, so the two spec sources disagree with each
-other); the sidebar's "select a run" hint was worded/placed to only appear
-*after* a run was already selected (backwards) and dropped "Overview" from
-its own text; the run-history pane was missing its "RUN / STATE / PROGRESS"
-column header; and workspace controls (root path, Rescan, Change workspace)
-lived in a full-width top bar this app invented, instead of inside the
-file-tree pane header where the spec puts them.
+First pass here compared against a text/coordinate dump extracted from the
+`.drawio` XML, not an actual rendered image — that caught tab labels and
+gross layout placement but missed everything visual. Second pass exported
+the real page to PNG (`drawio --export --format png --page-index 4`) and
+compared side by side; that surfaced a lot more. Fixed:
 
-Not fixed — genuine missing features, not alignment nits:
+- Tab labeled "Runs" → **"Overview"** (note `docs/ui/workspace.md`, also
+  from feat/197, calls it "Runs" in prose — the two spec sources disagree
+  with each other).
+- The sidebar's "select a run" hint was worded/placed to only appear
+  *after* a run was already selected (backwards) and dropped "Overview"
+  from its own text.
+- Missing "RUN / STATE / PROGRESS" column header.
+- Workspace controls (root path, Rescan, Change workspace) lived in a
+  full-width top bar this app invented, instead of inside the file-tree
+  pane header where the spec puts them.
+- Missing "All states ▾" run-status filter — now a real, working dropdown.
+- Run cards had no color-coded state indicator — added a colored dot
+  (green running / blue completed / faint otherwise), matching the spec's
+  use of color to distinguish state without fabricating the per-card
+  Stop/Resume/Details action buttons (see below).
+- Missing "WORKSPACE INDEX" summary box at the bottom of the file-tree
+  pane — added, wired to real `WorkspaceIndex` counts.
+- Missing per-config run-count annotations (spec: `experiment.yaml DQN ·
+  3 runs`) — added, computed from `WorkspaceRun.source_yaml`; only
+  renders when a scanned workspace's run manifests actually reference a
+  visible config file (didn't fire against the `usage/experiments/train`
+  test data used here, since those runs' `source_yaml` don't resolve to
+  the top-level template files shown — that's the real data, not a bug).
+- Sidebar was wider than the spec's proportions (280px → 220px).
+
+Not fixed — genuine missing features/engineering, not alignment nits:
+- YAML syntax highlighting and the hover autocomplete tooltip (spec shows
+  a real code editor experience; this is a plain `<textarea>`). The
+  original `CLAUDE.md` doc names Monaco for this — not attempted here.
+- The Explain tab's numeric grid editor is overlaid *directly on the
+  geometry canvas* in the spec; this build renders it as a separate
+  control in the right sidebar, disconnected from the 3D view.
+- "Observation source: ● Current replay step / ○ Fictional observation"
+  radio toggle on the Explain tab — not built; "Load fictional
+  observation…" exists but isn't framed as a source-selection choice.
 - "Start a new run [expand]" quick-create panel and the live
   `[running] ... 37%` progress banner.
-- "All states ▾" run-status filter dropdown.
 - Per-run-card **Stop / Resume / Run again / Details** actions. Checked
   whether these could be wired honestly: `stop_run` kills a `Child` handle
   *this process* spawned via Start run — it has no way to stop an arbitrary
