@@ -140,7 +140,17 @@ First pass here compared against a text/coordinate dump extracted from the
 `.drawio` XML, not an actual rendered image — that caught tab labels and
 gross layout placement but missed everything visual. Second pass exported
 the real page to PNG (`drawio --export --format png --page-index 4`) and
-compared side by side; that surfaced a lot more. Fixed:
+compared side by side; that surfaced a lot more, but *still* missed two
+things a careful look at the same image should have caught the first
+time: the Overview window's editor and file-tree panes were in the wrong
+left-right order (file tree before the editor; the spec has the editor
+immediately next to Run History and the file tree on the far right), and
+the run-card column header text below was transcribed from a different,
+earlier diagram page in the same file rather than read off "All Windows"
+itself. A third pass, done twice over as a deliberate check rather than
+once quickly, caught and fixed both — see the correction below the list.
+
+Fixed (second pass):
 
 - Tab labeled "Runs" → **"Overview"** (note `docs/ui/workspace.md`, also
   from feat/197, calls it "Runs" in prose — the two spec sources disagree
@@ -166,6 +176,16 @@ compared side by side; that surfaced a lot more. Fixed:
   test data used here, since those runs' `source_yaml` don't resolve to
   the top-level template files shown — that's the real data, not a bug).
 - Sidebar was wider than the spec's proportions (280px → 220px).
+
+Fixed (third pass — the correction referenced above):
+- **Overview pane order.** Built as Run history → file tree → editor;
+  the spec is Run history → editor+terminal → file tree (the editor sits
+  immediately next to Run history; the file tree is the narrower
+  right-most column). Swapped in `RunsPanel.tsx`.
+- **Run-card column header** read "RUN / STATE / PROGRESS" (copied from
+  a different page's XML text, not "All Windows"). The actual "All
+  Windows" text is **"EXPERIMENT / RUN ID"** — fixed in
+  `RunHistorySidebar.tsx`.
 
 Fixed since (this round):
 - **Drag-and-drop a folder onto the window to open it as the workspace** —

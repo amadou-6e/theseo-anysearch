@@ -149,7 +149,7 @@ export default function RunHistorySidebar({
           )}
           {index.runs.length > 0 && (
             <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-faint)", textTransform: "uppercase", marginBottom: 6 }}>
-              Run / state / progress
+              Experiment / run ID
             </div>
           )}
           {visibleRuns.map((run) => (

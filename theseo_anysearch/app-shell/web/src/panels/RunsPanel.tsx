@@ -230,55 +230,14 @@ export default function RunsPanel({
 
       {index ? (
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* Workspace file tree, collapsible, with config classification markers. --
-              header (workspace name + Change workspace/Rescan) lives in this pane,
-              matching the spec's placement rather than a separate top bar. */}
-          <div style={{ width: 300, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{workspaceName}</div>
-              <span style={{ fontSize: 10, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>workspace</span>
-            </div>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search files…"
-              style={{ ...inputStyle(), width: "100%", marginBottom: 10 }}
-            />
-            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-              <button onClick={onChangeWorkspace} style={{ ...btnStyle("#232323", true), flex: 1 }}>
-                Change workspace
-              </button>
-              <button onClick={() => onRescan(root)} disabled={scanning} style={{ ...btnStyle("#232323", true), flex: 1 }}>
-                {scanning ? "Scanning…" : "↻ Rescan"}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
-              {index.file_count} files · {index.yaml_count} yaml · {index.invalid_configuration_count} invalid
-            </div>
-            <DirTree
-              node={tree}
-              prefix=""
-              expanded={expanded}
-              onToggle={toggleDir}
-              selectedPath={selectedFile?.path ?? null}
-              onSelectFile={selectFile}
-              forceOpen={!!search}
-              runCounts={runCounts}
-            />
-
-            {/* Workspace-level summary, matching the spec's "WORKSPACE INDEX" box. */}
-            <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border-soft)" }}>
-              <div style={groupLabel()}>Workspace index</div>
-              <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.7 }}>
-                {index.configuration_count} configurations · {index.runs.length} runs indexed
-                <br />
-                {index.file_count} files · {index.invalid_configuration_count} invalid configs
-              </div>
-            </div>
-          </div>
-
-          {/* Editor (for recognized/invalid configs) or read-only preview, plus terminal. */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {/* Editor (for recognized/invalid configs) or read-only preview, plus
+              terminal -- this pane sits immediately next to Run History, with
+              the file tree to its right. Confirmed by inspecting the actual
+              rendered "All Windows" spec page twice (not the earlier
+              text/coordinate dump, which mispositioned this): the editor is
+              the wide middle column, the file tree is the narrower rightmost
+              one -- this file previously had them swapped. */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, borderRight: "1px solid var(--border-soft)" }}>
             <div style={{ flex: "1 1 55%", minHeight: 0, display: "flex", flexDirection: "column", padding: 14, borderBottom: "1px solid var(--border-soft)" }}>
               {selectedFile ? (
                 <>
@@ -404,6 +363,53 @@ export default function RunsPanel({
                 }}
               >
                 {terminal.length === 0 ? <span style={{ color: "var(--text-faint)" }}>No output yet.</span> : terminal.join("\n")}
+              </div>
+            </div>
+          </div>
+
+          {/* Workspace file tree, collapsible, with config classification markers. --
+              header (workspace name + Change workspace/Rescan) lives in this pane,
+              matching the spec's placement rather than a separate top bar. */}
+          <div style={{ width: 300, overflowY: "auto", padding: 14, flexShrink: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{workspaceName}</div>
+              <span style={{ fontSize: 10, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>workspace</span>
+            </div>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search files…"
+              style={{ ...inputStyle(), width: "100%", marginBottom: 10 }}
+            />
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button onClick={onChangeWorkspace} style={{ ...btnStyle("#232323", true), flex: 1 }}>
+                Change workspace
+              </button>
+              <button onClick={() => onRescan(root)} disabled={scanning} style={{ ...btnStyle("#232323", true), flex: 1 }}>
+                {scanning ? "Scanning…" : "↻ Rescan"}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 10 }}>
+              {index.file_count} files · {index.yaml_count} yaml · {index.invalid_configuration_count} invalid
+            </div>
+            <DirTree
+              node={tree}
+              prefix=""
+              expanded={expanded}
+              onToggle={toggleDir}
+              selectedPath={selectedFile?.path ?? null}
+              onSelectFile={selectFile}
+              forceOpen={!!search}
+              runCounts={runCounts}
+            />
+
+            {/* Workspace-level summary, matching the spec's "WORKSPACE INDEX" box. */}
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border-soft)" }}>
+              <div style={groupLabel()}>Workspace index</div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.7 }}>
+                {index.configuration_count} configurations · {index.runs.length} runs indexed
+                <br />
+                {index.file_count} files · {index.invalid_configuration_count} invalid configs
               </div>
             </div>
           </div>
