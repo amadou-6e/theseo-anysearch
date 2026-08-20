@@ -61,6 +61,8 @@ class ImitationPretrainingConfig(BaseModel):
     learning_rate: float = Field(default=3e-4, gt=0.0)
     label_smoothing: float = Field(default=0.0, ge=0.0, lt=1.0)
     early_stopping_patience: int = Field(default=3, ge=1)
+    value_discount: float = Field(default=0.99, ge=0.0, le=1.0)
+    value_loss_coefficient: float = Field(default=0.1, gt=0.0)
 
 
 class ImitationHandoffConfig(BaseModel):
@@ -117,7 +119,7 @@ class DemonstrationManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     fingerprint: str
     teacher_type: str
     teacher_weight: float | None
@@ -143,6 +145,8 @@ class ImitationResult(BaseModel):
     epochs_completed: int
     best_validation_loss: float
     validation_accuracy: float
+    best_validation_policy_loss: float | None = None
+    best_validation_value_loss: float | None = None
     training_samples: int
     validation_samples: int
     checkpoint_path: str

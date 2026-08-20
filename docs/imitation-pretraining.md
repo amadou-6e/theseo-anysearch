@@ -32,10 +32,16 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
 - `pretraining.learning_rate` applies only to behavior cloning.
 - `pretraining.label_smoothing` configures categorical cross-entropy smoothing.
 - `pretraining.early_stopping_patience` stops on stagnant validation loss.
+- `pretraining.value_discount` computes demonstration return targets for the
+  critic. It defaults to `0.99`.
+- `pretraining.value_loss_coefficient` weights robust value regression against
+  policy cross-entropy. It defaults to `0.1`.
 - `handoff.initialize_encoder` retains learned observation features.
 - `handoff.initialize_policy` retains learned policy/action-head parameters.
-- `handoff.initialize_value_head` retains value parameters and defaults to
-  false because action labels do not supervise values.
+- `handoff.initialize_value_head` trains and retains the value head using
+  discounted returns from the same demonstrations. It defaults to false for
+  backward compatibility; enable it for PPO handoffs to avoid starting with a
+  random critic.
 - `cache.enabled` reuses a content-addressed behavior-cloned checkpoint.
 - `cache.directory` overrides the cache root. Tune automatically enables an
   experiment-level cache when imitation is enabled.
@@ -61,9 +67,10 @@ Heterogeneous policy IDs receive independent keys, so differently configured
 models cannot consume each other's checkpoints. Agents mapped to the same
 shared policy ID reuse that policy's artifact.
 
-Demonstrations record the policy observation before each teacher action. The
-dataset is split by episode, not by step. Artifacts are written under the run's
-`imitation` directory: compressed data, manifest, epoch metrics, result, and
+Demonstrations record the policy observation, teacher action, environment
+reward, and discounted return target. The dataset is split by episode, not by
+step. Artifacts are written under the run's `imitation` directory: compressed
+data, manifest, epoch metrics (including policy and value losses), result, and
 policy checkpoint.
 
 Use `usage/experiments/train/ppo_tiny_overfit_imitation.yaml` for the first

@@ -64,8 +64,10 @@ class DemonstrationDataset(BaseModel):
 
     train_observations: np.ndarray
     train_actions: np.ndarray
+    train_returns: np.ndarray
     validation_observations: np.ndarray
     validation_actions: np.ndarray
+    validation_returns: np.ndarray
     manifest: DemonstrationManifest
 
 
@@ -97,7 +99,7 @@ def dataset_fingerprint(
         }
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "env": normalized_env,
         "geometry": _geometry_fingerprint(env_config),
         "teacher": imitation.teacher.model_dump(mode="json"),
@@ -110,6 +112,7 @@ def dataset_fingerprint(
         },
         "observation_size": observation_size,
         "action_spec": action_count,
+        "value_discount": imitation.pretraining.value_discount,
     }
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -156,6 +159,7 @@ def collect_demonstrations(
     observations: list[np.ndarray] = []
     actions: list[int | tuple[int, int, int]] = []
     episode_ids: list[int] = []
+    returns: list[float] = []
     accepted_seeds: list[int] = []
     teacher_successes = 0
     attempts = 0
@@ -169,6 +173,7 @@ def collect_demonstrations(
         observation, _ = env.reset(seed=seed)
         episode_observations: list[np.ndarray] = []
         episode_actions: list[int | tuple[int, int, int]] = []
+        episode_rewards: list[float] = []
         success = False
 
         try:
@@ -202,7 +207,8 @@ def collect_demonstrations(
                     np.asarray(preprocessor.transform(observation), dtype=np.float32)
                 )
                 episode_actions.append(action)
-                observation, _, terminated, truncated, info = env.step(action)
+                observation, reward, terminated, truncated, info = env.step(action)
+                episode_rewards.append(float(reward))
                 step_index += 1
                 success = bool(info.get("goal_reached", False))
                 if terminated or truncated:
@@ -215,6 +221,15 @@ def collect_demonstrations(
             observations.extend(episode_observations)
             actions.extend(episode_actions)
             episode_ids.extend([episode_id] * len(episode_actions))
+            discounted_return = 0.0
+            episode_returns = [0.0] * len(episode_rewards)
+            for index in range(len(episode_rewards) - 1, -1, -1):
+                discounted_return = (
+                    episode_rewards[index]
+                    + imitation.pretraining.value_discount * discounted_return
+                )
+                episode_returns[index] = discounted_return
+            returns.extend(episode_returns)
             accepted_seeds.append(seed)
             teacher_successes += int(success)
 
@@ -244,6 +259,7 @@ def collect_demonstrations(
     )
     observation_array = np.stack(observations).astype(np.float32, copy=False)
     action_array = np.asarray(actions, dtype=np.int64)
+    return_array = np.asarray(returns, dtype=np.float32)
     fingerprint = dataset_fingerprint(
         env_config,
         imitation,
@@ -270,8 +286,10 @@ def collect_demonstrations(
     return DemonstrationDataset(
         train_observations=observation_array[~validation_mask],
         train_actions=action_array[~validation_mask],
+        train_returns=return_array[~validation_mask],
         validation_observations=observation_array[validation_mask],
         validation_actions=action_array[validation_mask],
+        validation_returns=return_array[validation_mask],
         manifest=manifest,
     )
 
@@ -284,8 +302,10 @@ def save_dataset(dataset: DemonstrationDataset, directory: Path) -> None:
         directory.joinpath("demonstrations.npz"),
         train_observations=dataset.train_observations,
         train_actions=dataset.train_actions,
+        train_returns=dataset.train_returns,
         validation_observations=dataset.validation_observations,
         validation_actions=dataset.validation_actions,
+        validation_returns=dataset.validation_returns,
     )
     directory.joinpath("manifest.json").write_text(
         dataset.manifest.model_dump_json(indent=2),
@@ -311,7 +331,9 @@ def load_compatible_dataset(
     return DemonstrationDataset(
         train_observations=arrays["train_observations"],
         train_actions=arrays["train_actions"],
+        train_returns=arrays["train_returns"],
         validation_observations=arrays["validation_observations"],
         validation_actions=arrays["validation_actions"],
+        validation_returns=arrays["validation_returns"],
         manifest=manifest,
     )

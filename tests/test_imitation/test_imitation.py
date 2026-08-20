@@ -39,8 +39,11 @@ class TinyPolicyModel(torch.nn.Module):
     def forward(self, input_dict, state, sequence_lengths):
         del sequence_lengths
         features = torch.relu(self.encoder(input_dict["obs_flat"]))
-        self.value_head(features)
+        self._values = self.value_head(features).reshape(-1)
         return self.policy_head(features), state
+
+    def value_function(self):
+        return self._values
 
 
 def test_multidiscrete_supervision_scores_complete_action_vectors() -> None:
@@ -86,6 +89,21 @@ def test_dataset_fingerprint_ignores_tune_rollout_seed_offset() -> None:
 
     assert first == second
 
+
+def test_dataset_fingerprint_includes_value_discount() -> None:
+    first = ImitationConfig(
+        enabled=True,
+        pretraining={"value_discount": 0.9},
+    )
+    second = ImitationConfig(
+        enabled=True,
+        pretraining={"value_discount": 0.99},
+    )
+
+    assert dataset_fingerprint({}, first, 3, 18) != dataset_fingerprint(
+        {}, second, 3, 18
+    )
+
 class TinyPolicy:
     """Policy wrapper exposing the model attribute used by pretraining."""
 
@@ -98,8 +116,10 @@ class TinyRLModule(TinyPolicyModel):
 
     def forward_train(self, batch):
         features = torch.relu(self.encoder(batch[Columns.OBS]))
-        self.value_head(features)
-        return {Columns.ACTION_DIST_INPUTS: self.policy_head(features)}
+        return {
+            Columns.ACTION_DIST_INPUTS: self.policy_head(features),
+            Columns.VF_PREDS: self.value_head(features).reshape(-1),
+        }
 
 
 def _manifest() -> DemonstrationManifest:
@@ -128,10 +148,12 @@ def _linearly_separable_dataset() -> DemonstrationDataset:
             dtype=np.float32,
         ),
         train_actions=np.asarray([0, 0, 1, 1], dtype=np.int64),
+        train_returns=np.asarray([-2.0, -1.0, 1.0, 2.0], dtype=np.float32),
         validation_observations=np.asarray(
             [[-1.5, 0.0], [1.5, 0.0]], dtype=np.float32
         ),
         validation_actions=np.asarray([0, 1], dtype=np.int64),
+        validation_returns=np.asarray([-1.5, 1.5], dtype=np.float32),
         manifest=_manifest(),
     )
 
@@ -215,6 +237,52 @@ def test_behavior_cloning_supports_modern_rl_module(tmp_path):
     assert result.validation_accuracy == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("model_factory", [TinyPolicy, TinyRLModule])
+def test_behavior_cloning_pretrains_value_head_when_handed_off(
+    tmp_path, model_factory
+):
+    torch.manual_seed(4)
+    policy = model_factory()
+    model = getattr(policy, "model", policy)
+    value_before = {
+        name: value.detach().clone()
+        for name, value in model.state_dict().items()
+        if "value" in name
+    }
+    config = ImitationConfig(
+        enabled=True,
+        collection={"episodes": 4, "max_attempts": 4},
+        pretraining={
+            "epochs": 100,
+            "batch_size": 4,
+            "learning_rate": 0.03,
+            "early_stopping_patience": 20,
+            "value_loss_coefficient": 1.0,
+        },
+        handoff={
+            "initialize_encoder": True,
+            "initialize_policy": True,
+            "initialize_value_head": True,
+        },
+    )
+
+    result = behavior_clone_policy(
+        policy,
+        _linearly_separable_dataset(),
+        config,
+        tmp_path,
+    )
+
+    assert result.validation_accuracy == pytest.approx(1.0)
+    assert result.best_validation_value_loss is not None
+    assert result.best_validation_value_loss < 0.1
+    assert any(
+        not torch.equal(value, value_before[name])
+        for name, value in model.state_dict().items()
+        if "value" in name
+    )
+
+
 def test_dataset_reuse_rejects_schema_mismatch(tmp_path):
     save_dataset(_linearly_separable_dataset(), tmp_path)
 
@@ -273,6 +341,8 @@ def test_astar_collection_records_pre_action_observations(tmp_path):
     assert dataset.manifest.validation_samples == 2
     assert dataset.train_observations.shape[1] == dataset.manifest.observation_size
     assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < 26))
+    assert dataset.train_returns.shape == dataset.train_actions.shape
+    assert np.isfinite(dataset.train_returns).all()
 
 
 @pytest.mark.parametrize("action_mode", ["discrete_18", "vector_3"])
@@ -321,6 +391,11 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
     assert dataset.train_actions.shape[1:] == expected_shape
     upper_bound = 3 if action_mode == "vector_3" else 18
     assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < upper_bound))
+    assert dataset.train_returns.shape == (dataset.manifest.training_samples,)
+    assert dataset.validation_returns.shape == (
+        dataset.manifest.validation_samples,
+    )
+    assert np.isfinite(dataset.train_returns).all()
     assert dataset.manifest.action_nvec == (
         [3, 3, 3] if action_mode == "vector_3" else None
     )
