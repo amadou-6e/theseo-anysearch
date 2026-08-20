@@ -102,6 +102,17 @@ def test_dataset_fingerprint_includes_curriculum_stage_selection() -> None:
     )
 
 
+def test_dataset_fingerprint_changes_with_generation_provider_parameters() -> None:
+    default_weight = ImitationConfig(generation={"provider": "weighted_astar"})
+    heavier_weight = ImitationConfig(
+        generation={"provider": {"name": "weighted_astar", "parameters": {"weight": 3.0}}}
+    )
+
+    assert dataset_fingerprint({}, default_weight, 3, 18) != dataset_fingerprint(
+        {}, heavier_weight, 3, 18
+    )
+
+
 class TinyPolicy:
     """Policy wrapper exposing the model attribute used by pretraining."""
 
@@ -121,8 +132,8 @@ class TinyRLModule(TinyPolicyModel):
 def _manifest() -> DemonstrationManifest:
     return DemonstrationManifest(
         fingerprint="abc",
-        teacher_type="astar",
-        teacher_weight=None,
+        generation_provider_name="astar",
+        generation_provider_parameters={},
         requested_episodes=4,
         successful_episodes=4,
         accepted_episodes=4,
@@ -144,31 +155,30 @@ def _linearly_separable_dataset() -> DemonstrationDataset:
             dtype=np.float32,
         ),
         train_actions=np.asarray([0, 0, 1, 1], dtype=np.int64),
+        train_episode_ids=np.asarray([0, 0, 1, 1], dtype=np.int64),
         validation_observations=np.asarray(
             [[-1.5, 0.0], [1.5, 0.0]], dtype=np.float32
         ),
         validation_actions=np.asarray([0, 1], dtype=np.int64),
+        validation_episode_ids=np.asarray([2, 3], dtype=np.int64),
         manifest=_manifest(),
     )
 
 
-def test_teacher_weight_validation_is_explicit():
-    with pytest.raises(ValidationError, match="only valid for weighted_astar"):
-        ImitationConfig(teacher={"type": "astar", "weight": 2.0})
+def test_generation_attempt_budget_validation_is_explicit():
+    with pytest.raises(ValidationError, match="max_attempts must be at least episodes"):
+        ImitationConfig(generation={"episodes": 5, "max_attempts": 4})
 
 
 def test_collection_attempt_budget_must_cover_requested_episodes():
     with pytest.raises(ValidationError, match="max_attempts must be at least episodes"):
-        ImitationConfig(collection={"episodes": 5, "max_attempts": 4})
+        ImitationConfig(generation={"episodes": 5, "max_attempts": 4})
 
 
 def test_collection_accepts_shared_dataset_directory():
     config = ImitationConfig(
-        collection={
-            "episodes": 2,
-            "max_attempts": 2,
-            "dataset_dir": "runtime/shared-demonstrations",
-        }
+        generation={"episodes": 2, "max_attempts": 2},
+        collection={"dataset_dir": "runtime/shared-demonstrations"},
     )
 
     assert config.collection.dataset_dir == "runtime/shared-demonstrations"
@@ -184,7 +194,7 @@ def test_behavior_cloning_learns_actions_and_preserves_value_head(tmp_path):
     }
     config = ImitationConfig(
         enabled=True,
-        collection={"episodes": 4, "max_attempts": 4},
+        generation={"episodes": 4, "max_attempts": 4},
         pretraining={
             "epochs": 100,
             "batch_size": 4,
@@ -212,7 +222,7 @@ def test_behavior_cloning_supports_modern_rl_module(tmp_path):
     module = TinyRLModule()
     config = ImitationConfig(
         enabled=True,
-        collection={"episodes": 4, "max_attempts": 4},
+        generation={"episodes": 4, "max_attempts": 4},
         pretraining={
             "epochs": 100,
             "batch_size": 4,
@@ -242,7 +252,7 @@ def test_dataset_fingerprint_canonicalizes_geometry_paths(tmp_path, monkeypatch)
     geometry = tmp_path.joinpath("geometry.stl")
     geometry.write_bytes(b"solid test")
     monkeypatch.chdir(tmp_path)
-    config = ImitationConfig(collection={"episodes": 2, "max_attempts": 2})
+    config = ImitationConfig(generation={"episodes": 2, "max_attempts": 2})
 
     relative = dataset_fingerprint(
         {"stl_path": "geometry.stl"}, config, observation_size=36, action_count=26
@@ -274,12 +284,8 @@ def test_astar_collection_records_pre_action_observations(tmp_path):
     }
     config = ImitationConfig(
         enabled=True,
-        collection={
-            "episodes": 2,
-            "seed_start": 10,
-            "max_attempts": 2,
-            "validation_fraction": 0.5,
-        },
+        generation={"episodes": 2, "max_attempts": 2},
+        collection={"seed_start": 10, "validation_fraction": 0.5},
     )
 
     dataset = collect_demonstrations(env_config, config)
@@ -289,6 +295,7 @@ def test_astar_collection_records_pre_action_observations(tmp_path):
     assert dataset.manifest.validation_samples == 2
     assert dataset.train_observations.shape[1] == dataset.manifest.observation_size
     assert np.all((dataset.train_actions >= 0) & (dataset.train_actions < 26))
+    assert len(dataset.train_episode_ids) == len(dataset.train_actions)
 
 
 @pytest.mark.parametrize("action_mode", ["discrete_18", "vector_3"])
@@ -319,11 +326,13 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
     }
     config = ImitationConfig(
         enabled=True,
-        teacher={"type": "replanning_astar"},
-        collection={
+        generation={
+            "provider": "replanning_astar",
             "episodes": 6,
-            "seed_start": 10,
             "max_attempts": 6,
+        },
+        collection={
+            "seed_start": 10,
             "validation_fraction": 0.5,
             "curriculum_stages": "all",
         },
