@@ -258,12 +258,17 @@ class WaypointCurriculum:
         maximum = difficulty.maximum_distance
         if maximum is None:
             raise ValueError("all-stage collection requires maximum_distance")
-        stage_count = int(
-            math.ceil(
-                (maximum - difficulty.initial_distance)
-                / difficulty.distance_increment
-            )
-        ) + 1
+        # Round to the nearest stage before falling back to ceil: floating-point
+        # error can push an exact ratio (e.g. 9.0) just above the integer (e.g.
+        # 9.000000000000002), and a naive ceil would silently add an extra stage.
+        stage_span = (
+            (maximum - difficulty.initial_distance) / difficulty.distance_increment
+        )
+        rounded_span = round(stage_span)
+        if math.isclose(stage_span, rounded_span, rel_tol=1e-12, abs_tol=1e-12):
+            stage_count = int(rounded_span) + 1
+        else:
+            stage_count = int(math.ceil(stage_span)) + 1
         return [
             self._sample_route(env_config, stage) for stage in range(stage_count)
         ]
