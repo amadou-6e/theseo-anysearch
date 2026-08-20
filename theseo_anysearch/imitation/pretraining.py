@@ -26,6 +26,10 @@ from theseo_anysearch.imitation.models import (
     ImitationConfig,
     ImitationResult,
 )
+from theseo_anysearch.imitation.sampling_providers import (
+    EpisodeSamplingContext,
+    resolve_sampling_provider,
+)
 from theseo_anysearch.imitation.cache import (
     cache_key_lock,
     load_cached_pretraining,
@@ -133,7 +137,7 @@ def behavior_clone_policy(
         trainable,
         lr=imitation.pretraining.learning_rate,
     )
-    rng = np.random.default_rng(imitation.collection.seed_start)
+    sampling_provider = resolve_sampling_provider(imitation.sampling.provider.name)
     best_loss = float("inf")
     best_accuracy = 0.0
     best_state = copy.deepcopy(initial_state)
@@ -144,10 +148,17 @@ def behavior_clone_policy(
 
     for epoch in range(1, imitation.pretraining.epochs + 1):
         model.train()
-        indices = rng.permutation(len(dataset.train_actions))
+        batches = sampling_provider(
+            EpisodeSamplingContext(
+                dataset=dataset,
+                split="train",
+                batch_size=imitation.pretraining.batch_size,
+                seed=imitation.collection.seed_start + epoch,
+                parameters=imitation.sampling.provider.parameters,
+            )
+        )
         losses: list[float] = []
-        for offset in range(0, len(indices), imitation.pretraining.batch_size):
-            batch_indices = indices[offset:offset + imitation.pretraining.batch_size]
+        for batch_indices in batches:
             observations = torch.as_tensor(
                 dataset.train_observations[batch_indices],
                 dtype=torch.float32,
