@@ -7,6 +7,7 @@ from typing import Any, Callable
 import networkx as nx
 from pydantic import BaseModel, ConfigDict, Field
 
+from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic import VoxelReplanningAStarHeuristic, build_voxel_heuristic
 
 
@@ -20,15 +21,11 @@ class EpisodeGenerationContext(BaseModel):
     ``env`` has already been reset for this attempt; ``observation`` is the
     raw observation ``env.reset`` returned. The provider must not apply RLlib
     preprocessing -- the caller does that once the episode is returned.
-
-    ``env`` is typed as ``Any`` rather than ``VoxelEnv`` so Python generation
-    providers can be exercised in isolation with a lightweight test double
-    that doesn't need to satisfy the full ``VoxelEnv`` interface.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    env: Any
+    env: VoxelEnv
     observation: Any
     seed: int
     attempt: int

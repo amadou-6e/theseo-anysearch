@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.experiments.custom_imitation import (
     CustomGenerationError,
     available_python_generation_names,
@@ -11,6 +12,23 @@ from theseo_anysearch.experiments.custom_imitation import (
     load_generation_provider,
 )
 from theseo_anysearch.imitation.generation_providers import EpisodeGenerationContext
+
+
+def _tiny_env_config(tmp_path) -> dict:
+    waypoints = tmp_path.joinpath("waypoints.json")
+    waypoints.write_text(
+        json.dumps({"start": [4, 4, 4], "goal": [4, 4, 6]}),
+        encoding="utf-8",
+    )
+    return {
+        "waypoints_file": str(waypoints),
+        "grid_size": 8,
+        "max_steps": 10,
+        "agent_count": 1,
+        "obs_mode": "radial",
+        "ray_max_len": 10,
+        "trail_mode": False,
+    }
 
 
 IMITATION_SOURCE = '''
@@ -55,9 +73,12 @@ def test_load_generation_provider_runs_the_python_function(tmp_path):
     source.write_text(IMITATION_SOURCE, encoding="utf-8")
     record = load_generation_provider(source, "straight_line_generator")
 
+    env = VoxelEnv(_tiny_env_config(tmp_path))
+    observation, _ = env.reset(seed=7)
     episode = record.generate(
-        EpisodeGenerationContext(env=object(), observation="obs", seed=7, attempt=0)
+        EpisodeGenerationContext(env=env, observation=observation, seed=7, attempt=0)
     )
+    env.close()
 
     assert episode.success is True
     assert episode.seed == 7
