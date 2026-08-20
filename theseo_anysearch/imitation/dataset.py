@@ -24,14 +24,32 @@ from theseo_anysearch.imitation.models import (
 )
 
 
-def _configure_waypoint_curriculum(env: VoxelEnv, env_config: dict[str, Any]) -> None:
-    """Apply the initial trainer-owned curriculum stage to a teacher environment."""
+def _configure_waypoint_curriculum(
+    env: VoxelEnv,
+    env_config: dict[str, Any],
+    stage_selection: str,
+) -> tuple[Any | None, int]:
+    """Return the curriculum and number of stages used for collection."""
 
     from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
         configure_initial_waypoint_curriculum,
     )
 
-    configure_initial_waypoint_curriculum(env, env_config)
+    if stage_selection == "initial":
+        configure_initial_waypoint_curriculum(env, env_config)
+        return None, 0
+    from theseo_anysearch.models import WaypointCurriculumConfig
+    from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
+
+    raw_curriculum = env_config.get("waypoint_curriculum") or {}
+    curriculum_config = WaypointCurriculumConfig.model_validate(raw_curriculum)
+    if not curriculum_config.enabled:
+        raise ValueError(
+            "collection.curriculum_stages: all requires an enabled waypoint curriculum"
+        )
+    curriculum = WaypointCurriculum(curriculum_config, env_config)
+    stage_count = len(curriculum.configured_route_stages(env_config))
+    return curriculum, stage_count
 
 
 def _route_action_plan(
@@ -97,7 +115,9 @@ def dataset_fingerprint(
         }
 
     payload = {
-        "schema_version": 1,
+        # Version 3 makes all-stage datasets use one newly sampled route per
+        # episode rather than repeating one fixed route per stage.
+        "schema_version": 3,
         "env": normalized_env,
         "geometry": _geometry_fingerprint(env_config),
         "teacher": imitation.teacher.model_dump(mode="json"),
@@ -107,6 +127,7 @@ def dataset_fingerprint(
             "max_attempts": imitation.collection.max_attempts,
             "require_success": imitation.collection.require_success,
             "validation_fraction": imitation.collection.validation_fraction,
+            "curriculum_stages": imitation.collection.curriculum_stages,
         },
         "observation_size": observation_size,
         "action_spec": action_count,
@@ -144,7 +165,9 @@ def collect_demonstrations(
     """Collect successful teacher rollouts from actual environment transitions."""
 
     env = VoxelEnv(env_config)
-    _configure_waypoint_curriculum(env, env_config)
+    route_curriculum, curriculum_stage_count = _configure_waypoint_curriculum(
+        env, env_config, imitation.collection.curriculum_stages
+    )
     preprocessor = ModelCatalog.get_preprocessor_for_space(env.observation_space)
     observation_size = int(np.prod(preprocessor.shape))
     action_nvec = (
@@ -159,6 +182,20 @@ def collect_demonstrations(
     accepted_seeds: list[int] = []
     teacher_successes = 0
     attempts = 0
+    used_routes: set[tuple[Any, ...]] = set()
+    stage_episode_counts = [0] * curriculum_stage_count
+    if curriculum_stage_count:
+        episodes_per_stage, extra_episodes = divmod(
+            imitation.collection.episodes,
+            curriculum_stage_count,
+        )
+        stage_targets = [
+            episodes_per_stage + int(index < extra_episodes)
+            for index in range(curriculum_stage_count)
+        ]
+    else:
+        stage_targets = []
+    stage_index = 0
 
     while (
         len(accepted_seeds) < imitation.collection.episodes
@@ -166,6 +203,27 @@ def collect_demonstrations(
     ):
         seed = imitation.collection.seed_start + attempts
         attempts += 1
+        if route_curriculum is not None:
+            route_seed = seed
+            for _ in range(imitation.collection.max_attempts):
+                route = route_curriculum.route_for_stage(
+                    env_config,
+                    stage_index,
+                    seed=route_seed,
+                )
+                signature = (route.start, *route.waypoints)
+                if signature not in used_routes:
+                    used_routes.add(signature)
+                    break
+                route_seed += imitation.collection.max_attempts
+            else:
+                raise RuntimeError(
+                    "could not generate a unique waypoint route for demonstration collection"
+                )
+            env.set_waypoint_curriculum(
+                [route.model_dump(mode="python")],
+                [1.0],
+            )
         observation, _ = env.reset(seed=seed)
         episode_observations: list[np.ndarray] = []
         episode_actions: list[int | tuple[int, int, int]] = []
@@ -217,6 +275,13 @@ def collect_demonstrations(
             episode_ids.extend([episode_id] * len(episode_actions))
             accepted_seeds.append(seed)
             teacher_successes += int(success)
+            if route_curriculum is not None:
+                stage_episode_counts[stage_index] += 1
+                for offset in range(1, curriculum_stage_count + 1):
+                    candidate = (stage_index + offset) % curriculum_stage_count
+                    if stage_episode_counts[candidate] < stage_targets[candidate]:
+                        stage_index = candidate
+                        break
 
     env.close()
     if len(accepted_seeds) < imitation.collection.episodes:
@@ -266,6 +331,9 @@ def collect_demonstrations(
         action_count=action_count,
         action_nvec=action_nvec,
         seeds=accepted_seeds,
+        stage_episode_counts=(
+            stage_episode_counts if route_curriculum is not None else None
+        ),
     )
     return DemonstrationDataset(
         train_observations=observation_array[~validation_mask],

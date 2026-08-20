@@ -86,6 +86,22 @@ def test_dataset_fingerprint_ignores_tune_rollout_seed_offset() -> None:
 
     assert first == second
 
+
+def test_dataset_fingerprint_includes_curriculum_stage_selection() -> None:
+    initial = ImitationConfig(
+        enabled=True,
+        collection={"curriculum_stages": "initial"},
+    )
+    all_stages = ImitationConfig(
+        enabled=True,
+        collection={"curriculum_stages": "all"},
+    )
+
+    assert dataset_fingerprint({}, initial, 3, 18) != dataset_fingerprint(
+        {}, all_stages, 3, 18
+    )
+
+
 class TinyPolicy:
     """Policy wrapper exposing the model attribute used by pretraining."""
 
@@ -284,7 +300,7 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
         "obs_mode": "box",
         "box_radius": 1,
         "action_mode": action_mode,
-        "trail_mode": True,
+        "trail_mode": False,
         "geometry_boxes": [],
         "waypoint_curriculum": {
             "enabled": True,
@@ -305,18 +321,20 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
         enabled=True,
         teacher={"type": "replanning_astar"},
         collection={
-            "episodes": 2,
+            "episodes": 6,
             "seed_start": 10,
-            "max_attempts": 2,
+            "max_attempts": 6,
             "validation_fraction": 0.5,
+            "curriculum_stages": "all",
         },
     )
 
     dataset = collect_demonstrations(env_config, config)
 
-    assert dataset.manifest.successful_episodes == 2
-    assert dataset.manifest.training_samples == 6
-    assert dataset.manifest.validation_samples == 6
+    assert dataset.manifest.successful_episodes == 6
+    assert dataset.manifest.training_samples == 18
+    assert dataset.manifest.validation_samples == 18
+    assert dataset.manifest.stage_episode_counts == [2, 2, 2]
     expected_shape = (3,) if action_mode == "vector_3" else ()
     assert dataset.train_actions.shape[1:] == expected_shape
     upper_bound = 3 if action_mode == "vector_3" else 18
@@ -324,3 +342,13 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
     assert dataset.manifest.action_nvec == (
         [3, 3, 3] if action_mode == "vector_3" else None
     )
+
+
+def test_all_stage_collection_requires_enabled_curriculum() -> None:
+    config = ImitationConfig(
+        enabled=True,
+        collection={"curriculum_stages": "all"},
+    )
+
+    with pytest.raises(ValueError, match="requires an enabled waypoint curriculum"):
+        collect_demonstrations({}, config)

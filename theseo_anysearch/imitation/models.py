@@ -41,6 +41,7 @@ class DemonstrationCollectionConfig(BaseModel):
     validation_fraction: float = Field(default=0.1, gt=0.0, lt=1.0)
     reuse_dataset: bool = True
     dataset_dir: str | None = None
+    curriculum_stages: Literal["initial", "all"] = "initial"
 
     @model_validator(mode="after")
     def validate_attempt_budget(self) -> "DemonstrationCollectionConfig":
@@ -117,7 +118,7 @@ class DemonstrationManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     fingerprint: str
     teacher_type: str
     teacher_weight: float | None
@@ -133,6 +134,7 @@ class DemonstrationManifest(BaseModel):
     action_count: int
     action_nvec: list[int] | None = None
     seeds: list[int]
+    stage_episode_counts: list[int] | None = None
 
 
 class ImitationResult(BaseModel):
