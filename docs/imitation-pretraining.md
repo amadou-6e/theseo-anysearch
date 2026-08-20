@@ -27,6 +27,15 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
 - `collection.dataset_dir` optionally points multiple runs or Tune trials to
   one shared compatible dataset. Concurrent collectors coordinate by dataset
   fingerprint; incompatible environment or teacher settings are regenerated.
+- `collection.curriculum_stages` selects `initial` (the default) or `all`.
+  `all` collects demonstrations round-robin across every configured
+  `continue_route` segment distance, including a capped final stage when the
+  maximum is not an exact increment. Every demonstration receives a new,
+  deterministically seeded route; duplicate routes are rejected. This keeps
+  the dataset balanced across curriculum difficulty without repeatedly
+  training on one fixed route per stage.
+  Successful episodes are collected against an exact per-stage quota, so
+  rejected teacher rollouts cannot silently underrepresent a difficult stage.
 - `pretraining.epochs` is the maximum number of behavior-cloning passes.
 - `pretraining.batch_size` is the supervised optimizer batch size.
 - `pretraining.learning_rate` applies only to behavior cloning.

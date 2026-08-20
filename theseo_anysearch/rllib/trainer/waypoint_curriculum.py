@@ -210,7 +210,13 @@ class WaypointCurriculum:
             maximum,
         )
 
-    def _sample_route(self, env_config: dict[str, Any], stage: int) -> WaypointRoute:
+    def _sample_route(
+        self,
+        env_config: dict[str, Any],
+        stage: int,
+        *,
+        seed: int | None = None,
+    ) -> WaypointRoute:
         self._require_empty_geometry(env_config)
         difficulty = self.config.difficulty
         assert difficulty.initial_distance is not None
@@ -225,8 +231,47 @@ class WaypointCurriculum:
             segment_distance=segment_distance,
             grid_size=int(env_config.get("grid_size", 32)),
             action_mode=str(env_config.get("action_mode", "discrete_26")),
-            seed=self.config.seed + stage,
+            seed=self.config.seed + stage if seed is None else seed,
         )
+
+    def route_for_stage(
+        self,
+        env_config: dict[str, Any],
+        stage: int,
+        *,
+        seed: int | None = None,
+    ) -> WaypointRoute:
+        """Sample one route at an exact configured stage difficulty."""
+
+        return self._sample_route(env_config, stage, seed=seed)
+
+    def configured_route_stages(
+        self, env_config: dict[str, Any]
+    ) -> list[WaypointRoute]:
+        """Return every configured segment-distance route stage."""
+
+        if self.config.completion_mode != "continue_route":
+            raise ValueError("all-stage collection requires continue_route mode")
+        difficulty = self.config.difficulty
+        if difficulty.initial_distance is None:
+            raise ValueError("all-stage collection requires initial_distance")
+        maximum = difficulty.maximum_distance
+        if maximum is None:
+            raise ValueError("all-stage collection requires maximum_distance")
+        # Round to the nearest stage before falling back to ceil: floating-point
+        # error can push an exact ratio (e.g. 9.0) just above the integer (e.g.
+        # 9.000000000000002), and a naive ceil would silently add an extra stage.
+        stage_span = (
+            (maximum - difficulty.initial_distance) / difficulty.distance_increment
+        )
+        rounded_span = round(stage_span)
+        if math.isclose(stage_span, rounded_span, rel_tol=1e-12, abs_tol=1e-12):
+            stage_count = int(rounded_span) + 1
+        else:
+            stage_count = int(math.ceil(stage_span)) + 1
+        return [
+            self._sample_route(env_config, stage) for stage in range(stage_count)
+        ]
 
     def sample_stage(self, env_config: dict[str, Any]) -> WaypointRoute | tuple[Waypoint, Waypoint]:
         if self.config.completion_mode == "continue_route":
