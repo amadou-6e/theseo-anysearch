@@ -52,14 +52,15 @@ evaluation:
 imitation:
   enabled: true
   strategy: pretrain_then_rl
-  teacher:
-    type: astar
-    weight: null
-  collection:
+  generation:
+    provider: astar
     episodes: 64
-    seed_start: 1000
     max_attempts: 128
     require_success: true
+  sampling:
+    provider: uniform_transition
+  collection:
+    seed_start: 1000
     validation_fraction: 0.1
     reuse_dataset: true
     dataset_dir: runtime/tune/datasets/box_r1_astar_64
