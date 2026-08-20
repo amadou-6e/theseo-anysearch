@@ -8,6 +8,7 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.experiments.custom_imitation import (
     CustomGenerationError,
     available_python_generation_names,
+    copy_generation_source,
     discover_generation_source,
     load_generation_provider,
 )
@@ -57,6 +58,19 @@ def test_discover_generation_source_returns_none_without_sibling_file(tmp_path):
     config_path.write_text("imitation:\n  generation:\n    provider: straight_line_generator\n")
 
     assert discover_generation_source(config_path, "straight_line_generator") is None
+
+
+def test_copy_generation_source_archives_imitation_module_into_run_dir(tmp_path):
+    config_path = tmp_path.joinpath("experiment.yaml")
+    config_path.write_text("imitation:\n  generation:\n    provider: straight_line_generator\n")
+    source = tmp_path.joinpath("imitation.py")
+    source.write_text(IMITATION_SOURCE, encoding="utf-8")
+    run_dir = tmp_path.joinpath("run")
+
+    archived = copy_generation_source(config_path, run_dir, "straight_line_generator")
+
+    assert archived == run_dir.joinpath("imitation.py")
+    assert archived.read_bytes() == source.read_bytes()
 
 
 def test_available_python_generation_names_probes_exports(tmp_path):

@@ -293,6 +293,7 @@ def _write_trial_extension_sources(
     metric_source_contents: dict[str, str] | None,
     reward_source_content: str | None,
     scenario_source_content: str | None,
+    generation_source_content: str | None,
 ) -> None:
     """Materialize Python extension sources before env runners are created."""
     for filename, source in (metric_source_contents or {}).items():
@@ -305,6 +306,11 @@ def _write_trial_extension_sources(
     if scenario_source_content is not None:
         trial_dir.joinpath("scenarios.py").write_text(
             scenario_source_content,
+            encoding="utf-8",
+        )
+    if generation_source_content is not None:
+        trial_dir.joinpath("imitation.py").write_text(
+            generation_source_content,
             encoding="utf-8",
         )
 
@@ -326,6 +332,7 @@ def _experiment_trainable(
     metric_source_contents: dict[str, str] | None = None,
     reward_source_content: str | None = None,
     scenario_source_content: str | None = None,
+    generation_source_content: str | None = None,
     native_extension_bundle: dict[str, Any] | None = None,
 ) -> None:
     """
@@ -422,6 +429,7 @@ def _experiment_trainable(
         metric_source_contents=metric_source_contents,
         reward_source_content=reward_source_content,
         scenario_source_content=scenario_source_content,
+        generation_source_content=generation_source_content,
     )
     if native_extension_bundle is not None:
         native_dir = trial_dir.joinpath("native_extension")
@@ -1140,6 +1148,23 @@ class TuneRunner:
             if scenario_source is not None
             else None
         )
+        from theseo_anysearch.experiments.custom_imitation import (
+            discover_generation_source,
+        )
+
+        generation_source = discover_generation_source(
+            self._config_path,
+            (
+                self._config.imitation.generation.provider.name
+                if self._config.imitation.enabled
+                else None
+            ),
+        )
+        generation_source_content = (
+            generation_source.read_text(encoding="utf-8")
+            if generation_source is not None
+            else None
+        )
         from theseo_anysearch.experiments.native_extensions import (
             NativeExtensionManifest,
             discover_native_manifest,
@@ -1344,6 +1369,7 @@ class TuneRunner:
             metric_source_contents=metric_source_contents,
             reward_source_content=reward_source_content,
             scenario_source_content=scenario_source_content,
+            generation_source_content=generation_source_content,
             native_extension_bundle=native_extension_bundle,
         )
 

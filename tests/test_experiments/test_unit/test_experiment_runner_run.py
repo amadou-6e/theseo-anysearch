@@ -64,6 +64,51 @@ class TestExperimentRunnerRun:
         run_dir = experiment_config.run_output_dir.joinpath(info.run_id)
         assert run_dir.joinpath("experiment.yaml").exists()
 
+    def test_run_archives_custom_imitation_source(self, single_yaml: Path):
+        import theseo_anysearch.experiments.runner as runner_mod
+        from theseo_anysearch.experiments.loader import load_experiment
+
+        config_path = single_yaml
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8")
+            + "\nimitation:\n"
+            "  enabled: true\n"
+            "  generation:\n"
+            "    provider: straight_line_generator\n",
+            encoding="utf-8",
+        )
+        imitation_source = config_path.with_name("imitation.py")
+        imitation_source.write_text(
+            "def straight_line_generator(context):\n"
+            "    return {\n"
+            "        'observations': [context.observation],\n"
+            "        'actions': [0],\n"
+            "        'success': True,\n"
+            "        'seed': context.seed,\n"
+            "    }\n",
+            encoding="utf-8",
+        )
+        experiment_config = load_experiment(config_path)
+
+        fake_build, original = patch_build(runner_mod)
+        runner_mod._build_trainer = fake_build
+        try:
+            runner = ExperimentRunner(experiment_config, config_path)
+            # The synthetic STL fixture used by ``single_yaml`` does not exist
+            # on disk, so imitation pretraining fails once training starts.
+            # Source archiving happens earlier in ``run()``, before training,
+            # so the archived file is still produced despite this failure.
+            with pytest.raises(FileNotFoundError):
+                runner.run()
+        finally:
+            runner_mod._build_trainer = original
+
+        run_dirs = list(experiment_config.run_output_dir.iterdir())
+        assert len(run_dirs) == 1
+        archived = run_dirs[0].joinpath("imitation.py")
+        assert archived.exists()
+        assert archived.read_bytes() == imitation_source.read_bytes()
+
     def test_run_checkpoints_written(self, experiment_config: ExperimentConfig):
         import theseo_anysearch.experiments.runner as runner_mod
 

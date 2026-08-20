@@ -608,6 +608,19 @@ class ExperimentRunner:
                     else None
                 ),
             )
+            from theseo_anysearch.experiments.custom_imitation import (
+                copy_generation_source,
+            )
+
+            copy_generation_source(
+                self._config_path,
+                run_dir,
+                (
+                    self._config.imitation.generation.provider.name
+                    if self._config.imitation.enabled
+                    else None
+                ),
+            )
             from theseo_anysearch.experiments.native_extensions import copy_native_extension
 
             copy_native_extension(self._config_path, run_dir)
