@@ -34,6 +34,14 @@ reported on iterations selected by `evaluation.waypoint_curriculum.frequency`.
 The stage value reflects a promotion made during that iteration and remains
 available on subsequent iterations.
 
+Route-based retention evaluates every stage on a deterministic, heterogeneous
+route suite derived only from `evaluation.seed` and the stage number. The suite
+is rebuilt identically at every evaluation and across comparable trials; it does
+not consume or alter training-route randomness. Each
+`evaluation/curriculum_iter_*.json` stage entry records the route seed, a compact
+fingerprint, endpoints, and waypoint count so the evaluated suite can be audited
+without duplicating every waypoint in the artifact.
+
 ## Fields
 
 | Field | Default | Purpose |
