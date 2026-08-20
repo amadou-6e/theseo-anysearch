@@ -80,13 +80,21 @@ class CurriculumController:
             self.curriculum.state = WaypointCurriculumState.model_validate(
                 store.read_json("curriculum/state.json")
             )
+            self.curriculum.clamp_restored_state()
         self._apply_state(env_config)
         broadcast_waypoint_curriculum(algorithm, self.curriculum)
         self._persist(store)
 
     def stage_metric(self) -> dict[str, float]:
         """Return the current stage as a reportable scalar."""
-        return {"curriculum/stage": float(self.curriculum.state.stage)}
+        maximum_stage = self.curriculum.maximum_stage
+        return {
+            "curriculum/stage": float(self.curriculum.state.stage),
+            "curriculum/terminal": float(self.curriculum.terminal),
+            "curriculum/max_stage": float(
+                maximum_stage if maximum_stage is not None else -1
+            ),
+        }
 
     def evaluate(
         self,
@@ -204,12 +212,14 @@ class CurriculumController:
             {
                 "stages": stage_results,
                 "passed": passed,
+                "terminal": self.curriculum.terminal,
+                "maximum_stage": self.curriculum.maximum_stage,
                 "training_sampling_probabilities": self.curriculum.sampling_probabilities(),
             },
         )
         sampling = self.curriculum.sampling_probabilities()
         scalars = {
-            "curriculum/stage": float(self.curriculum.state.stage),
+            **self.stage_metric(),
             "curriculum/retention_success_rate": overall_rate,
         }
         for item, probability in zip(stage_results, sampling):
