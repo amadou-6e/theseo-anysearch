@@ -436,19 +436,13 @@ def _experiment_trainable(
     # ------------------------------------------------------------------ #
     # Build Settings for this trial                                        #
     # ------------------------------------------------------------------ #
-    # Derive a stable per-trial seed offset so different trials explore
-    # different start/goal position sequences during both training rollouts
-    # and eval trajectory snapshots. Using a hash of trial_id makes the
-    # offset deterministic (reproducible on resume) and unique per trial.
-    import hashlib as _hashlib
-    _seed_offset = int(
-        _hashlib.md5(output_trial_id.encode()).hexdigest()[:8], 16) % 10000
-
     base_settings = exp_config.to_settings()
-    trial_env = base_settings.env.model_copy(
-        update={
-            "seed": base_settings.env.seed + _seed_offset,
-        })
+    # Hyperparameter trials must see the same stochastic environment sequence.
+    # In particular, waypoint stages are generated from environment resets and
+    # later reused verbatim by retention evaluation.  Offsetting ``env.seed``
+    # by trial ID made otherwise identical trials train and evaluate against
+    # different tasks, so their metrics were not directly comparable.
+    trial_env = base_settings.env.model_copy(deep=True)
     settings = base_settings.model_copy(
         update={
             "training":

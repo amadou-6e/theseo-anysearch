@@ -104,6 +104,104 @@ class TestSampledConfigValidation:
         assert model.hidden_sizes == [64, 64]
 
 
+class TestComparableTrialSeeds:
+    """Tune trials must differ only in sampled hyperparameters."""
+
+    def test_trial_id_does_not_change_environment_or_curriculum_seed(
+        self, tmp_path
+    ):
+        from theseo_anysearch.experiments.tune_runner import _experiment_trainable
+        from tests.test_rllib.test_unit._tune_runner_support import (
+            make_experiment_config,
+        )
+
+        experiment = make_experiment_config(output_dir=str(tmp_path))
+        from theseo_anysearch.models import WaypointCurriculumConfig
+
+        curriculum = WaypointCurriculumConfig.model_validate(
+            {
+                "enabled": True,
+                "completion_mode": "continue_route",
+                "initial_start": [16, 16, 16],
+                "seed": 731,
+                "route_length": {"mode": "fixed", "distance": 24},
+                "difficulty": {
+                    "mode": "segment_distance",
+                    "initial_distance": 1,
+                    "distance_increment": 2,
+                    "maximum_distance": 9,
+                },
+            }
+        )
+        experiment = experiment.model_copy(
+            update={
+                "env": experiment.env.model_copy(
+                    update={"waypoint_curriculum": curriculum}
+                )
+            }
+        )
+        experiment_dict = experiment.model_dump(by_alias=True, mode="json")
+        captured_settings = []
+
+        class FakeTrainer:
+            @classmethod
+            def from_settings(cls, settings):
+                captured_settings.append(settings)
+                raise RuntimeError("settings captured")
+
+        for trial_id in ("trial-a", "trial-b"):
+            fake_tune = MagicMock()
+            fake_tune.get_context.return_value.get_trial_id.return_value = trial_id
+            with patch(
+                "theseo_anysearch.experiments.tune_runner._tune", fake_tune
+            ), patch(
+                "theseo_anysearch.experiments.tune_runner.Trainer", FakeTrainer
+            ):
+                with pytest.raises(RuntimeError, match="settings captured"):
+                    _experiment_trainable(
+                        config={},
+                        experiment_dict=experiment_dict,
+                        metric="episode_reward_mean",
+                        mode="max",
+                        max_iterations=1,
+                        mlflow_tracking_uri="",
+                        mlflow_experiment_name="test",
+                        mlflow_parent_run_id="",
+                        run_tag="test",
+                    )
+
+        first, second = captured_settings
+        assert first.env == second.env
+        assert first.env.seed == experiment.env.seed
+        assert second.env.seed == experiment.env.seed
+        assert (
+            first.env.waypoint_curriculum.seed
+            == second.env.waypoint_curriculum.seed
+        )
+        assert first.evaluation == second.evaluation
+
+        from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+            WaypointCurriculum,
+        )
+
+        generated = []
+        for settings in (first, second):
+            controller = WaypointCurriculum(
+                settings.env.waypoint_curriculum,
+                settings.env.to_runtime_dict(),
+            )
+            for iteration in range(1, 4):
+                controller.advance_stage(
+                    iteration,
+                    controller.sample_stage(settings.env.to_runtime_dict()),
+                )
+            generated.append(controller.stages())
+
+        # Retention evaluation iterates this exact stages() collection, so
+        # equality covers starts, goals, and every intermediate waypoint.
+        assert generated[0] == generated[1]
+
+
 class TestTrialDirname:
     """Verify short trial directory naming for Windows path safety."""
 
