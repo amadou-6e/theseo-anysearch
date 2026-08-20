@@ -217,6 +217,7 @@ class WaypointCurriculum:
         *,
         seed: int | None = None,
     ) -> WaypointRoute:
+        """Generate a route at a configured stage with an optional independent seed."""
         self._require_empty_geometry(env_config)
         difficulty = self.config.difficulty
         assert difficulty.initial_distance is not None
