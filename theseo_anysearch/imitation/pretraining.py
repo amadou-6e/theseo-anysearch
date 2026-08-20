@@ -238,6 +238,7 @@ def _dataset_for_run(
     env_config: dict[str, Any],
     imitation: ImitationConfig,
     dataset_dir: Path,
+    config_path: Path | None = None,
 ) -> DemonstrationDataset:
     """Reuse a compatible run dataset or collect a new one."""
 
@@ -273,7 +274,7 @@ def _dataset_for_run(
             if stored_manifest.fingerprint == expected:
                 return load_compatible_dataset(dataset_dir, expected)
 
-        dataset = collect_demonstrations(env_config, imitation)
+        dataset = collect_demonstrations(env_config, imitation, config_path)
         save_dataset(dataset, dataset_dir)
         return dataset
 
@@ -307,6 +308,8 @@ def run_imitation_pretraining(
 
     if not imitation.enabled:
         return None
+    config_path = run_dir.joinpath("experiment.yaml")
+    config_path = config_path if config_path.is_file() else None
     imitation_dir = run_dir.joinpath("imitation")
     dataset_dir = (
         Path(imitation.collection.dataset_dir).resolve()
@@ -317,6 +320,7 @@ def run_imitation_pretraining(
         env_config,
         imitation,
         dataset_dir,
+        config_path,
     )
     policy_or_module, uses_modern_module = _trainable_policy_or_module(algorithm)
     model = getattr(policy_or_module, "model", policy_or_module)

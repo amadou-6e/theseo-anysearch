@@ -94,6 +94,7 @@ def dataset_fingerprint(
     imitation: ImitationConfig,
     observation_size: int,
     action_count: int | list[int],
+    generation_source_sha256: str | None = None,
 ) -> str:
     """Hash every contract that affects demonstration compatibility."""
 
@@ -117,9 +118,8 @@ def dataset_fingerprint(
         }
 
     payload = {
-        # Version 4 replaces the closed teacher selector with a named,
-        # parameterized generation provider.
-        "schema_version": 4,
+        # Version 5 adds the Python generation-provider source digest.
+        "schema_version": 5,
         "env": normalized_env,
         "geometry": _geometry_fingerprint(env_config),
         "generation": {
@@ -127,6 +127,7 @@ def dataset_fingerprint(
             "episodes": imitation.generation.episodes,
             "max_attempts": imitation.generation.max_attempts,
             "require_success": imitation.generation.require_success,
+            "source_sha256": generation_source_sha256,
         },
         "collection": {
             "seed_start": imitation.collection.seed_start,
@@ -165,8 +166,22 @@ def _geometry_fingerprint(env_config: dict[str, Any]) -> str:
 def collect_demonstrations(
     env_config: dict[str, Any],
     imitation: ImitationConfig,
+    config_path: Path | None = None,
 ) -> DemonstrationDataset:
     """Collect successful teacher rollouts from actual environment transitions."""
+
+    python_provider = None
+    generation_name = imitation.generation.provider.name
+    if generation_name not in (
+        "astar", "dijkstra", "weighted_astar", "replanning_astar",
+    ):
+        from theseo_anysearch.experiments.custom_imitation import (
+            discover_generation_source,
+            load_generation_provider,
+        )
+
+        source = discover_generation_source(config_path, generation_name)
+        python_provider = load_generation_provider(source, generation_name)
 
     env = VoxelEnv(env_config)
     route_curriculum, curriculum_stage_count = _configure_waypoint_curriculum(
@@ -250,7 +265,9 @@ def collect_demonstrations(
                     if terminated or truncated:
                         break
             else:
-                provider = resolve_generation_provider(imitation.generation.provider.name)
+                provider = resolve_generation_provider(
+                    generation_name, python_provider=python_provider
+                )
                 episode = provider(
                     EpisodeGenerationContext(
                         env=env,
@@ -315,6 +332,7 @@ def collect_demonstrations(
         imitation,
         observation_size,
         action_nvec or action_count,
+        python_provider.source_sha256 if python_provider is not None else None,
     )
     train_episode_ids = episode_array[~validation_mask]
     validation_episode_ids = episode_array[validation_mask]
