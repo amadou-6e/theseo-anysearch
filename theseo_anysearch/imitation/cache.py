@@ -21,7 +21,7 @@ from theseo_anysearch.imitation.models import (
     ImitationResult,
 )
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 _LOCK_HEARTBEAT_INTERVAL_SECONDS = 5.0
 
 
@@ -50,6 +50,7 @@ def pretraining_cache_key(
         "torch_version": torch.__version__,
         "pretraining": imitation.pretraining.model_dump(mode="json"),
         "handoff": imitation.handoff.model_dump(mode="json"),
+        "sampling": imitation.sampling.provider.model_dump(mode="json"),
     }
     encoded = json.dumps(contract, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest(), contract
