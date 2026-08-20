@@ -187,17 +187,32 @@ Fixed (third pass — the correction referenced above):
   Windows" text is **"EXPERIMENT / RUN ID"** — fixed in
   `RunHistorySidebar.tsx`.
 
+Fixed (fourth pass): a designed "no workspace open" empty-state screen in
+`RunsPanel.tsx` — including a dashed "Drop a folder to open it as the
+workspace" panel — was removed. This app always opens on a workspace
+supplied by the CLI (`initialWorkspace()`); per that architecture there is
+no real "empty state" to design a flow around, only an edge case (the
+supplied path doesn't resolve) to handle minimally. The prior round had
+already been told once to stop building manual-workspace-entry UI (the
+raw path input) and, instead of reconsidering the surrounding screen,
+patched the one element that was named and left the promotional drop-zone
+panel standing — a repeat of the same mistake pattern as the pane-order
+miss above, this time on instruction-following rather than visual
+inspection. Replaced with a single text line + "Change workspace" button,
+nothing more. Verified live by launching with an invalid `--workspace`
+path to force the fallback and confirming it renders minimally.
+
 Fixed since (this round):
 - **Drag-and-drop a folder onto the window to open it as the workspace** —
   wired via Tauri's `getCurrentWebview().onDragDropEvent`, listened at the
   window level in `App.tsx` so it works from any tab, not just Overview.
-  A matching dashed drop-zone hint (spec: "Drop a folder to open it as the
-  workspace / One workspace is active at a time") shows in the empty
-  Overview state. **Not live-verified** — this is a native OS-level drop
-  event, not a browser DOM event, and there's no way to simulate an actual
-  OS file drop through CDP from this environment. Compiles and follows the
-  documented API; someone should drag a real folder onto the window once
-  to confirm.
+  **Not live-verified** — this is a native OS-level drop event, not a
+  browser DOM event, and there's no way to simulate an actual OS file drop
+  through CDP from this environment. Compiles and follows the documented
+  API; someone should drag a real folder onto the window once to confirm.
+  (A dashed drop-zone *hint panel* was added alongside this and then
+  removed again a round later — see "Fixed (fourth pass)" below. The
+  drag-and-drop event handling itself was never the problem.)
 - **"Observation source: ● Current replay step / ○ Fictional observation"**
   radio toggle on the Explain tab — built. Picking "Current replay step"
   re-runs the seeded trajectory-step explanation (and is disabled when

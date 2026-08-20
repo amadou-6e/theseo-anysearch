@@ -196,35 +196,18 @@ export default function RunsPanel({
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {error && <div style={{ color: "var(--red)", fontSize: 12, padding: "8px 14px", fontFamily: "var(--mono)" }}>{error}</div>}
       {!index && !error && (
-        <div style={{ padding: 14, flexShrink: 0 }}>
-          {/* No in-app "type a path" entry point -- this window opens on a
-              workspace the same way the native shell does, via
-              `anysearch ui <path>` (see App.tsx's initialWorkspace() call).
-              "Change workspace" (native picker) and drag-and-drop are the
-              only ways to switch, matching the spec. */}
-          {scanning ? (
-            <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Opening workspace…</div>
-          ) : (
-            <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)")}>
+        // Not a designed flow -- this window always opens on a workspace
+        // supplied by the CLI (App.tsx's initialWorkspace() call), so this
+        // only shows for the edge case where that resolves to nothing.
+        // No promotional drop-zone panel, no "type a path" field: just the
+        // minimum needed to recover.
+        <div style={{ padding: 14, flexShrink: 0, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{scanning ? "Opening workspace…" : "No workspace loaded."}</span>
+          {!scanning && (
+            <button onClick={onChangeWorkspace} style={btnStyle("var(--blue)", true)}>
               Change workspace
             </button>
           )}
-          <div
-            style={{
-              marginTop: 12,
-              padding: "18px 14px",
-              border: "1px dashed var(--border)",
-              borderRadius: 6,
-              textAlign: "center",
-              fontSize: 11.5,
-              color: "var(--text-faint)",
-              maxWidth: 340,
-            }}
-          >
-            Drop a folder anywhere in the window to open it as the workspace
-            <br />
-            One workspace is active at a time
-          </div>
         </div>
       )}
 
