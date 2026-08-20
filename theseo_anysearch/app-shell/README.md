@@ -297,6 +297,43 @@ added. No replacement was built; if a discovery path for those runs is
 wanted, it needs its own explicit design (most likely something that
 belongs in the actual drawio spec, not an ad hoc sidebar control).
 
+## Scrollbar theming and positioning
+
+Default WebView2/Chromium scrollbars didn't match the dark theme, and
+vertical scrollbars for the leftmost (`RunHistorySidebar`) and Explain's
+main content pane sat at the boundary shared with the next pane instead
+of the window's outer edge. Fixed:
+
+- `tokens.css` styles `::-webkit-scrollbar` (thin, dark thumb using
+  `--border`/`--text-faint` on hover, transparent track, no arrow
+  buttons). **Deliberately does not also set the standard
+  `scrollbar-width`/`scrollbar-color` properties** — on this dev machine
+  (WebView2 with an OS "always show scrollbars"-style setting), setting
+  both together made Chromium fall back to the classic native scrollbar
+  (arrow buttons included) and ignore the `::-webkit-scrollbar-button`
+  override; the `-webkit-` pseudo-elements alone render correctly.
+  Horizontal scrollbars needed no separate handling — they already
+  render along a container's bottom edge by default; only the theming
+  applies to them too.
+- `RunHistorySidebar.tsx` and `ExplainPanel.tsx`'s main pane wrap their
+  content in `direction: rtl` (outer scroll container) /
+  `direction: ltr` (inner content wrapper) so their vertical scrollbar
+  renders on the pane's outer-left edge instead of its inner edge
+  against the next pane, without reversing any internal flex-row
+  layouts. The rightmost pane on each tab (file tree / Replay's and
+  Explain's right sidebars) already had its scrollbar on the window's
+  true right edge by default and needed no change.
+
+Verified live: forced DOM overflow in the sidebar (cloned run cards) and
+screenshotted the actual window edges at real size — confirms a thin,
+dark, button-free thumb sitting flush against the window's left edge
+(previously it sat at the sidebar/main-content boundary, using the
+native light-gray style). **Not live-verified**: `ExplainPanel`'s flip
+uses the identical proven pattern but couldn't be exercised against its
+`available` (checkpoint-connected) branch — no run in this repo has both
+a saved checkpoint and a schema-compatible config, the same pre-existing
+gap noted elsewhere in this file.
+
 ## Known tech debt
 
 - `StepData`/`EpisodeData`/`TrajectoryData` are duplicated across

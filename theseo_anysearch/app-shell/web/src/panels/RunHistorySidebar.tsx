@@ -63,7 +63,12 @@ export default function RunHistorySidebar({
   }
 
   return (
-    <div style={{ width: 220, borderRight: "1px solid var(--border-soft)", overflowY: "auto", padding: 14, flexShrink: 0 }}>
+    // direction: rtl on the scroll container + direction: ltr on the inner
+    // wrapper flips the scrollbar to this pane's outer (left) edge instead
+    // of its inner edge against the main content, without reversing any of
+    // the flex-row layouts inside.
+    <div style={{ width: 220, borderRight: "1px solid var(--border-soft)", overflowY: "auto", flexShrink: 0, direction: "rtl" }}>
+    <div style={{ direction: "ltr", padding: 14 }}>
       {index && index.runs.length > 0 && !!startableConfigs.length && (
         <div style={{ marginBottom: 14 }}>
           <button onClick={() => setNewRunExpanded((v) => !v)} style={{ ...btnStyle("#232323", true), width: "100%" }}>
@@ -173,6 +178,7 @@ export default function RunHistorySidebar({
           </div>
         </>
       )}
+    </div>
     </div>
   );
 }

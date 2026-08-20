@@ -165,7 +165,11 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
         // sidebar for editing the observation (source, local_grid, actions) --
         // not three equal columns.
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, borderRight: "1px solid var(--border-soft)", overflowY: "auto" }}>
+          {/* direction: rtl/ltr flip (see RunHistorySidebar) moves this pane's
+              scrollbar to its outer-left edge instead of the boundary shared
+              with the observation-editor sidebar. */}
+          <div style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--border-soft)", overflowY: "auto", direction: "rtl" }}>
+          <div style={{ direction: "ltr", display: "flex", flexDirection: "column", padding: 14 }}>
             <div style={groupLabel()}>Observation geometry</div>
             <GeometryPreview
               observation={observation}
@@ -185,6 +189,7 @@ export default function ExplainPanel({ file, seed }: { file: TrajectoryFile; see
             <div style={{ flexShrink: 0 }}>
               <ResultPanel result={result} />
             </div>
+          </div>
           </div>
 
           <div style={{ width: 340, overflowY: "auto", padding: 14, flexShrink: 0 }}>
