@@ -41,6 +41,10 @@ def _split_episode_ids(dataset: DemonstrationDataset, split: str) -> np.ndarray:
 
 def uniform_transition(context: EpisodeSamplingContext) -> list[np.ndarray]:
     """Shuffle all transitions in the split and slice into fixed-size batches."""
+    if context.parameters:
+        raise SamplingProviderError(
+            "sampling provider 'uniform_transition' does not accept parameters"
+        )
     count = _split_size(context.dataset, context.split)
     rng = np.random.default_rng(context.seed)
     indices = rng.permutation(count)
@@ -51,7 +55,16 @@ def uniform_transition(context: EpisodeSamplingContext) -> list[np.ndarray]:
 
 
 def uniform_episode(context: EpisodeSamplingContext) -> list[np.ndarray]:
-    """Shuffle whole episodes and slice into batches of their transitions."""
+    """Shuffle whole episodes and slice into batches of their transitions.
+
+    Episodes are never split across batches, so a returned batch may exceed
+    ``batch_size`` by up to one episode's transition count -- ``batch_size``
+    is a soft target under this sampler, not a hard bound.
+    """
+    if context.parameters:
+        raise SamplingProviderError(
+            "sampling provider 'uniform_episode' does not accept parameters"
+        )
     episode_ids = _split_episode_ids(context.dataset, context.split)
     unique_episodes = np.unique(episode_ids)
     rng = np.random.default_rng(context.seed)

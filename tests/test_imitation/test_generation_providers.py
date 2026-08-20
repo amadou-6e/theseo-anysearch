@@ -7,6 +7,7 @@ import pytest
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.imitation.generation_providers import (
     BUILT_IN_GENERATION_PROVIDERS,
+    DemonstrationEpisode,
     EpisodeGenerationContext,
     GenerationProviderError,
     resolve_generation_provider,
@@ -71,3 +72,49 @@ def test_weighted_astar_provider_rejects_non_positive_weight(tmp_path):
             )
         )
     env.close()
+
+
+def test_astar_provider_rejects_unexpected_parameters(tmp_path):
+    env = VoxelEnv(_tiny_env_config(tmp_path))
+    observation, _ = env.reset(seed=10)
+    provider = resolve_generation_provider("astar")
+
+    with pytest.raises(GenerationProviderError, match="bogus_key"):
+        provider(
+            EpisodeGenerationContext(
+                env=env,
+                observation=observation,
+                seed=10,
+                attempt=0,
+                parameters={"bogus_key": 1},
+            )
+        )
+    env.close()
+
+
+def test_weighted_astar_provider_rejects_unexpected_parameters(tmp_path):
+    env = VoxelEnv(_tiny_env_config(tmp_path))
+    observation, _ = env.reset(seed=10)
+    provider = resolve_generation_provider("weighted_astar")
+
+    with pytest.raises(GenerationProviderError, match="bogus_key"):
+        provider(
+            EpisodeGenerationContext(
+                env=env,
+                observation=observation,
+                seed=10,
+                attempt=0,
+                parameters={"weight": 1.5, "bogus_key": 1},
+            )
+        )
+    env.close()
+
+
+def test_demonstration_episode_rejects_mismatched_observation_action_lengths():
+    with pytest.raises(ValueError, match="length mismatch"):
+        DemonstrationEpisode(
+            observations=[1, 2],
+            actions=[1],
+            success=True,
+            seed=1,
+        )

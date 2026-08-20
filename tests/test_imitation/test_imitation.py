@@ -22,6 +22,7 @@ from theseo_anysearch.imitation.models import (
     ImitationConfig,
 )
 from theseo_anysearch.imitation.pretraining import (
+    _dataset_for_run,
     _supervised_metrics,
     behavior_clone_policy,
 )
@@ -246,6 +247,47 @@ def test_dataset_reuse_rejects_schema_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         load_compatible_dataset(tmp_path, "different")
+
+
+def test_dataset_for_run_regenerates_when_cached_manifest_is_schema_incompatible(
+    tmp_path,
+):
+    waypoints = tmp_path.joinpath("waypoints.json")
+    waypoints.write_text(
+        json.dumps({"start": [4, 4, 4], "goal": [4, 4, 6]}),
+        encoding="utf-8",
+    )
+    env_config = {
+        "waypoints_file": str(waypoints),
+        "grid_size": 8,
+        "max_steps": 10,
+        "agent_count": 1,
+        "obs_mode": "radial",
+        "ray_max_len": 10,
+        "trail_mode": False,
+    }
+    config = ImitationConfig(
+        enabled=True,
+        generation={"episodes": 2, "max_attempts": 2},
+        collection={"seed_start": 10, "validation_fraction": 0.5, "reuse_dataset": True},
+    )
+
+    dataset_dir = tmp_path.joinpath("dataset")
+    dataset_dir.mkdir()
+    dataset_dir.joinpath("manifest.json").write_text(
+        json.dumps({"schema_version": 1, "teacher_type": "astar"}),
+        encoding="utf-8",
+    )
+    dataset_dir.joinpath("demonstrations.npz").write_bytes(b"not a real npz file")
+
+    dataset = _dataset_for_run(env_config, config, dataset_dir)
+
+    assert dataset.manifest.successful_episodes == 2
+    assert dataset.manifest.fingerprint != "1"
+    stored_manifest = DemonstrationManifest.model_validate_json(
+        dataset_dir.joinpath("manifest.json").read_text(encoding="utf-8")
+    )
+    assert stored_manifest.fingerprint == dataset.manifest.fingerprint
 
 
 def test_dataset_fingerprint_canonicalizes_geometry_paths(tmp_path, monkeypatch):

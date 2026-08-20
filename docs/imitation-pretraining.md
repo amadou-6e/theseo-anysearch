@@ -20,6 +20,10 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
   `dijkstra`, `weighted_astar`, and `replanning_astar`.
 - `generation.provider.parameters.weight` configures `weighted_astar` and is
   not accepted by the other built-in providers.
+- A waypoint curriculum with `completion_mode: continue_route` generates
+  demonstrations via the native shortest-path planner directly and does not
+  invoke `generation.provider` at all, so a custom generation provider
+  configured alongside such a curriculum never actually runs.
 - `generation.episodes` is the required number of accepted demonstrations.
 - `generation.max_attempts` bounds failed or unsolved collection attempts.
 - `generation.require_success` discards episodes that do not reach the goal.
@@ -44,11 +48,17 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
   difficult stage.
 - `sampling.provider` selects the batch-sampling provider used during
   pretraining. It defaults to `uniform_transition`, which samples individual
-  demonstration transitions uniformly at random. `uniform_episode` instead
-  samples whole episodes uniformly, then draws transitions from within each
-  sampled episode, which reduces the influence of long episodes relative to
-  short ones. Configure it the same way as `generation.provider`, either as
-  shorthand (`provider: uniform_episode`) or the full selector block.
+  demonstration transitions uniformly at random. `uniform_episode` shuffles
+  episode order and groups each episode's transitions contiguously so no
+  single episode's transitions are split across two batches, preserving
+  within-episode temporal correlation inside a batch; per-transition coverage
+  per epoch is otherwise identical to `uniform_transition` -- every
+  transition from every episode is still included exactly once. Because
+  episodes are never split across batches, `pretraining.batch_size` is a soft
+  target under `uniform_episode`, not a hard bound -- a batch can exceed it by
+  up to one episode's transition count. Configure the sampling provider the
+  same way as `generation.provider`, either as shorthand
+  (`provider: uniform_episode`) or the full selector block.
 - `pretraining.epochs` is the maximum number of behavior-cloning passes.
 - `pretraining.batch_size` is the supervised optimizer batch size.
 - `pretraining.learning_rate` applies only to behavior cloning.

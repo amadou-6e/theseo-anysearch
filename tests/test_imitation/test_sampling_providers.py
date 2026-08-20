@@ -65,3 +65,69 @@ def test_uniform_episode_never_splits_an_episode_across_batches():
         assert len(episode_ids_in_batch) == 1
     covered = np.sort(np.concatenate(batches))
     assert covered.tolist() == [0, 1, 2, 3, 4, 5]
+
+
+def _dataset_with_oversized_episode() -> DemonstrationDataset:
+    manifest = DemonstrationManifest(
+        fingerprint="abc",
+        generation_provider_name="astar",
+        generation_provider_parameters={},
+        requested_episodes=1,
+        successful_episodes=1,
+        accepted_episodes=1,
+        attempted_episodes=1,
+        training_episodes=1,
+        validation_episodes=0,
+        training_samples=5,
+        validation_samples=0,
+        observation_size=1,
+        action_count=2,
+        seeds=[1],
+    )
+    return DemonstrationDataset(
+        train_observations=np.zeros((5, 1), dtype=np.float32),
+        train_actions=np.zeros(5, dtype=np.int64),
+        train_episode_ids=np.zeros(5, dtype=np.int64),
+        validation_observations=np.zeros((0, 1), dtype=np.float32),
+        validation_actions=np.zeros(0, dtype=np.int64),
+        validation_episode_ids=np.zeros(0, dtype=np.int64),
+        manifest=manifest,
+    )
+
+
+def test_uniform_episode_batch_may_legitimately_exceed_batch_size():
+    provider = resolve_sampling_provider("uniform_episode")
+    dataset = _dataset_with_oversized_episode()
+    batches = provider(
+        EpisodeSamplingContext(dataset=dataset, split="train", batch_size=3, seed=1)
+    )
+    assert len(batches) == 1
+    assert sorted(batches[0].tolist()) == [0, 1, 2, 3, 4]
+
+
+def test_uniform_transition_rejects_unexpected_parameters():
+    provider = resolve_sampling_provider("uniform_transition")
+    with pytest.raises(SamplingProviderError, match="does not accept parameters"):
+        provider(
+            EpisodeSamplingContext(
+                dataset=_dataset(),
+                split="train",
+                batch_size=4,
+                seed=1,
+                parameters={"bogus_key": 1},
+            )
+        )
+
+
+def test_uniform_episode_rejects_unexpected_parameters():
+    provider = resolve_sampling_provider("uniform_episode")
+    with pytest.raises(SamplingProviderError, match="does not accept parameters"):
+        provider(
+            EpisodeSamplingContext(
+                dataset=_dataset(),
+                split="train",
+                batch_size=4,
+                seed=1,
+                parameters={"bogus_key": 1},
+            )
+        )

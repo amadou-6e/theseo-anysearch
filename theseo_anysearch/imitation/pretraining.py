@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as functional
+from pydantic import ValidationError
 from ray.rllib.models import ModelCatalog
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
@@ -268,10 +269,13 @@ def _dataset_for_run(
             and manifest_path.exists()
             and arrays_path.exists()
         ):
-            stored_manifest = DemonstrationManifest.model_validate_json(
-                manifest_path.read_text(encoding="utf-8")
-            )
-            if stored_manifest.fingerprint == expected:
+            try:
+                stored_manifest = DemonstrationManifest.model_validate_json(
+                    manifest_path.read_text(encoding="utf-8")
+                )
+            except ValidationError:
+                stored_manifest = None
+            if stored_manifest is not None and stored_manifest.fingerprint == expected:
                 return load_compatible_dataset(dataset_dir, expected)
 
         dataset = collect_demonstrations(env_config, imitation, config_path)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import networkx as nx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic import VoxelReplanningAStarHeuristic, build_voxel_heuristic
@@ -42,6 +42,15 @@ class DemonstrationEpisode(BaseModel):
     success: bool
     seed: int
 
+    @model_validator(mode="after")
+    def validate_observation_action_lengths(self) -> "DemonstrationEpisode":
+        if len(self.observations) != len(self.actions):
+            raise ValueError(
+                "DemonstrationEpisode observations and actions length mismatch: "
+                f"{len(self.observations)} observations vs {len(self.actions)} actions"
+            )
+        return self
+
 
 GenerationProvider = Callable[[EpisodeGenerationContext], DemonstrationEpisode]
 
@@ -63,9 +72,17 @@ def _generate_heuristic_episode(
             raise GenerationProviderError(
                 "generation provider 'weighted_astar' requires parameters.weight > 0"
             )
-    elif weight is not None:
+        unexpected = set(context.parameters) - {"weight"}
+    else:
+        if weight is not None:
+            raise GenerationProviderError(
+                f"generation provider {heuristic_type!r} does not accept parameters.weight"
+            )
+        unexpected = set(context.parameters)
+    if unexpected:
         raise GenerationProviderError(
-            f"generation provider {heuristic_type!r} does not accept parameters.weight"
+            f"generation provider {heuristic_type!r} does not accept parameters: "
+            f"{sorted(unexpected)}"
         )
     env = context.env
     teacher = build_voxel_heuristic(env, heuristic_type, weight=weight)
