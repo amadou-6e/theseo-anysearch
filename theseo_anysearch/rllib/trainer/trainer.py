@@ -213,6 +213,9 @@ class Trainer(BaseTrainer):
                     "imitation/cache_hit": float(self._imitation_result.cache_hit),
                     "imitation/validation_accuracy": self._imitation_result.validation_accuracy,
                     "imitation/validation_loss": self._imitation_result.best_validation_loss,
+                    "imitation/validation_value_loss": (
+                        self._imitation_result.best_validation_value_loss or 0.0
+                    ),
                     "imitation/pre_rl_success_rate": (
                         self._imitation_result.pre_rl_success_rate or 0.0
                     ),

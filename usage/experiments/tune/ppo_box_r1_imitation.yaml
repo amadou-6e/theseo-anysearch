@@ -65,10 +65,12 @@ imitation:
     learning_rate: 0.0003
     label_smoothing: 0.0
     early_stopping_patience: 3
+    value_discount: 0.99
+    value_loss_coefficient: 0.1
   handoff:
     initialize_encoder: true
     initialize_policy: true
-    initialize_value_head: false
+    initialize_value_head: true
   cache:
     enabled: true
     # Tune resolves a shared experiment-level directory automatically when null.
