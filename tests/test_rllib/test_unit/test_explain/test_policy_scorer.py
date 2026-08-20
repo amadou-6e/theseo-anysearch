@@ -7,8 +7,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
+from gymnasium.spaces import Box, Dict, Discrete
+from ray.rllib.core.columns import Columns
 
-from theseo_anysearch.rllib.explain.scoring import DQNPolicyScorer, MockPolicyScorer
+from theseo_anysearch.rllib.explain.scoring import (
+    DQNPolicyScorer,
+    MockPolicyScorer,
+    PPOPolicyScorer,
+)
 
 
 class FakeDQNAlgorithm:
@@ -30,6 +37,23 @@ class FakeDQNAlgorithm:
             }
         )
         return 0, [], {"q_values": self.q_values}
+
+
+class FakePPOModule(torch.nn.Module):
+    """Small modern PPO module exposing inference logits and critic values."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(()))
+        self.action_space = Discrete(3)
+
+    def forward_inference(self, batch):
+        batch_size = batch[Columns.OBS].shape[0]
+        logits = torch.tensor([[-1.0, 2.0, 0.5]], device=self.anchor.device)
+        return {Columns.ACTION_DIST_INPUTS: logits.repeat(batch_size, 1)}
+
+    def compute_values(self, batch, embeddings=None):
+        return batch[Columns.OBS].sum(dim=1) + self.anchor
 
 
 def observation() -> dict[str, np.ndarray]:
@@ -111,3 +135,26 @@ def test_dqn_policy_scorer_finds_repo_runtime_geometry_pool_candidate():
     candidates = DQNPolicyScorer.geometry_pool_candidates(pool_dir, experiment_path)
 
     assert Path("runtime", "geometry_pools", "preview").resolve() in candidates
+
+
+def test_ppo_policy_scorer_returns_logits_action_and_state_value():
+    observation_space = Dict(
+        {
+            "cursor_pos": Box(-1.0, 1.0, shape=(3,), dtype=np.float32),
+            "goal_distance": Box(0.0, 1.0, shape=(1,), dtype=np.float32),
+        }
+    )
+    sample = {
+        "cursor_pos": np.asarray([0.1, 0.2, 0.3], dtype=np.float32),
+        "goal_distance": np.asarray([0.4], dtype=np.float32),
+    }
+    scorer = PPOPolicyScorer(
+        module=FakePPOModule(), observation_space=observation_space
+    )
+
+    table = scorer.score_all([sample])
+
+    assert table.score_type == "policy_logit"
+    assert table.values[0] == pytest.approx([-1.0, 2.0, 0.5])
+    assert scorer.select_action(sample) == 1
+    assert scorer.state_values([sample]) == pytest.approx([1.0])

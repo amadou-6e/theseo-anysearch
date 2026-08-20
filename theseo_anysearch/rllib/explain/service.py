@@ -32,7 +32,11 @@ from theseo_anysearch.rllib.explain.scenarios import (
     load_scenario,
     validate_observation,
 )
-from theseo_anysearch.rllib.explain.scoring import DQNPolicyScorer, PolicyScorer
+from theseo_anysearch.rllib.explain.scoring import (
+    DQNPolicyScorer,
+    PPOPolicyScorer,
+    PolicyScorer,
+)
 from theseo_anysearch.rllib.explain.traces import (
     ObservationTrace,
     ObservationTraceStep,
@@ -135,15 +139,24 @@ class PolicyExplanationService:
         experiment = load_experiment(self.experiment_path)
         if not isinstance(experiment, ExperimentConfig):
             raise ValueError("explanations require a single resolved experiment")
-        if experiment.training.algorithm != "dqn":
+        algorithm = experiment.training.algorithm
+        scorer_types = {"dqn": DQNPolicyScorer, "ppo": PPOPolicyScorer}
+        if algorithm not in scorer_types:
             raise ValueError(
-                f"algorithm {experiment.training.algorithm!r} is not supported; expected 'dqn'"
+                f"algorithm {algorithm!r} is not supported; expected one of "
+                f"{sorted(scorer_types)}"
             )
         self.experiment = experiment
+        self.algorithm = algorithm
         self.checkpoint = checkpoint
-        self.scorer = scorer or DQNPolicyScorer.from_run_dir(
+        self.scorer = scorer or scorer_types[algorithm].from_run_dir(
             self.run_dir, checkpoint=checkpoint
         )
+
+    def _algorithm_name(self) -> str:
+        """Return restored algorithm name, retaining legacy test fixtures."""
+
+        return getattr(self, "algorithm", "dqn")
 
     def explain_trace(
         self,
@@ -246,7 +259,7 @@ class PolicyExplanationService:
                         collision=None,
                     )
                 ],
-                algorithm="dqn",
+                algorithm=self._algorithm_name(),
             )
             validity = "not_environment_validated"
         else:
@@ -477,7 +490,7 @@ class PolicyExplanationService:
             env.close()
         if not steps:
             raise ValueError(f"trajectory {path} contains no steps")
-        return ObservationTrace(steps, algorithm="dqn")
+        return ObservationTrace(steps, algorithm=self._algorithm_name())
 
     def _collect_actions(
         self, env: VoxelEnv, seed: int, actions: tuple[int, ...]
@@ -507,7 +520,7 @@ class PolicyExplanationService:
             observation = next_observation
             if terminated or truncated:
                 break
-        return ObservationTrace(steps, algorithm="dqn")
+        return ObservationTrace(steps, algorithm=self._algorithm_name())
 
     def _policy_action(self, canonical_action: int) -> int:
         """Map a stored canonical action back into the run's policy action space."""

@@ -45,12 +45,18 @@ class ExplanationReportBuilder:
         score_rows: Mapping[int, np.ndarray],
         attributions: Mapping[int, dict[str, float]],
         score_type: str,
+        state_values: Mapping[int, float] | None = None,
         output_dir: Path | None = None,
     ) -> ExplanationReport:
         """Build an explanation report."""
 
         explained_steps = [
-            self._build_step(trace.step(index), score_rows[index], attributions.get(index, {}))
+            self._build_step(
+                trace.step(index),
+                score_rows[index],
+                attributions.get(index, {}),
+                None if state_values is None else state_values.get(index),
+            )
             for index in selected_steps
         ]
         return ExplanationReport(
@@ -71,6 +77,7 @@ class ExplanationReportBuilder:
         step: ObservationTraceStep,
         scores: np.ndarray,
         attributions: dict[str, float],
+        state_value: float | None = None,
     ) -> ExplainedStep:
         """Build one explained step from trace metadata and scores."""
 
@@ -110,6 +117,7 @@ class ExplanationReportBuilder:
                 float(np.asarray(step.observation["goal_distance"]).reshape(-1)[0])
                 if "goal_distance" in step.observation else None
             ),
+            state_value=state_value,
         )
 
     def best_safe_action(
@@ -223,6 +231,7 @@ class ExplanationReportWriter:
                     "best_safe_action",
                     "best_safe_score",
                     "score_margin",
+                    "state_value",
                 ],
             )
             writer.writeheader()
@@ -239,6 +248,7 @@ class ExplanationReportWriter:
                         "best_safe_action": step.best_safe_action,
                         "best_safe_score": step.best_safe_score,
                         "score_margin": step.score_margin,
+                        "state_value": step.state_value,
                     }
                 )
 
@@ -287,6 +297,11 @@ class ExplanationReportWriter:
                     f"`{step.best_safe_score:.6g}` for safe action "
                     f"`{step.best_safe_action}`. The margin was "
                     f"`{step.score_margin:.6g}`. Strongest measured group: `{strongest}`.",
+                    *(
+                        [f"The PPO critic estimated state value `{step.state_value:.6g}`."]
+                        if step.state_value is not None
+                        else []
+                    ),
                     "",
                 ]
             )
