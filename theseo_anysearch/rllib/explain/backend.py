@@ -60,6 +60,7 @@ class PolicyExplanationBackend:
 
         selected_observations = [self._trace.step(index).observation for index in selected_steps]
         score_table = self._scorer.score_all(selected_observations)
+        state_value_rows = self._scorer.state_values(selected_observations)
         score_rows = {
             step_index: score_table.row(row_index)
             for row_index, step_index in enumerate(selected_steps)
@@ -74,6 +75,14 @@ class PolicyExplanationBackend:
             score_rows,
             attributions,
             score_table.score_type,
+            state_values=(
+                None
+                if state_value_rows is None
+                else {
+                    step_index: float(state_value_rows[row_index])
+                    for row_index, step_index in enumerate(selected_steps)
+                }
+            ),
             output_dir=(
                 self._report_writer.output_dir if self._report_writer is not None else None
             ),

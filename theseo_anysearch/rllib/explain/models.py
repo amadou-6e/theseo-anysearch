@@ -130,6 +130,7 @@ class ExplainedStep(BaseModel):
     action_scores: list[float] = Field(default_factory=list)
     goal_direction: list[float] | None = None
     goal_distance: float | None = None
+    state_value: float | None = None
 
     def to_json_dict(self) -> dict:
         """Return a JSON-serializable representation of this step."""
@@ -150,6 +151,7 @@ class ExplainedStep(BaseModel):
             "action_scores": list(self.action_scores),
             "goal_direction": self.goal_direction,
             "goal_distance": self.goal_distance,
+            "state_value": self.state_value,
         }
 
 

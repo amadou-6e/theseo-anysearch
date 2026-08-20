@@ -51,7 +51,7 @@ def explain(
     output: Optional[Path] = typer.Option(None, file_okay=False),
     seed: Optional[int] = typer.Option(None),
 ) -> None:
-    """Explain DQN decisions from a saved trace or controlled scenario."""
+    """Explain DQN or PPO decisions from a saved trace or controlled scenario."""
 
     run_explain(
         run, checkpoint, trace, scenario, request, method, focus, steps,

@@ -1,12 +1,18 @@
 # Explaining policy decisions
 
-`anysearch explain` restores a trained DQN checkpoint and explains why it preferred its recorded action over the best visibly safe alternative. Grouped occlusion replaces one observation group at a time with a background value and measures the change in the Q-value margin.
+`anysearch explain` restores a trained DQN or PPO checkpoint and explains why it preferred its recorded action over the best visibly safe alternative. Grouped occlusion replaces one observation group at a time with a background value and measures the change in the action-score margin.
+
+DQN reports use Q-values. PPO reports use action-distribution logits and also
+record the critic's scalar `state_value` for every explained observation. PPO
+logits are suitable for margins and deterministic `argmax` actions; they are
+deliberately labelled `policy_logit` and are never presented as Q-values.
 
 ## Explain a saved trajectory
 
 ```powershell
 anysearch explain experiments/train/000_example/runtime/run-id --trace best
 anysearch explain dqn-waypoints:4d312abc --checkpoint latest --trace iter_000080
+anysearch explain ppo-waypoints:b6f1ae83 --checkpoint 50 --trace iter_000050
 ```
 
 The run may be a directory or registered `experiment-name:run-id`. `--trace` accepts `best`, `latest`, an iteration filename, or a JSON trajectory path. AnySearch recreates the environment from `experiment.yaml` and replays every action. It stops at the first cursor mismatch and never silently explains a divergent replay.
@@ -35,7 +41,7 @@ The background can be `auto`, `trace`/`mean` (both average every observation in 
 
 An explicitly requested `trace` or `mean` background requires at least two observations, since a single-observation background collapses to the observation itself and always attributes 0.0 to every group. `auto` prevents this degeneration for single-step and fictional scenarios.
 
-Modern DQN checkpoints restore only their saved RLModule for explanations. This
+Modern DQN and PPO checkpoints restore only their saved RLModule for explanations. This
 avoids starting Ray, rebuilding a trainer, or allocating rollout workers merely
 to score observations.
 
@@ -72,11 +78,16 @@ Artifacts go to `<run>/explanations/<id>/` unless `--output` is set:
 - `observations/step_XXXXXX.json`: exact pre-action network inputs;
 - `request.yaml`: fully resolved settings.
 
-Attribution is relative to `chosen Q-value - best-safe Q-value`. A positive group attribution means that group increased preference for the chosen action; a negative value reduced it. Occlusion describes policy sensitivity, not causal correctness.
+Attribution is relative to `chosen action score - best-safe action score`. For
+DQN the score is a Q-value; for PPO it is a policy logit. A positive group
+attribution means that group increased preference for the chosen action; a
+negative value reduced it. PPO reports additionally include `state_value` in
+JSON, CSV, and the Markdown summary. Occlusion describes policy sensitivity,
+not causal correctness.
 
 ## Current scope
 
-Checkpoint restoration supports DQN with discrete voxel action spaces. The available method is grouped occlusion. Unsupported algorithms, vector actions, malformed scenarios, and divergent traces raise explicit errors.
+Checkpoint restoration supports DQN and PPO with discrete voxel action spaces. The available method is grouped occlusion. Unsupported algorithms, vector actions, malformed scenarios, and divergent traces raise explicit errors.
 
 ## Interactive UI
 

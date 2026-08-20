@@ -51,6 +51,13 @@ class PolicyScorer(ABC):
         scores = self.score_all([observation]).values[0]
         return int(np.argmax(scores))
 
+    def state_values(
+        self, observations: Sequence[Mapping[str, np.ndarray]]
+    ) -> np.ndarray | None:
+        """Return state-value estimates when the policy exposes a critic."""
+
+        return None
+
 
 class MockPolicyScorer(PolicyScorer):
     """Deterministic scorer backed by an explicit score table.
@@ -453,3 +460,94 @@ class DQNPolicyScorer(PolicyScorer):
         with torch.inference_mode():
             output = self._module.compute_q_values(batch)
         return output[QF_PREDS][0].detach().cpu().numpy().astype(np.float32)
+
+
+class PPOPolicyScorer(DQNPolicyScorer):
+    """Score discrete PPO actions with logits from a restored RLModule."""
+
+    algorithm = "ppo"
+    score_type = "policy_logit"
+
+    def score_all(
+        self, observations: Sequence[Mapping[str, np.ndarray]]
+    ) -> ActionScoreTable:
+        """Return one PPO action-logit row for every observation."""
+
+        values = np.stack(
+            [self._policy_logits(observation) for observation in observations]
+        ).astype(np.float32, copy=False)
+        return ActionScoreTable(values=values, score_type=self.score_type)
+
+    def select_action(self, observation: Mapping[str, np.ndarray]) -> int:
+        """Return PPO's deterministic discrete action."""
+
+        if self._module is not None:
+            return int(np.argmax(self._policy_logits(observation)))
+        result = self._compute_action(observation)
+        if isinstance(result, tuple):
+            return int(result[0])
+        if isinstance(result, np.ndarray):
+            return int(result.item())
+        return int(result)
+
+    def state_values(
+        self, observations: Sequence[Mapping[str, np.ndarray]]
+    ) -> np.ndarray | None:
+        """Return PPO critic estimates for every observation."""
+
+        if self._module is None:
+            return None
+        return np.asarray(
+            [self._module_state_value(observation) for observation in observations],
+            dtype=np.float32,
+        )
+
+    def _policy_logits(self, observation: Mapping[str, np.ndarray]) -> np.ndarray:
+        if self._module is None:
+            result = self._compute_action(observation)
+            info = self._extract_info(result)
+            values = info.get("action_dist_inputs")
+            if values is None:
+                raise ValueError("PPO policy info did not contain action_dist_inputs")
+            return np.asarray(values, dtype=np.float32).reshape(-1)
+        batch = self._module_batch(observation)
+        from ray.rllib.core.columns import Columns
+
+        self._module.eval()
+        import torch
+
+        with torch.inference_mode():
+            output = self._module.forward_inference(batch)
+        return (
+            output[Columns.ACTION_DIST_INPUTS][0]
+            .detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
+
+    def _module_state_value(self, observation: Mapping[str, np.ndarray]) -> float:
+        if not hasattr(self._module, "compute_values"):
+            raise ValueError("restored PPO RLModule does not expose compute_values()")
+        batch = self._module_batch(observation)
+        import torch
+
+        self._module.eval()
+        with torch.inference_mode():
+            values = self._module.compute_values(batch)
+        return float(values.reshape(-1)[0].detach().cpu().item())
+
+    def _module_batch(self, observation: Mapping[str, np.ndarray]) -> dict[str, Any]:
+        if self._observation_space is None:
+            raise ValueError("RLModule scoring requires the structured observation space")
+        import torch
+        from gymnasium.spaces import flatten
+        from ray.rllib.core.columns import Columns
+
+        flat = flatten(self._observation_space, observation)
+        device = next(self._module.parameters()).device
+        return {
+            Columns.OBS: torch.as_tensor(
+                flat, dtype=torch.float32, device=device
+            ).unsqueeze(0)
+        }
