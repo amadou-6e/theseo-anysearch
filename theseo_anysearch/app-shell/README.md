@@ -85,12 +85,6 @@ Verified live: one click on a run card, then Replay tab, showed the full
   Validate/diagnostics path was verified live; Save/Start run were not
   fired against real files during verification to avoid mutating the
   user's workspace or kicking off a real training job.)
-- "Open trajectories folder" — a direct path-based entry point into Replay
-  for runs/Tune trials with no `run.json` (legacy `ray_runtime.json`-keyed
-  trials never get a Run History row, and `trajectories/` is deliberately
-  excluded from the scanned file tree by `workspace.py`'s
-  `_workspace_files` — this mirrors the native CLI's `--tune-dir`/file-mode
-  entry points instead of trying to route everything through run.json).
 
 **Replay tab**
 - Iteration history: loads every `iter_*.json` (or `best.json`) in a run's
@@ -280,11 +274,28 @@ workspace with no manual entry anywhere. **Not yet wired**: the Python
 `anysearch ui` command itself still launches the old egui binary, not this
 one -- that CLI change is out of this pass's scope.
 
-Added but not in the spec at all (kept, flagged rather than hidden):
-- The entire "Open trajectories folder" control in the sidebar — added to
-  work around `trajectories/` being deliberately excluded from the scanned
-  file tree (see Runs tab notes above); without it, legacy Tune trials with
-  no `run.json` have no way into Replay at all.
+Fixed (fifth pass): the "Open trajectories folder" control (manual
+path input + Open button + "Trajectories found"/"No trajectories found"
+status line) has been removed from `RunHistorySidebar.tsx` entirely. It
+was flagged as an unrequested addition — "not in the spec at all" — in
+the fourth-pass entry above, and again multiple times afterward in
+direct feedback ("I also said a few times that the trajectories stuff
+under the runs is not part of the drawio yet its still there") before
+actually being removed this pass; documenting a known deviation is not
+the same as fixing it, and it should not have taken repeated asks.
+Verified live: `document.body.innerText` on the running app contains no
+occurrence of "trajector" anywhere, and the sidebar screenshot shows the
+run-card list running directly into the "Select a run to open Overview,
+Replay, or Explain." footer with nothing in between.
+
+Real, honest consequence of this removal (not silently worked around):
+legacy Tune trials/runs with no `run.json` manifest (`trajectories/` is
+deliberately excluded from the scanned file tree by `workspace.py`'s
+`_workspace_files`) once again have no path into Replay or Explain
+through this UI — that gap was the original reason the control was
+added. No replacement was built; if a discovery path for those runs is
+wanted, it needs its own explicit design (most likely something that
+belongs in the actual drawio spec, not an ad hoc sidebar control).
 
 ## Known tech debt
 

@@ -30,12 +30,7 @@ export default function RunHistorySidebar({
   root,
   index,
   selectedRun,
-  hasReplayData,
-  manualTrajDir,
-  onManualTrajDirChange,
-  manualTrajError,
   onSelectRun,
-  onOpenTrajectoriesDir,
   runActive,
   activeRunLabel,
   onStartRun,
@@ -43,12 +38,7 @@ export default function RunHistorySidebar({
   root: string;
   index: WorkspaceIndex | null;
   selectedRun: WorkspaceRun | null;
-  hasReplayData: boolean;
-  manualTrajDir: string;
-  onManualTrajDirChange: (v: string) => void;
-  manualTrajError: string | null;
   onSelectRun: (run: WorkspaceRun) => void;
-  onOpenTrajectoriesDir: () => void;
   runActive: boolean;
   activeRunLabel: string | null;
   onStartRun: (configPath: string) => Promise<void>;
@@ -175,39 +165,6 @@ export default function RunHistorySidebar({
             </div>
           ))}
 
-          <div style={{ ...groupLabel(), marginTop: 18 }}>Open trajectories folder</div>
-          <div style={{ fontSize: 10.5, color: "var(--text-faint)", marginBottom: 6 }}>
-            For runs/Tune trials with no run.json manifest (not shown above) — paste a run or trial directory.
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input
-              value={manualTrajDir}
-              onChange={(e) => onManualTrajDirChange(e.target.value)}
-              placeholder="Run or trial directory"
-              style={{ ...inputStyle(), fontSize: 11 }}
-            />
-            <button onClick={onOpenTrajectoriesDir} disabled={!manualTrajDir} style={btnStyle("#232323", true)}>
-              Open
-            </button>
-          </div>
-          {manualTrajError && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 6 }}>{manualTrajError}</div>}
-
-          {selectedRun && (
-            <div
-              style={{
-                marginTop: 12,
-                fontSize: 11.5,
-                color: hasReplayData ? "var(--green)" : "var(--red)",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-              }}
-            >
-              <span style={{ fontSize: 8 }}>●</span>
-              {hasReplayData ? "Trajectories found — open Replay or Explain above." : "No trajectories found for this run."}
-            </div>
-          )}
-
           {/* Static footer hint, always shown once a workspace is open --
               per the spec, not conditioned on a run already being selected
               (that reads backwards: "select a run" after one is selected). */}
@@ -222,18 +179,6 @@ export default function RunHistorySidebar({
 
 function groupLabel(): React.CSSProperties {
   return { fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", color: "var(--text-faint)", textTransform: "uppercase", marginBottom: 10 };
-}
-
-function inputStyle(): React.CSSProperties {
-  return {
-    flex: 1,
-    background: "var(--panel)",
-    border: "1px solid var(--border)",
-    borderRadius: 5,
-    color: "var(--text)",
-    padding: "8px 10px",
-    fontSize: 12.5,
-  };
 }
 
 function btnStyle(bg: string, small = false): React.CSSProperties {

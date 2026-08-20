@@ -51,8 +51,6 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
-  const [manualTrajDir, setManualTrajDir] = useState("");
-  const [manualTrajError, setManualTrajError] = useState<string | null>(null);
 
   // Run-lifecycle state lives here too (not just inside RunsPanel) so the
   // sidebar's "[running] <name>" progress banner -- shown per the spec on
@@ -153,30 +151,10 @@ export default function App() {
 
   async function selectRun(run: WorkspaceRun) {
     setSelectedRun(run);
-    setManualTrajError(null);
     try {
       const files = await listTrajectoryFiles(`${root}/${run.path}`);
       setSelected(pickRepresentative(files));
     } catch {
-      setSelected(null);
-    }
-  }
-
-  // Run artifacts (trajectories/) are deliberately excluded from the
-  // scanned workspace tree, and Tune-trial sweep dirs (ray_runtime.json
-  // keyed, no run.json) never get a WorkspaceRun row -- mirrors the native
-  // CLI's --tune-dir/file-mode entry points. See RunHistorySidebar.
-  async function openTrajectoriesDir() {
-    if (!manualTrajDir) return;
-    setManualTrajError(null);
-    setSelectedRun(null);
-    try {
-      const files = await listTrajectoryFiles(manualTrajDir);
-      const entry = pickRepresentative(files);
-      if (!entry) setManualTrajError("No trajectory files found under that path.");
-      setSelected(entry);
-    } catch (e) {
-      setManualTrajError(String(e));
       setSelected(null);
     }
   }
@@ -249,12 +227,7 @@ export default function App() {
           root={root}
           index={index}
           selectedRun={selectedRun}
-          hasReplayData={!!selected}
-          manualTrajDir={manualTrajDir}
-          onManualTrajDirChange={setManualTrajDir}
-          manualTrajError={manualTrajError}
           onSelectRun={selectRun}
-          onOpenTrajectoriesDir={openTrajectoriesDir}
           runActive={runActive}
           activeRunLabel={activeRunLabel}
           onStartRun={startRunFor}
