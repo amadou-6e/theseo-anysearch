@@ -116,10 +116,15 @@ class TinyRLModule(TinyPolicyModel):
 
     def forward_train(self, batch):
         features = torch.relu(self.encoder(batch[Columns.OBS]))
-        return {
-            Columns.ACTION_DIST_INPUTS: self.policy_head(features),
-            Columns.VF_PREDS: self.value_head(features).reshape(-1),
-        }
+        return {Columns.ACTION_DIST_INPUTS: self.policy_head(features)}
+
+    def compute_values(self, batch, embeddings=None):
+        features = (
+            torch.relu(self.encoder(batch[Columns.OBS]))
+            if embeddings is None
+            else embeddings
+        )
+        return self.value_head(features).reshape(-1)
 
 
 def _manifest() -> DemonstrationManifest:

@@ -63,10 +63,15 @@ def _policy_outputs(
     if hasattr(model, "forward_train"):
         from ray.rllib.core.columns import Columns
 
-        outputs = model.forward_train({Columns.OBS: observations})
+        batch = {Columns.OBS: observations}
+        outputs = model.forward_train(batch)
         values = outputs.get(Columns.VF_PREDS)
+        if values is None and hasattr(model, "compute_values"):
+            values = model.compute_values(batch)
         if values is None:
-            raise RuntimeError("PPO RLModule did not expose value predictions")
+            raise RuntimeError(
+                "PPO RLModule exposed neither VF_PREDS nor compute_values()"
+            )
         return outputs[Columns.ACTION_DIST_INPUTS], values.reshape(-1)
 
     logits, _ = model(
