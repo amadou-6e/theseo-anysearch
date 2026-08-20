@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from theseo_anysearch.models import WaypointCurriculumConfig, WaypointRouteLengthConfig
+from theseo_anysearch.rllib.trainer.curriculum.waypoint import CurriculumController
 from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
 from theseo_anysearch.rllib.trainer.waypoint_routes import (
     action_step_distance,
@@ -10,6 +11,35 @@ from theseo_anysearch.rllib.trainer.waypoint_routes import (
     sample_route,
     segment_lengths,
 )
+
+
+def route_curriculum_config(
+    *,
+    initial_distance: int = 1,
+    distance_increment: float = 2.0,
+    maximum_distance: float = 20.0,
+) -> WaypointCurriculumConfig:
+    return WaypointCurriculumConfig.model_validate({
+        "enabled": True,
+        "completion_mode": "continue_route",
+        "initial_start": [16, 16, 16],
+        "route_length": {"mode": "fixed", "distance": 24},
+        "difficulty": {
+            "mode": "segment_distance",
+            "initial_distance": initial_distance,
+            "distance_increment": distance_increment,
+            "maximum_distance": maximum_distance,
+        },
+        "advance": {"mode": "success"},
+    })
+
+
+def route_environment() -> dict[str, object]:
+    return {
+        "grid_size": 32,
+        "max_steps": 32,
+        "action_mode": "discrete_18",
+    }
 
 
 def test_route_length_modes_resolve_exactly():
@@ -73,6 +103,91 @@ def test_continue_route_curriculum_generates_initial_stage():
             curriculum._initial_route.waypoints,
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("initial_distance", "increment", "maximum_distance", "maximum_stage"),
+    [
+        (2, 2.0, 20.0, 9),
+        (1, 2.0, 20.0, 10),
+        (20, 2.0, 20.0, 0),
+        (1, 0.1, 1.3, 3),
+    ],
+)
+def test_continue_route_curriculum_computes_final_distinct_stage(
+    initial_distance,
+    increment,
+    maximum_distance,
+    maximum_stage,
+):
+    curriculum = WaypointCurriculum(
+        route_curriculum_config(
+            initial_distance=initial_distance,
+            distance_increment=increment,
+            maximum_distance=maximum_distance,
+        ),
+        route_environment(),
+    )
+
+    assert curriculum.maximum_stage == maximum_stage
+
+
+def test_terminal_route_curriculum_does_not_add_duplicate_capped_stage():
+    curriculum = WaypointCurriculum(route_curriculum_config(), route_environment())
+    for iteration in range(1, 11):
+        assert curriculum.observe(iteration, 1) is True
+        curriculum.advance_stage(iteration, curriculum.sample_stage(route_environment()))
+
+    assert curriculum.state.stage == 10
+    assert len(curriculum.stages()) == 11
+    assert curriculum.terminal is True
+    assert curriculum.observe(11, 1) is False
+    assert curriculum.state.successes_in_stage == 0
+    with pytest.raises(RuntimeError, match="terminal"):
+        curriculum.sample_stage(route_environment())
+    with pytest.raises(RuntimeError, match="terminal"):
+        curriculum.advance_stage(11, curriculum.stages()[-1])
+
+
+def test_restored_route_curriculum_is_clamped_to_final_distinct_stage():
+    curriculum = WaypointCurriculum(
+        route_curriculum_config(maximum_distance=24),
+        route_environment(),
+    )
+    for iteration in range(1, 13):
+        stage = curriculum._sample_route(route_environment(), iteration)
+        curriculum.state.stage = iteration - 1
+        curriculum.state.successes_in_stage = 4
+        curriculum.advance_stage(iteration, stage)
+    curriculum.config = route_curriculum_config()
+    curriculum.state.stage_evaluations = {
+        stage: {"attempts": 3, "successes": 3}
+        for stage in range(13)
+    }
+
+    assert curriculum.clamp_restored_state() is True
+    assert curriculum.state.stage == 10
+    assert len(curriculum.state.transitions) == 10
+    assert len(curriculum.stages()) == 11
+    assert set(curriculum.state.stage_evaluations) == set(range(11))
+    assert curriculum.state.successes_in_stage == 0
+    assert curriculum.state.goal == curriculum.state.transitions[-1].goal
+    assert curriculum.clamp_restored_state() is False
+
+
+def test_curriculum_stage_metrics_expose_terminal_and_maximum_stage():
+    curriculum = WaypointCurriculum(route_curriculum_config(), route_environment())
+    controller = CurriculumController.__new__(CurriculumController)
+    controller.curriculum = curriculum
+
+    assert controller.stage_metric() == {
+        "curriculum/stage": 0.0,
+        "curriculum/terminal": 0.0,
+        "curriculum/max_stage": 10.0,
+    }
+
+    curriculum.state.stage = 10
+    assert controller.stage_metric()["curriculum/terminal"] == 1.0
 
 
 def test_environment_continues_at_intermediate_waypoint():

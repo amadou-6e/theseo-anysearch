@@ -25,6 +25,8 @@ evaluation metrics:
 | Metric | Meaning |
 |---|---|
 | `curriculum/stage` | Current zero-based curriculum stage after evaluation and any promotion. |
+| `curriculum/max_stage` | Final distinct configured difficulty stage, or `-1` for an unbounded curriculum. |
+| `curriculum/terminal` | `1` after reaching the final configured difficulty; terminal retention evaluation continues without adding duplicate stages. |
 | `curriculum/transition` | `1` when this evaluation promoted the curriculum, otherwise `0`. |
 | `curriculum/retention_success_rate` | Goal-finish rate across all retained-stage evaluation episodes. |
 | `curriculum/retention_pass` | `1` when the overall and per-stage retention thresholds pass. |
