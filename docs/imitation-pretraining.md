@@ -8,25 +8,34 @@ heuristic demonstrations -> behavior cloning -> PPO policy -> normal PPO
 ```
 
 Enable it with a top-level `imitation` block. `training.algorithm` remains
-`ppo`; the heuristic is only the teacher.
+`ppo`; the heuristic runs only as the episode-generation provider.
 
 ## Configuration
 
 - `enabled` runs imitation before PPO's first iteration.
 - `strategy` is currently `pretrain_then_rl`.
-- `teacher.type` selects `astar`, `dijkstra`, `weighted_astar`, or
-  `replanning_astar`.
-- `teacher.weight` configures `weighted_astar` and must be null otherwise.
-- `collection.episodes` is the required number of accepted demonstrations.
+- `generation.provider` selects the episode-generation provider, either as
+  shorthand (`provider: astar`) or the full selector block
+  (`provider: {name: astar, parameters: {...}}`). Built-in names are `astar`,
+  `dijkstra`, `weighted_astar`, and `replanning_astar`.
+- `generation.provider.parameters.weight` configures `weighted_astar` and is
+  not accepted by the other built-in providers.
+- A waypoint curriculum with `completion_mode: continue_route` generates
+  demonstrations via the native shortest-path planner directly and does not
+  invoke `generation.provider` at all, so a custom generation provider
+  configured alongside such a curriculum never actually runs.
+- `generation.episodes` is the required number of accepted demonstrations.
+- `generation.max_attempts` bounds failed or unsolved collection attempts.
+- `generation.require_success` discards episodes that do not reach the goal.
 - `collection.seed_start` is the first deterministic environment reset seed.
-- `collection.max_attempts` bounds failed or unsolved collection attempts.
-- `collection.require_success` discards episodes that do not reach the goal.
 - `collection.validation_fraction` reserves complete episodes for validation.
 - `collection.reuse_dataset` reuses existing data only when its fingerprint
-  matches every environment, task, observation, action, and teacher setting.
+  matches every environment, task, observation, action, and generation
+  provider setting.
 - `collection.dataset_dir` optionally points multiple runs or Tune trials to
   one shared compatible dataset. Concurrent collectors coordinate by dataset
-  fingerprint; incompatible environment or teacher settings are regenerated.
+  fingerprint; incompatible environment or generation provider settings are
+  regenerated.
 - `collection.curriculum_stages` selects `initial` (the default) or `all`.
   `all` collects demonstrations round-robin across every configured
   `continue_route` segment distance, including a capped final stage when the
@@ -35,7 +44,21 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
   the dataset balanced across curriculum difficulty without repeatedly
   training on one fixed route per stage.
   Successful episodes are collected against an exact per-stage quota, so
-  rejected teacher rollouts cannot silently underrepresent a difficult stage.
+  rejected generation-provider rollouts cannot silently underrepresent a
+  difficult stage.
+- `sampling.provider` selects the batch-sampling provider used during
+  pretraining. It defaults to `uniform_transition`, which samples individual
+  demonstration transitions uniformly at random. `uniform_episode` shuffles
+  episode order and groups each episode's transitions contiguously so no
+  single episode's transitions are split across two batches, preserving
+  within-episode temporal correlation inside a batch; per-transition coverage
+  per epoch is otherwise identical to `uniform_transition` -- every
+  transition from every episode is still included exactly once. Because
+  episodes are never split across batches, `pretraining.batch_size` is a soft
+  target under `uniform_episode`, not a hard bound -- a batch can exceed it by
+  up to one episode's transition count. Configure the sampling provider the
+  same way as `generation.provider`, either as shorthand
+  (`provider: uniform_episode`) or the full selector block.
 - `pretraining.epochs` is the maximum number of behavior-cloning passes.
 - `pretraining.batch_size` is the supervised optimizer batch size.
 - `pretraining.learning_rate` applies only to behavior cloning.
@@ -60,7 +83,7 @@ published checkpoint. PPO-only settings such as learning rate, gamma, lambda,
 clipping, KL coefficient, or RL batch sizes do not affect the key.
 
 The key changes with model structure and tensor shapes, observation and action
-contracts, geometry and curriculum inputs, teacher and collection settings,
+contracts, geometry and curriculum inputs, generation and collection settings,
 behavior-cloning optimizer settings, handoff settings, or policy ID. Trial IDs,
 output directories, timestamps, rollout seed offsets, and copied native
 extension paths are excluded. Cache hit/miss, validation metrics, and the cache
@@ -70,10 +93,25 @@ Heterogeneous policy IDs receive independent keys, so differently configured
 models cannot consume each other's checkpoints. Agents mapped to the same
 shared policy ID reuse that policy's artifact.
 
-Demonstrations record the policy observation before each teacher action. The
-dataset is split by episode, not by step. Artifacts are written under the run's
-`imitation` directory: compressed data, manifest, epoch metrics, result, and
-policy checkpoint.
+Demonstrations record the policy observation before each generation-provider
+action. The dataset is split by episode, not by step. Artifacts are written
+under the run's `imitation` directory: compressed data, manifest, epoch
+metrics, result, and policy checkpoint.
+
+## Python generation providers
+
+Place Python generation providers in `imitation.py` beside the experiment
+YAML, following the same convention as scenario providers in
+`docs/extensions/scenarios.md`. Each provider is a function named after its
+`generation.provider.name` that accepts one `EpisodeGenerationContext` and
+returns a demonstration episode; AnySearch discovers it by name from the
+sibling file and archives the exact source used with the run. Built-in
+provider names (`astar`, `dijkstra`, `weighted_astar`, `replanning_astar`) are
+reserved and cannot be shadowed by a Python provider of the same name. If a
+future Rust generation provider exposes the identical selected name, Rust
+would supersede Python, mirroring scenario provider resolution — but Rust
+generation providers are not yet supported, so today every generation
+provider outside the built-ins is Python.
 
 Use `usage/experiments/train/ppo_tiny_overfit_imitation.yaml` for the first
 validation and compare it with `ppo_tiny_overfit.yaml`.

@@ -14,9 +14,9 @@ from ray.rllib.models import ModelCatalog
 
 from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
-from theseo_anysearch.heuristic import (
-    VoxelReplanningAStarHeuristic,
-    build_voxel_heuristic,
+from theseo_anysearch.imitation.generation_providers import (
+    EpisodeGenerationContext,
+    resolve_generation_provider,
 )
 from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
@@ -82,8 +82,10 @@ class DemonstrationDataset(BaseModel):
 
     train_observations: np.ndarray
     train_actions: np.ndarray
+    train_episode_ids: np.ndarray
     validation_observations: np.ndarray
     validation_actions: np.ndarray
+    validation_episode_ids: np.ndarray
     manifest: DemonstrationManifest
 
 
@@ -92,6 +94,7 @@ def dataset_fingerprint(
     imitation: ImitationConfig,
     observation_size: int,
     action_count: int | list[int],
+    generation_source_sha256: str | None = None,
 ) -> str:
     """Hash every contract that affects demonstration compatibility."""
 
@@ -115,17 +118,19 @@ def dataset_fingerprint(
         }
 
     payload = {
-        # Version 3 makes all-stage datasets use one newly sampled route per
-        # episode rather than repeating one fixed route per stage.
-        "schema_version": 3,
+        # Version 5 adds the Python generation-provider source digest.
+        "schema_version": 5,
         "env": normalized_env,
         "geometry": _geometry_fingerprint(env_config),
-        "teacher": imitation.teacher.model_dump(mode="json"),
+        "generation": {
+            "provider": imitation.generation.provider.model_dump(mode="json"),
+            "episodes": imitation.generation.episodes,
+            "max_attempts": imitation.generation.max_attempts,
+            "require_success": imitation.generation.require_success,
+            "source_sha256": generation_source_sha256,
+        },
         "collection": {
-            "episodes": imitation.collection.episodes,
             "seed_start": imitation.collection.seed_start,
-            "max_attempts": imitation.collection.max_attempts,
-            "require_success": imitation.collection.require_success,
             "validation_fraction": imitation.collection.validation_fraction,
             "curriculum_stages": imitation.collection.curriculum_stages,
         },
@@ -161,8 +166,22 @@ def _geometry_fingerprint(env_config: dict[str, Any]) -> str:
 def collect_demonstrations(
     env_config: dict[str, Any],
     imitation: ImitationConfig,
+    config_path: Path | None = None,
 ) -> DemonstrationDataset:
     """Collect successful teacher rollouts from actual environment transitions."""
+
+    python_provider = None
+    generation_name = imitation.generation.provider.name
+    if generation_name not in (
+        "astar", "dijkstra", "weighted_astar", "replanning_astar",
+    ):
+        from theseo_anysearch.experiments.custom_imitation import (
+            discover_generation_source,
+            load_generation_provider,
+        )
+
+        source = discover_generation_source(config_path, generation_name)
+        python_provider = load_generation_provider(source, generation_name)
 
     env = VoxelEnv(env_config)
     route_curriculum, curriculum_stage_count = _configure_waypoint_curriculum(
@@ -186,7 +205,7 @@ def collect_demonstrations(
     stage_episode_counts = [0] * curriculum_stage_count
     if curriculum_stage_count:
         episodes_per_stage, extra_episodes = divmod(
-            imitation.collection.episodes,
+            imitation.generation.episodes,
             curriculum_stage_count,
         )
         stage_targets = [
@@ -198,14 +217,14 @@ def collect_demonstrations(
     stage_index = 0
 
     while (
-        len(accepted_seeds) < imitation.collection.episodes
-        and attempts < imitation.collection.max_attempts
+        len(accepted_seeds) < imitation.generation.episodes
+        and attempts < imitation.generation.max_attempts
     ):
         seed = imitation.collection.seed_start + attempts
         attempts += 1
         if route_curriculum is not None:
             route_seed = seed
-            for _ in range(imitation.collection.max_attempts):
+            for _ in range(imitation.generation.max_attempts):
                 route = route_curriculum.route_for_stage(
                     env_config,
                     stage_index,
@@ -215,7 +234,7 @@ def collect_demonstrations(
                 if signature not in used_routes:
                     used_routes.add(signature)
                     break
-                route_seed += imitation.collection.max_attempts
+                route_seed += imitation.generation.max_attempts
             else:
                 raise RuntimeError(
                     "could not generate a unique waypoint route for demonstration collection"
@@ -225,50 +244,49 @@ def collect_demonstrations(
                 [1.0],
             )
         observation, _ = env.reset(seed=seed)
+        success = False
         episode_observations: list[np.ndarray] = []
         episode_actions: list[int | tuple[int, int, int]] = []
-        success = False
 
         try:
             route_plan = _route_action_plan(env, env_config)
             if route_plan is not None:
                 action_plan = route_plan
-            else:
-                teacher = build_voxel_heuristic(
-                    env,
-                    imitation.teacher.type,
-                    weight=imitation.teacher.weight,
-                )
-                if isinstance(teacher, VoxelReplanningAStarHeuristic):
-                    action_plan = None
-                else:
-                    action_plan = list(teacher.plan().action_indices)
-
-            step_index = 0
-            while True:
-                if action_plan is None:
-                    current_plan = teacher.plan()
-                    if not current_plan.action_indices:
-                        break
-                    action = current_plan.action_indices[0]
-                else:
-                    if step_index >= len(action_plan):
-                        break
+                step_index = 0
+                while step_index < len(action_plan):
                     action = action_plan[step_index]
-
-                episode_observations.append(
-                    np.asarray(preprocessor.transform(observation), dtype=np.float32)
+                    episode_observations.append(
+                        np.asarray(preprocessor.transform(observation), dtype=np.float32)
+                    )
+                    episode_actions.append(action)
+                    observation, _, terminated, truncated, info = env.step(action)
+                    step_index += 1
+                    success = bool(info.get("goal_reached", False))
+                    if terminated or truncated:
+                        break
+            else:
+                provider = resolve_generation_provider(
+                    generation_name, python_provider=python_provider
                 )
-                episode_actions.append(action)
-                observation, _, terminated, truncated, info = env.step(action)
-                step_index += 1
-                success = bool(info.get("goal_reached", False))
-                if terminated or truncated:
-                    break
+                episode = provider(
+                    EpisodeGenerationContext(
+                        env=env,
+                        observation=observation,
+                        seed=seed,
+                        attempt=attempts - 1,
+                        parameters=imitation.generation.provider.parameters,
+                    )
+                )
+                success = episode.success
+                episode_observations = [
+                    np.asarray(preprocessor.transform(raw), dtype=np.float32)
+                    for raw in episode.observations
+                ]
+                episode_actions = list(episode.actions)
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             success = False
 
-        if success or not imitation.collection.require_success:
+        if success or not imitation.generation.require_success:
             episode_id = len(accepted_seeds)
             observations.extend(episode_observations)
             actions.extend(episode_actions)
@@ -284,10 +302,10 @@ def collect_demonstrations(
                         break
 
     env.close()
-    if len(accepted_seeds) < imitation.collection.episodes:
+    if len(accepted_seeds) < imitation.generation.episodes:
         raise RuntimeError(
             "Heuristic demonstration collection produced "
-            f"{len(accepted_seeds)}/{imitation.collection.episodes} episodes "
+            f"{len(accepted_seeds)}/{imitation.generation.episodes} episodes "
             f"after {attempts} attempts"
         )
     if not observations:
@@ -314,12 +332,15 @@ def collect_demonstrations(
         imitation,
         observation_size,
         action_nvec or action_count,
+        python_provider.source_sha256 if python_provider is not None else None,
     )
+    train_episode_ids = episode_array[~validation_mask]
+    validation_episode_ids = episode_array[validation_mask]
     manifest = DemonstrationManifest(
         fingerprint=fingerprint,
-        teacher_type=imitation.teacher.type,
-        teacher_weight=imitation.teacher.weight,
-        requested_episodes=imitation.collection.episodes,
+        generation_provider_name=imitation.generation.provider.name,
+        generation_provider_parameters=imitation.generation.provider.parameters,
+        requested_episodes=imitation.generation.episodes,
         successful_episodes=teacher_successes,
         accepted_episodes=len(accepted_seeds),
         attempted_episodes=attempts,
@@ -338,8 +359,10 @@ def collect_demonstrations(
     return DemonstrationDataset(
         train_observations=observation_array[~validation_mask],
         train_actions=action_array[~validation_mask],
+        train_episode_ids=train_episode_ids,
         validation_observations=observation_array[validation_mask],
         validation_actions=action_array[validation_mask],
+        validation_episode_ids=validation_episode_ids,
         manifest=manifest,
     )
 
@@ -352,8 +375,10 @@ def save_dataset(dataset: DemonstrationDataset, directory: Path) -> None:
         directory.joinpath("demonstrations.npz"),
         train_observations=dataset.train_observations,
         train_actions=dataset.train_actions,
+        train_episode_ids=dataset.train_episode_ids,
         validation_observations=dataset.validation_observations,
         validation_actions=dataset.validation_actions,
+        validation_episode_ids=dataset.validation_episode_ids,
     )
     directory.joinpath("manifest.json").write_text(
         dataset.manifest.model_dump_json(indent=2),
@@ -379,7 +404,9 @@ def load_compatible_dataset(
     return DemonstrationDataset(
         train_observations=arrays["train_observations"],
         train_actions=arrays["train_actions"],
+        train_episode_ids=arrays["train_episode_ids"],
         validation_observations=arrays["validation_observations"],
         validation_actions=arrays["validation_actions"],
+        validation_episode_ids=arrays["validation_episode_ids"],
         manifest=manifest,
     )

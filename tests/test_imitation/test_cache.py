@@ -25,8 +25,8 @@ from theseo_anysearch.imitation.models import (
 def _manifest() -> DemonstrationManifest:
     return DemonstrationManifest(
         fingerprint="dataset-contract",
-        teacher_type="astar",
-        teacher_weight=None,
+        generation_provider_name="astar",
+        generation_provider_parameters={},
         requested_episodes=2,
         successful_episodes=2,
         accepted_episodes=2,
@@ -70,6 +70,26 @@ def test_cache_key_ignores_rl_only_settings_and_tracks_model_contract() -> None:
 
     assert first_key == same_key
     assert first_key != different_key
+
+
+def test_cache_key_changes_with_sampling_provider() -> None:
+    model = torch.nn.Linear(4, 2)
+    manifest = _manifest()
+
+    transition_key, _ = pretraining_cache_key(
+        model,
+        manifest,
+        ImitationConfig(sampling={"provider": "uniform_transition"}),
+        policy_id="default_policy",
+    )
+    episode_key, _ = pretraining_cache_key(
+        model,
+        manifest,
+        ImitationConfig(sampling={"provider": "uniform_episode"}),
+        policy_id="default_policy",
+    )
+
+    assert transition_key != episode_key
 
 
 def test_heterogeneous_policy_ids_receive_distinct_cache_entries() -> None:

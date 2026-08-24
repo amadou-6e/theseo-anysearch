@@ -66,6 +66,7 @@ def test_tune_materializes_python_scenarios_for_each_trial(tmp_path: Path) -> No
         metric_source_contents=None,
         reward_source_content=None,
         scenario_source_content="def adjacent(context):\n    return {}\n",
+        generation_source_content=None,
     )
 
     assert tmp_path.joinpath("scenarios.py").read_text(encoding="utf-8").startswith(

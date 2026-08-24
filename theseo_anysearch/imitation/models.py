@@ -2,54 +2,76 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 
-class ImitationTeacherConfig(BaseModel):
-    """Heuristic that labels demonstration observations."""
+class ProviderSelector(BaseModel):
+    """Select a named Python or Rust imitation provider."""
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["astar", "dijkstra", "weighted_astar", "replanning_astar"] = "astar"
-    weight: float | None = None
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+def _expand_provider_shorthand(value: Any) -> Any:
+    """Accept ``provider: name`` as shorthand for the selector block."""
+    if isinstance(value, str):
+        return {"name": value}
+    return value
+
+
+class GenerationConfig(BaseModel):
+    """Controls deterministic episode-generation provider rollout."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: ProviderSelector = Field(default_factory=lambda: ProviderSelector(name="astar"))
+    episodes: int = Field(default=500, ge=2)
+    max_attempts: int = Field(default=1000, ge=1)
+    require_success: bool = True
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def expand_provider_shorthand(cls, value: Any) -> Any:
+        return _expand_provider_shorthand(value)
 
     @model_validator(mode="after")
-    def validate_weight(self) -> "ImitationTeacherConfig":
-        if self.type == "weighted_astar":
-            if self.weight is None:
-                self.weight = 1.5
-            elif self.weight <= 0.0:
-                raise ValueError("imitation.teacher.weight must be greater than zero")
-        elif self.weight is not None:
+    def validate_attempt_budget(self) -> "GenerationConfig":
+        if self.max_attempts < self.episodes:
             raise ValueError(
-                "imitation.teacher.weight is only valid for weighted_astar"
+                "imitation.generation.max_attempts must be at least episodes"
             )
         return self
 
 
-class DemonstrationCollectionConfig(BaseModel):
-    """Controls deterministic teacher rollout collection."""
+class SamplingConfig(BaseModel):
+    """Selects the batch-sampling provider used during pretraining."""
 
     model_config = ConfigDict(extra="forbid")
 
-    episodes: int = Field(default=500, ge=2)
+    provider: ProviderSelector = Field(
+        default_factory=lambda: ProviderSelector(name="uniform_transition")
+    )
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def expand_provider_shorthand(cls, value: Any) -> Any:
+        return _expand_provider_shorthand(value)
+
+
+class DemonstrationCollectionConfig(BaseModel):
+    """Controls deterministic dataset collection and reuse."""
+
+    model_config = ConfigDict(extra="forbid")
+
     seed_start: int = Field(default=1000, ge=0)
-    max_attempts: int = Field(default=1000, ge=1)
-    require_success: bool = True
     validation_fraction: float = Field(default=0.1, gt=0.0, lt=1.0)
     reuse_dataset: bool = True
     dataset_dir: str | None = None
     curriculum_stages: Literal["initial", "all"] = "initial"
-
-    @model_validator(mode="after")
-    def validate_attempt_budget(self) -> "DemonstrationCollectionConfig":
-        if self.max_attempts < self.episodes:
-            raise ValueError(
-                "imitation.collection.max_attempts must be at least episodes"
-            )
-        return self
 
 
 class ImitationPretrainingConfig(BaseModel):
@@ -102,7 +124,8 @@ class ImitationConfig(BaseModel):
 
     enabled: bool = False
     strategy: Literal["pretrain_then_rl"] = "pretrain_then_rl"
-    teacher: ImitationTeacherConfig = Field(default_factory=ImitationTeacherConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    sampling: SamplingConfig = Field(default_factory=SamplingConfig)
     collection: DemonstrationCollectionConfig = Field(
         default_factory=DemonstrationCollectionConfig
     )
@@ -118,10 +141,10 @@ class DemonstrationManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1, 2] = 2
+    schema_version: Literal[1, 2, 3] = 3
     fingerprint: str
-    teacher_type: str
-    teacher_weight: float | None
+    generation_provider_name: str
+    generation_provider_parameters: dict[str, JsonValue]
     requested_episodes: int
     successful_episodes: int
     accepted_episodes: int

@@ -354,8 +354,10 @@ class ExperimentRunner:
 
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
         from theseo_anysearch.environment_rules import preflight_environment_rules
+        from theseo_anysearch.imitation.preflight import preflight_imitation_providers
 
         preflight_environment_rules(config, config_path)
+        preflight_imitation_providers(config.imitation, config_path)
         self._config = config
         self._config_path = config_path
 
@@ -603,6 +605,19 @@ class ExperimentRunner:
                 (
                     self._config.env.scenarios.provider.name
                     if self._config.env.scenarios.provider
+                    else None
+                ),
+            )
+            from theseo_anysearch.experiments.custom_imitation import (
+                copy_generation_source,
+            )
+
+            copy_generation_source(
+                self._config_path,
+                run_dir,
+                (
+                    self._config.imitation.generation.provider.name
+                    if self._config.imitation.enabled
                     else None
                 ),
             )
