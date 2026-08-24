@@ -46,6 +46,7 @@ environment instance.
 
 **Observability**
 - MLflow tracking: params, per-iteration metrics, artifacts, run lifecycle
+- `anysearch mlflow` launches the UI pointed at the right DB
 - TensorBoard logs written automatically by Ray Tune to the session artifacts dir
 - `anysearch inspect` prints resolved config + metrics summary for any run
 

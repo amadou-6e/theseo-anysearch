@@ -101,5 +101,5 @@ named breakdown, and Python exposes it unchanged through Gymnasium `info`.
 
 The selected `rewards.py` or compiled library is archived in every ordinary run
 or Tune trial. See [`rewards.py`](../../usage/experiments/showcase/rewards.py) and
-the [`native_extension`](../../usage/experiments/showcase/native_extension)
+the <a href="../../usage/experiments/showcase/native_extension">`native_extension`</a>
 example.

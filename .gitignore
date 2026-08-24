@@ -36,6 +36,7 @@ htmlcov/
 
 # Sphinx documentation build output
 docs/_build/
+docs/superpowers/
 
 # MLflow
 mlflow.db

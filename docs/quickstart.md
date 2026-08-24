@@ -11,6 +11,23 @@ pip install -e ".[torch-cpu]"   # or .[torch-gpu] on a CUDA machine
 
 This registers the `anysearch` command.
 
+The Rust-backed voxel environments (`PyVoxelEnv`, `PySurfaceEnv`) that power
+AnySearch's fast step throughput live in a separate crate under
+`theseo_anysearch/core/` and are built with `maturin`, not with `pip install
+-e .` of the root package. Build and install that extension into the same
+environment before running anything that touches the environment code or the
+CLI's training command:
+
+```bash
+cd theseo_anysearch/core
+maturin develop --release
+# On Windows, if maturin can't find the right Python interpreter:
+# VIRTUAL_ENV=/path/to/.venv maturin develop --release
+```
+
+Skipping this step surfaces as `ModuleNotFoundError: theseo_core` the first
+time you run `anysearch run`.
+
 ## Run a training experiment
 
 Every experiment is a single YAML file under `usage/experiments/`. Run
@@ -59,6 +76,12 @@ YAML at a server to centralize tracking, e.g.:
 ```bash
 mlflow server --host 0.0.0.0 --port 5000
 ```
+
+`anysearch mlflow` is a shortcut that launches the MLflow UI already
+pointed at the right database — pass a registered experiment name (e.g.
+`anysearch mlflow ppo-baseline`) to resolve its output directory from the
+registry, or `--output-dir` / `--tracking-uri` to target a directory or URI
+explicitly.
 
 ## Next steps
 
