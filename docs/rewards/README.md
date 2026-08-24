@@ -100,6 +100,5 @@ the compiled extension does not supply a reward capability.
 named breakdown, and Python exposes it unchanged through Gymnasium `info`.
 
 The selected `rewards.py` or compiled library is archived in every ordinary run
-or Tune trial. See [`rewards.py`](../../usage/experiments/showcase/rewards.py) and
-the [`native_extension`](../../usage/experiments/showcase/native_extension)
-example.
+or Tune trial. See the `rewards.py` and `native_extension` examples in
+`usage/experiments/showcase/`.

@@ -34,6 +34,9 @@ pytest_tmp_root/
 htmlcov/
 *.log
 
+# Sphinx documentation build output
+docs/_build/
+
 # MLflow
 mlflow.db
 mlruns/
