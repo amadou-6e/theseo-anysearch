@@ -149,5 +149,5 @@ Each distinct `policy` creates a separate RLlib policy; repeating a policy name
 shares parameters between those agents.
 
 The optional `env.hunter_and_hunted` task ends on same-voxel or adjacent capture
-and awards asymmetric capture/timeout rewards. See the
-`usage/experiments/showcase/hunter_and_hunted/` example directory.
+and awards asymmetric capture/timeout rewards. See
+[`usage/experiments/showcase/hunter_and_hunted`](../../usage/experiments/showcase/hunter_and_hunted/README.md).
