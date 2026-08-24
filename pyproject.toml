@@ -29,6 +29,7 @@ dependencies = [
 cloud-azure = ["adlfs>=2024.2"]
 cloud-gcs = ["gcsfs>=2024.2"]
 cloud-s3 = ["s3fs>=2024.2"]
+docs = ["sphinx>=7.0,<10", "myst-parser>=3.0,<5", "furo>=2024.1,<2026"]
 dev = [
   "pytest>=8.0",
   "pytest-timeout>=2.3",

@@ -28,19 +28,19 @@ usage/
 
 ```bash
 # single training run
-anysearch experiment run --config usage/experiments/train/ppo_baseline.yaml
+anysearch run usage/experiments/train/ppo_baseline.yaml
 
 # hyperparameter search
-anysearch experiment run --config usage/experiments/tune/ppo_asha.yaml
+anysearch run usage/experiments/tune/ppo_asha.yaml
 
 # geometry sweep
-anysearch experiment run --config usage/experiments/tune/ppo_sweep_geometries.yaml
+anysearch run usage/experiments/tune/ppo_sweep_geometries.yaml
 
 # resume an interrupted run
-anysearch experiment resume --run-id <run_id>
+anysearch resume ppo_baseline:<run_id>
 
 # inspect results
-anysearch experiment inspect --run-id <run_id>
+anysearch inspect ppo_baseline:<run_id>
 ```
 
 All configs expect MLflow at `http://localhost:5000`.

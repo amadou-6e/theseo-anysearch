@@ -1,4 +1,4 @@
-# Ray suite timing baseline — 2026-08-02
+# Ray suite timing baseline â€” 2026-08-02
 
 This baseline records one serial attempt of every test marked `ray`. It is an
 execution measurement and a failure inventory, not a clean performance result:
@@ -85,10 +85,10 @@ lower bound until the blockers are fixed and the benchmark is repeated.
 Use separate jobs so independent Ray runtimes do not serialize all startup and
 training work:
 
-1. CLI Ray tests — initial timeout: 30 minutes.
-2. Tune and algorithm coverage — initial timeout: 20 minutes.
-3. Trainer and model integration — initial timeout: 30 minutes.
-4. Experiment runner integration — initial timeout: 20 minutes.
+1. CLI Ray tests â€” initial timeout: 30 minutes.
+2. Tune and algorithm coverage â€” initial timeout: 20 minutes.
+3. Trainer and model integration â€” initial timeout: 30 minutes.
+4. Experiment runner integration â€” initial timeout: 20 minutes.
 
 Keep a 60-minute timeout only for an unsplit fallback job. Re-run this benchmark
 after the fixture failures are corrected before tightening any timeout.
@@ -112,7 +112,7 @@ python -m pytest tests/test_cli/test_integration/test_cli_commands.py `
 | CLI Ray tests | 36 | 5 |
 | CLI Ray wall time | 1,050.630 s | 199.229 s |
 | Outcome | 7 passed, 17 failed, 12 skipped | 5 passed |
-| Runtime reduction | — | 81.0% |
+| Runtime reduction | â€” | 81.0% |
 
 The five passing test durations were:
 

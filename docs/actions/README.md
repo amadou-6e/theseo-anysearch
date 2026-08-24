@@ -150,4 +150,4 @@ shares parameters between those agents.
 
 The optional `env.hunter_and_hunted` task ends on same-voxel or adjacent capture
 and awards asymmetric capture/timeout rewards. See
-[`usage/experiments/showcase/hunter_and_hunted`](../../usage/experiments/showcase/hunter_and_hunted/README.md).
+<a href="../../usage/experiments/showcase/hunter_and_hunted/README.md">`usage/experiments/showcase/hunter_and_hunted`</a>.
