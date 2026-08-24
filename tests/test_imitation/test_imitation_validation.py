@@ -13,7 +13,7 @@ def _experiment(algorithm: str, agent_count: int = 1) -> dict:
         "training": {"algorithm": algorithm},
         "imitation": {
             "enabled": True,
-            "collection": {"episodes": 2, "max_attempts": 2},
+            "generation": {"episodes": 2, "max_attempts": 2},
         },
     }
 

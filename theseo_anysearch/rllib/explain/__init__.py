@@ -24,7 +24,12 @@ from theseo_anysearch.rllib.explain.models import (
 from theseo_anysearch.rllib.explain.reports import ExplanationReportBuilder, ExplanationReportWriter
 from theseo_anysearch.rllib.explain.requests import ExplanationRequestFile
 from theseo_anysearch.rllib.explain.scenarios import EnvironmentScenario, ObservationScenario
-from theseo_anysearch.rllib.explain.scoring import DQNPolicyScorer, LinearMockPolicyScorer, MockPolicyScorer
+from theseo_anysearch.rllib.explain.scoring import (
+    DQNPolicyScorer,
+    LinearMockPolicyScorer,
+    MockPolicyScorer,
+    PPOPolicyScorer,
+)
 from theseo_anysearch.rllib.explain.selectors import CollisionStepSelector, ExplicitStepSelector
 from theseo_anysearch.rllib.explain.traces import (
     ObservationTrace,
@@ -44,6 +49,7 @@ __all__ = [
     "ExplanationRequestFile",
     "FeatureSchema",
     "DQNPolicyScorer",
+    "PPOPolicyScorer",
     "LinearMockPolicyScorer",
     "MockPolicyScorer",
     "ObservationTrace",

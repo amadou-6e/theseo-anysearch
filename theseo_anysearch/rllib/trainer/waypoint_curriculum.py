@@ -106,8 +106,73 @@ class WaypointCurriculum:
             (transition.start, transition.goal) for transition in self.state.transitions
         ]
 
+    @property
+    def maximum_stage(self) -> int | None:
+        """Return the last distinct configured difficulty stage, when bounded."""
+        maximum = self.config.difficulty.maximum_distance
+        if maximum is None:
+            return None
+        if self.config.completion_mode == "continue_route":
+            initial = self.config.difficulty.initial_distance
+            assert initial is not None
+            initial_distance = float(initial)
+        elif self.config.difficulty.mode == "monotonic_distance":
+            assert self.config.initial_start is not None
+            assert self.config.initial_goal is not None
+            initial_distance = waypoint_distance(
+                self.config.initial_start,
+                self.config.initial_goal,
+            )
+        else:
+            return None
+        remaining = max(float(maximum) - initial_distance, 0.0)
+        stage_span = remaining / self.config.difficulty.distance_increment
+        rounded_span = round(stage_span)
+        if math.isclose(stage_span, rounded_span, rel_tol=1e-12, abs_tol=1e-12):
+            return int(rounded_span)
+        return int(math.ceil(stage_span))
+
+    @property
+    def terminal(self) -> bool:
+        """Whether the curriculum has reached its final distinct difficulty."""
+        maximum_stage = self.maximum_stage
+        return maximum_stage is not None and self.state.stage >= maximum_stage
+
+    def clamp_restored_state(self) -> bool:
+        """Clamp legacy state that advanced beyond the configured difficulty cap."""
+        maximum_stage = self.maximum_stage
+        if maximum_stage is None or self.state.stage <= maximum_stage:
+            return False
+        self.state.transitions = self.state.transitions[:maximum_stage]
+        self.state.stage_evaluations = {
+            stage: evaluation
+            for stage, evaluation in self.state.stage_evaluations.items()
+            if stage <= maximum_stage
+        }
+        self.state.stage = maximum_stage
+        self.state.successes_in_stage = 0
+        if maximum_stage == 0:
+            if self._initial_route is not None:
+                self.state.start = self._initial_route.start
+                self.state.goal = self._initial_route.goal
+                self.state.waypoints = self._initial_route.waypoints
+            else:
+                assert self.config.initial_start is not None
+                assert self.config.initial_goal is not None
+                self.state.start = self.config.initial_start
+                self.state.goal = self.config.initial_goal
+                self.state.waypoints = ()
+        else:
+            transition = self.state.transitions[-1]
+            self.state.start = transition.start
+            self.state.goal = transition.goal
+            self.state.waypoints = transition.waypoints
+        return True
+
     def observe(self, iteration: int, successes: int) -> bool:
         """Record evaluation successes and return whether the stage advances."""
+        if self.terminal:
+            return False
         self.state.successes_in_stage += max(int(successes), 0)
         advance = self.config.advance
         if advance.mode == "fixed":
@@ -177,6 +242,8 @@ class WaypointCurriculum:
 
     def advance(self, iteration: int, start: Waypoint, goal: Waypoint) -> WaypointTransition:
         """Commit a sampled waypoint pair as the next curriculum stage."""
+        if self.terminal:
+            raise RuntimeError("cannot advance a terminal waypoint curriculum")
         previous_stage = self.state.stage
         transition = WaypointTransition(
             iteration=iteration,
@@ -210,7 +277,14 @@ class WaypointCurriculum:
             maximum,
         )
 
-    def _sample_route(self, env_config: dict[str, Any], stage: int) -> WaypointRoute:
+    def _sample_route(
+        self,
+        env_config: dict[str, Any],
+        stage: int,
+        *,
+        seed: int | None = None,
+    ) -> WaypointRoute:
+        """Generate a route at a configured stage with an optional independent seed."""
         self._require_empty_geometry(env_config)
         difficulty = self.config.difficulty
         assert difficulty.initial_distance is not None
@@ -225,10 +299,51 @@ class WaypointCurriculum:
             segment_distance=segment_distance,
             grid_size=int(env_config.get("grid_size", 32)),
             action_mode=str(env_config.get("action_mode", "discrete_26")),
-            seed=self.config.seed + stage,
+            seed=self.config.seed + stage if seed is None else seed,
         )
 
+    def route_for_stage(
+        self,
+        env_config: dict[str, Any],
+        stage: int,
+        *,
+        seed: int | None = None,
+    ) -> WaypointRoute:
+        """Sample one route at an exact configured stage difficulty."""
+
+        return self._sample_route(env_config, stage, seed=seed)
+
+    def configured_route_stages(
+        self, env_config: dict[str, Any]
+    ) -> list[WaypointRoute]:
+        """Return every configured segment-distance route stage."""
+
+        if self.config.completion_mode != "continue_route":
+            raise ValueError("all-stage collection requires continue_route mode")
+        difficulty = self.config.difficulty
+        if difficulty.initial_distance is None:
+            raise ValueError("all-stage collection requires initial_distance")
+        maximum = difficulty.maximum_distance
+        if maximum is None:
+            raise ValueError("all-stage collection requires maximum_distance")
+        # Round to the nearest stage before falling back to ceil: floating-point
+        # error can push an exact ratio (e.g. 9.0) just above the integer (e.g.
+        # 9.000000000000002), and a naive ceil would silently add an extra stage.
+        stage_span = (
+            (maximum - difficulty.initial_distance) / difficulty.distance_increment
+        )
+        rounded_span = round(stage_span)
+        if math.isclose(stage_span, rounded_span, rel_tol=1e-12, abs_tol=1e-12):
+            stage_count = int(rounded_span) + 1
+        else:
+            stage_count = int(math.ceil(stage_span)) + 1
+        return [
+            self._sample_route(env_config, stage) for stage in range(stage_count)
+        ]
+
     def sample_stage(self, env_config: dict[str, Any]) -> WaypointRoute | tuple[Waypoint, Waypoint]:
+        if self.terminal:
+            raise RuntimeError("cannot sample beyond the terminal waypoint curriculum stage")
         if self.config.completion_mode == "continue_route":
             return self._sample_route(env_config, self.state.stage + 1)
         return self.sample(env_config)
@@ -238,6 +353,8 @@ class WaypointCurriculum:
         iteration: int,
         stage: WaypointRoute | tuple[Waypoint, Waypoint],
     ) -> WaypointTransition:
+        if self.terminal:
+            raise RuntimeError("cannot advance a terminal waypoint curriculum")
         if not isinstance(stage, WaypointRoute):
             return self.advance(iteration, *stage)
         previous_stage = self.state.stage

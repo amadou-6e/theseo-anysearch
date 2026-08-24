@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as functional
+from pydantic import ValidationError
 from ray.rllib.models import ModelCatalog
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
@@ -25,6 +26,10 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
     ImitationResult,
+)
+from theseo_anysearch.imitation.sampling_providers import (
+    EpisodeSamplingContext,
+    resolve_sampling_provider,
 )
 from theseo_anysearch.imitation.cache import (
     cache_key_lock,
@@ -133,7 +138,7 @@ def behavior_clone_policy(
         trainable,
         lr=imitation.pretraining.learning_rate,
     )
-    rng = np.random.default_rng(imitation.collection.seed_start)
+    sampling_provider = resolve_sampling_provider(imitation.sampling.provider.name)
     best_loss = float("inf")
     best_accuracy = 0.0
     best_state = copy.deepcopy(initial_state)
@@ -144,10 +149,17 @@ def behavior_clone_policy(
 
     for epoch in range(1, imitation.pretraining.epochs + 1):
         model.train()
-        indices = rng.permutation(len(dataset.train_actions))
+        batches = sampling_provider(
+            EpisodeSamplingContext(
+                dataset=dataset,
+                split="train",
+                batch_size=imitation.pretraining.batch_size,
+                seed=imitation.collection.seed_start + epoch,
+                parameters=imitation.sampling.provider.parameters,
+            )
+        )
         losses: list[float] = []
-        for offset in range(0, len(indices), imitation.pretraining.batch_size):
-            batch_indices = indices[offset:offset + imitation.pretraining.batch_size]
+        for batch_indices in batches:
             observations = torch.as_tensor(
                 dataset.train_observations[batch_indices],
                 dtype=torch.float32,
@@ -227,6 +239,7 @@ def _dataset_for_run(
     env_config: dict[str, Any],
     imitation: ImitationConfig,
     dataset_dir: Path,
+    config_path: Path | None = None,
 ) -> DemonstrationDataset:
     """Reuse a compatible run dataset or collect a new one."""
 
@@ -256,13 +269,16 @@ def _dataset_for_run(
             and manifest_path.exists()
             and arrays_path.exists()
         ):
-            stored_manifest = DemonstrationManifest.model_validate_json(
-                manifest_path.read_text(encoding="utf-8")
-            )
-            if stored_manifest.fingerprint == expected:
+            try:
+                stored_manifest = DemonstrationManifest.model_validate_json(
+                    manifest_path.read_text(encoding="utf-8")
+                )
+            except ValidationError:
+                stored_manifest = None
+            if stored_manifest is not None and stored_manifest.fingerprint == expected:
                 return load_compatible_dataset(dataset_dir, expected)
 
-        dataset = collect_demonstrations(env_config, imitation)
+        dataset = collect_demonstrations(env_config, imitation, config_path)
         save_dataset(dataset, dataset_dir)
         return dataset
 
@@ -296,6 +312,8 @@ def run_imitation_pretraining(
 
     if not imitation.enabled:
         return None
+    config_path = run_dir.joinpath("experiment.yaml")
+    config_path = config_path if config_path.is_file() else None
     imitation_dir = run_dir.joinpath("imitation")
     dataset_dir = (
         Path(imitation.collection.dataset_dir).resolve()
@@ -306,6 +324,7 @@ def run_imitation_pretraining(
         env_config,
         imitation,
         dataset_dir,
+        config_path,
     )
     policy_or_module, uses_modern_module = _trainable_policy_or_module(algorithm)
     model = getattr(policy_or_module, "model", policy_or_module)

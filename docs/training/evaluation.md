@@ -25,6 +25,8 @@ evaluation metrics:
 | Metric | Meaning |
 |---|---|
 | `curriculum/stage` | Current zero-based curriculum stage after evaluation and any promotion. |
+| `curriculum/max_stage` | Final distinct configured difficulty stage, or `-1` for an unbounded curriculum. |
+| `curriculum/terminal` | `1` after reaching the final configured difficulty; terminal retention evaluation continues without adding duplicate stages. |
 | `curriculum/transition` | `1` when this evaluation promoted the curriculum, otherwise `0`. |
 | `curriculum/retention_success_rate` | Goal-finish rate across all retained-stage evaluation episodes. |
 | `curriculum/retention_pass` | `1` when the overall and per-stage retention thresholds pass. |
@@ -33,6 +35,14 @@ These metrics require no Tune `metric` configuration. Retention metrics are
 reported on iterations selected by `evaluation.waypoint_curriculum.frequency`.
 The stage value reflects a promotion made during that iteration and remains
 available on subsequent iterations.
+
+Route-based retention evaluates every stage on a deterministic, heterogeneous
+route suite derived only from `evaluation.seed` and the stage number. The suite
+is rebuilt identically at every evaluation and across comparable trials; it does
+not consume or alter training-route randomness. Each
+`evaluation/curriculum_iter_*.json` stage entry records the route seed, a compact
+fingerprint, endpoints, and waypoint count so the evaluated suite can be audited
+without duplicating every waypoint in the artifact.
 
 ## Fields
 

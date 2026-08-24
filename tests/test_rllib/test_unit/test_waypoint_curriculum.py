@@ -9,6 +9,11 @@ from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
     WaypointCurriculum,
     broadcast_waypoints,
 )
+from theseo_anysearch.rllib.trainer.curriculum.waypoint import (
+    _route_summary,
+    build_route_evaluation_suite,
+)
+from theseo_anysearch.rllib.trainer.waypoint_routes import sample_route
 
 
 def curriculum(**advance):
@@ -186,6 +191,138 @@ def empty_grid(grid_size=32):
         "stl_paths": None,
         "geometry_pool": None,
     }
+
+
+def test_configured_route_stages_cover_exact_distance_schedule():
+    scheduler = WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            completion_mode="continue_route",
+            initial_start=(16, 16, 16),
+            route_length={"mode": "fixed", "distance": 20},
+            difficulty={
+                "mode": "segment_distance",
+                "initial_distance": 1,
+                "distance_increment": 2,
+                "maximum_distance": 6,
+            },
+        ),
+        empty_grid(),
+    )
+
+    with patch(
+        "theseo_anysearch.rllib.trainer.waypoint_curriculum.sample_route",
+        wraps=sample_route,
+    ) as route_sampler:
+        routes = scheduler.configured_route_stages(empty_grid())
+
+    assert [call.kwargs["segment_distance"] for call in route_sampler.call_args_list] == [
+        1,
+        3,
+        5,
+        6,
+    ]
+    assert [len(route.waypoints) for route in routes] == [20, 7, 4, 4]
+
+
+def test_route_for_stage_uses_collection_seed_for_new_routes():
+    scheduler = WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            completion_mode="continue_route",
+            initial_start=(16, 16, 16),
+            route_length={"mode": "fixed", "distance": 20},
+            difficulty={
+                "mode": "segment_distance",
+                "initial_distance": 3,
+                "maximum_distance": 3,
+            },
+        ),
+        empty_grid(),
+    )
+
+    first = scheduler.route_for_stage(empty_grid(), 0, seed=1000)
+    second = scheduler.route_for_stage(empty_grid(), 0, seed=1001)
+
+    assert first != second
+    assert len(first.waypoints) == len(second.waypoints) == 7
+
+
+def test_route_for_stage_accepts_an_evaluation_seed_without_changing_training_seed():
+    scheduler = WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            completion_mode="continue_route",
+            initial_start=(16, 16, 16),
+            seed=17,
+            route_length={"mode": "fixed", "distance": 20},
+            difficulty={
+                "mode": "segment_distance",
+                "initial_distance": 3,
+                "maximum_distance": 3,
+            },
+        ),
+        empty_grid(),
+    )
+
+    evaluation_route = scheduler.route_for_stage(empty_grid(), 0, seed=1000)
+
+    assert evaluation_route != scheduler.route_for_stage(empty_grid(), 0, seed=1001)
+    assert scheduler.route_for_stage(empty_grid(), 0) == scheduler._sample_route(
+        empty_grid(), 0
+    )
+
+
+def test_route_evaluation_suite_is_stable_and_heterogeneous():
+    scheduler = WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            completion_mode="continue_route",
+            initial_start=(16, 16, 16),
+            route_length={"mode": "fixed", "distance": 20},
+            difficulty={
+                "mode": "segment_distance",
+                "initial_distance": 3,
+                "maximum_distance": 3,
+            },
+        ),
+        empty_grid(),
+    )
+
+    first = build_route_evaluation_suite(scheduler, empty_grid(), 0, 3, 142)
+    second = build_route_evaluation_suite(scheduler, empty_grid(), 0, 3, 142)
+
+    assert first == second
+    assert [seed for seed, _ in first] == [142, 143, 144]
+    signatures = {(route.start, *route.waypoints) for _, route in first}
+    assert len(signatures) == 3
+
+
+def test_route_summary_is_compact_and_auditable():
+    scheduler = WaypointCurriculum(
+        WaypointCurriculumConfig(
+            enabled=True,
+            completion_mode="continue_route",
+            initial_start=(16, 16, 16),
+            route_length={"mode": "fixed", "distance": 20},
+            difficulty={
+                "mode": "segment_distance",
+                "initial_distance": 3,
+                "maximum_distance": 3,
+            },
+        ),
+        empty_grid(),
+    )
+    route = scheduler.route_for_stage(empty_grid(), 0, seed=142)
+
+    summary = _route_summary(142, route)
+
+    assert summary["seed"] == 142
+    assert summary["start"] == route.start
+    assert summary["goal"] == route.goal
+    assert summary["waypoint_count"] == len(route.waypoints)
+    assert len(summary["fingerprint"]) == 16
+    assert "waypoints" not in summary
 
 
 def distance(pair):
