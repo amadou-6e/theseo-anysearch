@@ -1,0 +1,123 @@
+description: >
+  Replays tuning trial ed7db_00008 for 400 iterations after policy-only
+  behavior cloning on a balanced round-robin sample of every waypoint stage.
+
+experiment:
+  name: ppo-waypoint-ed7db-00008-all-stage-policy-pretraining
+  output_dir: runtime/train
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 128
+  seed: 9996
+  trail_mode: false
+  task:
+    max_consecutive_collisions: 10
+  geometry:
+    grid_size: 32
+    boxes: []
+  observation:
+    mode: box
+    box_radius: 1
+  action:
+    mode: discrete_18
+  rewards:
+    custom:
+      name: segment_countdown_goal
+      parameters:
+        additional_budget: 10.0
+        minimum_reward: 1.0
+  waypoint_curriculum:
+    enabled: true
+    completion_mode: continue_route
+    initial_start: [16, 16, 16]
+    seed: 42
+    route_length:
+      mode: fixed
+      distance: 96
+    difficulty:
+      mode: segment_distance
+      initial_distance: 1
+      distance_increment: 2
+      maximum_distance: 20
+      sampling_attempts: 512
+    training_sampling:
+      strategy: inverse_success
+      minimum_weight: 0.5
+      power: 1.0
+      unevaluated_success_rate: 0.0
+
+training:
+  algorithm: ppo
+  model: voxel_encoder
+  runner: local
+  iterations: 400
+  checkpoint_interval: 50
+  require_gpu: true
+  num_gpus: 0.3333333333333333
+  num_env_runners: 3
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
+  trajectory_every: 50
+  best_trajectory: true
+
+evaluation:
+  episodes: 10
+  seed: 142
+  min_success_rate: 0.8
+  num_env_runners: 0
+  num_envs_per_env_runner: 4
+  waypoint_curriculum:
+    enabled: true
+    frequency: 5
+    stages: all
+    episodes: 3
+    min_success_rate: 0.8
+    min_per_stage_success_rate: 0.666
+    advance:
+      mode: success
+      successes_required: 1
+
+imitation:
+  enabled: true
+  strategy: pretrain_then_rl
+  teacher:
+    type: replanning_astar
+    weight: null
+  collection:
+    episodes: 128
+    seed_start: 1000
+    max_attempts: 256
+    require_success: true
+    validation_fraction: 0.1
+    reuse_dataset: true
+    curriculum_stages: all
+    dataset_dir: runtime/pretraining_benchmark/datasets/route_segment_astar_128_all_stages
+  pretraining:
+    epochs: 20
+    batch_size: 256
+    learning_rate: 0.0003
+    label_smoothing: 0.0
+    early_stopping_patience: 5
+  handoff:
+    initialize_encoder: true
+    initialize_policy: true
+    initialize_value_head: false
+
+algorithm_config:
+  lr: 3.2758116123493746e-06
+  train_batch_size: 4096
+  gamma: 0.9553965963523646
+  clip_param: 0.17433888871735448
+  kl_coeff: 0.055248848244078094
+  num_sgd_iter: 3
+  minibatch_size: 256
+  lambda_: 0.8859247630340334
+
+model_config:
+  hidden_sizes: [512, 256, 128]
+  activation: relu
+
+mlflow:
+  tracking_uri: sqlite:///runtime/experiments/mlflow.db
