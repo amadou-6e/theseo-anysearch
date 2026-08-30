@@ -25,4 +25,4 @@ pub use regional::{
     BoundedRegion, GridRay, InMemoryResidentGuard, RayHit, WorldAccessError, WorldMutation,
     WorldRead, WorldResidency,
 };
-pub use state::{Coord, WorldBackendKind, WorldState, WORLD_CENTER, WORLD_SIZE};
+pub use state::{Coord, WorldBackendKind, WorldHandle, WorldState, WORLD_CENTER, WORLD_SIZE};

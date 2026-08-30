@@ -9,7 +9,7 @@
 
 use crate::voxel::actions::OFFSETS_26;
 use crate::voxel::rewards::RewardConfig;
-use crate::voxel::world::{Block, Coord, World, WorldState, BLOCK_KIND_OCCUPIED};
+use crate::voxel::world::{Block, Coord, WorldState, BLOCK_KIND_OCCUPIED};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
 use super::multi_action::AgentActionPipeline;
@@ -33,7 +33,6 @@ pub struct AgentEntry {
 
 pub struct MultiAgentVoxelEnv {
     pub world: WorldState,
-    pub geometry: Vec<Coord>,
     pub geometry_len: usize,
     pub surface_cells: Vec<Coord>,
     pub trail_mode: bool,
@@ -68,9 +67,16 @@ impl MultiAgentVoxelEnv {
         grid_size: u16,
     ) -> Self {
         let mut world = WorldState::new();
-        for &coord in &geometry {
-            world.set(coord, true);
-        }
+        world.replace_base_blocks(geometry.iter().copied().map(|coord| {
+            (
+                coord,
+                Block {
+                    kind: BLOCK_KIND_OCCUPIED,
+                    active: true,
+                    reward_weight: 0.0,
+                },
+            )
+        }));
         let geometry_len = geometry.len();
         let surface_cells = compute_surface_cells(&geometry, grid_size);
         let pipelines = (0..agent_count)
@@ -86,7 +92,6 @@ impl MultiAgentVoxelEnv {
             .collect();
         Self {
             world,
-            geometry,
             geometry_len,
             surface_cells,
             trail_mode,
@@ -111,10 +116,9 @@ impl MultiAgentVoxelEnv {
     /// recomputes surface cells. Does not reset steps or agent positions — call
     /// reset() after set_geometry() to start a new episode.
     pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
-        self.world.clear();
-        for &coord in &geometry {
-            self.world
-                .set_block(
+        self.world
+            .replace_base_blocks(geometry.iter().copied().map(|coord| {
+                (
                     coord,
                     Block {
                         kind: BLOCK_KIND_OCCUPIED,
@@ -122,11 +126,9 @@ impl MultiAgentVoxelEnv {
                         reward_weight: 0.0,
                     },
                 )
-                .expect("geometry coordinates must be inside the voxel world");
-        }
+            }));
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
-        self.geometry = geometry;
     }
 
     /// Total agent-filled cells (excludes geometry).
@@ -137,18 +139,6 @@ impl MultiAgentVoxelEnv {
     pub fn reset(&mut self, seed: u64) -> (u32, usize, Vec<Coord>, Vec<Option<u32>>) {
         self.steps = 0;
         self.world.clear();
-        for &coord in &self.geometry {
-            self.world
-                .set_block(
-                    coord,
-                    Block {
-                        kind: BLOCK_KIND_OCCUPIED,
-                        active: true,
-                        reward_weight: 0.0,
-                    },
-                )
-                .expect("geometry coordinates must be inside the voxel world");
-        }
 
         for pipeline in &mut self.pipelines {
             pipeline.history.clear();

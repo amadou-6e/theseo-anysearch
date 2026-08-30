@@ -58,6 +58,10 @@ impl ChunkedWorld {
     pub fn resident_chunk_count(&self) -> usize {
         self.chunks.len()
     }
+
+    pub(crate) const fn chunk_shape(&self) -> WorldExtent {
+        self.chunk_shape
+    }
 }
 
 impl WorldRead for ChunkedWorld {

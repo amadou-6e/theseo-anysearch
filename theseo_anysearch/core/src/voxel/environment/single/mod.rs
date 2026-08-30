@@ -45,8 +45,6 @@ pub struct VoxelObservation {
 
 pub struct VoxelEnv {
     world: WorldState,
-    /// Fixed obstacle geometry — restored on every reset.
-    geometry: Vec<Coord>,
     geometry_len: usize,
     agent_filled_count: usize,
     /// Cells 6-adjacent to geometry but not in geometry — valid start/goal positions.
@@ -103,7 +101,6 @@ impl VoxelEnv {
     pub fn new(world: WorldState, max_steps: u32) -> Self {
         Self {
             world,
-            geometry: Vec::new(),
             geometry_len: 0,
             agent_filled_count: 0,
             surface_cells: Vec::new(),
@@ -159,19 +156,19 @@ impl VoxelEnv {
 
     /// Pre-fill geometry obstacle cells. Computes surface cells automatically.
     pub fn with_geometry(mut self, geometry: Vec<Coord>) -> Self {
-        for &coord in &geometry {
-            let _ = self.world.set_block(
-                coord,
-                Block {
-                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
-                    active: true,
-                    reward_weight: 0.0,
-                },
-            );
-        }
+        self.world
+            .replace_base_blocks(geometry.iter().copied().map(|coord| {
+                (
+                    coord,
+                    Block {
+                        kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
+                        active: true,
+                        reward_weight: 0.0,
+                    },
+                )
+            }));
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
-        self.geometry = geometry;
         self
     }
 
@@ -342,21 +339,20 @@ impl VoxelEnv {
     /// recomputes surface cells. Does not reset steps or cursor — call reset()
     /// after set_geometry() to start a new episode.
     pub fn set_geometry(&mut self, geometry: Vec<Coord>) {
-        self.world.clear();
         self.agent_filled_count = 0;
-        for &coord in &geometry {
-            let _ = self.world.set_block(
-                coord,
-                Block {
-                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
-                    active: true,
-                    reward_weight: 0.0,
-                },
-            );
-        }
+        self.world
+            .replace_base_blocks(geometry.iter().copied().map(|coord| {
+                (
+                    coord,
+                    Block {
+                        kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
+                        active: true,
+                        reward_weight: 0.0,
+                    },
+                )
+            }));
         self.geometry_len = geometry.len();
         self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
-        self.geometry = geometry;
     }
 }
 

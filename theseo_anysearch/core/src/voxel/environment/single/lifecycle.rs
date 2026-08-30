@@ -25,16 +25,6 @@ impl Environment for VoxelEnv {
         self.last_construction_overshoot = 0;
         self.world.clear();
         self.agent_filled_count = 0;
-        for &coord in &self.geometry {
-            let _ = self.world.set_block(
-                coord,
-                Block {
-                    kind: crate::voxel::world::BLOCK_KIND_OCCUPIED,
-                    active: true,
-                    reward_weight: 0.0,
-                },
-            );
-        }
 
         // Determine start and goal for this episode.
         let (start, goal) = if let (Some(s), Some(g)) = (self.fixed_start, self.fixed_goal) {
