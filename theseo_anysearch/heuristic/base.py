@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import heapq
+import itertools
+import math
 from typing import Any, Iterable
 
 import networkx as nx
@@ -14,6 +17,7 @@ from theseo_anysearch.heuristic.models import (
     VoxelOracleReplay,
     VoxelPosition,
 )
+from theseo_anysearch.worlds.extent import contains_task_coordinate, resolve_extent
 
 
 class BaseVoxelHeuristic(ABC):
@@ -21,7 +25,8 @@ class BaseVoxelHeuristic(ABC):
 
     def __init__(self, env: VoxelEnv) -> None:
         self.env = env
-        self.grid_size = int(env._config.get("grid_size", 32))
+        self.extent = resolve_extent(env._config)
+        self.grid_size = max(self.extent)
         self.action_mode = str(env._config.get("action_mode", "discrete_26"))
         self.directions = (
             ACTION_OFFSETS_26
@@ -36,6 +41,8 @@ class BaseVoxelHeuristic(ABC):
             )
             for index, direction in enumerate(self.directions)
         }
+        self._last_search_nodes = 0
+        self._last_search_edges = 0
 
     def plan(self) -> VoxelOraclePlan:
         """Build a plan from the environment's current state."""
@@ -46,16 +53,13 @@ class BaseVoxelHeuristic(ABC):
             raise ValueError("Voxel environment has no goal after reset")
         goal = self._position(raw_goal)
 
-        blocked = {self._position(cell) for cell in rust_env.filled_voxels()}
-        blocked.discard(start)
-        blocked.discard(goal)
-        graph = self._build_graph(blocked)
-        if start not in graph or goal not in graph:
+        if not contains_task_coordinate(self.extent, start) or not contains_task_coordinate(
+            self.extent, goal
+        ):
             raise nx.NodeNotFound(
                 f"Start {start} or goal {goal} is outside the free voxel graph"
             )
-
-        positions = tuple(self._find_path(graph, start, goal))
+        positions = tuple(self._find_path(start, goal))
         actions = tuple(
             self.direction_to_index[self._subtract(after, before)]
             for before, after in zip(positions, positions[1:])
@@ -63,8 +67,8 @@ class BaseVoxelHeuristic(ABC):
         return VoxelOraclePlan(
             positions=positions,
             action_indices=actions,
-            graph_nodes=graph.number_of_nodes(),
-            graph_edges=graph.number_of_edges(),
+            graph_nodes=self._last_search_nodes,
+            graph_edges=self._last_search_edges,
         )
 
     def replay(self, plan: VoxelOraclePlan) -> VoxelOracleReplay:
@@ -123,34 +127,56 @@ class BaseVoxelHeuristic(ABC):
     @abstractmethod
     def _find_path(
         self,
-        graph: nx.Graph,
         start: VoxelPosition,
         goal: VoxelPosition,
     ) -> list[VoxelPosition]:
         """Return a path through ``graph`` from ``start`` to ``goal``."""
 
-    def _build_graph(self, blocked: set[VoxelPosition]) -> nx.Graph:
-        """Build the free 26-neighbor voxel graph."""
-        graph = nx.Graph()
-        size = self.grid_size
-        free = {
-            (x, y, z)
-            for x in range(1, size + 1)
-            for y in range(1, size + 1)
-            for z in range(1, size + 1)
-            if (x, y, z) not in blocked
-        }
-        graph.add_nodes_from(free)
-        forward_directions = tuple(
-            direction for direction in self.directions if direction > (0, 0, 0)
-        )
-        for position in free:
-            x, y, z = position
-            for dx, dy, dz in forward_directions:
-                neighbor = (x + dx, y + dy, z + dz)
-                if neighbor in free:
-                    graph.add_edge(position, neighbor, weight=1.0)
-        return graph
+    def _search_path(
+        self,
+        start: VoxelPosition,
+        goal: VoxelPosition,
+        *,
+        heuristic_weight: float,
+    ) -> list[VoxelPosition]:
+        """Search the regional world lazily without materializing its volume."""
+
+        frontier: list[tuple[float, int, VoxelPosition]] = [(0.0, 0, start)]
+        serial = itertools.count(1)
+        cost = {start: 0.0}
+        parent: dict[VoxelPosition, VoxelPosition] = {}
+        closed: set[VoxelPosition] = set()
+        edges = 0
+        while frontier:
+            _, _, current = heapq.heappop(frontier)
+            if current in closed:
+                continue
+            closed.add(current)
+            if current == goal:
+                break
+            for dx, dy, dz in self.directions:
+                neighbor = (current[0] + dx, current[1] + dy, current[2] + dz)
+                if not contains_task_coordinate(self.extent, neighbor):
+                    continue
+                edges += 1
+                if neighbor != goal and self.env._rust_env.world_occupied(neighbor):
+                    continue
+                next_cost = cost[current] + 1.0
+                if next_cost >= cost.get(neighbor, math.inf):
+                    continue
+                cost[neighbor] = next_cost
+                parent[neighbor] = current
+                priority = next_cost + heuristic_weight * self._chebyshev(neighbor, goal)
+                heapq.heappush(frontier, (priority, next(serial), neighbor))
+        self._last_search_nodes = len(closed)
+        self._last_search_edges = edges
+        if goal not in closed:
+            raise nx.NetworkXNoPath(f"No path between {start} and {goal}")
+        path = [goal]
+        while path[-1] != start:
+            path.append(parent[path[-1]])
+        path.reverse()
+        return path
 
     @staticmethod
     def _chebyshev(left: VoxelPosition, right: VoxelPosition) -> float:

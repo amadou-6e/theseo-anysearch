@@ -43,6 +43,7 @@ pub struct MultiAgentVoxelEnv {
     pub agent_count: usize,
     /// Side length of the cubic grid (coords in [1, grid_size]³). Default 32.
     pub grid_size: u16,
+    pub extent: [u16; 3],
     pub(crate) pipelines: Vec<AgentActionPipeline>,
     pub(crate) capture_task: Option<CaptureTask>,
     pub(crate) last_action_error: Option<String>,
@@ -59,6 +60,9 @@ pub struct MultiStepResult {
 
 impl MultiAgentVoxelEnv {
     pub fn replace_world(&mut self, world: WorldState) {
+        let extent = world.extent();
+        self.extent = [extent.x as u16, extent.y as u16, extent.z as u16];
+        self.grid_size = *self.extent.iter().max().expect("extent has three axes");
         self.geometry_len = world.block_count() as usize;
         self.surface_cells.clear();
         self.world = world;
@@ -72,6 +76,7 @@ impl MultiAgentVoxelEnv {
         reward_config: RewardConfig,
         grid_size: u16,
     ) -> Self {
+        let extent = [grid_size; 3];
         let mut world = WorldState::new();
         world.replace_base_blocks(geometry.iter().copied().map(|coord| {
             (
@@ -84,7 +89,7 @@ impl MultiAgentVoxelEnv {
             )
         }));
         let geometry_len = geometry.len();
-        let surface_cells = compute_surface_cells(&geometry, grid_size);
+        let surface_cells = compute_surface_cells(&geometry, extent);
         let pipelines = (0..agent_count)
             .map(|index| AgentActionPipeline::standard(format!("agent_{index}"), trail_mode))
             .collect();
@@ -107,10 +112,19 @@ impl MultiAgentVoxelEnv {
             agents,
             agent_count,
             grid_size,
+            extent,
             pipelines,
             capture_task: None,
             last_action_error: None,
         }
+    }
+
+    pub fn with_extent(mut self, extent: [u16; 3]) -> Self {
+        self.extent = extent;
+        self.grid_size = *extent.iter().max().expect("extent has three axes");
+        self.surface_cells =
+            compute_surface_cells(&self.world.iter_filled().collect::<Vec<_>>(), extent);
+        self
     }
 
     pub fn agent_count(&self) -> usize {
@@ -134,7 +148,7 @@ impl MultiAgentVoxelEnv {
                 )
             }));
         self.geometry_len = geometry.len();
-        self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
+        self.surface_cells = compute_surface_cells(&geometry, self.extent);
     }
 
     /// Total agent-filled cells (excludes geometry).
@@ -176,9 +190,10 @@ impl MultiAgentVoxelEnv {
                 (s, Some(g))
             } else {
                 // No geometry — spread agents across the grid with fixed pattern.
-                let span = (self.grid_size as usize).saturating_sub(1).max(1);
-                let x = ((i * 8) % span + 1) as u16;
-                let y = ((i * 5) % span + 1) as u16;
+                let span_x = (self.extent[0] as usize).saturating_sub(1).max(1);
+                let span_y = (self.extent[1] as usize).saturating_sub(1).max(1);
+                let x = ((i * 8) % span_x + 1) as u16;
+                let y = ((i * 5) % span_y + 1) as u16;
                 ((x, y, 1), None)
             };
 
@@ -214,12 +229,11 @@ impl MultiAgentVoxelEnv {
             let action = actions.get(i).copied().unwrap_or(-1);
             let (x, y, z) = agent.cursor;
 
-            let g = self.grid_size as i32;
             let dest = if (action as usize) < 26 {
                 let (dx, dy, dz) = OFFSETS_26[action as usize];
-                let nx = (x as i32 + dx).clamp(1, g) as u16;
-                let ny = (y as i32 + dy).clamp(1, g) as u16;
-                let nz = (z as i32 + dz).clamp(1, g) as u16;
+                let nx = (x as i32 + dx).clamp(1, i32::from(self.extent[0])) as u16;
+                let ny = (y as i32 + dy).clamp(1, i32::from(self.extent[1])) as u16;
+                let nz = (z as i32 + dz).clamp(1, i32::from(self.extent[2])) as u16;
                 (nx, ny, nz)
             } else {
                 (x, y, z)
@@ -245,7 +259,7 @@ impl MultiAgentVoxelEnv {
                 let new_l2 = l2(agent.cursor, goal);
                 step_reward +=
                     self.reward_config
-                        .base_step_reward(agent.prev_l2, new_l2, self.grid_size);
+                        .base_step_reward_extent(agent.prev_l2, new_l2, self.extent);
                 agent.prev_l2 = new_l2;
 
                 if agent.cursor == goal {

@@ -220,3 +220,27 @@ class TestSurfaceEnv:
         obs, _ = env.reset()
         for agent_obs in obs.values():
             assert isinstance(agent_obs, dict)
+
+
+def test_voxel_env_enforces_non_cubic_axis_bounds():
+    from theseo_anysearch.environments.action_spaces import ACTION_OFFSETS_26
+
+    env = VoxelEnv(
+        {
+            "grid_size": None,
+            "extent": (7, 3, 2),
+            "max_steps": 4,
+            "trail_mode": False,
+            "action_mode": "discrete_26",
+            "waypoints": {"start": (7, 3, 2), "goal": (1, 1, 1)},
+            "task": {},
+        }
+    )
+    try:
+        env.reset(seed=1)
+        positive_y = ACTION_OFFSETS_26.index((0, 1, 0))
+        _, _, _, _, info = env.step(positive_y)
+        assert env._rust_env.cursor_pos() == (7, 3, 2)
+        assert info["collision"] is True
+    finally:
+        env.close()

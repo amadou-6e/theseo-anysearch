@@ -105,7 +105,7 @@ impl PyVoxelEnv {
         let r = radius as i32;
         let side = (2 * r + 1) as usize;
         let mut result = Vec::with_capacity(side * side * side);
-        let grid_size = i32::from(self.inner.grid_size);
+        let extent = self.inner.extent;
         for dx in -r..=r {
             for dy in -r..=r {
                 for dz in -r..=r {
@@ -115,9 +115,9 @@ impl PyVoxelEnv {
                     let kind = if x >= 1
                         && y >= 1
                         && z >= 1
-                        && x <= grid_size
-                        && y <= grid_size
-                        && z <= grid_size
+                        && x <= i32::from(extent[0])
+                        && y <= i32::from(extent[1])
+                        && z <= i32::from(extent[2])
                     {
                         self.inner
                             .world()
@@ -146,7 +146,7 @@ impl PyVoxelEnv {
     /// * `collision_cost`    â€“ extra penalty subtracted on blocked moves (default 0.0).
     #[new]
     #[pyo3(signature = (max_steps, trail_mode=true, geometry=None,
-                        grid_size=32, step_cost=-0.01, goal_reward=1.0,
+                        grid_size=32, extent=None, step_cost=-0.01, goal_reward=1.0,
                         distance_shaping=0.0, collision_cost=0.0,
                         distance_reward_mode="progress".to_string(),
                         zone_reward_min=-1.0, zone_reward_max=-0.01,
@@ -172,6 +172,7 @@ impl PyVoxelEnv {
         trail_mode: bool,
         geometry: Option<Vec<(u16, u16, u16)>>,
         grid_size: u16,
+        extent: Option<(u16, u16, u16)>,
         step_cost: f32,
         goal_reward: f32,
         distance_shaping: f32,
@@ -214,8 +215,12 @@ impl PyVoxelEnv {
             &zone_reward_curve,
         )
         .map_err(PyValueError::new_err)?;
+        let resolved_extent = extent.unwrap_or((grid_size, grid_size, grid_size));
+        if resolved_extent.0 == 0 || resolved_extent.1 == 0 || resolved_extent.2 == 0 {
+            return Err(PyValueError::new_err("extent axes must be positive"));
+        }
         let env = VoxelEnv::new(WorldState::new(), max_steps)
-            .with_grid_size(grid_size)
+            .with_extent([resolved_extent.0, resolved_extent.1, resolved_extent.2])
             .with_geometry(geometry.unwrap_or_default())
             .with_trail_mode(trail_mode)
             .with_reward_config(reward_config)
@@ -851,6 +856,7 @@ mod tests {
             true,
             None,
             32,
+            None,
             -0.01,
             1.0,
             0.0,

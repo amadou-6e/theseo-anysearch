@@ -90,8 +90,10 @@ impl VoxelEnv {
         } else {
             cursor
         };
-        let grid = i32::from(self.grid_size);
-        let in_bounds = destination.iter().all(|value| (1..=grid).contains(value));
+        let in_bounds = destination
+            .iter()
+            .enumerate()
+            .all(|(axis, value)| (1..=i32::from(self.extent[axis])).contains(value));
         let coord = if in_bounds {
             (
                 destination[0] as u16,
@@ -244,6 +246,18 @@ impl VoxelEnv {
                 super::lifecycle::merge_mutations(&mut mutations, result, self.grid_size)
             {
                 self.last_reward_error = Some(error);
+                return VoxelAction::Collision;
+            }
+        }
+        for coord in [mutations.cursor, mutations.place, mutations.remove]
+            .into_iter()
+            .flatten()
+        {
+            if coord.0 > self.extent[0] || coord.1 > self.extent[1] || coord.2 > self.extent[2] {
+                self.last_reward_error = Some(format!(
+                    "outcome coordinate {coord:?} is outside extent {:?}",
+                    self.extent
+                ));
                 return VoxelAction::Collision;
             }
         }

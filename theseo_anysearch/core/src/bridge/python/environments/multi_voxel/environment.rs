@@ -67,7 +67,7 @@ fn cursor_region(cursor: (u16, u16, u16), radius: u32, extent: WorldExtent) -> B
 impl PyMultiVoxelEnv {
     #[new]
     #[pyo3(signature = (agent_count, max_steps, trail_mode=true, geometry=None,
-                        grid_size=32, step_cost=-0.01, goal_reward=1.0,
+                        grid_size=32, extent=None, step_cost=-0.01, goal_reward=1.0,
                         distance_shaping=0.0, collision_cost=0.0,
                         distance_reward_mode="progress".to_string(),
                         zone_reward_min=-1.0, zone_reward_max=-0.01,
@@ -79,6 +79,7 @@ impl PyMultiVoxelEnv {
         trail_mode: bool,
         geometry: Option<Vec<(u16, u16, u16)>>,
         grid_size: u16,
+        extent: Option<(u16, u16, u16)>,
         step_cost: f32,
         goal_reward: f32,
         distance_shaping: f32,
@@ -115,6 +116,10 @@ impl PyMultiVoxelEnv {
         reward_config
             .validate_finite()
             .map_err(PyValueError::new_err)?;
+        let resolved_extent = extent.unwrap_or((grid_size, grid_size, grid_size));
+        if resolved_extent.0 == 0 || resolved_extent.1 == 0 || resolved_extent.2 == 0 {
+            return Err(PyValueError::new_err("extent axes must be positive"));
+        }
         let mut inner = crate::voxel::MultiAgentVoxelEnv::new(
             agent_count,
             max_steps,
@@ -122,7 +127,8 @@ impl PyMultiVoxelEnv {
             geometry.unwrap_or_default(),
             reward_config,
             grid_size,
-        );
+        )
+        .with_extent([resolved_extent.0, resolved_extent.1, resolved_extent.2]);
         if let Some(agents_json) = agents_json {
             inner
                 .configure_agents(
@@ -440,6 +446,7 @@ mod tests {
             true,
             None,
             32,
+            None,
             -0.01,
             1.0,
             0.0,

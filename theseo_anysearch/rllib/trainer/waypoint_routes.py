@@ -8,6 +8,7 @@ from typing import TypeAlias
 import numpy as np
 
 from theseo_anysearch.environments.action_spaces import action_step_distance
+from theseo_anysearch.worlds.extent import WorldExtent, contains_task_coordinate
 from pydantic import BaseModel, ConfigDict
 
 Waypoint: TypeAlias = tuple[int, int, int]
@@ -41,12 +42,16 @@ def sample_route(
     start: Waypoint,
     total_distance: int,
     segment_distance: int,
-    grid_size: int,
     action_mode: str,
     seed: int,
+    grid_size: int | None = None,
+    extent: WorldExtent | None = None,
 ) -> WaypointRoute:
     """Sample spherical directions while enforcing exact graph distances."""
-    if not all(1 <= coordinate <= grid_size for coordinate in start):
+    if extent is None:
+        size = 32 if grid_size is None else grid_size
+        extent = (size, size, size)
+    if not contains_task_coordinate(extent, start):
         raise ValueError("route start must be inside the grid")
     rng = np.random.default_rng(seed)
     current = start
@@ -54,8 +59,8 @@ def sample_route(
     visited = {start}
     for distance in segment_lengths(total_distance, segment_distance):
         ranges = tuple(
-            range(max(1, coordinate - distance), min(grid_size, coordinate + distance) + 1)
-            for coordinate in current
+            range(max(1, coordinate - distance), min(axis, coordinate + distance) + 1)
+            for coordinate, axis in zip(current, extent)
         )
         candidates = [
             (x, y, z)

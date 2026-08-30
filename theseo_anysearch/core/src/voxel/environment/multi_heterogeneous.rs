@@ -84,6 +84,7 @@ impl MultiAgentVoxelEnv {
                 self.steps,
                 self.max_steps,
                 self.grid_size,
+                self.extent,
                 observation_filled,
             );
             let mut reward = 0.0;
@@ -101,10 +102,10 @@ impl MultiAgentVoxelEnv {
             }
             if let Some(goal) = goal {
                 let distance = l2(self.agents[index].cursor, goal);
-                reward += self.reward_config.base_step_reward(
+                reward += self.reward_config.base_step_reward_extent(
                     self.agents[index].prev_l2,
                     distance,
-                    self.grid_size,
+                    self.extent,
                 );
                 self.agents[index].prev_l2 = distance;
                 if self.agents[index].cursor == goal {

@@ -1,7 +1,5 @@
 """Weighted A* search for faster, potentially suboptimal voxel planning."""
 
-import networkx as nx
-
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic.base import BaseVoxelHeuristic
 from theseo_anysearch.heuristic.models import VoxelPosition
@@ -18,19 +16,13 @@ class VoxelWeightedAStarHeuristic(BaseVoxelHeuristic):
 
     def _find_path(
         self,
-        graph: nx.Graph,
         start: VoxelPosition,
         goal: VoxelPosition,
     ) -> list[VoxelPosition]:
-        def weighted_heuristic(left: VoxelPosition, right: VoxelPosition) -> float:
-            return self.heuristic_weight * self._chebyshev(left, right)
-
-        return nx.astar_path(
-            graph,
+        return self._search_path(
             start,
             goal,
-            heuristic=weighted_heuristic,
-            weight="weight",
+            heuristic_weight=self.heuristic_weight,
         )
 
 

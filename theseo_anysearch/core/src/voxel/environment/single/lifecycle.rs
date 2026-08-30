@@ -149,12 +149,12 @@ impl Environment for VoxelEnv {
         let goal_reached = has_accepted_target && new_l2 <= self.goal_tolerance;
         let goal_distance = self.active_goal.map(|goal| manhattan(self.cursor, goal));
         let step_cost = reward_components::step_cost::compute(&self.reward_config);
-        let distance_reward = reward_components::distance::compute(
+        let distance_reward = reward_components::distance::compute_extent(
             &self.reward_config,
             self.active_goal.is_some(),
             self.prev_goal_dist_l2,
             new_l2,
-            self.grid_size,
+            self.extent,
         );
         let (residual, overshoot) = if self.construction_target.is_empty() {
             (0, 0)

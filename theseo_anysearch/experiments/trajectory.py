@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from theseo_anysearch.worlds.extent import resolve_extent
+
 if TYPE_CHECKING:
     from theseo_anysearch.experiments.output import OutputStore
 
@@ -87,6 +89,7 @@ class VoxelEpisodeData:
     total_reward: float
     success: bool      # True if episode ended before max_steps (reached target)
     grid_size: int = 32
+    extent: tuple[int, int, int] = (32, 32, 32)
     start_pos: tuple[int, int, int] | None = None
     goal_pos: tuple[int, int, int] | None = None
     termination_reason: str = "unknown"
@@ -360,7 +363,8 @@ class _VoxelEpisodeState:
             agent_count=1,
             max_steps=self.env_config.get("max_steps", 200),
             obs_mode=self.env_config.get("obs_mode", "scalar"),
-            grid_size=self.env_config.get("grid_size", 32),
+            grid_size=max(resolve_extent(self.env_config)),
+            extent=resolve_extent(self.env_config),
             init_filled=self.init_filled,
             steps=self.steps,
             total_reward=self.total_reward,
@@ -585,7 +589,8 @@ def collect_heuristic_episode(
         agent_count=1,
         max_steps=int(env_config.get("max_steps", 200)),
         obs_mode=str(env_config.get("obs_mode", "scalar")),
-        grid_size=int(env_config.get("grid_size", 32)),
+        grid_size=max(resolve_extent(env_config)),
+        extent=resolve_extent(env_config),
         init_filled=init_filled,
         steps=steps,
         total_reward=sum(replay.rewards),
@@ -1102,6 +1107,7 @@ def _build_payload(
         "iteration": iteration,
         "episode_reward_mean": episode_reward_mean,
         "grid_size": episode.grid_size,
+        "extent": list(episode.extent),
         "agent_count": episode.agent_count,
         "max_steps": episode.max_steps,
         "obs_mode": episode.obs_mode,

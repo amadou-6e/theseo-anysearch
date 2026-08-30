@@ -59,6 +59,8 @@ pub struct VoxelEnv {
     segment_length: u32,
     /// Side length of the cubic grid (coords in [1, grid_size]³). Default 32.
     pub grid_size: u16,
+    /// Independent one-based task-coordinate bounds for x, y, and z.
+    pub extent: [u16; 3],
     // --- Navigation state ---
     /// Current agent cursor position in [1, grid_size]³.
     cursor: Coord,
@@ -112,6 +114,7 @@ impl VoxelEnv {
             segment_steps: 0,
             segment_length: 0,
             grid_size: 32,
+            extent: [32, 32, 32],
             cursor: (1, 1, 1),
             fixed_start: None,
             fixed_goal: None,
@@ -153,6 +156,13 @@ impl VoxelEnv {
     /// Set the grid side length (coords in [1, grid_size]³). Must be called before with_geometry.
     pub fn with_grid_size(mut self, grid_size: u16) -> Self {
         self.grid_size = grid_size;
+        self.extent = [grid_size; 3];
+        self
+    }
+
+    pub fn with_extent(mut self, extent: [u16; 3]) -> Self {
+        self.extent = extent;
+        self.grid_size = *extent.iter().max().expect("extent has three axes");
         self
     }
 
@@ -170,7 +180,7 @@ impl VoxelEnv {
                 )
             }));
         self.geometry_len = geometry.len();
-        self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
+        self.surface_cells = compute_surface_cells(&geometry, self.extent);
         self
     }
 
@@ -312,6 +322,9 @@ impl VoxelEnv {
     }
 
     pub fn replace_world(&mut self, world: WorldState) {
+        let extent = world.extent();
+        self.extent = [extent.x as u16, extent.y as u16, extent.z as u16];
+        self.grid_size = *self.extent.iter().max().expect("extent has three axes");
         self.geometry_len = world.block_count() as usize;
         self.agent_filled_count = 0;
         self.surface_cells.clear();
@@ -361,7 +374,7 @@ impl VoxelEnv {
                 )
             }));
         self.geometry_len = geometry.len();
-        self.surface_cells = compute_surface_cells(&geometry, self.grid_size);
+        self.surface_cells = compute_surface_cells(&geometry, self.extent);
     }
 }
 
