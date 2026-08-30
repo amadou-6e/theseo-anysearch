@@ -4,7 +4,9 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 use crate::{
     environments::Environment,
-    voxel::world::{World, WorldState, BLOCK_KIND_OCCUPIED},
+    voxel::world::{
+        BoundedRegion, StorageCoord, World, WorldExtent, WorldRead, WorldState, BLOCK_KIND_OCCUPIED,
+    },
     voxel::VoxelEnv,
 };
 
@@ -44,6 +46,42 @@ fn validate_box_radius(radius: u32) -> PyResult<()> {
 pub struct PyVoxelEnv {
     pub(crate) inner: VoxelEnv,
     pub(crate) box_radius: Option<u32>,
+    residency_radius: u32,
+    pending_prefetch: Option<crate::voxel::world::PrefetchRequest>,
+}
+
+fn cursor_region(cursor: (u16, u16, u16), radius: u32, extent: WorldExtent) -> BoundedRegion {
+    let center = StorageCoord {
+        x: u32::from(cursor.0).min(extent.x - 1),
+        y: u32::from(cursor.1).min(extent.y - 1),
+        z: u32::from(cursor.2).min(extent.z - 1),
+    };
+    BoundedRegion::new(
+        StorageCoord {
+            x: center.x.saturating_sub(radius),
+            y: center.y.saturating_sub(radius),
+            z: center.z.saturating_sub(radius),
+        },
+        StorageCoord {
+            x: center
+                .x
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.x),
+            y: center
+                .y
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.y),
+            z: center
+                .z
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.z),
+        },
+        extent,
+    )
+    .expect("cursor clamped to a positive finite extent produces a valid region")
 }
 
 impl PyVoxelEnv {
@@ -213,14 +251,25 @@ impl PyVoxelEnv {
         Ok(Self {
             inner: env,
             box_radius,
+            residency_radius: box_radius.unwrap_or(1).saturating_add(2),
+            pending_prefetch: None,
         })
     }
 
     /// Reset the environment and return the initial observation.
     /// Cursor is placed at the randomly-selected (or fixed) start position.
-    pub fn reset(&mut self, seed: u64) -> PyVoxelObservation {
+    pub fn reset(&mut self, seed: u64) -> PyResult<PyVoxelObservation> {
         let obs = self.inner.reset(seed);
-        self.to_py_observation(obs)
+        let region = cursor_region(
+            self.inner.cursor(),
+            self.residency_radius,
+            self.inner.world().extent(),
+        );
+        self.inner
+            .world()
+            .prefetch_region(region)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        Ok(self.to_py_observation(obs))
     }
 
     /// Invoke a native scenario-v2 provider directly against the Rust world.
@@ -267,6 +316,21 @@ impl PyVoxelEnv {
     /// Action space: Discrete(26) â€” all 26 neighbors in {-1,0,1}Â³ \ {origin},
     /// enumerated as (dx,dy,dz) with dz inner loop, skip (0,0,0) at index 13.
     pub fn step(&mut self, action: i32) -> PyResult<PyStepResultVoxel> {
+        use crate::voxel::world::WorldResidency;
+        if let Some(request) = self.pending_prefetch.take() {
+            request
+                .wait()
+                .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        }
+        let handle = self.inner.world().world_handle();
+        let residency = cursor_region(
+            self.inner.cursor(),
+            self.residency_radius,
+            self.inner.world().extent(),
+        );
+        let _resident = handle
+            .pin_region(residency)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
         let previous_cursor = self.inner.cursor();
         let invalid_action = !(0..=26).contains(&action);
         if invalid_action {
@@ -278,6 +342,12 @@ impl PyVoxelEnv {
             .prepare_navigation_step(action, previous_cursor, invalid_action);
         let rust_action = self.inner.execute_navigation_action(action);
         let result = self.inner.step(rust_action);
+        let next_region = cursor_region(
+            self.inner.cursor(),
+            self.residency_radius,
+            self.inner.world().extent(),
+        );
+        self.pending_prefetch = self.inner.world().request_prefetch_region(next_region);
         if let Some(error) = self.inner.take_reward_error() {
             return Err(PyValueError::new_err(error));
         }
@@ -300,6 +370,16 @@ impl PyVoxelEnv {
 
     /// Return feasibility for all 26 canonical moves plus no-op.
     pub fn action_mask(&mut self) -> PyResult<Vec<u8>> {
+        use crate::voxel::world::WorldResidency;
+        let handle = self.inner.world().world_handle();
+        let residency = cursor_region(
+            self.inner.cursor(),
+            self.residency_radius,
+            self.inner.world().extent(),
+        );
+        let _resident = handle
+            .pin_region(residency)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
         let mask = self.inner.action_mask();
         if let Some(error) = self.inner.take_reward_error() {
             return Err(PyValueError::new_err(error));
@@ -352,6 +432,71 @@ impl PyVoxelEnv {
     /// Call reset() afterwards to start a fresh episode on the new geometry.
     pub fn set_geometry(&mut self, filled_cells: Vec<(u16, u16, u16)>) {
         self.inner.set_geometry(filled_cells);
+    }
+
+    /// Replace in-memory geometry with a lazily decoded compiled world pack.
+    pub fn set_compiled_world(
+        &mut self,
+        root: String,
+        maximum_decoded_bytes: usize,
+    ) -> PyResult<()> {
+        let world = WorldState::from_compiled_pack(Path::new(&root), maximum_decoded_bytes)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        self.inner.replace_world(world);
+        Ok(())
+    }
+
+    pub fn set_world_residency_radius(&mut self, radius: u32) {
+        self.residency_radius = radius;
+    }
+
+    /// Synchronously establish residency before a latency-sensitive step.
+    pub fn prefetch_world_region(
+        &self,
+        minimum: (u32, u32, u32),
+        maximum_exclusive: (u32, u32, u32),
+    ) -> PyResult<()> {
+        use crate::voxel::world::{BoundedRegion, StorageCoord, WorldRead};
+        let region = BoundedRegion::new(
+            StorageCoord {
+                x: minimum.0,
+                y: minimum.1,
+                z: minimum.2,
+            },
+            StorageCoord {
+                x: maximum_exclusive.0,
+                y: maximum_exclusive.1,
+                z: maximum_exclusive.2,
+            },
+            self.inner.world().extent(),
+        )
+        .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        self.inner
+            .world()
+            .prefetch_region(region)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))
+    }
+
+    /// Per-process decoded-cache counters; absent for in-memory backends.
+    pub fn world_cache_metrics(&self) -> Option<std::collections::HashMap<String, u64>> {
+        self.inner.world().disk_cache_metrics().map(|metrics| {
+            [
+                ("cache_hits".to_owned(), metrics.cache_hits),
+                ("cache_misses".to_owned(), metrics.cache_misses),
+                ("pack_reads".to_owned(), metrics.pack_reads),
+                ("evictions".to_owned(), metrics.evictions),
+                ("decoded_bytes".to_owned(), metrics.decoded_bytes as u64),
+                ("pinned_bytes".to_owned(), metrics.pinned_bytes as u64),
+                (
+                    "pinned_overcommit_bytes".to_owned(),
+                    metrics.pinned_overcommit_bytes as u64,
+                ),
+                ("resident_chunks".to_owned(), metrics.resident_chunks as u64),
+                ("pinned_chunks".to_owned(), metrics.pinned_chunks as u64),
+            ]
+            .into_iter()
+            .collect()
+        })
     }
 
     /// Returns a flattened (2*radius+1)Â³ binary array centred on the cursor.
@@ -530,6 +675,8 @@ mod tests {
         PyVoxelEnv {
             inner,
             box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
         }
     }
 
@@ -541,6 +688,8 @@ mod tests {
         PyVoxelEnv {
             inner,
             box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
         }
     }
 
@@ -560,6 +709,8 @@ mod tests {
         PyVoxelEnv {
             inner,
             box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
         }
     }
 
@@ -574,6 +725,8 @@ mod tests {
         let mut env = PyVoxelEnv {
             inner,
             box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
         };
 
         let result = env.step(26).unwrap();

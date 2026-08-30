@@ -10,7 +10,7 @@ The scenario-v2 callback table is captured through point, two-pass region, and r
 
 Rendering parity currently compares the sorted resolved world enumeration consumed by rendering and trajectory snapshots. Pixel-level rendering belongs to #22; persisted replay fixtures belong to #20.
 
-The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, checked arithmetic overflow, candidate-index corruption, and candidate query/result budget exhaustion are direct fixtures. Only faults requiring the still-unmerged residency cache (#224) remain dependency-gated.
+The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, checked arithmetic overflow, candidate-index corruption, candidate query/result budget exhaustion, pack short reads, checksum corruption, cache eviction, pinned overcommit, and failed prefetch are direct fixtures.
 
 ## Benchmark workloads
 
@@ -28,7 +28,7 @@ Each report records the fixed seed, operating system, architecture, build profil
 
 Measured operations are point reads, radius-2 and radius-8 regional reads, length-8 and length-32 rays, mutations, backend reset/repopulation, overlay-only environment reset, environment step controls, and full enumeration. Resident chunk count, conservative decoded/storage estimates, and overlay memory are reported separately.
 
-Overlay memory is measured from the actual number and representation of episode-local overrides and tombstones. Encoded bytes are measured by the Python world-pack benchmark documented in `world_pack_format.md`; this in-memory Rust report leaves that field `null` rather than mixing measurements from separate processes. Pinned memory and operating-system file-cache bytes remain `null` until #224 provides those concepts. Process RSS is not used as a disk-residency or file-cache guarantee.
+Overlay memory is measured from the actual number and representation of episode-local overrides and tombstones. Encoded bytes are measured by the Python world-pack benchmark documented in `world_pack_format.md`; this in-memory Rust report leaves that field `null` rather than mixing measurements from separate processes. Disk-backed runs obtain decoded, pinned, and pinned-overcommit bytes directly from `world_cache_metrics()`. Operating-system file-cache bytes remain a separate, explicitly unavailable measurement: region reads benefit from the OS cache, but neither process RSS nor decoded-cache bytes are presented as an OS residency guarantee.
 
 ## Commands
 
@@ -50,7 +50,7 @@ Full local benchmark:
 cargo run --release --bin world-bench -- --output runtime/world-bench-full.json
 ```
 
-`runtime/` is ignored by Git. Cold and hot persistence measurements cannot yet be distinguished because no persistent backend is merged. The current in-memory warmup/measured split represents process-local cold-ish construction followed by hot queries, and is labeled accordingly.
+`runtime/` is ignored by Git. For compiled packs, `pack_reads` separates cold faults from hot cache hits and the decoded/pinned counters describe process-owned memory. The operating-system file cache remains outside that measurement. The original in-memory warmup/measured split continues to represent process-local construction followed by hot queries.
 
 ## Revisit criteria
 

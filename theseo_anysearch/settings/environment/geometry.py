@@ -28,6 +28,19 @@ class GeometryConfig(BaseModel):
     scale_variants_per_map: int = Field(default=4, ge=1, description="Scale variants generated for each source geometry.")
     padding: int = Field(default=2, ge=0, description="Empty voxel padding around imported geometry.")
     pool: dict[str, Any] | None = Field(None, description="Geometry-pool generation and augmentation settings.")
+    compiled_world_path: Path | None = Field(
+        None, description="Validated compiled-world directory loaded lazily by each worker."
+    )
+    maximum_decoded_bytes: int = Field(
+        default=256 * 1024 * 1024,
+        ge=1,
+        description="Per-process upper bound for unpinned decoded world chunks.",
+    )
+    prefetch_margin: int = Field(
+        default=2,
+        ge=0,
+        description="Extra voxels loaded around the observation and movement envelope.",
+    )
 
     @model_validator(mode="before")
     @classmethod

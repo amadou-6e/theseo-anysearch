@@ -164,7 +164,7 @@ class MultiVoxelEnv(RustParallelEnv):
                     manifest_path.parent.joinpath(manifest.library).resolve()
                 )
 
-        return theseo_core.PyMultiVoxelEnv(
+        env = theseo_core.PyMultiVoxelEnv(
             agent_count=config.get("agent_count", 2),
             max_steps=config.get("max_steps", 200),
             trail_mode=config.get("trail_mode", False),
@@ -186,12 +186,32 @@ class MultiVoxelEnv(RustParallelEnv):
             ),
             native_action_path=native_action_path,
         )
+        compiled_world_path = config.get("compiled_world_path")
+        if compiled_world_path is not None:
+            from pathlib import Path
+            from theseo_anysearch.worlds.compiler import validate_compiled_world
+
+            compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            env.set_compiled_world(
+                str(compiled.root),
+                int(config.get("world_maximum_decoded_bytes", 256 * 1024 * 1024)),
+            )
+            env.set_world_residency_radius(
+                max(
+                    int(config.get("box_radius", 2)),
+                    int(config.get("ray_max_len", 16)),
+                )
+                + 2
+                + int(config.get("world_prefetch_margin", 2))
+            )
+        return env
 
     def _has_goal(self) -> bool:
         return bool(
             self._config.get("geometry_boxes")
             or self._config.get("stl_path")
             or self._config.get("geometry_pool")
+            or self._config.get("compiled_world_path")
         )
 
     def reset(self, seed: int | None = None, options: dict | None = None):

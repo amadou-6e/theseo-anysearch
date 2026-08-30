@@ -15,6 +15,40 @@ The compiler selects among a constant-size uniform representation, sorted sparse
 
 Publication uses the shared heartbeat/token cache lock. A build is written to a unique temporary directory, fully validated, and atomically renamed. Corrupt entries are rebuilt when their source still exists. When only a pack identity is available, corruption raises an explicit `WorldPackUnavailableError` because rebuilding is impossible.
 
+## Runtime residency
+
+Compiled packs can be attached to Gymnasium and PettingZoo workers without
+materializing the world:
+
+```yaml
+env:
+  geometry:
+    compiled_world_path: runtime/worlds/<identity>
+    maximum_decoded_bytes: 268435456
+    prefetch_margin: 2
+```
+
+Each process shares one immutable backend between environment clones. Chunks
+are region-read from `world.pack`, decoded into a bounded LRU, and pinned for
+the union of the agents' movement and observation envelopes while a step is
+executing. Reset may synchronously establish initial residency. Subsequent
+envelopes are prefetched on Rust worker threads and joined before the next
+step. A custom outcome that teleports or mutates outside the predicted
+envelope takes a synchronous correctness fallback; it may make that step cold,
+but the mutation is not committed until the target chunk has loaded and the
+coordinate has been validated.
+
+`world_cache_metrics()` reports cache hits/misses, pack reads, evictions,
+decoded and pinned bytes, resident and pinned chunks, and pinned overcommit.
+The single-agent Gymnasium wrapper also publishes these counters under
+`info["world_cache"]`. `decoded_bytes` is owned decoded memory. It deliberately
+does not claim to measure bytes retained by the operating-system file cache.
+
+Use `stage_compiled_world()` to copy a validated pack into a node-local,
+content-addressed cache. Publication uses the same heartbeat-protected lock and
+atomic rename protocol as compilation, so concurrent RLlib workers reuse one
+complete staged entry.
+
 Spawn and goal candidates are free cells adjacent to compiled geometry; surface
 candidates are the corresponding occupied boundary cells. Their quality score
 records local openness. Portal candidates require explicit semantic annotation

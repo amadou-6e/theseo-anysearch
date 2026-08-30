@@ -171,6 +171,13 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale_variants_per_map": self.geometry__scale_variants_per_map,
             "geometry_padding": self.geometry__padding,
             "geometry_pool": self.geometry__pool,
+            "compiled_world_path": (
+                str(self.geometry.compiled_world_path)
+                if self.geometry.compiled_world_path is not None
+                else None
+            ),
+            "world_maximum_decoded_bytes": self.geometry.maximum_decoded_bytes,
+            "world_prefetch_margin": self.geometry.prefetch_margin,
             "obs_mode": self.observation__mode,
             "box_radius": self.observation__box_radius,
             "box_radii": self.observation__box_radii,

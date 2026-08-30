@@ -9,7 +9,7 @@
 
 use crate::voxel::actions::OFFSETS_26;
 use crate::voxel::rewards::RewardConfig;
-use crate::voxel::world::{Block, Coord, WorldState, BLOCK_KIND_OCCUPIED};
+use crate::voxel::world::{Block, Coord, WorldRead, WorldState, BLOCK_KIND_OCCUPIED};
 
 use super::geometry::{compute_surface_cells, l2, manhattan};
 use super::multi_action::AgentActionPipeline;
@@ -58,6 +58,12 @@ pub struct MultiStepResult {
 }
 
 impl MultiAgentVoxelEnv {
+    pub fn replace_world(&mut self, world: WorldState) {
+        self.geometry_len = world.block_count() as usize;
+        self.surface_cells.clear();
+        self.world = world;
+    }
+
     pub fn new(
         agent_count: usize,
         max_steps: u32,

@@ -1,5 +1,7 @@
 use crate::voxel::rewards::RewardConfig;
-use crate::voxel::world::{Block, Coord, World, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START};
+use crate::voxel::world::{
+    Block, Coord, World, WorldRead, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START,
+};
 
 use crate::environments::{Environment, StepResult};
 use crate::voxel::{
@@ -307,6 +309,13 @@ impl VoxelEnv {
 
     pub fn world(&self) -> &WorldState {
         &self.world
+    }
+
+    pub fn replace_world(&mut self, world: WorldState) {
+        self.geometry_len = world.block_count() as usize;
+        self.agent_filled_count = 0;
+        self.surface_cells.clear();
+        self.world = world;
     }
 
     pub fn trail_mode(&self) -> bool {
