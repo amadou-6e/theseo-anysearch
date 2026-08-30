@@ -202,6 +202,11 @@ impl WorldState {
         self.len() * std::mem::size_of::<(Coord, Block)>()
     }
 
+    /// Approximate memory owned by episode-local block overrides and tombstones.
+    pub fn estimated_overlay_bytes(&self) -> usize {
+        self.overlay.len() * std::mem::size_of::<(StorageCoord, OverlayEntry)>()
+    }
+
     pub fn dense_world_bytes() -> usize {
         WORLD_SIZE as usize * WORLD_SIZE as usize * WORLD_SIZE as usize
     }

@@ -23,6 +23,10 @@ path = "src/bin/garden_show_data.rs"
 name = "pool-explorer"
 path = "src/bin/pool_explorer.rs"
 
+[[bin]]
+name = "world-bench"
+path = "src/bin/world_bench.rs"
+
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
