@@ -138,6 +138,10 @@ impl WorldState {
         coord.0 < WORLD_SIZE && coord.1 < WORLD_SIZE && coord.2 < WORLD_SIZE
     }
 
+    fn contains_coord(&self, coord: Coord) -> bool {
+        self.extent().contains_storage(Self::storage(coord))
+    }
+
     pub fn is_filled(&self, coord: Coord) -> bool {
         self.get_block(coord).is_some()
     }
@@ -237,7 +241,7 @@ impl WorldState {
             ),
         };
         for (coord, block) in blocks {
-            if Self::in_bounds(coord) {
+            if self.contains_coord(coord) {
                 backend
                     .mutation()
                     .set_block_value(Self::storage(coord), block)
@@ -478,7 +482,7 @@ impl WorldResidency for WorldState {
 
 impl World for WorldState {
     fn set_block(&mut self, coord: Coord, block: Block) -> Result<(), WorldError> {
-        if !Self::in_bounds(coord) {
+        if !self.contains_coord(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
         self.set_block_value(Self::storage(coord), block)
@@ -487,7 +491,7 @@ impl World for WorldState {
     }
 
     fn remove_block(&mut self, coord: Coord) -> Result<(), WorldError> {
-        if !Self::in_bounds(coord) {
+        if !self.contains_coord(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
         if self
@@ -501,7 +505,7 @@ impl World for WorldState {
     }
 
     fn update_block(&mut self, coord: Coord, update: BlockUpdate) -> Result<(), WorldError> {
-        if !Self::in_bounds(coord) {
+        if !self.contains_coord(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
         self.update_block_value(Self::storage(coord), update)
@@ -510,7 +514,7 @@ impl World for WorldState {
     }
 
     fn get_block(&self, coord: Coord) -> Option<Block> {
-        if !Self::in_bounds(coord) {
+        if !self.contains_coord(coord) {
             return None;
         }
         self.get_block_value(Self::storage(coord))
@@ -551,6 +555,27 @@ mod tests {
             world.remove_block((1, 2, 3)).unwrap();
             assert_eq!(world.len(), 0);
         }
+    }
+
+    #[test]
+    fn world_operations_use_backend_extent_beyond_legacy_limit() {
+        let backend = ChunkedWorld::new(
+            WorldExtent {
+                x: 2_000,
+                y: 2_000,
+                z: 2_000,
+            },
+            WorldExtent::cubic(32),
+        )
+        .unwrap();
+        let mut world = WorldState::from_handle(WorldHandle::new(WorldBackend::Chunked(backend)));
+        let coordinate = (1_500, 1_500, 1_500);
+
+        world.set_block(coordinate, Block::default()).unwrap();
+
+        assert!(world.get_block(coordinate).is_some());
+        world.remove_block(coordinate).unwrap();
+        assert!(world.get_block(coordinate).is_none());
     }
 
     #[test]

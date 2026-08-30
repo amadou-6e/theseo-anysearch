@@ -50,6 +50,20 @@ Full local benchmark:
 cargo run --release --bin world-bench -- --output runtime/world-bench-full.json
 ```
 
+Single-CPU compiled-world phase benchmark:
+
+```text
+python benchmarks/large_world_cpu.py reset --iterations 512
+python benchmarks/large_world_cpu.py scalar --iterations 10000
+python benchmarks/large_world_cpu.py box --iterations 10000
+python benchmarks/large_world_cpu.py mask --iterations 10000
+```
+
+The benchmark pins itself to one logical CPU and reports process CPU time,
+wall time, RSS, decoded and pinned cache memory, pack reads, and cache hits. Its
+default sparse world has extent `60,000 x 40,000 x 20,000`; each phase should
+run in a fresh process so retained memory is attributable to that phase.
+
 `runtime/` is ignored by Git. For compiled packs, `pack_reads` separates cold faults from hot cache hits and the decoded/pinned counters describe process-owned memory. The operating-system file cache remains outside that measurement. The original in-memory warmup/measured split continues to represent process-local construction followed by hot queries.
 
 ## Revisit criteria

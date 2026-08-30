@@ -208,6 +208,23 @@ impl DiskInner {
             y: region.maximum_exclusive.y - 1,
             z: region.maximum_exclusive.z - 1,
         });
+        let range_count = u64::from(maximum.0 - minimum.0 + 1)
+            .saturating_mul(u64::from(maximum.1 - minimum.1 + 1))
+            .saturating_mul(u64::from(maximum.2 - minimum.2 + 1));
+        if range_count > self.locations.len() as u64 {
+            let mut keys: Vec<_> = self
+                .locations
+                .keys()
+                .copied()
+                .filter(|key| {
+                    (minimum.0..=maximum.0).contains(&key.0)
+                        && (minimum.1..=maximum.1).contains(&key.1)
+                        && (minimum.2..=maximum.2).contains(&key.2)
+                })
+                .collect();
+            keys.sort_unstable();
+            return keys;
+        }
         let mut keys = Vec::new();
         for z in minimum.2..=maximum.2 {
             for y in minimum.1..=maximum.1 {
