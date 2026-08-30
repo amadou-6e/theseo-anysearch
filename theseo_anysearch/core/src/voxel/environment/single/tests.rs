@@ -21,6 +21,21 @@ fn make_backend_env(world: WorldState) -> VoxelEnv {
 }
 
 #[test]
+fn environments_sharing_a_base_keep_episode_mutations_isolated() {
+    let mut base = WorldState::new();
+    base.replace_base_blocks([((5, 5, 5), Block::default())]);
+    let handle = base.world_handle();
+    let mut first = VoxelEnv::new(WorldState::from_handle(handle.clone()), 10);
+    let second = VoxelEnv::new(WorldState::from_handle(handle), 10);
+
+    first.world.set_block((6, 5, 5), Block::default()).unwrap();
+    first.world.remove_block((5, 5, 5)).unwrap();
+
+    assert!(second.world.is_filled((5, 5, 5)));
+    assert!(!second.world.is_filled((6, 5, 5)));
+}
+
+#[test]
 fn environment_results_and_masks_match_across_world_backends() {
     let mut oracle = make_backend_env(WorldState::new_hashmap());
     let mut chunked = make_backend_env(WorldState::new_chunked(4));
@@ -99,6 +114,32 @@ fn reset_restores_geometry() {
     assert_eq!(obs.filled, 0);
     assert!(env.world().is_filled((5, 5, 5)));
     assert!(!env.world().is_blocking(env.cursor()));
+}
+
+#[test]
+fn removing_base_geometry_uses_a_tombstone_until_reset() {
+    let mut env = VoxelEnv::new(WorldState::new(), 10).with_geometry(vec![(5, 5, 5)]);
+    env.step(VoxelAction::Remove((5, 5, 5)));
+    assert!(!env.world().is_filled((5, 5, 5)));
+
+    env.reset(42);
+
+    assert!(env.world().is_filled((5, 5, 5)));
+}
+
+#[test]
+fn construction_targets_only_measure_resolved_agent_placements() {
+    let mut env = VoxelEnv::new(WorldState::new(), 10)
+        .with_geometry(vec![(5, 5, 5)])
+        .with_construction_target(vec![(2, 2, 2)]);
+    env.step(VoxelAction::Place((2, 2, 2)));
+    assert_eq!(env.last_construction_residual(), 0);
+    assert_eq!(env.last_construction_overshoot(), 0);
+
+    env.reset(42);
+    env.step(VoxelAction::Noop);
+    assert_eq!(env.last_construction_residual(), 1);
+    assert_eq!(env.last_construction_overshoot(), 0);
 }
 
 #[test]

@@ -4,6 +4,7 @@ use super::{
     BoundedRegion, ChunkedWorld, HashMapWorld, InMemoryResidentGuard, StorageCoord,
     WorldAccessError, WorldExtent, WorldMutation, WorldRead, WorldResidency,
 };
+use std::{collections::HashMap, sync::Arc};
 
 pub const WORLD_SIZE: u16 = 1000;
 pub const WORLD_CENTER: (u16, u16, u16) = (500, 500, 500);
@@ -21,9 +22,25 @@ enum WorldBackend {
     Chunked(ChunkedWorld),
 }
 
+/// Cheaply cloneable, immutable ownership of base geometry.
+///
+/// A handle can be shared by any number of environments. Mutation is only
+/// available through a [`WorldState`]'s private episode overlay.
+#[derive(Clone, Debug)]
+pub struct WorldHandle {
+    backend: Arc<WorldBackend>,
+}
+
+#[derive(Clone, Debug)]
+enum OverlayEntry {
+    Block(Block),
+    Tombstone,
+}
+
 #[derive(Clone, Debug)]
 pub struct WorldState {
-    backend: WorldBackend,
+    base: WorldHandle,
+    overlay: HashMap<StorageCoord, OverlayEntry>,
 }
 
 impl WorldState {
@@ -33,7 +50,10 @@ impl WorldState {
 
     pub fn new_hashmap() -> Self {
         Self {
-            backend: WorldBackend::HashMap(HashMapWorld::new(Self::legacy_extent())),
+            base: WorldHandle::new(WorldBackend::HashMap(HashMapWorld::new(
+                Self::legacy_extent(),
+            ))),
+            overlay: HashMap::new(),
         }
     }
 
@@ -41,7 +61,8 @@ impl WorldState {
         let backend = ChunkedWorld::new(Self::legacy_extent(), WorldExtent::cubic(chunk_size))
             .expect("positive legacy chunk size must fit the address space");
         Self {
-            backend: WorldBackend::Chunked(backend),
+            base: WorldHandle::new(WorldBackend::Chunked(backend)),
+            overlay: HashMap::new(),
         }
     }
 
@@ -49,8 +70,8 @@ impl WorldState {
         WorldExtent::cubic(WORLD_SIZE as u32)
     }
 
-    pub const fn backend_kind(&self) -> WorldBackendKind {
-        match self.backend {
+    pub fn backend_kind(&self) -> WorldBackendKind {
+        match self.base.backend.as_ref() {
             WorldBackend::HashMap(_) => WorldBackendKind::HashMap,
             WorldBackend::Chunked(_) => WorldBackendKind::Chunked,
         }
@@ -58,13 +79,10 @@ impl WorldState {
 
     pub fn with_default_cube() -> Self {
         let mut world = Self::new();
-        for z in 495u16..505u16 {
-            for y in 495u16..505u16 {
-                for x in 495u16..505u16 {
-                    let _ = world.set_block((x, y, z), Block::default());
-                }
-            }
-        }
+        world.replace_base_blocks((495u16..505u16).flat_map(|z| {
+            (495u16..505u16)
+                .flat_map(move |y| (495u16..505u16).map(move |x| ((x, y, z), Block::default())))
+        }));
         world
     }
 
@@ -101,7 +119,7 @@ impl WorldState {
     }
 
     pub fn len(&self) -> usize {
-        self.read_backend().block_count() as usize
+        self.block_count() as usize
     }
 
     pub fn iter_filled(&self) -> impl Iterator<Item = Coord> {
@@ -116,8 +134,7 @@ impl WorldState {
             extent,
         )
         .expect("legacy world extent is non-empty");
-        self.read_backend()
-            .blocks_in_region(region)
+        self.blocks_in_region(region)
             .expect("full legacy region is valid")
             .into_iter()
             .map(|(coordinate, _)| {
@@ -130,7 +147,55 @@ impl WorldState {
     }
 
     pub fn clear(&mut self) {
-        self.mutation_backend().clear_blocks();
+        self.overlay.clear();
+    }
+
+    pub fn from_handle(base: WorldHandle) -> Self {
+        Self {
+            base,
+            overlay: HashMap::new(),
+        }
+    }
+
+    pub fn world_handle(&self) -> WorldHandle {
+        self.base.clone()
+    }
+
+    /// Replace the immutable base and discard episode-local mutations.
+    pub fn replace_base(&mut self, base: WorldHandle) {
+        self.base = base;
+        self.overlay.clear();
+    }
+
+    /// Build immutable base geometry once, outside the reset path.
+    pub fn replace_base_blocks<I>(&mut self, blocks: I)
+    where
+        I: IntoIterator<Item = (Coord, Block)>,
+    {
+        let mut backend = match self.backend_kind() {
+            WorldBackendKind::HashMap => {
+                WorldBackend::HashMap(HashMapWorld::new(Self::legacy_extent()))
+            }
+            WorldBackendKind::Chunked => {
+                let chunk_shape = match self.base.backend.as_ref() {
+                    WorldBackend::Chunked(world) => world.chunk_shape(),
+                    WorldBackend::HashMap(_) => unreachable!("backend kind was checked"),
+                };
+                WorldBackend::Chunked(
+                    ChunkedWorld::new(Self::legacy_extent(), chunk_shape)
+                        .expect("positive legacy chunk size must fit the address space"),
+                )
+            }
+        };
+        for (coord, block) in blocks {
+            if Self::in_bounds(coord) {
+                backend
+                    .mutation()
+                    .set_block_value(Self::storage(coord), block)
+                    .expect("validated legacy coordinate must fit backend");
+            }
+        }
+        self.replace_base(WorldHandle::new(backend));
     }
 
     pub fn estimated_sparse_bytes(&self) -> usize {
@@ -150,21 +215,39 @@ impl WorldState {
     }
 
     fn read_backend(&self) -> &dyn WorldRead {
-        match &self.backend {
-            WorldBackend::HashMap(world) => world,
-            WorldBackend::Chunked(world) => world,
+        self.base.read_backend()
+    }
+}
+
+impl WorldBackend {
+    fn read(&self) -> &dyn WorldRead {
+        match self {
+            Self::HashMap(world) => world,
+            Self::Chunked(world) => world,
         }
     }
 
-    fn mutation_backend(&mut self) -> &mut dyn WorldMutation {
-        match &mut self.backend {
-            WorldBackend::HashMap(world) => world,
-            WorldBackend::Chunked(world) => world,
+    fn mutation(&mut self) -> &mut dyn WorldMutation {
+        match self {
+            Self::HashMap(world) => world,
+            Self::Chunked(world) => world,
         }
     }
 }
 
-impl WorldRead for WorldState {
+impl WorldHandle {
+    fn new(backend: WorldBackend) -> Self {
+        Self {
+            backend: Arc::new(backend),
+        }
+    }
+
+    fn read_backend(&self) -> &dyn WorldRead {
+        self.backend.read()
+    }
+}
+
+impl WorldRead for WorldHandle {
     fn extent(&self) -> WorldExtent {
         self.read_backend().extent()
     }
@@ -185,20 +268,117 @@ impl WorldRead for WorldState {
     }
 }
 
+impl WorldResidency for WorldHandle {
+    type Guard<'a> = InMemoryResidentGuard<'a>;
+
+    fn is_region_resident(&self, region: BoundedRegion) -> bool {
+        match self.backend.as_ref() {
+            WorldBackend::HashMap(world) => world.is_region_resident(region),
+            WorldBackend::Chunked(world) => world.is_region_resident(region),
+        }
+    }
+
+    fn pin_region(&self, region: BoundedRegion) -> Result<Self::Guard<'_>, WorldAccessError> {
+        match self.backend.as_ref() {
+            WorldBackend::HashMap(world) => world.pin_region(region),
+            WorldBackend::Chunked(world) => world.pin_region(region),
+        }
+    }
+}
+
+impl WorldRead for WorldState {
+    fn extent(&self) -> WorldExtent {
+        self.read_backend().extent()
+    }
+
+    fn get_block_value(&self, coord: StorageCoord) -> Result<Option<Block>, WorldAccessError> {
+        if !self.extent().contains_storage(coord) {
+            return Err(WorldAccessError::OutOfBounds(coord));
+        }
+        match self.overlay.get(&coord) {
+            Some(OverlayEntry::Block(block)) => Ok(Some(block.clone())),
+            Some(OverlayEntry::Tombstone) => Ok(None),
+            None => self.read_backend().get_block_value(coord),
+        }
+    }
+
+    fn blocks_in_region(
+        &self,
+        region: BoundedRegion,
+    ) -> Result<Vec<(StorageCoord, Block)>, WorldAccessError> {
+        let mut resolved = self
+            .read_backend()
+            .blocks_in_region(region)?
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        for (coord, entry) in self
+            .overlay
+            .iter()
+            .filter(|(coord, _)| region.contains(**coord))
+        {
+            match entry {
+                OverlayEntry::Block(block) => {
+                    resolved.insert(*coord, block.clone());
+                }
+                OverlayEntry::Tombstone => {
+                    resolved.remove(coord);
+                }
+            }
+        }
+        let mut blocks = resolved.into_iter().collect::<Vec<_>>();
+        blocks.sort_by_key(|(coord, _)| coord.global_key());
+        Ok(blocks)
+    }
+
+    fn block_count(&self) -> u64 {
+        let mut count = self.read_backend().block_count();
+        for (coord, entry) in &self.overlay {
+            let in_base = self
+                .read_backend()
+                .get_block_value(*coord)
+                .expect("overlay coordinates are validated")
+                .is_some();
+            match (in_base, entry) {
+                (false, OverlayEntry::Block(_)) => count += 1,
+                (true, OverlayEntry::Tombstone) => count -= 1,
+                _ => {}
+            }
+        }
+        count
+    }
+}
+
 impl WorldMutation for WorldState {
     fn set_block_value(
         &mut self,
         coord: StorageCoord,
         block: Block,
     ) -> Result<Option<Block>, WorldAccessError> {
-        self.mutation_backend().set_block_value(coord, block)
+        if !self.extent().contains_storage(coord) {
+            return Err(WorldAccessError::OutOfBounds(coord));
+        }
+        let previous = self.get_block_value(coord)?;
+        self.overlay.insert(coord, OverlayEntry::Block(block));
+        Ok(previous)
     }
 
     fn remove_block_value(
         &mut self,
         coord: StorageCoord,
     ) -> Result<Option<Block>, WorldAccessError> {
-        self.mutation_backend().remove_block_value(coord)
+        if !self.extent().contains_storage(coord) {
+            return Err(WorldAccessError::OutOfBounds(coord));
+        }
+        let previous = self.get_block_value(coord)?;
+        if previous.is_none() {
+            return Ok(None);
+        }
+        if self.read_backend().get_block_value(coord)?.is_some() {
+            self.overlay.insert(coord, OverlayEntry::Tombstone);
+        } else {
+            self.overlay.remove(&coord);
+        }
+        Ok(previous)
     }
 
     fn update_block_value(
@@ -206,11 +386,17 @@ impl WorldMutation for WorldState {
         coord: StorageCoord,
         update: BlockUpdate,
     ) -> Result<Block, WorldAccessError> {
-        self.mutation_backend().update_block_value(coord, update)
+        let mut block = self
+            .get_block_value(coord)?
+            .ok_or(WorldAccessError::NotFound(coord))?;
+        update.apply_to(&mut block);
+        self.overlay
+            .insert(coord, OverlayEntry::Block(block.clone()));
+        Ok(block)
     }
 
     fn clear_blocks(&mut self) {
-        self.mutation_backend().clear_blocks();
+        self.overlay.clear();
     }
 }
 
@@ -218,17 +404,11 @@ impl WorldResidency for WorldState {
     type Guard<'a> = InMemoryResidentGuard<'a>;
 
     fn is_region_resident(&self, region: BoundedRegion) -> bool {
-        match &self.backend {
-            WorldBackend::HashMap(world) => world.is_region_resident(region),
-            WorldBackend::Chunked(world) => world.is_region_resident(region),
-        }
+        self.base.is_region_resident(region)
     }
 
     fn pin_region(&self, region: BoundedRegion) -> Result<Self::Guard<'_>, WorldAccessError> {
-        match &self.backend {
-            WorldBackend::HashMap(world) => world.pin_region(region),
-            WorldBackend::Chunked(world) => world.pin_region(region),
-        }
+        self.base.pin_region(region)
     }
 }
 
@@ -237,8 +417,7 @@ impl World for WorldState {
         if !Self::in_bounds(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
-        self.mutation_backend()
-            .set_block_value(Self::storage(coord), block)
+        self.set_block_value(Self::storage(coord), block)
             .expect("validated legacy coordinate must fit backend");
         Ok(())
     }
@@ -248,7 +427,6 @@ impl World for WorldState {
             return Err(WorldError::OutOfBounds(coord));
         }
         if self
-            .mutation_backend()
             .remove_block_value(Self::storage(coord))
             .expect("validated legacy coordinate must fit backend")
             .is_none()
@@ -262,8 +440,7 @@ impl World for WorldState {
         if !Self::in_bounds(coord) {
             return Err(WorldError::OutOfBounds(coord));
         }
-        self.mutation_backend()
-            .update_block_value(Self::storage(coord), update)
+        self.update_block_value(Self::storage(coord), update)
             .map_err(|_| WorldError::NotFound(coord))?;
         Ok(())
     }
@@ -272,8 +449,7 @@ impl World for WorldState {
         if !Self::in_bounds(coord) {
             return None;
         }
-        self.read_backend()
-            .get_block_value(Self::storage(coord))
+        self.get_block_value(Self::storage(coord))
             .expect("validated legacy coordinate must fit backend")
     }
 }
@@ -287,7 +463,7 @@ impl Default for WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::voxel::world::{Block, BlockUpdate, World, WorldError};
+    use crate::voxel::world::{Block, BlockUpdate, GridRay, World, WorldError, WorldRead};
 
     fn backends() -> [WorldState; 2] {
         [WorldState::new_hashmap(), WorldState::new_chunked(16)]
@@ -351,5 +527,140 @@ mod tests {
     #[test]
     fn default_world_has_cube() {
         assert_eq!(WorldState::default().len(), 1000);
+    }
+
+    fn base_world() -> WorldState {
+        let mut world = WorldState::new();
+        world.replace_base_blocks([
+            ((1, 1, 1), Block::default()),
+            (
+                (2, 2, 2),
+                Block {
+                    kind: 2,
+                    ..Block::default()
+                },
+            ),
+        ]);
+        world
+    }
+
+    #[test]
+    fn shared_base_has_isolated_overlays() {
+        let source = base_world();
+        let handle = source.world_handle();
+        let mut first = WorldState::from_handle(handle.clone());
+        let second = WorldState::from_handle(handle);
+
+        first.set_block((3, 3, 3), Block::default()).unwrap();
+        first.remove_block((1, 1, 1)).unwrap();
+
+        assert!(second.get_block((1, 1, 1)).is_some());
+        assert!(second.get_block((3, 3, 3)).is_none());
+    }
+
+    #[test]
+    fn reset_clears_overlay_without_replacing_base() {
+        let mut world = base_world();
+        let original_base = world.base.backend.clone();
+        world.set_block((3, 3, 3), Block::default()).unwrap();
+        world.remove_block((1, 1, 1)).unwrap();
+
+        world.clear();
+
+        assert!(Arc::ptr_eq(&original_base, &world.base.backend));
+        assert!(world.overlay.is_empty());
+        assert!(world.get_block((1, 1, 1)).is_some());
+        assert!(world.get_block((3, 3, 3)).is_none());
+    }
+
+    #[test]
+    fn insert_update_tombstone_and_reinsert_resolve_correctly() {
+        let mut world = base_world();
+        world
+            .set_block(
+                (1, 1, 1),
+                Block {
+                    kind: 7,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(world.get_block((1, 1, 1)).unwrap().kind, 7);
+        assert_eq!(world.len(), 2);
+
+        world.remove_block((1, 1, 1)).unwrap();
+        assert!(world.get_block((1, 1, 1)).is_none());
+        assert_eq!(world.len(), 1);
+
+        world
+            .set_block(
+                (1, 1, 1),
+                Block {
+                    kind: 9,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        world
+            .update_block(
+                (1, 1, 1),
+                BlockUpdate {
+                    kind: Some(10),
+                    ..BlockUpdate::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(world.get_block((1, 1, 1)).unwrap().kind, 10);
+        assert_eq!(world.len(), 2);
+
+        world.set_block((4, 4, 4), Block::default()).unwrap();
+        assert_eq!(world.len(), 3);
+        world.remove_block((4, 4, 4)).unwrap();
+        assert_eq!(world.len(), 2);
+        assert!(!world
+            .overlay
+            .contains_key(&StorageCoord { x: 4, y: 4, z: 4 }));
+    }
+
+    #[test]
+    fn regional_queries_merge_without_duplicates() {
+        let mut world = base_world();
+        world
+            .set_block(
+                (1, 1, 1),
+                Block {
+                    kind: 7,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        world.remove_block((2, 2, 2)).unwrap();
+        world.set_block((3, 3, 3), Block::default()).unwrap();
+        let region = BoundedRegion::new(
+            StorageCoord { x: 0, y: 0, z: 0 },
+            StorageCoord { x: 5, y: 5, z: 5 },
+            WorldState::legacy_extent(),
+        )
+        .unwrap();
+
+        let blocks = world.blocks_in_region(region).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].0, StorageCoord { x: 1, y: 1, z: 1 });
+        assert_eq!(blocks[0].1.kind, 7);
+        assert_eq!(blocks[1].0, StorageCoord { x: 3, y: 3, z: 3 });
+    }
+
+    #[test]
+    fn raycast_observes_overlay_first_view() {
+        let mut world = base_world();
+        world.remove_block((1, 1, 1)).unwrap();
+        world.set_block((3, 3, 3), Block::default()).unwrap();
+        let ray = GridRay::new(StorageCoord { x: 0, y: 0, z: 0 }, [1, 1, 1], 5).unwrap();
+
+        let hit = world.raycast(ray).unwrap().unwrap();
+        assert_eq!(hit.coordinate, StorageCoord { x: 2, y: 2, z: 2 });
+        world.remove_block((2, 2, 2)).unwrap();
+        let hit = world.raycast(ray).unwrap().unwrap();
+        assert_eq!(hit.coordinate, StorageCoord { x: 3, y: 3, z: 3 });
     }
 }
