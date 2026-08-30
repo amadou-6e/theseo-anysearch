@@ -9,6 +9,7 @@ pub const WORLD_QUERY_ABI_VERSION: u32 = 1;
 pub const SCENARIO_ABI_VERSION_V2: u32 = 2;
 pub const MAX_SCENARIO_OUTPUT_BYTES: usize = 1_048_576;
 pub const MAX_REGION_RESULTS: usize = 1_000_000;
+pub const MAX_CANDIDATE_RESULTS: usize = 4096;
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,6 +76,31 @@ pub struct WorldRayStepV1 {
     pub z: i8,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CandidateV1 {
+    pub position: WorldCoordV1,
+    pub kind: u8,
+    pub reserved: [u8; 3],
+    pub quality: f32,
+    pub region: WorldCoordV1,
+}
+
+pub type CandidateQueryV1 = unsafe extern "C" fn(
+    context: *mut c_void,
+    call_token: u64,
+    kind: u8,
+    seed: u64,
+    stream: u64,
+    near: WorldCoordV1,
+    radius: u32,
+    minimum_quality: f32,
+    maximum_results: u32,
+    output: *mut CandidateV1,
+    output_capacity: usize,
+    required_length: *mut usize,
+) -> QueryStatus;
+
 pub type PointQueryV1 = unsafe extern "C" fn(
     context: *mut c_void,
     call_token: u64,
@@ -124,6 +150,7 @@ pub struct WorldQueryApiV1 {
     pub region: Option<RegionQueryV1>,
     pub ray: Option<RayQueryV1>,
     pub count_region: Option<CountQueryV1>,
+    pub sample_candidates: Option<CandidateQueryV1>,
 }
 
 #[repr(C)]
@@ -146,6 +173,9 @@ pub struct ScenarioContextV2 {
     pub parameters_json: *const u8,
     pub parameters_json_len: usize,
     pub world: *const WorldQueryApiV1,
+    pub extent: WorldCoordV1,
+    pub world_identity: *const u8,
+    pub world_identity_len: usize,
 }
 
 pub type ScenarioFunctionV2 = unsafe extern "C" fn(

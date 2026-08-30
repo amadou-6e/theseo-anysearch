@@ -53,6 +53,8 @@ fn independently_compiled_v2_extension_queries_the_real_world() {
                 previous_scenario_json: "null",
                 curriculum_json: "{}",
                 parameters_json: "{}",
+                candidate_index_path: None,
+                world_identity: "",
             },
         )
         .expect("invoke v2 extension");

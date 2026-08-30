@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from theseo_anysearch.worlds.candidates import CandidateIndexHandle
 from theseo_anysearch.worlds.compiler import (
     COMPLETE_FILE,
     MANIFEST_FILE,
@@ -41,6 +42,22 @@ def _read_chunks(root: Path) -> dict[tuple[int, int, int], np.ndarray]:
     return decoded
 
 
+def test_compiler_emits_sparse_surface_and_free_candidates(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource(minimum=(2, 2, 2), maximum_inclusive=(2, 2, 2))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+    candidates = CandidateIndexHandle(
+        compiled.root, world_identity=compiled.manifest.identity_sha256
+    )
+    assert len(candidates.sample(20, "spawn", seed=1, stream=1)) == 6
+    assert {
+        item.position for item in candidates.sample(20, "surface", seed=1, stream=2)
+    } == {(3, 3, 3)}
+    assert candidates.sample(1, "portal", seed=1, stream=3) == ()
+
+
 def test_boxes_compile_without_coordinate_tuple_expansion(tmp_path: Path) -> None:
     compiled = compile_world(
         [BoxSource((1, 2, 3), (6, 5, 4))],
@@ -68,7 +85,9 @@ def test_identical_inputs_have_identical_identity_and_bytes(tmp_path: Path) -> N
 def test_source_order_does_not_change_identity(tmp_path: Path) -> None:
     sources = [BoxSource((0, 0, 0), (0, 0, 0)), BoxSource((7, 7, 7), (7, 7, 7))]
     first = compile_world(sources, WorldExtent(x=8, y=8, z=8), tmp_path.joinpath("a"))
-    second = compile_world(list(reversed(sources)), WorldExtent(x=8, y=8, z=8), tmp_path.joinpath("b"))
+    second = compile_world(
+        list(reversed(sources)), WorldExtent(x=8, y=8, z=8), tmp_path.joinpath("b")
+    )
 
     assert first.manifest.identity_sha256 == second.manifest.identity_sha256
     assert first.pack_path.read_bytes() == second.pack_path.read_bytes()
@@ -85,7 +104,10 @@ def test_pool_compiles_each_grid_without_grid_to_cells(tmp_path: Path) -> None:
     compiled = list(compile_pool(pool, tmp_path.joinpath("cache")))
 
     assert len(compiled) == 2
-    assert [sum(chunk.occupied_voxels for chunk in item.manifest.chunks) for item in compiled] == [8, 8]
+    assert [
+        sum(chunk.occupied_voxels for chunk in item.manifest.chunks)
+        for item in compiled
+    ] == [8, 8]
 
 
 def test_stl_source_uses_existing_voxelizer_and_converts_coordinates(
@@ -128,7 +150,9 @@ def test_ascii_stl_compiles_with_native_voxelizer(tmp_path: Path) -> None:
     assert sum(chunk.occupied_voxels for chunk in compiled.manifest.chunks) > 0
 
 
-def test_corruption_is_detected_and_recompiled_when_source_exists(tmp_path: Path) -> None:
+def test_corruption_is_detected_and_recompiled_when_source_exists(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path.joinpath("source.npy")
     np.save(source_path, np.ones((4, 4, 4), dtype=np.uint8))
     cache = tmp_path.joinpath("cache")
@@ -248,7 +272,9 @@ def test_chunk_encodings_round_trip(occupancy: int, tmp_path: Path) -> None:
     grid.reshape(-1)[:occupancy] = 1
     path = tmp_path.joinpath(f"{occupancy}.npy")
     np.save(path, grid)
-    compiled = compile_world([NpySource(path)], WorldExtent(x=8, y=8, z=8), tmp_path.joinpath("cache"))
+    compiled = compile_world(
+        [NpySource(path)], WorldExtent(x=8, y=8, z=8), tmp_path.joinpath("cache")
+    )
 
     decoded = next(iter(_read_chunks(compiled.root).values()))
     assert np.array_equal(decoded, grid.astype(np.bool_))

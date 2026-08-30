@@ -15,8 +15,6 @@ mod tests;
 pub enum PendingFaultCase {
     ChecksumMismatch,
     ShortRead,
-    CandidateIndexCorruption,
-    BudgetExhaustion,
     CacheEviction,
     PinnedOvercommit,
     FailedPrefetch,
@@ -26,7 +24,6 @@ impl PendingFaultCase {
     pub const fn dependency_issues(self) -> &'static [u32] {
         match self {
             Self::ChecksumMismatch | Self::ShortRead => &[224],
-            Self::CandidateIndexCorruption | Self::BudgetExhaustion => &[223],
             Self::CacheEviction | Self::PinnedOvercommit | Self::FailedPrefetch => &[224],
         }
     }

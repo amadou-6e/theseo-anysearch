@@ -6,10 +6,10 @@ import ctypes
 import hashlib
 import importlib.util
 import inspect
-import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -18,16 +18,34 @@ class CustomScenarioError(ValueError):
     """Raised when a scenario provider violates its explicit contract."""
 
 
+@runtime_checkable
+class ScenarioWorld(Protocol):
+    """Continuous-grid view; storage regions and cache residency stay hidden."""
+
+    extent: tuple[int, int, int]
+    identity: str | None
+
+    def occupied(self, coordinate: tuple[int, int, int]) -> bool: ...
+
+    def occupied_in_region(
+        self,
+        minimum: tuple[int, int, int],
+        maximum_exclusive: tuple[int, int, int],
+    ) -> tuple[tuple[int, int, int], ...]: ...
+
+
 class ScenarioContext(BaseModel):
     """Immutable reset inputs supplied to an episode scenario provider."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     seed: int
     episode_index: int
     scope: Literal["training", "evaluation"]
-    grid_size: int
-    filled_voxels: tuple[tuple[int, int, int], ...]
+    extent: tuple[int, int, int]
+    world_identity: str | None = None
+    world: ScenarioWorld = Field(exclude=True)
+    candidates: Any = Field(default=None, exclude=True)
     action_mode: str
     action_offsets: tuple[tuple[int, int, int], ...]
     previous_scenario: dict[str, Any] | None = None
@@ -47,7 +65,7 @@ class ScenarioResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_route(self) -> "ScenarioResult":
+    def validate_route(self) -> ScenarioResult:
         """Require exactly one non-empty representation of the goal route."""
         if self.goal is None and not self.route:
             raise ValueError("scenario result requires goal or route")
@@ -106,7 +124,9 @@ def available_python_scenario_names(
     return tuple(available)
 
 
-def discover_scenario_source(config_path: Path | None, provider_name: str | None) -> Path | None:
+def discover_scenario_source(
+    config_path: Path | None, provider_name: str | None
+) -> Path | None:
     """Discover the conventional sibling ``scenarios.py`` module."""
     if config_path is None:
         return None
@@ -115,7 +135,7 @@ def discover_scenario_source(config_path: Path | None, provider_name: str | None
 
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         owners = [raw.get("env") or {}, raw.get("evaluation") or {}]
-        for stage in ((raw.get("staging") or {}).get("stages") or []):
+        for stage in (raw.get("staging") or {}).get("stages") or []:
             owners.extend((stage.get("env") or {}, stage.get("evaluation") or {}))
         if not any((owner.get("scenarios") or {}).get("provider") for owner in owners):
             return None
@@ -222,17 +242,17 @@ def load_native_scenario_provider(
 def validate_scenario(
     result: ScenarioResult,
     *,
-    grid_size: int,
-    filled_voxels: set[tuple[int, int, int]],
+    extent: tuple[int, int, int],
+    world: ScenarioWorld,
 ) -> ScenarioResult:
     """Reject out-of-grid, occupied, or degenerate scenario coordinates."""
     coordinates = (result.start, *result.waypoints)
     for coordinate in coordinates:
-        if not all(1 <= value <= grid_size for value in coordinate):
+        if not all(1 <= coordinate[axis] <= extent[axis] for axis in range(3)):
             raise CustomScenarioError(
                 f"scenario {result.scenario_id!r} coordinate {coordinate} is outside grid"
             )
-        if coordinate in filled_voxels:
+        if world.occupied(coordinate):
             raise CustomScenarioError(
                 f"scenario {result.scenario_id!r} coordinate {coordinate} is occupied"
             )

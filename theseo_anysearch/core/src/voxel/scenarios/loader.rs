@@ -1,9 +1,9 @@
 use super::{
     abi::{
-        ScenarioContextV2, ScenarioFunctionV2, ScenarioStatusV2, MAX_SCENARIO_OUTPUT_BYTES,
-        SCENARIO_ABI_VERSION_V2,
+        ScenarioContextV2, ScenarioFunctionV2, ScenarioStatusV2, WorldCoordV1,
+        MAX_SCENARIO_OUTPUT_BYTES, SCENARIO_ABI_VERSION_V2,
     },
-    query::WorldQueryScope,
+    query::{CompiledCandidateIndex, WorldQueryScope},
 };
 use crate::voxel::{
     common::{load_library, validate_name},
@@ -28,6 +28,8 @@ pub struct ScenarioInvocationV2<'a> {
     pub previous_scenario_json: &'a str,
     pub curriculum_json: &'a str,
     pub parameters_json: &'a str,
+    pub candidate_index_path: Option<&'a str>,
+    pub world_identity: &'a str,
 }
 
 /// Loaded v2 scenario extension. The library remains resident while its function is callable.
@@ -66,6 +68,11 @@ impl NativeScenarioV2 {
         let (previous_ptr, previous_len) = bytes(input.previous_scenario_json);
         let (curriculum_ptr, curriculum_len) = bytes(input.curriculum_json);
         let (parameters_ptr, parameters_len) = bytes(input.parameters_json);
+        let candidates = input
+            .candidate_index_path
+            .map(|root| CompiledCandidateIndex::load(Path::new(root), input.world_identity))
+            .transpose()?;
+        let (identity_ptr, identity_len) = bytes(input.world_identity);
         let call = |output: *mut u8,
                     capacity: usize,
                     required: &mut usize|
@@ -74,10 +81,16 @@ impl NativeScenarioV2 {
             if input.grid_size == 0 {
                 return Err("scenario grid_size must be positive".to_owned());
             }
-            let query_scope =
-                WorldQueryScope::enter(world, WorldExtent::cubic(input.grid_size), token).map_err(
-                    |status| format!("could not establish scenario query scope: {status:?}"),
-                )?;
+            let query_scope = match candidates.clone() {
+                Some(index) => WorldQueryScope::enter_with_index(
+                    world,
+                    WorldExtent::cubic(input.grid_size),
+                    token,
+                    index,
+                ),
+                None => WorldQueryScope::enter(world, WorldExtent::cubic(input.grid_size), token),
+            }
+            .map_err(|status| format!("could not establish scenario query scope: {status:?}"))?;
             let api = query_scope.api();
             let context = ScenarioContextV2 {
                 abi_version: SCENARIO_ABI_VERSION_V2,
@@ -98,6 +111,13 @@ impl NativeScenarioV2 {
                 parameters_json: parameters_ptr,
                 parameters_json_len: parameters_len,
                 world: &api,
+                extent: WorldCoordV1 {
+                    x: input.grid_size,
+                    y: input.grid_size,
+                    z: input.grid_size,
+                },
+                world_identity: identity_ptr,
+                world_identity_len: identity_len,
             };
             Ok(unsafe { (self.function)(&context, output, capacity, required) })
         };

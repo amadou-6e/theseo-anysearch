@@ -19,9 +19,10 @@ evaluation:
 
 Place Python providers in `scenarios.py` beside `experiment.yaml`. A provider
 accepts one `ScenarioContext` and returns a `ScenarioResult`. The context
-contains the resolved seed, episode index and scope, grid and occupied voxels,
-action mode and offsets, prior scenario metadata, curriculum state, and YAML
-parameters. Results contain a start plus either one goal or an ordered route,
+contains the resolved seed, episode index and scope, three-axis extent, world
+identity, lazy continuous-grid `world` and `candidates` handles, action mode and
+offsets, prior scenario metadata, curriculum state, and YAML parameters. It
+never serializes the complete geometry. Results contain a start plus either one goal or an ordered route,
 a stable scenario ID, and optional metadata.
 
 Rust extensions use the same YAML name:
@@ -100,3 +101,19 @@ returns. Extensions must not retain them. Calls from another thread, nested
 scenario invocation, callback reentry, and stale tokens are rejected. Both
 host callbacks and the SDK export catch panics so unwinding never crosses FFI.
 See `usage/experiments/showcase/scenario_world_query_v2` for a complete example.
+
+## Candidate-index migration
+
+Compiled worlds store `candidates.idx` and `candidates.bin` beside the world
+pack. Records use public one-based coordinates and are bucketed by coarse
+region and kind (`spawn`, `goal`, `surface`, or `portal`). Configure the
+compiled-world directory under `env.scenarios.candidate_index`; every reset
+receives a fresh lazy handle with independent query and result budgets.
+
+Python providers previously reading `context.grid_size` should use
+`context.extent`. Providers previously scanning `context.filled_voxels` should
+use bounded `context.world` queries or `context.candidates.sample(...)` with an
+explicit `seed` and `stream`. Candidate results may be filtered by kind,
+region, distance, radius, and minimum quality. Identical world identity, seed,
+stream, and filters produce identical results across processes and cache
+states. Providers must not depend on file order or query history.

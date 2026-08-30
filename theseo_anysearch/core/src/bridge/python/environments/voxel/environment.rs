@@ -224,7 +224,7 @@ impl PyVoxelEnv {
     }
 
     /// Invoke a native scenario-v2 provider directly against the Rust world.
-    #[pyo3(signature=(library_path, provider_name, seed, episode_index, scope, action_mode, action_offsets_json, previous_scenario_json, curriculum_json, parameters_json))]
+    #[pyo3(signature=(library_path, provider_name, seed, episode_index, scope, action_mode, action_offsets_json, previous_scenario_json, curriculum_json, parameters_json, candidate_index_path=None, world_identity=None))]
     pub fn generate_native_scenario_v2(
         &self,
         library_path: String,
@@ -237,6 +237,8 @@ impl PyVoxelEnv {
         previous_scenario_json: String,
         curriculum_json: String,
         parameters_json: String,
+        candidate_index_path: Option<String>,
+        world_identity: Option<String>,
     ) -> PyResult<String> {
         use crate::voxel::scenarios::{NativeScenarioV2, ScenarioInvocationV2};
         let extension = NativeScenarioV2::load(Path::new(&library_path), &provider_name)
@@ -254,6 +256,8 @@ impl PyVoxelEnv {
                     previous_scenario_json: &previous_scenario_json,
                     curriculum_json: &curriculum_json,
                     parameters_json: &parameters_json,
+                    candidate_index_path: candidate_index_path.as_deref(),
+                    world_identity: world_identity.as_deref().unwrap_or(""),
                 },
             )
             .map_err(PyValueError::new_err)
@@ -422,7 +426,7 @@ impl PyVoxelEnv {
                         let ny = cy as i32 + dy * step as i32;
                         let nz = cz as i32 + dz * step as i32;
                         if nx < 1 || ny < 1 || nz < 1 || nx > g || ny > g || nz > g {
-                                kind = f32::from(BLOCK_KIND_OCCUPIED);
+                            kind = f32::from(BLOCK_KIND_OCCUPIED);
                             break;
                         }
                         if let Some(block) = self
@@ -445,6 +449,70 @@ impl PyVoxelEnv {
     /// Used to snapshot the world state at episode start for trajectory recording.
     pub fn filled_voxels(&self) -> Vec<(u16, u16, u16)> {
         self.inner.world().iter_filled().collect()
+    }
+
+    /// Query one public one-based coordinate without exposing backend chunks.
+    pub fn world_occupied(&self, coordinate: (u32, u32, u32)) -> PyResult<bool> {
+        use crate::voxel::world::{StorageCoord, WorldRead};
+        if coordinate.0 == 0
+            || coordinate.1 == 0
+            || coordinate.2 == 0
+            || coordinate.0 > u32::from(u16::MAX)
+            || coordinate.1 > u32::from(u16::MAX)
+            || coordinate.2 > u32::from(u16::MAX)
+        {
+            return Err(PyValueError::new_err("world coordinates are one-based"));
+        }
+        self.inner
+            .world()
+            .world_handle()
+            .get_block_value(StorageCoord {
+                x: coordinate.0,
+                y: coordinate.1,
+                z: coordinate.2,
+            })
+            .map(|value| value.is_some())
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))
+    }
+
+    /// Query occupied public coordinates in a bounded one-based region.
+    pub fn world_occupied_in_region(
+        &self,
+        minimum: (u32, u32, u32),
+        maximum_exclusive: (u32, u32, u32),
+        maximum_results: usize,
+    ) -> PyResult<Vec<(u32, u32, u32)>> {
+        use crate::voxel::world::{BoundedRegion, StorageCoord, WorldRead};
+        if minimum.0 == 0 || minimum.1 == 0 || minimum.2 == 0 {
+            return Err(PyValueError::new_err("world coordinates are one-based"));
+        }
+        let region = BoundedRegion::new(
+            StorageCoord {
+                x: minimum.0,
+                y: minimum.1,
+                z: minimum.2,
+            },
+            StorageCoord {
+                x: maximum_exclusive.0,
+                y: maximum_exclusive.1,
+                z: maximum_exclusive.2,
+            },
+            self.inner.world().extent(),
+        )
+        .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        let values = self
+            .inner
+            .world()
+            .world_handle()
+            .blocks_in_region(region)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        if values.len() > maximum_results {
+            return Err(PyValueError::new_err("world query result budget exhausted"));
+        }
+        Ok(values
+            .into_iter()
+            .map(|(coordinate, _)| (coordinate.x, coordinate.y, coordinate.z))
+            .collect())
     }
 }
 
@@ -570,7 +638,7 @@ mod tests {
         // cursor at (1,1,1)
         let env = env_with_block((5, 5, 5), (5, 5, 5));
         let obs = env.box_obs(2).unwrap(); // 5Â³ = 125 cells
-                                  // centre element: dx=0,dy=0,dz=0 â†’ flat index = 2*25 + 2*5 + 2 = 62
+                                           // centre element: dx=0,dy=0,dz=0 â†’ flat index = 2*25 + 2*5 + 2 = 62
         assert_eq!(obs[62], 5.0);
         let non_centre: Vec<f32> = obs
             .iter()
@@ -650,7 +718,8 @@ mod tests {
             None,
             None,
             None,
-            "[{\"name\":\"valid_action\"},{\"name\":\"bounds\"},{\"name\":\"unoccupied\"}]".to_string(),
+            "[{\"name\":\"valid_action\"},{\"name\":\"bounds\"},{\"name\":\"unoccupied\"}]"
+                .to_string(),
             None,
             16,
             Some(MAX_BOX_RADIUS + 1),

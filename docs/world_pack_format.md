@@ -7,13 +7,22 @@ Each completed entry contains:
 - `manifest.json`: versioned world contract, compiler settings, pack checksum, and per-chunk integrity metadata.
 - `index.json`: tuple-coordinate keys (`x,y,z`) mapped to byte ranges in the pack.
 - `world.pack`: concatenated, independently decodable non-background chunks.
+- `candidates.idx`: versioned coarse-region/kind ranges bound to the world identity.
+- `candidates.bin`: fixed-width public-coordinate spawn, goal, surface, and portal records.
 - `COMPLETE`: written last and containing the world identity. Readers reject entries without it.
 
 The compiler selects among a constant-size uniform representation, sorted sparse `u32` indices, and a zlib-compressed dense bitset. Empty chunks are omitted. Selection compares the actual encoded lengths, with `sparse_max_fraction` providing an explicit tuning boundary. Boxes are intersected directly with chunks, and `.npy` pool grids are memory-mapped and visited chunk-by-chunk; neither path creates a full-world list of Python coordinate tuples.
 
 Publication uses the shared heartbeat/token cache lock. A build is written to a unique temporary directory, fully validated, and atomically renamed. Corrupt entries are rebuilt when their source still exists. When only a pack identity is available, corruption raises an explicit `WorldPackUnavailableError` because rebuilding is impossible.
 
-Waypoint routes are intentionally not part of a world pack. They remain task/curriculum inputs and can be varied without recompiling immutable geometry.
+Spawn and goal candidates are free cells adjacent to compiled geometry; surface
+candidates are the corresponding occupied boundary cells. Their quality score
+records local openness. Portal candidates require explicit semantic annotation
+and are therefore empty for occupancy-only sources. Candidate buckets are read
+lazily and sampled deterministically from world identity, seed, and stream;
+cache population and worker scheduling do not affect selection. Waypoint routes
+remain task/curriculum inputs and can be varied without recompiling immutable
+geometry.
 
 ## Measuring encoding choices
 
