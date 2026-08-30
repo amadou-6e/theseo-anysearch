@@ -72,7 +72,8 @@ class ScenarioProvider(BaseModel):
     name: str
     source_path: Path
     source_sha256: str
-    generate: ScenarioFunction = Field(exclude=True)
+    generate: ScenarioFunction | None = Field(default=None, exclude=True)
+    native_abi: Literal[1, 2] | None = None
 
 
 def available_python_scenario_names(
@@ -175,6 +176,15 @@ def load_native_scenario_provider(
 ) -> ScenarioProvider:
     """Load a macro-generated Rust scenario function through the stable JSON ABI."""
     library = ctypes.CDLL(str(library_path))
+    v2_symbol = f"anysearch_scenario_{provider_name}_v2"
+    if getattr(library, v2_symbol, None) is not None:
+        digest = hashlib.sha256(library_path.read_bytes()).hexdigest()
+        return ScenarioProvider(
+            name=provider_name,
+            source_path=library_path,
+            source_sha256=digest,
+            native_abi=2,
+        )
     symbol = f"anysearch_scenario_{provider_name}_v1"
     function = getattr(library, symbol)
     function.argtypes = [
@@ -205,6 +215,7 @@ def load_native_scenario_provider(
         source_path=library_path,
         source_sha256=digest,
         generate=generate,
+        native_abi=1,
     )
 
 

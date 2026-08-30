@@ -223,6 +223,42 @@ impl PyVoxelEnv {
         self.to_py_observation(obs)
     }
 
+    /// Invoke a native scenario-v2 provider directly against the Rust world.
+    #[pyo3(signature=(library_path, provider_name, seed, episode_index, scope, action_mode, action_offsets_json, previous_scenario_json, curriculum_json, parameters_json))]
+    pub fn generate_native_scenario_v2(
+        &self,
+        library_path: String,
+        provider_name: String,
+        seed: u64,
+        episode_index: u64,
+        scope: String,
+        action_mode: String,
+        action_offsets_json: String,
+        previous_scenario_json: String,
+        curriculum_json: String,
+        parameters_json: String,
+    ) -> PyResult<String> {
+        use crate::voxel::scenarios::{NativeScenarioV2, ScenarioInvocationV2};
+        let extension = NativeScenarioV2::load(Path::new(&library_path), &provider_name)
+            .map_err(PyValueError::new_err)?;
+        extension
+            .invoke(
+                self.inner.world(),
+                &ScenarioInvocationV2 {
+                    seed,
+                    episode_index,
+                    grid_size: u32::from(self.inner.grid_size),
+                    scope: &scope,
+                    action_mode: &action_mode,
+                    action_offsets_json: &action_offsets_json,
+                    previous_scenario_json: &previous_scenario_json,
+                    curriculum_json: &curriculum_json,
+                    parameters_json: &parameters_json,
+                },
+            )
+            .map_err(PyValueError::new_err)
+    }
+
     /// Step the environment.
     /// Action space: Discrete(26) â€” all 26 neighbors in {-1,0,1}Â³ \ {origin},
     /// enumerated as (dx,dy,dz) with dz inner loop, skip (0,0,0) at index 13.

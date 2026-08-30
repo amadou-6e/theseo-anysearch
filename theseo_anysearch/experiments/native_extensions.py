@@ -420,7 +420,10 @@ class NativeExtension:
         return hasattr(self._library, f"anysearch_outcome_{name}_v2")
 
     def has_scenario(self, name: str) -> bool:
-        return hasattr(self._library, f"anysearch_scenario_{name}_v1")
+        return hasattr(self._library, f"anysearch_scenario_{name}_v2") or hasattr(
+            self._library, f"anysearch_scenario_{name}_v1"
+        )
+
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":
         library = ctypes.CDLL(str(path))
