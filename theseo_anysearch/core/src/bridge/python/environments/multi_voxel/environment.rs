@@ -129,7 +129,7 @@ impl PyMultiVoxelEnv {
 
     /// Returns all currently filled voxel coordinates (geometry + agent trail).
     pub fn filled_voxels(&self) -> Vec<(u16, u16, u16)> {
-        self.inner.world.iter_filled().copied().collect()
+        self.inner.world.iter_filled().collect()
     }
 
     /// Returns each agent's current cursor position.

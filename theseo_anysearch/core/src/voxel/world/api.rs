@@ -11,7 +11,7 @@ pub trait World {
     fn set_block(&mut self, coord: Coord, block: Block) -> Result<(), WorldError>;
     fn remove_block(&mut self, coord: Coord) -> Result<(), WorldError>;
     fn update_block(&mut self, coord: Coord, update: BlockUpdate) -> Result<(), WorldError>;
-    fn get_block(&self, coord: Coord) -> Option<&Block>;
+    fn get_block(&self, coord: Coord) -> Option<Block>;
 }
 
 #[cfg(test)]
