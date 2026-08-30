@@ -193,6 +193,37 @@ def empty_grid(grid_size=32):
     }
 
 
+def oversized_grid():
+    return {
+        **empty_grid(grid_size=None),
+        "extent": (65536, 2, 2),
+    }
+
+
+def test_route_sampling_rejects_oversized_live_task_extent_immediately():
+    with pytest.raises(ValueError, match="up to 65535"):
+        WaypointCurriculum(
+            WaypointCurriculumConfig(
+                enabled=True,
+                completion_mode="continue_route",
+                initial_start=(1, 1, 1),
+                route_length={"mode": "fixed", "distance": 2},
+                difficulty={
+                    "mode": "segment_distance",
+                    "initial_distance": 1,
+                    "maximum_distance": 1,
+                },
+            ),
+            oversized_grid(),
+        )
+
+
+def test_monotonic_sampling_rejects_oversized_live_task_extent_immediately():
+    scheduler = monotonic_curriculum()
+    with pytest.raises(ValueError, match="up to 65535"):
+        scheduler.sample(oversized_grid())
+
+
 def test_configured_route_stages_cover_exact_distance_schedule():
     scheduler = WaypointCurriculum(
         WaypointCurriculumConfig(

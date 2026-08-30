@@ -14,7 +14,7 @@ from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample
 from theseo_anysearch.worlds.extent import (
     WorldExtent,
     maximum_euclidean,
-    resolve_extent,
+    resolve_task_extent,
     task_center,
 )
 
@@ -304,7 +304,7 @@ class WaypointCurriculum:
             start=self.config.initial_start,
             total_distance=self.config.route_length.resolve(int(env_config.get("max_steps", 200))),
             segment_distance=segment_distance,
-            extent=resolve_extent(env_config),
+            extent=resolve_task_extent(env_config),
             action_mode=str(env_config.get("action_mode", "discrete_26")),
             seed=self.config.seed + stage if seed is None else seed,
         )
@@ -417,7 +417,7 @@ class WaypointCurriculum:
     ) -> tuple[Waypoint, Waypoint]:
         """Sample an empty-grid pair whose distance never decreases by stage."""
         self._require_empty_geometry(env_config)
-        extent = resolve_extent(env_config)
+        extent = resolve_task_extent(env_config)
         if maximum_euclidean(extent) < 1:
             raise ValueError("monotonic_distance curriculum requires a movable extent")
 
