@@ -7,7 +7,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
-from theseo_anysearch.settings import Settings
 from theseo_anysearch.rllib.trainer.base import BaseTrainer
 from theseo_anysearch.rllib.trainer.checkpointing import (
     CheckpointManager,
@@ -16,14 +15,16 @@ from theseo_anysearch.rllib.trainer.checkpointing import (
 from theseo_anysearch.rllib.trainer.evaluation.coordinator import EvaluationCoordinator
 from theseo_anysearch.rllib.trainer.lifecycle import TrainingLifecycle
 from theseo_anysearch.rllib.trainer.reporting.metrics import TrainingMetricCoordinator
-from theseo_anysearch.rllib.trainer.reporting.trajectories import TrajectoryReporter
 from theseo_anysearch.rllib.trainer.reporting.tensorboard import _TensorBoardRunWriter
+from theseo_anysearch.rllib.trainer.reporting.trajectories import TrajectoryReporter
 from theseo_anysearch.rllib.trainer.results import RllibTrainResult, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import (
     _append_trainer_stage_log,
     _detect_num_gpus,
     _resolve_pool_dir,
 )
+from theseo_anysearch.settings import Settings
+from theseo_anysearch.worlds import world_contract
 
 
 class Trainer(BaseTrainer):
@@ -49,7 +50,10 @@ class Trainer(BaseTrainer):
         self._imitation_result: Any = None
         self._episodes_total: int = 0
         self._output_dir: Path = Path(config.training.output_dir)
-        self._checkpoints = CheckpointManager(self._output_dir)
+        self._checkpoints = CheckpointManager(
+            self._output_dir,
+            world_contract(config.env.to_runtime_dict()),
+        )
         self._lifecycle = TrainingLifecycle(self._output_dir)
         from theseo_anysearch.experiments.custom_metrics import (
             load_metric_providers,
@@ -80,7 +84,9 @@ class Trainer(BaseTrainer):
         )
         self._curriculum = None
         if config.env.waypoint_curriculum.enabled:
-            from theseo_anysearch.rllib.trainer.curriculum.waypoint import CurriculumController
+            from theseo_anysearch.rllib.trainer.curriculum.waypoint import (
+                CurriculumController,
+            )
 
             self._curriculum = CurriculumController(config.env, config.evaluation)
 

@@ -26,6 +26,7 @@ from theseo_anysearch.imitation.pretraining import (
     _supervised_metrics,
     behavior_clone_policy,
 )
+from theseo_anysearch.worlds import world_contract
 
 
 class TinyPolicyModel(torch.nn.Module):
@@ -101,6 +102,54 @@ def test_dataset_fingerprint_includes_curriculum_stage_selection() -> None:
     assert dataset_fingerprint({}, initial, 3, 18) != dataset_fingerprint(
         {}, all_stages, 3, 18
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("WORLD_SCHEMA_VERSION", 2),
+        ("COORDINATE_TYPE", "u64"),
+        ("STORAGE_COORDINATE_CONVENTION", "one_based"),
+        ("ENVIRONMENT_COORDINATE_CONVENTION", "zero_based"),
+    ],
+)
+def test_dataset_fingerprint_changes_with_coordinate_contract(
+    monkeypatch,
+    field: str,
+    replacement: object,
+) -> None:
+    from theseo_anysearch.worlds import manifest as world_manifest
+
+    imitation = ImitationConfig()
+    first = dataset_fingerprint({"grid_size": 32}, imitation, 3, 18)
+    monkeypatch.setattr(world_manifest, field, replacement)
+    second = dataset_fingerprint({"grid_size": 32}, imitation, 3, 18)
+    assert first != second
+
+
+def test_dataset_fingerprint_canonicalizes_cubic_world_extent() -> None:
+    imitation = ImitationConfig()
+    cubic = dataset_fingerprint({"grid_size": 32}, imitation, 3, 18)
+    explicit = dataset_fingerprint({"extent": [32, 32, 32]}, imitation, 3, 18)
+    assert cubic == explicit
+
+
+def test_legacy_demonstration_manifest_is_not_relabeled_as_u32() -> None:
+    payload = _manifest().model_dump(mode="json")
+    payload["schema_version"] = 3
+    payload.pop("world_schema_version")
+    payload.pop("coordinate_type")
+    payload.pop("coordinate_convention")
+    payload.pop("storage_coordinate_convention")
+    payload.pop("source_origin")
+    payload.pop("world_extent")
+    payload.pop("world_identity_sha256")
+
+    legacy = DemonstrationManifest.model_validate(payload)
+
+    assert legacy.world_schema_version == 0
+    assert legacy.coordinate_type == "u16"
+    assert legacy.world_extent == (32, 32, 32)
 
 
 def test_dataset_fingerprint_changes_with_generation_provider_parameters() -> None:
@@ -246,7 +295,25 @@ def test_dataset_reuse_rejects_schema_mismatch(tmp_path):
     save_dataset(_linearly_separable_dataset(), tmp_path)
 
     with pytest.raises(ValueError, match="fingerprint mismatch"):
-        load_compatible_dataset(tmp_path, "different")
+        load_compatible_dataset(
+            tmp_path,
+            "different",
+            world_contract({"grid_size": 32}),
+        )
+
+
+def test_dataset_reuse_rejects_world_contract_mismatch_even_with_same_fingerprint(
+    tmp_path,
+):
+    dataset = _linearly_separable_dataset()
+    save_dataset(dataset, tmp_path)
+
+    with pytest.raises(ValueError, match="world contract mismatch"):
+        load_compatible_dataset(
+            tmp_path,
+            dataset.manifest.fingerprint,
+            world_contract({"grid_size": 64}),
+        )
 
 
 def test_dataset_for_run_regenerates_when_cached_manifest_is_schema_incompatible(

@@ -15,10 +15,17 @@ from pydantic import ValidationError
 from ray.rllib.models import ModelCatalog
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+from theseo_anysearch.imitation.cache import (
+    cache_key_lock,
+    load_cached_pretraining,
+    pretraining_cache_key,
+    publish_cached_pretraining,
+)
 from theseo_anysearch.imitation.dataset import (
     DemonstrationDataset,
     collect_demonstrations,
     dataset_fingerprint,
+    demonstration_world_contract,
     load_compatible_dataset,
     save_dataset,
 )
@@ -31,12 +38,7 @@ from theseo_anysearch.imitation.sampling_providers import (
     EpisodeSamplingContext,
     resolve_sampling_provider,
 )
-from theseo_anysearch.imitation.cache import (
-    cache_key_lock,
-    load_cached_pretraining,
-    pretraining_cache_key,
-    publish_cached_pretraining,
-)
+from theseo_anysearch.worlds import world_contract
 
 
 def _parameter_part(name: str) -> str:
@@ -275,8 +277,17 @@ def _dataset_for_run(
                 )
             except ValidationError:
                 stored_manifest = None
-            if stored_manifest is not None and stored_manifest.fingerprint == expected:
-                return load_compatible_dataset(dataset_dir, expected)
+            expected_world = world_contract(env_config)
+            if (
+                stored_manifest is not None
+                and stored_manifest.fingerprint == expected
+                and demonstration_world_contract(stored_manifest) == expected_world
+            ):
+                return load_compatible_dataset(
+                    dataset_dir,
+                    expected,
+                    expected_world,
+                )
 
         dataset = collect_demonstrations(env_config, imitation, config_path)
         save_dataset(dataset, dataset_dir)

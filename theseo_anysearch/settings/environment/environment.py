@@ -8,7 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from theseo_anysearch.environments.task import TaskConfig
 from theseo_anysearch.settings.compatibility import NestedFieldAccessMixin
 from theseo_anysearch.settings.environment.action import ActionConfig
-from theseo_anysearch.settings.environment.agent import AgentConfig, HunterAndHuntedConfig
+from theseo_anysearch.settings.environment.agent import (
+    AgentConfig,
+    HunterAndHuntedConfig,
+)
 from theseo_anysearch.settings.environment.curriculum import WaypointCurriculumConfig
 from theseo_anysearch.settings.environment.geometry import GeometryConfig
 from theseo_anysearch.settings.environment.lifecycle import LifecycleConfig
@@ -162,6 +165,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale": self.geometry__scale,
             "scale_range": self.geometry__scale_range,
             "grid_size": self.geometry__grid_size,
+            "extent": self.geometry.extent,
             "geometry_boxes": self.geometry__boxes,
             "geometry_pool_size": self.geometry__pool_size,
             "scale_variants_per_map": self.geometry__scale_variants_per_map,

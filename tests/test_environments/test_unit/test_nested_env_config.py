@@ -43,6 +43,19 @@ def test_legacy_flattened_environment_remains_loadable() -> None:
     assert configured.rewards.goal_reward == 2.0
 
 
+def test_non_cubic_extent_is_preserved_for_regional_world_pipeline() -> None:
+    configured = EnvConfig(geometry={"extent": [100, 50, 10]})
+
+    assert configured.geometry.grid_size is None
+    assert configured.geometry.extent == (100, 50, 10)
+    assert configured.to_runtime_dict()["extent"] == (100, 50, 10)
+
+
+def test_conflicting_grid_size_and_extent_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="describe different bounds"):
+        EnvConfig(geometry={"grid_size": 32, "extent": [32, 64, 32]})
+
+
 def test_mixed_legacy_and_nested_geometry_is_rejected() -> None:
     with pytest.raises(ValidationError, match="cannot be mixed.*geometry"):
         EnvConfig(grid_size=8, geometry={"grid_size": 16})

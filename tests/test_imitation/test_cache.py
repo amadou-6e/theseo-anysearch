@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from threading import Lock, Thread
-import time
 
+import pytest
 import torch
 
 from theseo_anysearch.imitation import cache as cache_module
-
 from theseo_anysearch.imitation.cache import (
     cache_key_lock,
     load_cached_pretraining,
@@ -70,6 +70,35 @@ def test_cache_key_ignores_rl_only_settings_and_tracks_model_contract() -> None:
 
     assert first_key == same_key
     assert first_key != different_key
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"world_schema_version": 2},
+        {"coordinate_type": "u16"},
+        {"coordinate_convention": "zero_based"},
+        {"storage_coordinate_convention": "one_based"},
+        {"source_origin": (1, 0, 0)},
+        {"world_extent": (64, 32, 32)},
+        {"world_identity_sha256": "a" * 64},
+    ],
+)
+def test_cache_key_changes_with_world_contract(update: dict[str, object]) -> None:
+    model = torch.nn.Linear(4, 2)
+    imitation = ImitationConfig(enabled=True)
+    current = _manifest()
+    legacy = current.model_copy(update=update)
+
+    current_key, current_contract = pretraining_cache_key(
+        model, current, imitation, policy_id="default_policy"
+    )
+    legacy_key, legacy_contract = pretraining_cache_key(
+        model, legacy, imitation, policy_id="default_policy"
+    )
+
+    assert current_key != legacy_key
+    assert current_contract["world"] != legacy_contract["world"]
 
 
 def test_cache_key_changes_with_sampling_provider() -> None:
@@ -138,6 +167,31 @@ def test_cache_publish_and_load_materializes_checkpoint(tmp_path: Path) -> None:
     assert Path(result.checkpoint_path).is_file()
     for expected, actual in zip(source_model.parameters(), restored_model.parameters()):
         assert torch.equal(expected, actual)
+
+
+def test_cache_load_rejects_changed_world_contract(tmp_path: Path) -> None:
+    model = torch.nn.Linear(4, 2)
+    imitation = ImitationConfig(enabled=True)
+    cache_key, contract = pretraining_cache_key(
+        model, _manifest(), imitation, policy_id="default_policy"
+    )
+    checkpoint = tmp_path.joinpath("source.pt")
+    torch.save({"model_state": model.state_dict()}, checkpoint)
+    cache_dir = tmp_path.joinpath("cache")
+    cache_dir.mkdir()
+    publish_cached_pretraining(cache_dir, cache_key, contract, _result(checkpoint))
+    incompatible = {**contract, "world": {**contract["world"], "extent": [64, 32, 32]}}
+
+    assert (
+        load_cached_pretraining(
+            model,
+            cache_dir,
+            cache_key,
+            incompatible,
+            tmp_path.joinpath("trial"),
+        )
+        is None
+    )
 
 
 def test_cache_key_lock_serializes_concurrent_publishers(tmp_path: Path) -> None:

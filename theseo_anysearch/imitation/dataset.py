@@ -22,6 +22,7 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
 )
+from theseo_anysearch.worlds import world_contract
 
 
 def _configure_waypoint_curriculum(
@@ -106,6 +107,10 @@ def dataset_fingerprint(
     # Demonstration resets always use collection.seed_start + attempt, so the
     # Tune trial's rollout seed offset cannot affect collected examples.
     normalized_env.pop("seed", None)
+    normalized_world = world_contract(env_config)
+    normalized_env.pop("grid_size", None)
+    normalized_env.pop("extent", None)
+    normalized_env["extent"] = normalized_world["extent"]
     for path_key in ("stl_path", "waypoints_file"):
         path_value = normalized_env.get(path_key)
         if path_value:
@@ -118,9 +123,10 @@ def dataset_fingerprint(
         }
 
     payload = {
-        # Version 5 adds the Python generation-provider source digest.
-        "schema_version": 5,
+        # Version 6 adds the explicit finite-world coordinate contract.
+        "schema_version": 6,
         "env": normalized_env,
+        "world": normalized_world,
         "geometry": _geometry_fingerprint(env_config),
         "generation": {
             "provider": imitation.generation.provider.model_dump(mode="json"),
@@ -336,8 +342,20 @@ def collect_demonstrations(
     )
     train_episode_ids = episode_array[~validation_mask]
     validation_episode_ids = episode_array[validation_mask]
+    normalized_world = world_contract(env_config)
     manifest = DemonstrationManifest(
         fingerprint=fingerprint,
+        world_schema_version=int(normalized_world["schema_version"]),
+        coordinate_type=str(normalized_world["coordinate_type"]),
+        coordinate_convention=str(
+            normalized_world["environment_coordinate_convention"]
+        ),
+        storage_coordinate_convention=str(
+            normalized_world["storage_coordinate_convention"]
+        ),
+        source_origin=tuple(normalized_world["source_origin"]),
+        world_extent=tuple(normalized_world["extent"]),
+        world_identity_sha256=normalized_world["identity_sha256"],
         generation_provider_name=imitation.generation.provider.name,
         generation_provider_parameters=imitation.generation.provider.parameters,
         requested_episodes=imitation.generation.episodes,
@@ -389,6 +407,7 @@ def save_dataset(dataset: DemonstrationDataset, directory: Path) -> None:
 def load_compatible_dataset(
     directory: Path,
     expected_fingerprint: str,
+    expected_world_contract: dict[str, Any],
 ) -> DemonstrationDataset:
     """Load a dataset only when its complete contract fingerprint matches."""
 
@@ -400,6 +419,12 @@ def load_compatible_dataset(
             "Imitation dataset fingerprint mismatch: "
             f"expected {expected_fingerprint}, found {manifest.fingerprint}"
         )
+    stored_world_contract = demonstration_world_contract(manifest)
+    if stored_world_contract != expected_world_contract:
+        raise ValueError(
+            "Imitation dataset world contract mismatch: "
+            f"expected {expected_world_contract}, found {stored_world_contract}"
+        )
     arrays = np.load(directory.joinpath("demonstrations.npz"))
     return DemonstrationDataset(
         train_observations=arrays["train_observations"],
@@ -410,3 +435,18 @@ def load_compatible_dataset(
         validation_episode_ids=arrays["validation_episode_ids"],
         manifest=manifest,
     )
+
+
+def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, Any]:
+    """Recover the explicit world contract persisted beside a dataset."""
+
+    return {
+        "schema_version": manifest.world_schema_version,
+        "coordinate_type": manifest.coordinate_type,
+        "storage_coordinate_convention": manifest.storage_coordinate_convention,
+        "environment_coordinate_convention": manifest.coordinate_convention,
+        "environment_min": [1, 1, 1],
+        "source_origin": list(manifest.source_origin),
+        "extent": list(manifest.world_extent),
+        "identity_sha256": manifest.world_identity_sha256,
+    }
