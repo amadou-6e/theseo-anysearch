@@ -8,7 +8,7 @@ from threading import Lock, Thread
 import pytest
 import torch
 
-from theseo_anysearch.imitation import cache as cache_module
+from theseo_anysearch import cache_lock as cache_module
 from theseo_anysearch.imitation.cache import (
     cache_key_lock,
     load_cached_pretraining,
@@ -228,7 +228,7 @@ def test_cache_key_lock_heartbeat_protects_a_slow_holder_past_its_timeout(
     long behavior-cloning run) would be forcibly evicted by a waiter, and
     both would then believe they held the lock simultaneously.
     """
-    monkeypatch.setattr(cache_module, "_LOCK_HEARTBEAT_INTERVAL_SECONDS", 0.02)
+    monkeypatch.setattr(cache_module, "LOCK_HEARTBEAT_INTERVAL_SECONDS", 0.02)
     events: list[str] = []
     events_lock = Lock()
 

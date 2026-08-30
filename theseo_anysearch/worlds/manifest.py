@@ -63,6 +63,9 @@ class WorldChunkManifest(BaseModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_length: int = Field(ge=0)
     occupied_voxels: int = Field(ge=0)
+    encoding: Literal["uniform", "sparse_u32", "dense_zlib"] = "sparse_u32"
+    pack_offset: int = Field(default=0, ge=0)
+    decoded_byte_length: int = Field(default=0, ge=0)
 
 
 class WorldManifest(BaseModel):
@@ -86,6 +89,8 @@ class WorldManifest(BaseModel):
     identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     voxel_scale: float = Field(default=1.0, gt=0.0)
+    compiler: dict[str, Any] = Field(default_factory=dict)
+    pack_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_environment_min(self) -> WorldManifest:
