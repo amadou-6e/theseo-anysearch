@@ -13,11 +13,8 @@ mod tests;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PendingFaultCase {
-    CompilerInterruption,
-    MalformedManifest,
     ChecksumMismatch,
     ShortRead,
-    CallbackFailure,
     CandidateIndexCorruption,
     BudgetExhaustion,
     CacheEviction,
@@ -28,9 +25,7 @@ pub enum PendingFaultCase {
 impl PendingFaultCase {
     pub const fn dependency_issues(self) -> &'static [u32] {
         match self {
-            Self::CompilerInterruption | Self::MalformedManifest => &[221],
-            Self::ChecksumMismatch | Self::ShortRead => &[221, 224],
-            Self::CallbackFailure => &[222],
+            Self::ChecksumMismatch | Self::ShortRead => &[224],
             Self::CandidateIndexCorruption | Self::BudgetExhaustion => &[223],
             Self::CacheEviction | Self::PinnedOvercommit | Self::FailedPrefetch => &[224],
         }

@@ -1,14 +1,16 @@
 # World backend parity and benchmark methodology
 
-This baseline verifies the in-memory contracts introduced by issues #218 and #219. It is intentionally generic over `WorldRead` and `WorldMutation`; later overlay and residency implementations can use the same probes without changing the harness.
+This baseline verifies the in-memory contracts introduced by issues #218 through #222. It is intentionally generic over `WorldRead` and `WorldMutation`, so the same exact snapshots cover flat backends, overlay-resolved `WorldState`, and scenario-v2 callbacks.
 
 ## Parity scope
 
-`HashMapWorld` is the oracle. Exact results are compared with `ChunkedWorld` for point reads, bounded enumeration, rays, counts, set/update/remove operations, cubic and non-cubic extents, partial edge chunks, chunk boundaries, empty worlds, and sparse/dense logical chunks. `WorldState` parity additionally compares observations, masks, rewards and breakdowns, collision flags, termination/truncation, and enumerated world snapshots. Deterministic multi-agent, heterogeneous-agent, and trail behavior are covered as environment-level parity fixtures.
+`HashMapWorld` is the oracle. Exact results are compared with `ChunkedWorld` for point reads, bounded enumeration, rays, counts, set/update/remove operations, cubic and non-cubic extents, partial edge chunks, chunk boundaries, empty worlds, and sparse/dense logical chunks. Overlay parity materializes the resolved view in the oracle and checks base overrides, tombstones, overlay-only additions, block counts, rays, reset isolation, and preservation of the shared base. `WorldState` parity additionally compares observations, masks, rewards and breakdowns, collision flags, termination/truncation, and enumerated world snapshots. Deterministic multi-agent, heterogeneous-agent, shared trail-union, and reset behavior are covered as environment-level parity fixtures.
+
+The scenario-v2 callback table is captured through point, two-pass region, and ray callbacks and compared value-for-value with the same generic `ReadSnapshot`. Injected backend failures must cross the callback boundary as an explicit status. Compiler tests inject incomplete builds, malformed manifests, tuple-index corruption, whole-pack checksum corruption, and short reads.
 
 Rendering parity currently compares the sorted resolved world enumeration consumed by rendering and trajectory snapshots. Pixel-level rendering belongs to #22; persisted replay fixtures belong to #20.
 
-The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, and checked arithmetic overflow are direct fixtures. Future fault types are dependency-gated by issue number rather than represented by fake passing tests.
+The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, and checked arithmetic overflow are direct fixtures. Only faults requiring the still-unmerged candidate index (#223) or residency cache (#224) remain dependency-gated.
 
 ## Benchmark workloads
 
@@ -24,9 +26,9 @@ There is no checked-in STL fixture suitable for this backend microbenchmark. STL
 
 Each report records the fixed seed, operating system, architecture, build profile, processor identifier when available, warmup count, measured sample count, and operations per sample. Results contain minimum, p50, p95, p99, and maximum nanoseconds per operation. Warmups are executed separately and excluded from samples.
 
-Measured operations are point reads, radius-2 and radius-8 regional reads, length-8 and length-32 rays, mutations, backend reset/repopulation, empty-environment reset and step controls, and full enumeration. Resident chunk count and conservative decoded/storage estimates are reported separately.
+Measured operations are point reads, radius-2 and radius-8 regional reads, length-8 and length-32 rays, mutations, backend reset/repopulation, overlay-only environment reset, environment step controls, and full enumeration. Resident chunk count, conservative decoded/storage estimates, and overlay memory are reported separately.
 
-Encoded bytes, overlay memory, pinned memory, and operating-system file-cache bytes are `null` until #221, #220, and #224 provide those concepts. Process RSS is not used as a disk-residency or file-cache guarantee.
+Overlay memory is measured from the actual number and representation of episode-local overrides and tombstones. Encoded bytes are measured by the Python world-pack benchmark documented in `world_pack_format.md`; this in-memory Rust report leaves that field `null` rather than mixing measurements from separate processes. Pinned memory and operating-system file-cache bytes remain `null` until #224 provides those concepts. Process RSS is not used as a disk-residency or file-cache guarantee.
 
 ## Commands
 

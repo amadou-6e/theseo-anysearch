@@ -141,6 +141,46 @@ def test_corruption_is_detected_and_recompiled_when_source_exists(tmp_path: Path
     validate_compiled_world(rebuilt.root)
 
 
+def test_short_pack_read_is_detected(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource((0, 0, 0), (3, 3, 3))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+    payload = compiled.pack_path.read_bytes()
+    compiled.pack_path.write_bytes(payload[:-1])
+
+    with pytest.raises(WorldPackCorruptError, match="pack checksum mismatch"):
+        validate_compiled_world(compiled.root)
+
+
+def test_tuple_index_corruption_is_detected(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource((0, 0, 0), (3, 3, 3))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+    index = json.loads(compiled.index_path.read_text(encoding="utf-8"))
+    entry = next(iter(index.values()))
+    entry["offset"] += 1
+    compiled.index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorldPackCorruptError, match="chunk index mismatch"):
+        validate_compiled_world(compiled.root)
+
+
+def test_malformed_manifest_is_detected(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource((0, 0, 0), (0, 0, 0))],
+        WorldExtent(x=2, y=2, z=2),
+        tmp_path,
+    )
+    compiled.root.joinpath(MANIFEST_FILE).write_text("{", encoding="utf-8")
+
+    with pytest.raises(WorldPackCorruptError, match="metadata is invalid"):
+        validate_compiled_world(compiled.root)
+
+
 def test_invalid_pack_without_source_fails_explicitly(tmp_path: Path) -> None:
     compiled = compile_world(
         [BoxSource((0, 0, 0), (0, 0, 0))],

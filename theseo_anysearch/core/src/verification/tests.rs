@@ -3,7 +3,9 @@ use crate::{
     verification::{
         benchmark::{self, BenchmarkConfig},
         fault::{FaultInjectedWorld, FaultOperation, FaultRule},
-        parity::{apply_mutation, compare_exact, Mutation, ReadProbe},
+        parity::{
+            apply_mutation, capture_abi_read, capture_read, compare_exact, Mutation, ReadProbe,
+        },
         PendingFaultCase,
     },
     voxel::{
@@ -211,6 +213,104 @@ fn world_state_facade_backends_match_exact_environment_outputs() {
 }
 
 #[test]
+fn overlay_resolution_and_reset_match_a_materialized_oracle() {
+    let extent = WorldExtent::cubic(1000);
+    let base_coordinate = StorageCoord { x: 4, y: 4, z: 4 };
+    let removed_coordinate = StorageCoord { x: 5, y: 4, z: 4 };
+    let added_coordinate = StorageCoord { x: 6, y: 4, z: 4 };
+    let mut candidate = WorldState::new_chunked(16);
+    candidate.replace_base_blocks([((4, 4, 4), block(1)), ((5, 4, 4), block(2))]);
+    let shared_base = candidate.world_handle();
+    let mut oracle = HashMapWorld::new(extent);
+    oracle.set_block_value(base_coordinate, block(1)).unwrap();
+    oracle
+        .set_block_value(removed_coordinate, block(2))
+        .unwrap();
+    let probe = ReadProbe {
+        points: vec![base_coordinate, removed_coordinate, added_coordinate],
+        regions: vec![BoundedRegion::new(
+            StorageCoord { x: 3, y: 3, z: 3 },
+            StorageCoord { x: 8, y: 6, z: 6 },
+            extent,
+        )
+        .unwrap()],
+        rays: vec![GridRay::new(StorageCoord { x: 3, y: 4, z: 4 }, [1, 0, 0], 8).unwrap()],
+    };
+    compare_exact(&oracle, &candidate, &probe).unwrap();
+
+    candidate
+        .update_block_value(
+            base_coordinate,
+            BlockUpdate {
+                kind: Some(9),
+                active: Some(true),
+                reward_weight: Some(2.0),
+            },
+        )
+        .unwrap();
+    oracle.set_block_value(base_coordinate, block(9)).unwrap();
+    oracle
+        .update_block_value(
+            base_coordinate,
+            BlockUpdate {
+                reward_weight: Some(2.0),
+                ..BlockUpdate::default()
+            },
+        )
+        .unwrap();
+    candidate.remove_block_value(removed_coordinate).unwrap();
+    oracle.remove_block_value(removed_coordinate).unwrap();
+    candidate
+        .set_block_value(added_coordinate, block(3))
+        .unwrap();
+    oracle.set_block_value(added_coordinate, block(3)).unwrap();
+    compare_exact(&oracle, &candidate, &probe).unwrap();
+    assert!(candidate.estimated_overlay_bytes() > 0);
+
+    candidate.clear_blocks();
+    oracle.clear_blocks();
+    oracle.set_block_value(base_coordinate, block(1)).unwrap();
+    oracle
+        .set_block_value(removed_coordinate, block(2))
+        .unwrap();
+    compare_exact(&oracle, &candidate, &probe).unwrap();
+    compare_exact(&oracle, &shared_base, &probe).unwrap();
+    assert_eq!(candidate.estimated_overlay_bytes(), 0);
+}
+
+#[test]
+fn scenario_v2_callbacks_match_overlay_aware_generic_snapshot() {
+    let extent = WorldExtent::cubic(1000);
+    let mut world = WorldState::new_chunked(16);
+    world.replace_base_blocks([((2, 2, 2), block(1)), ((3, 2, 2), block(2))]);
+    world
+        .remove_block_value(StorageCoord { x: 2, y: 2, z: 2 })
+        .unwrap();
+    world
+        .set_block_value(StorageCoord { x: 4, y: 2, z: 2 }, block(7))
+        .unwrap();
+    let probe = ReadProbe {
+        points: vec![
+            StorageCoord { x: 2, y: 2, z: 2 },
+            StorageCoord { x: 3, y: 2, z: 2 },
+            StorageCoord { x: 4, y: 2, z: 2 },
+        ],
+        regions: vec![BoundedRegion::new(
+            StorageCoord { x: 1, y: 1, z: 1 },
+            StorageCoord { x: 6, y: 4, z: 4 },
+            extent,
+        )
+        .unwrap()],
+        rays: vec![GridRay::new(StorageCoord { x: 1, y: 2, z: 2 }, [1, 0, 0], 8).unwrap()],
+    };
+
+    assert_eq!(
+        capture_abi_read(&world, &probe, 226).unwrap(),
+        capture_read(&world, &probe)
+    );
+}
+
+#[test]
 fn multi_agent_and_heterogeneous_resets_are_deterministic() {
     fn multi(trail: bool) -> MultiAgentVoxelEnv {
         MultiAgentVoxelEnv::new(
@@ -244,6 +344,29 @@ fn multi_agent_and_heterogeneous_resets_are_deterministic() {
     assert_eq!(left_step.cursors, right_step.cursors);
     assert_eq!(left_step.rewards, right_step.rewards);
     assert_eq!(left_step.done, right_step.done);
+}
+
+#[test]
+fn heterogeneous_agent_trails_form_one_resolved_union_and_reset_isolates_it() {
+    let mut env = MultiAgentVoxelEnv::new(2, 4, false, vec![(8, 8, 8)], RewardConfig::default(), 8);
+    let agents = r#"[
+      {"id":"first","policy":"a","start":[1,1,2],"action_predicates":[{"name":"valid_action"},{"name":"bounds"},{"name":"unoccupied"}],"action_outcomes":[{"name":"cursor_movement"},{"name":"trail_placement"}]},
+      {"id":"second","policy":"b","start":[3,1,2],"action_predicates":[{"name":"valid_action"},{"name":"bounds"},{"name":"unoccupied"}],"action_outcomes":[{"name":"cursor_movement"},{"name":"trail_placement"}]}
+    ]"#;
+    env.configure_agents(agents, None).unwrap();
+    env.reset(7);
+    let base = env.world.world_handle();
+
+    let result = env.step_all(&[13, 12]);
+
+    assert_eq!(result.cursors, vec![(1, 1, 3), (3, 1, 1)]);
+    assert!(env.world.is_filled((1, 1, 3)));
+    assert!(env.world.is_filled((3, 1, 1)));
+    assert_eq!(env.world.len(), base.block_count() as usize + 2);
+    assert_eq!(base.block_count(), 1);
+    env.reset(7);
+    assert_eq!(env.world.len(), 1);
+    assert!(env.world.is_filled((8, 8, 8)));
 }
 
 #[test]
@@ -342,6 +465,31 @@ fn injected_query_and_mutation_failures_are_observable() {
 }
 
 #[test]
+fn scenario_v2_callback_surfaces_injected_backend_failure() {
+    let coordinate = StorageCoord { x: 1, y: 1, z: 1 };
+    let world = FaultInjectedWorld::new(
+        HashMapWorld::new(WorldExtent::cubic(4)),
+        vec![FaultRule {
+            operation: FaultOperation::Point,
+            fail_on_call: 1,
+            error: WorldAccessError::BackendFailure,
+        }],
+    );
+    let probe = ReadProbe {
+        points: vec![coordinate],
+        regions: vec![],
+        rays: vec![],
+    };
+
+    let error = capture_abi_read(&world, &probe, 227).unwrap_err();
+
+    assert!(
+        error.contains("BackendFailure"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn in_memory_residency_contracts_match_exactly() {
     let extent = WorldExtent {
         x: 35,
@@ -372,15 +520,7 @@ fn in_memory_residency_contracts_match_exactly() {
 
 #[test]
 fn future_faults_remain_explicitly_dependency_gated() {
-    assert_eq!(
-        PendingFaultCase::CompilerInterruption.dependency_issues(),
-        &[221]
-    );
-    assert_eq!(PendingFaultCase::ShortRead.dependency_issues(), &[221, 224]);
-    assert_eq!(
-        PendingFaultCase::CallbackFailure.dependency_issues(),
-        &[222]
-    );
+    assert_eq!(PendingFaultCase::ShortRead.dependency_issues(), &[224]);
     assert_eq!(
         PendingFaultCase::BudgetExhaustion.dependency_issues(),
         &[223]
@@ -396,7 +536,7 @@ fn benchmark_smoke_matrix_is_ci_safe_and_separates_future_memory_metrics() {
         .measurements
         .iter()
         .all(|measurement| measurement.encoded_bytes.is_none()
-            && measurement.overlay_memory_bytes.is_none()
+            && measurement.overlay_memory_bytes.is_some()
             && measurement.pinned_memory_bytes.is_none()
             && measurement.operating_system_file_cache_bytes.is_none()));
 }

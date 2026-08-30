@@ -3,3 +3,4 @@ pub mod abi;
 mod loader;
 mod query;
 pub use loader::{NativeScenarioV2, ScenarioInvocationV2};
+pub(crate) use query::WorldQueryScope;

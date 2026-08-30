@@ -233,7 +233,24 @@ fn measure_chunk(
         }
         black_box(world.block_count());
     });
-    let mut environment = VoxelEnv::new(WorldState::new_chunked(chunk_edge), u32::MAX)
+    let mut benchmark_state = WorldState::new_chunked(chunk_edge);
+    benchmark_state.replace_base_blocks(coordinates.iter().map(|coordinate| {
+        (
+            (
+                coordinate.x as u16,
+                coordinate.y as u16,
+                coordinate.z as u16,
+            ),
+            Block::default(),
+        )
+    }));
+    for coordinate in points.iter().take(32) {
+        benchmark_state
+            .set_block_value(*coordinate, Block::default())
+            .expect("benchmark overlay coordinate fits extent");
+    }
+    let overlay_memory_bytes = benchmark_state.estimated_overlay_bytes();
+    let mut environment = VoxelEnv::new(benchmark_state, u32::MAX)
         .with_grid_size(extent.x as u16)
         .with_geometry(Vec::new());
     let environment_reset = sample(config, 1, || {
@@ -272,7 +289,7 @@ fn measure_chunk(
         storage_overhead_estimate_bytes: entry_estimate + chunk_estimate,
         decoded_chunk_memory_estimate_bytes: entry_estimate + chunk_estimate,
         encoded_bytes: None,
-        overlay_memory_bytes: None,
+        overlay_memory_bytes: Some(overlay_memory_bytes),
         pinned_memory_bytes: None,
         operating_system_file_cache_bytes: None,
     }
