@@ -60,6 +60,12 @@ jobs:
         run: python -m pip install maturin
       - name: Check all Rust targets
         run: cargo check --manifest-path theseo_anysearch/core/Cargo.toml --all-targets
+      - name: Run world benchmark smoke matrix
+        run: >-
+          cargo test
+          --manifest-path theseo_anysearch/core/Cargo.toml
+          --lib
+          verification::tests::benchmark_smoke_matrix_is_ci_safe_and_separates_future_memory_metrics
       - name: Build Python wheel
         run: >-
           python -m maturin build --release
