@@ -5,14 +5,25 @@ from pathlib import Path
 import pytest
 
 from theseo_anysearch.experiments.custom_scenarios import (
-    available_python_scenario_names,
     CustomScenarioError,
     ScenarioContext,
     ScenarioResult,
+    available_python_scenario_names,
     load_scenario_provider,
     validate_scenario,
 )
 from theseo_anysearch.experiments.loader import load_experiment
+
+
+class EmptyWorld:
+    extent = (8, 8, 8)
+    identity = None
+
+    def occupied(self, coordinate):
+        return False
+
+    def occupied_in_region(self, minimum, maximum_exclusive):
+        return ()
 
 
 def context(**updates) -> ScenarioContext:
@@ -20,8 +31,8 @@ def context(**updates) -> ScenarioContext:
         "seed": 42,
         "episode_index": 0,
         "scope": "evaluation",
-        "grid_size": 8,
-        "filled_voxels": (),
+        "extent": (8, 8, 8),
+        "world": EmptyWorld(),
         "action_mode": "discrete_26",
         "action_offsets": ((1, 0, 0),),
     }
@@ -51,9 +62,9 @@ def test_discovers_only_selected_python_implementations(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    assert available_python_scenario_names(
-        source, ("python_only", "rust_only")
-    ) == ("python_only",)
+    assert available_python_scenario_names(source, ("python_only", "rust_only")) == (
+        "python_only",
+    )
 
 
 def test_tune_materializes_python_scenarios_for_each_trial(tmp_path: Path) -> None:
@@ -69,18 +80,22 @@ def test_tune_materializes_python_scenarios_for_each_trial(tmp_path: Path) -> No
         generation_source_content=None,
     )
 
-    assert tmp_path.joinpath("scenarios.py").read_text(encoding="utf-8").startswith(
-        "def adjacent"
+    assert (
+        tmp_path.joinpath("scenarios.py")
+        .read_text(encoding="utf-8")
+        .startswith("def adjacent")
     )
 
 
 def test_rejects_occupied_scenario_coordinate() -> None:
-    scenario = ScenarioResult(
-        start=(2, 2, 2), goal=(3, 2, 2), scenario_id="occupied"
-    )
+    scenario = ScenarioResult(start=(2, 2, 2), goal=(3, 2, 2), scenario_id="occupied")
+
+    class OccupiedWorld(EmptyWorld):
+        def occupied(self, coordinate):
+            return coordinate == (3, 2, 2)
 
     with pytest.raises(CustomScenarioError, match="occupied"):
-        validate_scenario(scenario, grid_size=8, filled_voxels={(3, 2, 2)})
+        validate_scenario(scenario, extent=(8, 8, 8), world=OccupiedWorld())
 
 
 def test_result_requires_goal_or_route() -> None:
@@ -88,7 +103,9 @@ def test_result_requires_goal_or_route() -> None:
         ScenarioResult(start=(2, 2, 2), scenario_id="empty")
 
 
-def test_adjacent_scenario_showcase_resolves_training_and_evaluation_providers() -> None:
+def test_adjacent_scenario_showcase_resolves_training_and_evaluation_providers() -> (
+    None
+):
     config_path = Path(
         "usage", "experiments", "showcase", "scenario_extensions", "experiment.yaml"
     )
@@ -124,7 +141,7 @@ def test_adjacent_scenario_evaluation_covers_every_action_direction() -> None:
         provider.generate(
             context(
                 seed=142 + index,
-                grid_size=32,
+                extent=(32, 32, 32),
                 action_offsets=offsets,
                 parameters={"seed_base": 142},
             )

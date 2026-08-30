@@ -1,16 +1,10 @@
 """Versioned contracts for compiled finite voxel worlds."""
 
-from theseo_anysearch.worlds.manifest import (
-    COORDINATE_TYPE,
-    ENVIRONMENT_COORDINATE_CONVENTION,
-    STORAGE_COORDINATE_CONVENTION,
-    WORLD_SCHEMA_VERSION,
-    ChunkCoordinate,
-    WorldChunkManifest,
-    WorldExtent,
-    WorldManifest,
-    world_contract,
-    world_contract_fingerprint,
+from theseo_anysearch.worlds.candidates import (
+    CandidateBudgetExceeded,
+    CandidateIndexHandle,
+    CandidateQueryBudget,
+    CandidateRecord,
 )
 from theseo_anysearch.worlds.compiler import (
     BoxSource,
@@ -27,23 +21,37 @@ from theseo_anysearch.worlds.compiler import (
     load_compiled_world,
     validate_compiled_world,
 )
+from theseo_anysearch.worlds.manifest import (
+    COORDINATE_TYPE,
+    ENVIRONMENT_COORDINATE_CONVENTION,
+    STORAGE_COORDINATE_CONVENTION,
+    WORLD_SCHEMA_VERSION,
+    ChunkCoordinate,
+    WorldChunkManifest,
+    WorldExtent,
+    WorldManifest,
+    world_contract,
+    world_contract_fingerprint,
+)
 
 __all__ = [
     "COORDINATE_TYPE",
     "ENVIRONMENT_COORDINATE_CONVENTION",
     "STORAGE_COORDINATE_CONVENTION",
     "WORLD_SCHEMA_VERSION",
-    "ChunkCoordinate",
-    "WorldChunkManifest",
-    "WorldExtent",
-    "WorldManifest",
-    "world_contract",
-    "world_contract_fingerprint",
     "BoxSource",
+    "CandidateBudgetExceeded",
+    "CandidateIndexHandle",
+    "CandidateQueryBudget",
+    "CandidateRecord",
+    "ChunkCoordinate",
     "CompiledWorld",
     "NpySource",
     "StlSource",
+    "WorldChunkManifest",
     "WorldCompilerConfig",
+    "WorldExtent",
+    "WorldManifest",
     "WorldPackCorruptError",
     "WorldPackUnavailableError",
     "benchmark_encodings",
@@ -52,4 +60,6 @@ __all__ = [
     "decode_chunk",
     "load_compiled_world",
     "validate_compiled_world",
+    "world_contract",
+    "world_contract_fingerprint",
 ]

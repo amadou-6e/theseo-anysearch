@@ -424,6 +424,36 @@ class VoxelEnv(RustGymnasiumEnv):
             validate_scenario,
         )
 
+        class _WorldView:
+            def __init__(self, rust_env, extent, identity, maximum_queries, maximum_results):
+                self.rust_env = rust_env
+                self.extent = extent
+                self.identity = identity
+                self.maximum_queries = maximum_queries
+                self.maximum_results = maximum_results
+                self.queries = 0
+                self.results = 0
+
+            def _consume(self, results=0):
+                self.queries += 1
+                self.results += results
+                if self.queries > self.maximum_queries or self.results > self.maximum_results:
+                    raise RuntimeError("scenario world query budget exhausted")
+
+            def occupied(self, coordinate: tuple[int, int, int]) -> bool:
+                self._consume()
+                return bool(self.rust_env.world_occupied(coordinate))
+
+            def occupied_in_region(self, minimum, maximum_exclusive):
+                remaining = self.maximum_results - self.results
+                values = tuple(
+                    self.rust_env.world_occupied_in_region(
+                        minimum, maximum_exclusive, remaining
+                    )
+                )
+                self._consume(len(values))
+                return values
+
         episode_index = self._reset_count
         resolved_seed = (
             int(seed)
@@ -437,6 +467,36 @@ class VoxelEnv(RustGymnasiumEnv):
             else offsets_for_mode(action_mode)
         )
         grid_size = int(self._config.get("grid_size", 32))
+        extent = tuple(self._config.get("extent") or (grid_size, grid_size, grid_size))
+        candidates = None
+        candidate_root = self._config.get("scenario_candidate_index")
+        world_identity = self._config.get("world_identity_sha256")
+        if candidate_root is not None:
+            from theseo_anysearch.worlds.candidates import (
+                CandidateIndexHandle,
+                CandidateQueryBudget,
+            )
+
+            candidates = CandidateIndexHandle(
+                Path(candidate_root),
+                world_identity=world_identity,
+                budget=CandidateQueryBudget(
+                    maximum_queries=int(
+                        self._config.get("scenario_maximum_candidate_queries", 64)
+                    ),
+                    maximum_results=int(
+                        self._config.get("scenario_maximum_candidate_results", 4096)
+                    ),
+                ),
+            )
+            world_identity = candidates.world_identity
+        world = _WorldView(
+            self._rust_env,
+            extent,
+            world_identity,
+            int(self._config.get("scenario_maximum_candidate_queries", 64)),
+            int(self._config.get("scenario_maximum_candidate_results", 4096)),
+        )
         if self._scenario_provider.native_abi == 2:
             raw = self._rust_env.generate_native_scenario_v2(
                 str(self._scenario_provider.source_path),
@@ -449,6 +509,8 @@ class VoxelEnv(RustGymnasiumEnv):
                 json.dumps(self._previous_scenario),
                 json.dumps(dict(self._config.get("waypoint_curriculum") or {})),
                 json.dumps(self._scenario_parameters),
+                str(candidate_root) if candidate_root is not None else None,
+                world.identity,
             )
             from theseo_anysearch.experiments.custom_scenarios import ScenarioResult
 
@@ -458,8 +520,10 @@ class VoxelEnv(RustGymnasiumEnv):
                 seed=resolved_seed,
                 episode_index=episode_index,
                 scope=self._scenario_scope,
-                grid_size=grid_size,
-                filled_voxels=self._scenario_geometry,
+                extent=extent,
+                world_identity=world.identity,
+                world=world,
+                candidates=candidates,
                 action_mode=action_mode,
                 action_offsets=offsets,
                 previous_scenario=self._previous_scenario,
@@ -471,8 +535,8 @@ class VoxelEnv(RustGymnasiumEnv):
             generated = self._scenario_provider.generate(context)
         scenario = validate_scenario(
             generated,
-            grid_size=grid_size,
-            filled_voxels=set(self._scenario_geometry),
+            extent=extent,
+            world=world,
         )
         self._activate_route({"start": scenario.start, "waypoints": scenario.waypoints})
         self._previous_scenario = {

@@ -217,6 +217,13 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             ),
             "scenario_provider": self.scenarios.provider.name if self.scenarios.provider else None,
             "scenario_parameters": self.scenarios.provider.parameters if self.scenarios.provider else {},
+            "scenario_candidate_index": (
+                str(self.scenarios.candidate_index)
+                if self.scenarios.candidate_index is not None
+                else None
+            ),
+            "scenario_maximum_candidate_queries": self.scenarios.maximum_candidate_queries,
+            "scenario_maximum_candidate_results": self.scenarios.maximum_candidate_results,
             "task": self.task.model_dump(mode="json"),
             "lifecycle_rules": [
                 rule.model_dump(mode="json") for rule in self.lifecycle.rules

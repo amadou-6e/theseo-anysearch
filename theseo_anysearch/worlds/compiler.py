@@ -10,14 +10,22 @@ import statistics
 import time
 import uuid
 import zlib
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.cache_lock import cache_key_lock
+from theseo_anysearch.worlds.candidates import (
+    CANDIDATE_DATA_FILE,
+    CANDIDATE_INDEX_FILE,
+    CandidateIndexHandle,
+    CandidateRecord,
+    write_candidate_index,
+)
 from theseo_anysearch.worlds.manifest import (
     ChunkCoordinate,
     WorldChunkManifest,
@@ -29,7 +37,7 @@ PACK_FILE = "world.pack"
 INDEX_FILE = "index.json"
 MANIFEST_FILE = "manifest.json"
 COMPLETE_FILE = "COMPLETE"
-COMPILER_SCHEMA_VERSION = 1
+COMPILER_SCHEMA_VERSION = 2
 _CHUNK_MAGIC = b"AWC1"
 _ENCODING_IDS = {"uniform": 1, "sparse_u32": 2, "dense_zlib": 3}
 
@@ -131,7 +139,9 @@ def _source_contract(source: WorldSource) -> dict[str, Any]:
         "suffix": path.suffix.lower(),
     }
     if isinstance(source, StlSource):
-        contract.update({"type": "stl", "scale": source.scale, "padding": source.padding})
+        contract.update(
+            {"type": "stl", "scale": source.scale, "padding": source.padding}
+        )
     return contract
 
 
@@ -196,8 +206,7 @@ def _add_box(
                 key = (cx, cy, cz)
                 chunk = _chunk_for(chunks, key, extent, shape)
                 starts = tuple(
-                    max(source.minimum[a] - key[a] * shape[a], 0)
-                    for a in range(3)
+                    max(source.minimum[a] - key[a] * shape[a], 0) for a in range(3)
                 )
                 stops = tuple(
                     min(
@@ -233,8 +242,8 @@ def _add_npy(
                     starts[2] : starts[2] + shape[2],
                 ]
                 if np.any(view):
-                    _chunk_for(chunks, (cx, cy, cz), extent, shape)[:] |= (
-                        np.asarray(view, dtype=np.bool_)
+                    _chunk_for(chunks, (cx, cy, cz), extent, shape)[:] |= np.asarray(
+                        view, dtype=np.bool_
                     )
 
 
@@ -279,7 +288,11 @@ def _load_stl_cells(
     sampler = theseo_core.PyVoxelSampler(grid_size=grid_size)
     origin = float(padding + 1)
     sampler.load_stl_normalized(
-        str(path), min(float(scale), float(max_span)) / max_extent, origin, origin, origin
+        str(path),
+        min(float(scale), float(max_span)) / max_extent,
+        origin,
+        origin,
+        origin,
     )
     free = set(sampler.free_cells())
     lower, upper = padding + 1, grid_size - padding
@@ -292,7 +305,9 @@ def _load_stl_cells(
     ]
 
 
-def _encode_chunk(chunk: np.ndarray, config: WorldCompilerConfig) -> tuple[str, bytes, int]:
+def _encode_chunk(
+    chunk: np.ndarray, config: WorldCompilerConfig
+) -> tuple[str, bytes, int]:
     flat = np.ravel(chunk, order="C")
     occupied = int(np.count_nonzero(flat))
     if occupied == flat.size:
@@ -300,8 +315,10 @@ def _encode_chunk(chunk: np.ndarray, config: WorldCompilerConfig) -> tuple[str, 
     indices = np.flatnonzero(flat).astype("<u4", copy=False)
     sparse = _CHUNK_MAGIC + bytes([_ENCODING_IDS["sparse_u32"]]) + indices.tobytes()
     dense_raw = np.packbits(flat, bitorder="little").tobytes()
-    dense = _CHUNK_MAGIC + bytes([_ENCODING_IDS["dense_zlib"]]) + zlib.compress(
-        dense_raw, level=config.compression_level
+    dense = (
+        _CHUNK_MAGIC
+        + bytes([_ENCODING_IDS["dense_zlib"]])
+        + zlib.compress(dense_raw, level=config.compression_level)
     )
     if occupied / flat.size <= config.sparse_max_fraction and len(sparse) <= len(dense):
         return "sparse_u32", sparse, len(dense_raw)
@@ -336,9 +353,9 @@ def decode_chunk(payload: bytes, shape: tuple[int, int, int]) -> np.ndarray:
         expected = (size + 7) // 8
         if len(raw) != expected:
             raise WorldPackCorruptError("dense chunk has incorrect decoded length")
-        flat = np.unpackbits(
-            np.frombuffer(raw, dtype=np.uint8), bitorder="little"
-        )[:size].astype(np.bool_)
+        flat = np.unpackbits(np.frombuffer(raw, dtype=np.uint8), bitorder="little")[
+            :size
+        ].astype(np.bool_)
     else:
         raise WorldPackCorruptError("unsupported chunk encoding")
     return flat.reshape(shape, order="C")
@@ -453,7 +470,67 @@ def _write_pack(
     root.joinpath(MANIFEST_FILE).write_text(
         manifest.model_dump_json(indent=2), encoding="utf-8"
     )
-    root.joinpath(COMPLETE_FILE).write_text(identity, encoding="ascii")
+
+
+def _candidate_records(
+    chunks: dict[tuple[int, int, int], np.ndarray],
+    extent: WorldExtent,
+    chunk_shape: tuple[int, int, int],
+) -> list[CandidateRecord]:
+    """Derive sparse surface and adjacent free-space candidates pre-flight."""
+
+    occupied: set[tuple[int, int, int]] = set()
+    for chunk_key, chunk in chunks.items():
+        origin = tuple(chunk_key[axis] * chunk_shape[axis] for axis in range(3))
+        for local in np.argwhere(chunk):
+            occupied.add(tuple(origin[axis] + int(local[axis]) for axis in range(3)))
+    limits = extent.as_tuple()
+    directions = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+    free: set[tuple[int, int, int]] = set()
+    surface: set[tuple[int, int, int]] = set()
+    for coordinate in occupied:
+        for direction in directions:
+            neighbor = tuple(coordinate[a] + direction[a] for a in range(3))
+            if (
+                all(0 <= neighbor[a] < limits[a] for a in range(3))
+                and neighbor not in occupied
+            ):
+                free.add(neighbor)
+                surface.add(coordinate)
+    records: list[CandidateRecord] = []
+    for coordinate in sorted(free):
+        open_neighbors = 0
+        total_neighbors = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    if (dx, dy, dz) == (0, 0, 0):
+                        continue
+                    neighbor = (
+                        coordinate[0] + dx,
+                        coordinate[1] + dy,
+                        coordinate[2] + dz,
+                    )
+                    if all(0 <= neighbor[a] < limits[a] for a in range(3)):
+                        total_neighbors += 1
+                        open_neighbors += int(neighbor not in occupied)
+        quality = open_neighbors / max(total_neighbors, 1)
+        public = tuple(value + 1 for value in coordinate)
+        region = tuple(coordinate[a] // chunk_shape[a] for a in range(3))
+        records.extend(
+            CandidateRecord(position=public, kind=kind, quality=quality, region=region)
+            for kind in ("spawn", "goal")
+        )
+    for coordinate in sorted(surface):
+        records.append(
+            CandidateRecord(
+                position=tuple(value + 1 for value in coordinate),
+                kind="surface",
+                quality=1.0,
+                region=tuple(coordinate[a] // chunk_shape[a] for a in range(3)),
+            )
+        )
+    return records
 
 
 def validate_compiled_world(root: Path, *, verify_chunks: bool = True) -> CompiledWorld:
@@ -461,7 +538,14 @@ def validate_compiled_world(root: Path, *, verify_chunks: bool = True) -> Compil
 
     required = [
         root.joinpath(name)
-        for name in (PACK_FILE, INDEX_FILE, MANIFEST_FILE, COMPLETE_FILE)
+        for name in (
+            PACK_FILE,
+            INDEX_FILE,
+            MANIFEST_FILE,
+            COMPLETE_FILE,
+            CANDIDATE_DATA_FILE,
+            CANDIDATE_INDEX_FILE,
+        )
     ]
     if not all(path.is_file() for path in required):
         raise WorldPackCorruptError("compiled world is incomplete")
@@ -472,15 +556,25 @@ def validate_compiled_world(root: Path, *, verify_chunks: bool = True) -> Compil
         index = json.loads(root.joinpath(INDEX_FILE).read_text(encoding="utf-8"))
     except (ValueError, OSError) as error:
         raise WorldPackCorruptError("compiled world metadata is invalid") from error
-    if root.joinpath(COMPLETE_FILE).read_text(encoding="ascii") != manifest.identity_sha256:
+    if (
+        root.joinpath(COMPLETE_FILE).read_text(encoding="ascii")
+        != manifest.identity_sha256
+    ):
         raise WorldPackCorruptError("completion marker does not match world identity")
     identity_contract = manifest.compiler.get("identity_contract")
-    if not isinstance(identity_contract, dict) or _sha256_bytes(
-        _canonical_json(identity_contract)
-    ) != manifest.identity_sha256:
-        raise WorldPackCorruptError("manifest identity contract does not match world identity")
+    if (
+        not isinstance(identity_contract, dict)
+        or _sha256_bytes(_canonical_json(identity_contract)) != manifest.identity_sha256
+    ):
+        raise WorldPackCorruptError(
+            "manifest identity contract does not match world identity"
+        )
     if _sha256_file(root.joinpath(PACK_FILE)) != manifest.pack_sha256:
         raise WorldPackCorruptError("world pack checksum mismatch")
+    try:
+        CandidateIndexHandle(root, world_identity=manifest.identity_sha256)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise WorldPackCorruptError("candidate index is invalid") from error
     expected_keys = {
         f"{chunk.coordinate.x},{chunk.coordinate.y},{chunk.coordinate.z}"
         for chunk in manifest.chunks
@@ -534,9 +628,7 @@ def load_compiled_world(cache_dir: Path, identity: str) -> CompiledWorld:
             f"world pack {identity} is unavailable or invalid; "
             "source data is required to rebuild it"
         )
-        raise WorldPackUnavailableError(
-            message
-        ) from error
+        raise WorldPackUnavailableError(message) from error
 
 
 def compile_world(
@@ -562,7 +654,9 @@ def compile_world(
                     raise WorldPackUnavailableError(
                         f"world pack {identity} is invalid and source data is unavailable"
                     ) from None
-                quarantine = cache_dir.joinpath(f".{identity}.{uuid.uuid4().hex}.invalid")
+                quarantine = cache_dir.joinpath(
+                    f".{identity}.{uuid.uuid4().hex}.invalid"
+                )
                 os.replace(entry, quarantine)
                 shutil.rmtree(quarantine)
         temporary = cache_dir.joinpath(f".{identity}.{uuid.uuid4().hex}.tmp")
@@ -578,6 +672,12 @@ def compile_world(
                 else:
                     _add_stl(chunks, source, extent, shape)
             _write_pack(temporary, chunks, extent, resolved_config, identity, contract)
+            write_candidate_index(
+                temporary,
+                identity,
+                _candidate_records(chunks, extent, resolved_config.chunk_shape),
+            )
+            temporary.joinpath(COMPLETE_FILE).write_text(identity, encoding="ascii")
             validate_compiled_world(temporary)
             os.replace(temporary, entry)
         finally:

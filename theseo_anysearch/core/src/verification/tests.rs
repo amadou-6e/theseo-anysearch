@@ -521,10 +521,6 @@ fn in_memory_residency_contracts_match_exactly() {
 #[test]
 fn future_faults_remain_explicitly_dependency_gated() {
     assert_eq!(PendingFaultCase::ShortRead.dependency_issues(), &[224]);
-    assert_eq!(
-        PendingFaultCase::BudgetExhaustion.dependency_issues(),
-        &[223]
-    );
     assert_eq!(PendingFaultCase::FailedPrefetch.dependency_issues(), &[224]);
 }
 

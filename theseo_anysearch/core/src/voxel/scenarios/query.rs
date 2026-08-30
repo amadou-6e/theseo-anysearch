@@ -1,7 +1,8 @@
 //! Call-scoped implementation of the world-query callback table.
 use super::abi::{
-    QueryStatus, WorldBlockV1, WorldCoordV1, WorldQueryApiV1, WorldRayHitV1, WorldRayStepV1,
-    WorldRegionEntryV1, MAX_REGION_RESULTS, WORLD_QUERY_ABI_VERSION,
+    CandidateV1, QueryStatus, WorldBlockV1, WorldCoordV1, WorldQueryApiV1, WorldRayHitV1,
+    WorldRayStepV1, WorldRegionEntryV1, MAX_CANDIDATE_RESULTS, MAX_REGION_RESULTS,
+    WORLD_QUERY_ABI_VERSION,
 };
 use crate::voxel::world::{
     Block, BoundedRegion, GridRay, StorageCoord, WorldAccessError, WorldExtent, WorldRead,
@@ -10,13 +11,115 @@ use std::{
     cell::RefCell,
     ffi::c_void,
     panic::{catch_unwind, AssertUnwindSafe},
+    path::{Path, PathBuf},
 };
+
+#[derive(Clone)]
+enum CandidateSource {
+    Memory(Vec<CandidateV1>),
+    Compiled(CompiledCandidateIndex),
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct CandidateRange {
+    kind: String,
+    offset: u64,
+    byte_length: usize,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct CandidateIndexPayload {
+    schema_version: u32,
+    world_identity_sha256: String,
+    record_size: usize,
+    entries: Vec<CandidateRange>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledCandidateIndex {
+    data_path: PathBuf,
+    ranges: Vec<CandidateRange>,
+}
+
+impl CompiledCandidateIndex {
+    pub(crate) fn load(root: &Path, expected_identity: &str) -> Result<Self, String> {
+        let payload: CandidateIndexPayload = serde_json::from_slice(
+            &std::fs::read(root.join("candidates.idx"))
+                .map_err(|error| format!("could not read candidate index: {error}"))?,
+        )
+        .map_err(|error| format!("candidate index is invalid: {error}"))?;
+        if payload.schema_version != 1
+            || payload.record_size != 29
+            || payload.world_identity_sha256 != expected_identity
+        {
+            return Err("candidate index contract does not match the world".to_owned());
+        }
+        Ok(Self {
+            data_path: root.join("candidates.bin"),
+            ranges: payload.entries,
+        })
+    }
+
+    fn records(&self, kind: u8) -> Result<Vec<CandidateV1>, QueryStatus> {
+        use std::io::{Read, Seek, SeekFrom};
+        let name = ["spawn", "goal", "surface", "portal"]
+            .get(kind as usize)
+            .ok_or(QueryStatus::InvalidArgument)?;
+        let mut stream =
+            std::fs::File::open(&self.data_path).map_err(|_| QueryStatus::BackendFailure)?;
+        let mut values = Vec::new();
+        for range in self.ranges.iter().filter(|range| range.kind == *name) {
+            if range.byte_length % 29 != 0 {
+                return Err(QueryStatus::BackendFailure);
+            }
+            stream
+                .seek(SeekFrom::Start(range.offset))
+                .map_err(|_| QueryStatus::BackendFailure)?;
+            let mut payload = vec![0; range.byte_length];
+            stream
+                .read_exact(&mut payload)
+                .map_err(|_| QueryStatus::BackendFailure)?;
+            for record in payload.chunks_exact(29) {
+                let u32_at =
+                    |offset| u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+                values.push(CandidateV1 {
+                    position: WorldCoordV1 {
+                        x: u32_at(0),
+                        y: u32_at(4),
+                        z: u32_at(8),
+                    },
+                    kind: record[12],
+                    reserved: [0; 3],
+                    quality: f32::from_le_bytes(record[13..17].try_into().unwrap()),
+                    region: WorldCoordV1 {
+                        x: u32_at(17),
+                        y: u32_at(21),
+                        z: u32_at(25),
+                    },
+                });
+            }
+        }
+        Ok(values)
+    }
+}
+
+impl CandidateSource {
+    fn records(&self, kind: u8) -> Result<Vec<CandidateV1>, QueryStatus> {
+        match self {
+            Self::Memory(values) => Ok(values.iter().copied().filter(|v| v.kind == kind).collect()),
+            Self::Compiled(index) => index.records(kind),
+        }
+    }
+}
 
 struct ActiveCall {
     token: u64,
     world: *const (dyn WorldRead + 'static),
     in_callback: bool,
     extent: WorldExtent,
+    candidates: CandidateSource,
+    candidate_queries: usize,
+    candidate_results: usize,
 }
 thread_local! { static ACTIVE_CALL: RefCell<Option<ActiveCall>> = const { RefCell::new(None) }; }
 
@@ -33,6 +136,14 @@ impl WorldQueryScope {
         if token == 0 {
             return Err(QueryStatus::InvalidArgument);
         }
+        Self::enter_with_candidates(world, extent, token, Vec::new())
+    }
+    pub fn enter_with_candidates(
+        world: &dyn WorldRead,
+        extent: WorldExtent,
+        token: u64,
+        candidates: Vec<CandidateV1>,
+    ) -> Result<Self, QueryStatus> {
         ACTIVE_CALL.with(|slot| {
             let mut active = slot.borrow_mut();
             if active.is_some() {
@@ -47,9 +158,24 @@ impl WorldQueryScope {
                 world: pointer,
                 in_callback: false,
                 extent,
+                candidates: CandidateSource::Memory(candidates),
+                candidate_queries: 0,
+                candidate_results: 0,
             });
             Ok(Self { token })
         })
+    }
+    pub(crate) fn enter_with_index(
+        world: &dyn WorldRead,
+        extent: WorldExtent,
+        token: u64,
+        candidates: CompiledCandidateIndex,
+    ) -> Result<Self, QueryStatus> {
+        let scope = Self::enter_with_candidates(world, extent, token, Vec::new())?;
+        ACTIVE_CALL.with(|slot| {
+            slot.borrow_mut().as_mut().unwrap().candidates = CandidateSource::Compiled(candidates)
+        });
+        Ok(scope)
     }
     pub fn api(&self) -> WorldQueryApiV1 {
         WorldQueryApiV1 {
@@ -65,8 +191,101 @@ impl WorldQueryScope {
             region: Some(region),
             ray: Some(ray),
             count_region: Some(count_region),
+            sample_candidates: Some(sample_candidates),
         }
     }
+}
+
+fn rank(seed: u64, stream: u64, candidate: &CandidateV1) -> u64 {
+    let mut value = 0xcbf29ce484222325u64;
+    for byte in seed
+        .to_le_bytes()
+        .into_iter()
+        .chain(stream.to_le_bytes())
+        .chain(candidate.position.x.to_le_bytes())
+        .chain(candidate.position.y.to_le_bytes())
+        .chain(candidate.position.z.to_le_bytes())
+        .chain([candidate.kind])
+    {
+        value ^= u64::from(byte);
+        value = value.wrapping_mul(0x100000001b3);
+    }
+    value
+}
+
+unsafe extern "C" fn sample_candidates(
+    context: *mut c_void,
+    token: u64,
+    kind: u8,
+    seed: u64,
+    stream: u64,
+    near: WorldCoordV1,
+    radius: u32,
+    minimum_quality: f32,
+    maximum_results: u32,
+    output: *mut CandidateV1,
+    capacity: usize,
+    required: *mut usize,
+) -> QueryStatus {
+    guarded(|| {
+        if required.is_null() || (capacity != 0 && output.is_null()) || kind > 3 {
+            return Err(QueryStatus::InvalidArgument);
+        }
+        if context.is_null() || context as usize as u64 != token {
+            return Err(QueryStatus::StaleToken);
+        }
+        ACTIVE_CALL.with(|slot| {
+            let mut active = slot.borrow_mut();
+            let call = active.as_mut().ok_or(QueryStatus::StaleToken)?;
+            if call.token != token || call.in_callback {
+                return Err(QueryStatus::StaleToken);
+            }
+            let radius_squared = u64::from(radius) * u64::from(radius);
+            let mut values: Vec<_> = call
+                .candidates
+                .records(kind)?
+                .into_iter()
+                .filter(|item| item.quality >= minimum_quality)
+                .filter(|item| {
+                    if radius == u32::MAX {
+                        return true;
+                    }
+                    let distance = [
+                        item.position.x.abs_diff(near.x),
+                        item.position.y.abs_diff(near.y),
+                        item.position.z.abs_diff(near.z),
+                    ];
+                    distance
+                        .iter()
+                        .map(|v| u64::from(*v) * u64::from(*v))
+                        .sum::<u64>()
+                        <= radius_squared
+                })
+                .collect();
+            values.sort_by_key(|item| rank(seed, stream, item));
+            values.truncate(maximum_results as usize);
+            if values.len() > MAX_CANDIDATE_RESULTS - call.candidate_results {
+                return Err(QueryStatus::InvalidArgument);
+            }
+            unsafe { required.write(values.len()) };
+            if capacity < values.len() {
+                return Ok(QueryStatus::InsufficientBuffer);
+            }
+            call.candidate_queries += 1;
+            if call.candidate_queries > 64 {
+                return Err(QueryStatus::InvalidArgument);
+            }
+            for (index, item) in values.iter().enumerate() {
+                unsafe { output.add(index).write(*item) };
+            }
+            call.candidate_results += values.len();
+            Ok(if values.is_empty() {
+                QueryStatus::EmptyOrMiss
+            } else {
+                QueryStatus::BlockHit
+            })
+        })
+    })
 }
 impl Drop for WorldQueryScope {
     fn drop(&mut self) {
@@ -659,5 +878,128 @@ mod tests {
         let _guard = world.pin_region(bounded).unwrap();
         let hot = collect(21);
         assert_eq!(cold, hot);
+    }
+
+    #[test]
+    fn candidate_sampling_is_deterministic_filtered_and_bounded() {
+        let world = populated();
+        let values = vec![
+            CandidateV1 {
+                position: WorldCoordV1 { x: 2, y: 2, z: 2 },
+                kind: 0,
+                quality: 0.8,
+                region: WorldCoordV1::default(),
+                ..CandidateV1::default()
+            },
+            CandidateV1 {
+                position: WorldCoordV1 { x: 3, y: 2, z: 2 },
+                kind: 0,
+                quality: 0.9,
+                region: WorldCoordV1::default(),
+                ..CandidateV1::default()
+            },
+        ];
+        let collect = |token| {
+            let scope = WorldQueryScope::enter_with_candidates(
+                &world,
+                world.extent(),
+                token,
+                values.clone(),
+            )
+            .unwrap();
+            let api = scope.api();
+            let function = api.sample_candidates.unwrap();
+            let mut required = 0;
+            assert_eq!(
+                unsafe {
+                    function(
+                        api.context,
+                        token,
+                        0,
+                        42,
+                        7,
+                        WorldCoordV1::default(),
+                        u32::MAX,
+                        0.0,
+                        1,
+                        std::ptr::null_mut(),
+                        0,
+                        &mut required,
+                    )
+                },
+                QueryStatus::InsufficientBuffer
+            );
+            assert_eq!(required, 1);
+            let mut output = CandidateV1::default();
+            assert_eq!(
+                unsafe {
+                    function(
+                        api.context,
+                        token,
+                        0,
+                        42,
+                        7,
+                        WorldCoordV1::default(),
+                        u32::MAX,
+                        0.0,
+                        1,
+                        &mut output,
+                        1,
+                        &mut required,
+                    )
+                },
+                QueryStatus::BlockHit
+            );
+            output
+        };
+        let selected = collect(30);
+        assert_eq!(selected, collect(31));
+        assert_eq!(selected.position, WorldCoordV1 { x: 2, y: 2, z: 2 });
+        assert_eq!(rank(42, 7, &values[0]), 4_629_902_318_065_186_782);
+    }
+
+    #[test]
+    fn compiled_candidate_data_is_opened_lazily_and_short_reads_surface() {
+        let root = std::env::temp_dir().join(format!(
+            "anysearch-candidates-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(
+            root.join("candidates.idx"),
+            r#"{"schema_version":1,"world_identity_sha256":"world","record_size":29,"entries":[{"kind":"spawn","offset":0,"byte_length":29}]}"#,
+        )
+        .unwrap();
+        let index = CompiledCandidateIndex::load(&root, "world").unwrap();
+        let world = populated();
+        let scope = WorldQueryScope::enter_with_index(&world, world.extent(), 40, index).unwrap();
+        let api = scope.api();
+        let mut required = 0;
+        assert_eq!(
+            unsafe {
+                api.sample_candidates.unwrap()(
+                    api.context,
+                    40,
+                    0,
+                    1,
+                    1,
+                    WorldCoordV1::default(),
+                    u32::MAX,
+                    0.0,
+                    1,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            QueryStatus::BackendFailure
+        );
+        drop(scope);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

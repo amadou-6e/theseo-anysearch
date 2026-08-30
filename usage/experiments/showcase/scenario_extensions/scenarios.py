@@ -2,12 +2,15 @@
 
 import random
 
-from theseo_anysearch.experiments.custom_scenarios import ScenarioContext, ScenarioResult
+from theseo_anysearch.experiments.custom_scenarios import (
+    ScenarioContext,
+    ScenarioResult,
+)
 
 
 def adjacent_goal_python(context: ScenarioContext) -> ScenarioResult:
     """Place a goal in one selectable voxel adjacent to the grid center."""
-    center_value = (context.grid_size + 1) // 2
+    center_value = (context.extent[0] + 1) // 2
     start = (center_value, center_value, center_value)
     if context.scope == "evaluation":
         seed_base = int(context.parameters["seed_base"])

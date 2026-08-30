@@ -10,7 +10,7 @@ The scenario-v2 callback table is captured through point, two-pass region, and r
 
 Rendering parity currently compares the sorted resolved world enumeration consumed by rendering and trajectory snapshots. Pixel-level rendering belongs to #22; persisted replay fixtures belong to #20.
 
-The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, and checked arithmetic overflow are direct fixtures. Only faults requiring the still-unmerged candidate index (#223) or residency cache (#224) remain dependency-gated.
+The fault wrapper injects deterministic point, region, ray, set, update, and remove failures by call number. Invalid extents, regions, coordinates, rays, checked arithmetic overflow, candidate-index corruption, and candidate query/result budget exhaustion are direct fixtures. Only faults requiring the still-unmerged residency cache (#224) remain dependency-gated.
 
 ## Benchmark workloads
 

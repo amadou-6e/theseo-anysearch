@@ -158,6 +158,29 @@ pub struct WorldRayStepV1 {
     pub y: i8,
     pub z: i8,
 }
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CandidateV1 {
+    pub position: WorldCoordV1,
+    pub kind: u8,
+    pub reserved: [u8; 3],
+    pub quality: f32,
+    pub region: WorldCoordV1,
+}
+pub type CandidateQueryV1 = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    u64,
+    u8,
+    u64,
+    u64,
+    WorldCoordV1,
+    u32,
+    f32,
+    u32,
+    *mut CandidateV1,
+    usize,
+    *mut usize,
+) -> QueryStatus;
 pub type PointQueryV1 = unsafe extern "C" fn(
     *mut std::ffi::c_void,
     u64,
@@ -203,6 +226,7 @@ pub struct WorldQueryApiV1 {
     pub region: Option<RegionQueryV1>,
     pub ray: Option<RayQueryV1>,
     pub count_region: Option<CountQueryV1>,
+    pub sample_candidates: Option<CandidateQueryV1>,
 }
 #[repr(C)]
 pub struct ScenarioContextV2Raw {
@@ -224,6 +248,9 @@ pub struct ScenarioContextV2Raw {
     pub parameters_json: *const u8,
     pub parameters_json_len: usize,
     pub world: *const WorldQueryApiV1,
+    pub extent: WorldCoordV1,
+    pub world_identity: *const u8,
+    pub world_identity_len: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -369,6 +396,68 @@ impl<'a> WorldQuery<'a> {
             status => Err(query_error(status)),
         }
     }
+
+    pub fn candidates(
+        &self,
+        kind: u8,
+        seed: u64,
+        stream: u64,
+        near: Option<([u32; 3], u32)>,
+        minimum_quality: f32,
+        maximum_results: u32,
+    ) -> Result<Vec<CandidateV1>, WorldQueryError> {
+        let function = self
+            .api
+            .sample_candidates
+            .ok_or(WorldQueryError::Unsupported)?;
+        let (near, radius) = near.map_or(([0, 0, 0], u32::MAX), |value| value);
+        let mut required = 0;
+        let status = unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                kind,
+                seed,
+                stream,
+                near.into(),
+                radius,
+                minimum_quality,
+                maximum_results,
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+            )
+        };
+        if status != QueryStatus::InsufficientBuffer
+            && !(status == QueryStatus::EmptyOrMiss && required == 0)
+        {
+            return Err(query_error(status));
+        }
+        let mut output = vec![CandidateV1::default(); required];
+        let status = unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                kind,
+                seed,
+                stream,
+                near.into(),
+                radius,
+                minimum_quality,
+                maximum_results,
+                output.as_mut_ptr(),
+                output.len(),
+                &mut required,
+            )
+        };
+        match status {
+            QueryStatus::EmptyOrMiss | QueryStatus::BlockHit => {
+                output.truncate(required);
+                Ok(output)
+            }
+            status => Err(query_error(status)),
+        }
+    }
 }
 impl From<[u32; 3]> for WorldCoordV1 {
     fn from(v: [u32; 3]) -> Self {
@@ -391,6 +480,8 @@ pub struct ScenarioContextV2<'a> {
     pub curriculum: serde_json::Value,
     pub parameters: serde_json::Value,
     pub world: WorldQuery<'a>,
+    pub extent: [u32; 3],
+    pub world_identity: &'a str,
 }
 unsafe fn text<'a>(pointer: *const u8, length: usize) -> Result<&'a str, ScenarioStatusV2> {
     if pointer.is_null() && length != 0 {
@@ -430,6 +521,8 @@ unsafe fn context_v2<'a>(
         curriculum: parse(raw.curriculum_json, raw.curriculum_json_len)?,
         parameters: parse(raw.parameters_json, raw.parameters_json_len)?,
         world: WorldQuery::validate(&*raw.world).map_err(|_| ScenarioStatusV2::InvalidContext)?,
+        extent: [raw.extent.x, raw.extent.y, raw.extent.z],
+        world_identity: text(raw.world_identity, raw.world_identity_len)?,
     })
 }
 
@@ -1009,6 +1102,9 @@ mod tests {
             parameters_json: b"{}".as_ptr(),
             parameters_json_len: 2,
             world: api,
+            extent: WorldCoordV1 { x: 8, y: 8, z: 8 },
+            world_identity: std::ptr::null(),
+            world_identity_len: 0,
         }
     }
 
@@ -1027,6 +1123,7 @@ mod tests {
             region: None,
             ray: None,
             count_region: None,
+            sample_candidates: None,
         };
         let context = raw_v2_context(&api);
         let mut required = 0;
@@ -1122,6 +1219,7 @@ mod tests {
             region: None,
             ray: None,
             count_region: None,
+            sample_candidates: None,
         };
         let context = raw_v2_context(&api);
         let mut required = 0;
@@ -1162,6 +1260,7 @@ mod tests {
             region: None,
             ray: None,
             count_region: None,
+            sample_candidates: None,
         };
         let context = raw_v2_context(&api);
         let mut required = 0;
