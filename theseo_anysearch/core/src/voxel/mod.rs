@@ -7,6 +7,7 @@ pub mod predicates;
 pub(crate) mod rendering;
 pub mod rewards;
 pub mod sampling;
+pub mod scenarios;
 pub mod world;
 
 pub use environment::{

@@ -431,23 +431,48 @@ class VoxelEnv(RustGymnasiumEnv):
             else int(self._config.get("seed", 42)) + episode_index + 1
         )
         action_mode = self._config.get("action_mode", "discrete_26")
-        offsets = ACTION_OFFSETS_26 if action_mode == "vector_3" else offsets_for_mode(action_mode)
-        context = ScenarioContext(
-            seed=resolved_seed,
-            episode_index=episode_index,
-            scope=self._scenario_scope,
-            grid_size=int(self._config.get("grid_size", 32)),
-            filled_voxels=self._scenario_geometry,
-            action_mode=action_mode,
-            action_offsets=offsets,
-            previous_scenario=self._previous_scenario,
-            curriculum=dict(self._config.get("waypoint_curriculum") or {}),
-            parameters=self._scenario_parameters,
+        offsets = (
+            ACTION_OFFSETS_26
+            if action_mode == "vector_3"
+            else offsets_for_mode(action_mode)
         )
+        grid_size = int(self._config.get("grid_size", 32))
+        if self._scenario_provider.native_abi == 2:
+            raw = self._rust_env.generate_native_scenario_v2(
+                str(self._scenario_provider.source_path),
+                self._scenario_provider.name,
+                resolved_seed,
+                episode_index,
+                self._scenario_scope,
+                action_mode,
+                json.dumps(offsets),
+                json.dumps(self._previous_scenario),
+                json.dumps(dict(self._config.get("waypoint_curriculum") or {})),
+                json.dumps(self._scenario_parameters),
+            )
+            from theseo_anysearch.experiments.custom_scenarios import ScenarioResult
+
+            generated = ScenarioResult.model_validate_json(raw)
+        else:
+            context = ScenarioContext(
+                seed=resolved_seed,
+                episode_index=episode_index,
+                scope=self._scenario_scope,
+                grid_size=grid_size,
+                filled_voxels=self._scenario_geometry,
+                action_mode=action_mode,
+                action_offsets=offsets,
+                previous_scenario=self._previous_scenario,
+                curriculum=dict(self._config.get("waypoint_curriculum") or {}),
+                parameters=self._scenario_parameters,
+            )
+            if self._scenario_provider.generate is None:
+                raise RuntimeError("scenario provider has no executable implementation")
+            generated = self._scenario_provider.generate(context)
         scenario = validate_scenario(
-            self._scenario_provider.generate(context),
-            grid_size=context.grid_size,
-            filled_voxels=set(context.filled_voxels),
+            generated,
+            grid_size=grid_size,
+            filled_voxels=set(self._scenario_geometry),
         )
         self._activate_route({"start": scenario.start, "waypoints": scenario.waypoints})
         self._previous_scenario = {

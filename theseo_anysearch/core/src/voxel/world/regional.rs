@@ -83,6 +83,8 @@ pub enum WorldAccessError {
     },
     InvalidRayStep([i8; 3]),
     ChunkShapeExceedsAddressSpace(WorldExtent),
+    BackendFailure,
+    Unsupported,
 }
 
 pub trait WorldRead {

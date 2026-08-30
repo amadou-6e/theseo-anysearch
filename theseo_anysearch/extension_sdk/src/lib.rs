@@ -5,6 +5,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub use anysearch_extension_macros::{
     anysearch_outcome, anysearch_predicate, anysearch_reward, anysearch_scenario,
+    anysearch_scenario_v2,
 };
 
 pub const ABI_VERSION: u32 = 2;
@@ -92,6 +93,374 @@ pub unsafe fn export_scenario_v1(
     std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len());
     *output_len = encoded.len();
     0
+}
+
+pub const WORLD_QUERY_ABI_VERSION: u32 = 1;
+pub const SCENARIO_ABI_VERSION_V2: u32 = 2;
+pub const MAX_SCENARIO_OUTPUT_BYTES: usize = 1_048_576;
+
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QueryStatus {
+    EmptyOrMiss = 0,
+    BlockHit = 1,
+    InvalidArgument = 2,
+    OutOfBounds = 3,
+    InsufficientBuffer = 4,
+    StaleToken = 5,
+    BackendFailure = 6,
+    Unsupported = 7,
+    HostFailure = 8,
+}
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScenarioStatusV2 {
+    Success = 0,
+    InvalidArgument = 1,
+    InvalidContext = 2,
+    Panic = 3,
+    SerializationFailure = 4,
+    InsufficientBuffer = 5,
+    OutputTooLarge = 6,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorldCoordV1 {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WorldBlockV1 {
+    pub kind: u8,
+    pub active: u8,
+    pub reserved: [u8; 2],
+    pub reward_weight: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WorldRegionEntryV1 {
+    pub coordinate: WorldCoordV1,
+    pub block: WorldBlockV1,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WorldRayHitV1 {
+    pub coordinate: WorldCoordV1,
+    pub block: WorldBlockV1,
+    pub steps: u32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorldRayStepV1 {
+    pub x: i8,
+    pub y: i8,
+    pub z: i8,
+}
+pub type PointQueryV1 = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    u64,
+    WorldCoordV1,
+    *mut WorldBlockV1,
+) -> QueryStatus;
+pub type RegionQueryV1 = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    u64,
+    WorldCoordV1,
+    WorldCoordV1,
+    *mut WorldRegionEntryV1,
+    usize,
+    *mut usize,
+) -> QueryStatus;
+pub type RayQueryV1 = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    u64,
+    WorldCoordV1,
+    WorldRayStepV1,
+    u32,
+    *mut WorldRayHitV1,
+) -> QueryStatus;
+pub type CountQueryV1 = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    u64,
+    WorldCoordV1,
+    WorldCoordV1,
+    *mut u64,
+) -> QueryStatus;
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WorldQueryApiV1 {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub coordinate_size: u32,
+    pub block_size: u32,
+    pub region_entry_size: u32,
+    pub ray_hit_size: u32,
+    pub context: *mut std::ffi::c_void,
+    pub call_token: u64,
+    pub point: Option<PointQueryV1>,
+    pub region: Option<RegionQueryV1>,
+    pub ray: Option<RayQueryV1>,
+    pub count_region: Option<CountQueryV1>,
+}
+#[repr(C)]
+pub struct ScenarioContextV2Raw {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub seed: u64,
+    pub episode_index: u64,
+    pub grid_size: u32,
+    pub scope: *const u8,
+    pub scope_len: usize,
+    pub action_mode: *const u8,
+    pub action_mode_len: usize,
+    pub action_offsets_json: *const u8,
+    pub action_offsets_json_len: usize,
+    pub previous_scenario_json: *const u8,
+    pub previous_scenario_json_len: usize,
+    pub curriculum_json: *const u8,
+    pub curriculum_json_len: usize,
+    pub parameters_json: *const u8,
+    pub parameters_json_len: usize,
+    pub world: *const WorldQueryApiV1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldQueryError {
+    InvalidArgument,
+    OutOfBounds,
+    InsufficientBuffer,
+    StaleToken,
+    BackendFailure,
+    Unsupported,
+    HostFailure,
+}
+fn query_error(status: QueryStatus) -> WorldQueryError {
+    match status {
+        QueryStatus::InvalidArgument => WorldQueryError::InvalidArgument,
+        QueryStatus::OutOfBounds => WorldQueryError::OutOfBounds,
+        QueryStatus::InsufficientBuffer => WorldQueryError::InsufficientBuffer,
+        QueryStatus::StaleToken => WorldQueryError::StaleToken,
+        QueryStatus::BackendFailure => WorldQueryError::BackendFailure,
+        QueryStatus::Unsupported => WorldQueryError::Unsupported,
+        _ => WorldQueryError::HostFailure,
+    }
+}
+pub struct WorldQuery<'a> {
+    api: &'a WorldQueryApiV1,
+}
+impl<'a> WorldQuery<'a> {
+    fn validate(api: &'a WorldQueryApiV1) -> Result<Self, WorldQueryError> {
+        if api.abi_version != WORLD_QUERY_ABI_VERSION
+            || (api.struct_size as usize) < std::mem::size_of::<WorldQueryApiV1>()
+            || api.coordinate_size as usize != std::mem::size_of::<WorldCoordV1>()
+            || api.block_size as usize != std::mem::size_of::<WorldBlockV1>()
+            || api.region_entry_size as usize != std::mem::size_of::<WorldRegionEntryV1>()
+            || api.ray_hit_size as usize != std::mem::size_of::<WorldRayHitV1>()
+        {
+            return Err(WorldQueryError::Unsupported);
+        }
+        Ok(Self { api })
+    }
+    pub fn point(&self, coordinate: [u32; 3]) -> Result<Option<WorldBlockV1>, WorldQueryError> {
+        let function = self.api.point.ok_or(WorldQueryError::Unsupported)?;
+        let mut output = WorldBlockV1::default();
+        match unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                coordinate.into(),
+                &mut output,
+            )
+        } {
+            QueryStatus::EmptyOrMiss => Ok(None),
+            QueryStatus::BlockHit => Ok(Some(output)),
+            status => Err(query_error(status)),
+        }
+    }
+    pub fn region(
+        &self,
+        minimum: [u32; 3],
+        maximum_exclusive: [u32; 3],
+    ) -> Result<Vec<WorldRegionEntryV1>, WorldQueryError> {
+        let function = self.api.region.ok_or(WorldQueryError::Unsupported)?;
+        let mut required = 0;
+        let status = unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                minimum.into(),
+                maximum_exclusive.into(),
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+            )
+        };
+        if status != QueryStatus::InsufficientBuffer
+            && !(status == QueryStatus::EmptyOrMiss && required == 0)
+        {
+            return Err(query_error(status));
+        }
+        let mut output = vec![WorldRegionEntryV1::default(); required];
+        let status = unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                minimum.into(),
+                maximum_exclusive.into(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut required,
+            )
+        };
+        match status {
+            QueryStatus::EmptyOrMiss | QueryStatus::BlockHit => {
+                output.truncate(required);
+                Ok(output)
+            }
+            status => Err(query_error(status)),
+        }
+    }
+    pub fn ray(
+        &self,
+        origin: [u32; 3],
+        step: [i8; 3],
+        maximum_steps: u32,
+    ) -> Result<Option<WorldRayHitV1>, WorldQueryError> {
+        let function = self.api.ray.ok_or(WorldQueryError::Unsupported)?;
+        let mut output = WorldRayHitV1::default();
+        match unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                origin.into(),
+                WorldRayStepV1 {
+                    x: step[0],
+                    y: step[1],
+                    z: step[2],
+                },
+                maximum_steps,
+                &mut output,
+            )
+        } {
+            QueryStatus::EmptyOrMiss => Ok(None),
+            QueryStatus::BlockHit => Ok(Some(output)),
+            status => Err(query_error(status)),
+        }
+    }
+    pub fn count(
+        &self,
+        minimum: [u32; 3],
+        maximum_exclusive: [u32; 3],
+    ) -> Result<u64, WorldQueryError> {
+        let function = self.api.count_region.ok_or(WorldQueryError::Unsupported)?;
+        let mut output = 0;
+        match unsafe {
+            function(
+                self.api.context,
+                self.api.call_token,
+                minimum.into(),
+                maximum_exclusive.into(),
+                &mut output,
+            )
+        } {
+            QueryStatus::EmptyOrMiss | QueryStatus::BlockHit => Ok(output),
+            status => Err(query_error(status)),
+        }
+    }
+}
+impl From<[u32; 3]> for WorldCoordV1 {
+    fn from(v: [u32; 3]) -> Self {
+        Self {
+            x: v[0],
+            y: v[1],
+            z: v[2],
+        }
+    }
+}
+
+pub struct ScenarioContextV2<'a> {
+    pub seed: u64,
+    pub episode_index: u64,
+    pub grid_size: u32,
+    pub scope: &'a str,
+    pub action_mode: &'a str,
+    pub action_offsets: serde_json::Value,
+    pub previous_scenario: serde_json::Value,
+    pub curriculum: serde_json::Value,
+    pub parameters: serde_json::Value,
+    pub world: WorldQuery<'a>,
+}
+unsafe fn text<'a>(pointer: *const u8, length: usize) -> Result<&'a str, ScenarioStatusV2> {
+    if pointer.is_null() && length != 0 {
+        return Err(ScenarioStatusV2::InvalidContext);
+    }
+    let bytes = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(pointer, length)
+    };
+    std::str::from_utf8(bytes).map_err(|_| ScenarioStatusV2::InvalidContext)
+}
+unsafe fn context_v2<'a>(
+    raw: *const ScenarioContextV2Raw,
+) -> Result<ScenarioContextV2<'a>, ScenarioStatusV2> {
+    if raw.is_null() {
+        return Err(ScenarioStatusV2::InvalidArgument);
+    }
+    let raw = &*raw;
+    if raw.abi_version != SCENARIO_ABI_VERSION_V2
+        || (raw.struct_size as usize) < std::mem::size_of::<ScenarioContextV2Raw>()
+        || raw.world.is_null()
+    {
+        return Err(ScenarioStatusV2::InvalidContext);
+    }
+    let parse = |p, l| {
+        serde_json::from_str(unsafe { text(p, l) }?).map_err(|_| ScenarioStatusV2::InvalidContext)
+    };
+    Ok(ScenarioContextV2 {
+        seed: raw.seed,
+        episode_index: raw.episode_index,
+        grid_size: raw.grid_size,
+        scope: text(raw.scope, raw.scope_len)?,
+        action_mode: text(raw.action_mode, raw.action_mode_len)?,
+        action_offsets: parse(raw.action_offsets_json, raw.action_offsets_json_len)?,
+        previous_scenario: parse(raw.previous_scenario_json, raw.previous_scenario_json_len)?,
+        curriculum: parse(raw.curriculum_json, raw.curriculum_json_len)?,
+        parameters: parse(raw.parameters_json, raw.parameters_json_len)?,
+        world: WorldQuery::validate(&*raw.world).map_err(|_| ScenarioStatusV2::InvalidContext)?,
+    })
+}
+
+/// Export a safe scenario-v2 function with bounded two-call length negotiation.
+pub unsafe fn export_scenario_v2(
+    context: *const ScenarioContextV2Raw,
+    output: *mut u8,
+    capacity: usize,
+    required: *mut usize,
+    function: for<'a> fn(&ScenarioContextV2<'a>) -> ScenarioResult,
+) -> ScenarioStatusV2 {
+    if required.is_null() || (capacity != 0 && output.is_null()) {
+        return ScenarioStatusV2::InvalidArgument;
+    }
+    let encoded = match catch_unwind(AssertUnwindSafe(|| {
+        let context = context_v2(context)?;
+        serde_json::to_vec(&function(&context)).map_err(|_| ScenarioStatusV2::SerializationFailure)
+    })) {
+        Ok(Ok(v)) => v,
+        Ok(Err(s)) => return s,
+        Err(_) => return ScenarioStatusV2::Panic,
+    };
+    if encoded.len() > MAX_SCENARIO_OUTPUT_BYTES {
+        return ScenarioStatusV2::OutputTooLarge;
+    }
+    required.write(encoded.len());
+    if capacity < encoded.len() {
+        return ScenarioStatusV2::InsufficientBuffer;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len());
+    ScenarioStatusV2::Success
 }
 
 #[repr(C)]
@@ -590,6 +959,219 @@ mod tests {
             [5, 4, 4],
             format!("episode-{}", context.episode_index),
         )
+    }
+
+    unsafe extern "C" fn test_point(
+        _: *mut std::ffi::c_void,
+        _: u64,
+        coordinate: WorldCoordV1,
+        output: *mut WorldBlockV1,
+    ) -> QueryStatus {
+        if output.is_null() {
+            return QueryStatus::InvalidArgument;
+        }
+        if coordinate == (WorldCoordV1 { x: 2, y: 2, z: 2 }) {
+            output.write(WorldBlockV1 {
+                kind: 1,
+                active: 1,
+                reserved: [0; 2],
+                reward_weight: 0.0,
+            });
+            QueryStatus::BlockHit
+        } else {
+            QueryStatus::EmptyOrMiss
+        }
+    }
+    #[anysearch_scenario_v2]
+    fn queried_scenario(context: &ScenarioContextV2<'_>) -> ScenarioResult {
+        assert!(context.world.point([2, 2, 2]).unwrap().is_some());
+        ScenarioResult::goal([1, 1, 1], [2, 2, 2], "v2")
+    }
+
+    fn raw_v2_context(api: &WorldQueryApiV1) -> ScenarioContextV2Raw {
+        let json = b"null";
+        ScenarioContextV2Raw {
+            abi_version: SCENARIO_ABI_VERSION_V2,
+            struct_size: std::mem::size_of::<ScenarioContextV2Raw>() as u32,
+            seed: 1,
+            episode_index: 2,
+            grid_size: 8,
+            scope: b"training".as_ptr(),
+            scope_len: 8,
+            action_mode: b"discrete_26".as_ptr(),
+            action_mode_len: 11,
+            action_offsets_json: b"[]".as_ptr(),
+            action_offsets_json_len: 2,
+            previous_scenario_json: json.as_ptr(),
+            previous_scenario_json_len: json.len(),
+            curriculum_json: b"{}".as_ptr(),
+            curriculum_json_len: 2,
+            parameters_json: b"{}".as_ptr(),
+            parameters_json_len: 2,
+            world: api,
+        }
+    }
+
+    #[test]
+    fn scenario_v2_macro_negotiates_exact_output_and_validates_layout() {
+        let api = WorldQueryApiV1 {
+            abi_version: WORLD_QUERY_ABI_VERSION,
+            struct_size: std::mem::size_of::<WorldQueryApiV1>() as u32,
+            coordinate_size: std::mem::size_of::<WorldCoordV1>() as u32,
+            block_size: std::mem::size_of::<WorldBlockV1>() as u32,
+            region_entry_size: std::mem::size_of::<WorldRegionEntryV1>() as u32,
+            ray_hit_size: std::mem::size_of::<WorldRayHitV1>() as u32,
+            context: 1usize as *mut _,
+            call_token: 1,
+            point: Some(test_point),
+            region: None,
+            ray: None,
+            count_region: None,
+        };
+        let context = raw_v2_context(&api);
+        let mut required = 0;
+        assert_eq!(
+            unsafe {
+                anysearch_scenario_queried_scenario_v2(
+                    &context,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            ScenarioStatusV2::InsufficientBuffer
+        );
+        let mut output = vec![0; required];
+        let mut written = 0;
+        assert_eq!(
+            unsafe {
+                anysearch_scenario_queried_scenario_v2(
+                    &context,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut written,
+                )
+            },
+            ScenarioStatusV2::Success
+        );
+        assert_eq!(written, required);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap()["scenario_id"],
+            "v2"
+        );
+        let mut short_required = 0;
+        let mut short = vec![0; required - 1];
+        assert_eq!(
+            unsafe {
+                anysearch_scenario_queried_scenario_v2(
+                    &context,
+                    short.as_mut_ptr(),
+                    short.len(),
+                    &mut short_required,
+                )
+            },
+            ScenarioStatusV2::InsufficientBuffer
+        );
+        assert_eq!(short_required, required);
+        let mut invalid = raw_v2_context(&api);
+        invalid.struct_size = 0;
+        assert_eq!(
+            unsafe {
+                anysearch_scenario_queried_scenario_v2(
+                    &invalid,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            ScenarioStatusV2::InvalidContext
+        );
+        let unsupported = WorldQueryApiV1 {
+            abi_version: 99,
+            ..api
+        };
+        let invalid_api = raw_v2_context(&unsupported);
+        assert_eq!(
+            unsafe {
+                anysearch_scenario_queried_scenario_v2(
+                    &invalid_api,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            ScenarioStatusV2::InvalidContext
+        );
+    }
+
+    #[test]
+    fn scenario_v2_panics_do_not_cross_ffi() {
+        fn panic_scenario(_: &ScenarioContextV2<'_>) -> ScenarioResult {
+            panic!("expected")
+        }
+        let api = WorldQueryApiV1 {
+            abi_version: WORLD_QUERY_ABI_VERSION,
+            struct_size: std::mem::size_of::<WorldQueryApiV1>() as u32,
+            coordinate_size: std::mem::size_of::<WorldCoordV1>() as u32,
+            block_size: std::mem::size_of::<WorldBlockV1>() as u32,
+            region_entry_size: std::mem::size_of::<WorldRegionEntryV1>() as u32,
+            ray_hit_size: std::mem::size_of::<WorldRayHitV1>() as u32,
+            context: 1usize as *mut _,
+            call_token: 1,
+            point: Some(test_point),
+            region: None,
+            ray: None,
+            count_region: None,
+        };
+        let context = raw_v2_context(&api);
+        let mut required = 0;
+        assert_eq!(
+            unsafe {
+                export_scenario_v2(
+                    &context,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                    panic_scenario,
+                )
+            },
+            ScenarioStatusV2::Panic
+        );
+    }
+
+    #[test]
+    fn scenario_v2_rejects_oversized_output_and_layout_is_stable() {
+        fn huge(_: &ScenarioContextV2<'_>) -> ScenarioResult {
+            let mut result = ScenarioResult::goal([1, 1, 1], [2, 2, 2], "huge");
+            result.metadata.insert(
+                "payload".into(),
+                serde_json::Value::String("x".repeat(MAX_SCENARIO_OUTPUT_BYTES)),
+            );
+            result
+        }
+        let api = WorldQueryApiV1 {
+            abi_version: WORLD_QUERY_ABI_VERSION,
+            struct_size: std::mem::size_of::<WorldQueryApiV1>() as u32,
+            coordinate_size: std::mem::size_of::<WorldCoordV1>() as u32,
+            block_size: std::mem::size_of::<WorldBlockV1>() as u32,
+            region_entry_size: std::mem::size_of::<WorldRegionEntryV1>() as u32,
+            ray_hit_size: std::mem::size_of::<WorldRayHitV1>() as u32,
+            context: 1usize as *mut _,
+            call_token: 1,
+            point: Some(test_point),
+            region: None,
+            ray: None,
+            count_region: None,
+        };
+        let context = raw_v2_context(&api);
+        let mut required = 0;
+        assert_eq!(
+            unsafe { export_scenario_v2(&context, std::ptr::null_mut(), 0, &mut required, huge) },
+            ScenarioStatusV2::OutputTooLarge
+        );
+        assert_eq!(std::mem::size_of::<WorldCoordV1>(), 12);
+        assert_eq!(std::mem::size_of::<WorldBlockV1>(), 8);
+        assert_eq!(std::mem::size_of::<WorldRayStepV1>(), 3);
     }
 
     #[test]

@@ -116,3 +116,31 @@ pub fn anysearch_scenario(arguments: TokenStream, item: TokenStream) -> TokenStr
     }
     .into()
 }
+
+#[proc_macro_attribute]
+pub fn anysearch_scenario_v2(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    if !arguments.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "anysearch_scenario_v2 does not accept arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let function = parse_macro_input!(item as ItemFn);
+    let function_name = &function.sig.ident;
+    let export_name = format_ident!("anysearch_scenario_{}_v2", function_name);
+    quote! {
+        #function
+        #[doc(hidden)]
+        #[no_mangle]
+        pub unsafe extern "C" fn #export_name(
+            context: *const ::anysearch_extension::ScenarioContextV2Raw,
+            output: *mut u8,
+            output_capacity: usize,
+            required_length: *mut usize,
+        ) -> ::anysearch_extension::ScenarioStatusV2 {
+            ::anysearch_extension::export_scenario_v2(context, output, output_capacity, required_length, #function_name)
+        }
+    }.into()
+}
