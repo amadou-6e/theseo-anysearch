@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from theseo_anysearch.worlds import world_contract_fingerprint
+
 
 class CheckpointState(BaseModel):
     """State stored alongside an RLlib checkpoint.
@@ -27,6 +29,8 @@ class CheckpointState(BaseModel):
     iteration: int
     episodes_total: int = 0
     rllib_path: str
+    world_contract: dict[str, Any] | None = None
+    world_fingerprint: str | None = None
 
 
 class CheckpointManager:
@@ -38,8 +42,18 @@ class CheckpointManager:
         Root directory of the training run.
     """
 
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        expected_world_contract: dict[str, Any] | None = None,
+    ) -> None:
         self._root = Path(output_dir, "checkpoints")
+        self._expected_world_contract = expected_world_contract
+        self._expected_world_fingerprint = (
+            world_contract_fingerprint(expected_world_contract)
+            if expected_world_contract is not None
+            else None
+        )
 
     def save(self, algorithm: Any, state: CheckpointState) -> Path:
         """Save one RLlib and project checkpoint.
@@ -65,7 +79,13 @@ class CheckpointManager:
             if isinstance(returned, str) and returned:
                 rllib_path = returned
 
-        stored_state = state.model_copy(update={"rllib_path": rllib_path})
+        stored_state = state.model_copy(
+            update={
+                "rllib_path": rllib_path,
+                "world_contract": self._expected_world_contract,
+                "world_fingerprint": self._expected_world_fingerprint,
+            }
+        )
         self._write_json(
             Path(checkpoint_dir, "state.json"),
             stored_state.model_dump(),
@@ -101,6 +121,18 @@ class CheckpointManager:
                 iteration=0,
                 episodes_total=0,
                 rllib_path=str(checkpoint_dir),
+            )
+        if (
+            self._expected_world_contract is not None
+            and (
+                state.world_contract != self._expected_world_contract
+                or state.world_fingerprint != self._expected_world_fingerprint
+            )
+        ):
+            raise ValueError(
+                "Checkpoint world contract mismatch: "
+                f"expected {self._expected_world_contract}, "
+                f"found {state.world_contract}"
             )
         algorithm.restore(state.rllib_path)
         return state

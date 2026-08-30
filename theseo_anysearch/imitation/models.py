@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
+
+from theseo_anysearch.worlds import WORLD_SCHEMA_VERSION
 
 
 class ProviderSelector(BaseModel):
@@ -141,8 +150,15 @@ class DemonstrationManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1, 2, 3] = 3
+    schema_version: Literal[1, 2, 3, 4] = 4
     fingerprint: str
+    world_schema_version: int = WORLD_SCHEMA_VERSION
+    coordinate_type: Literal["u16", "u32"] = "u32"
+    coordinate_convention: Literal["one_based"] = "one_based"
+    storage_coordinate_convention: Literal["zero_based"] = "zero_based"
+    source_origin: tuple[int, int, int] = (0, 0, 0)
+    world_extent: tuple[int, int, int] = (32, 32, 32)
+    world_identity_sha256: str | None = None
     generation_provider_name: str
     generation_provider_parameters: dict[str, JsonValue]
     requested_episodes: int
@@ -158,6 +174,23 @@ class DemonstrationManifest(BaseModel):
     action_nvec: list[int] | None = None
     seeds: list[int]
     stage_episode_counts: list[int] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def mark_legacy_coordinate_contract(cls, value: Any) -> Any:
+        """Do not silently label old manifests as using the widened contract."""
+
+        if not isinstance(value, dict) or int(value.get("schema_version", 4)) >= 4:
+            return value
+        data = dict(value)
+        data.setdefault("world_schema_version", 0)
+        data.setdefault("coordinate_type", "u16")
+        data.setdefault("coordinate_convention", "one_based")
+        data.setdefault("storage_coordinate_convention", "zero_based")
+        data.setdefault("source_origin", (0, 0, 0))
+        data.setdefault("world_extent", (32, 32, 32))
+        data.setdefault("world_identity_sha256", None)
+        return data
 
 
 class ImitationResult(BaseModel):

@@ -42,6 +42,17 @@ def pretraining_cache_key(
         "schema_version": CACHE_SCHEMA_VERSION,
         "policy_id": policy_id,
         "dataset_fingerprint": dataset_manifest.fingerprint,
+        "world": {
+            "schema_version": dataset_manifest.world_schema_version,
+            "coordinate_type": dataset_manifest.coordinate_type,
+            "coordinate_convention": dataset_manifest.coordinate_convention,
+            "storage_coordinate_convention": (
+                dataset_manifest.storage_coordinate_convention
+            ),
+            "source_origin": list(dataset_manifest.source_origin),
+            "extent": list(dataset_manifest.world_extent),
+            "identity_sha256": dataset_manifest.world_identity_sha256,
+        },
         "model": {
             "class": f"{type(model).__module__}.{type(model).__qualname__}",
             "structure": str(model),

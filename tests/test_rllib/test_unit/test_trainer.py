@@ -8,21 +8,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from unittest.mock import patch
-
+from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
+from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _set_rllib_storage_path
 from theseo_anysearch.rllib.trainer.evaluation.coordinator import (
     EvaluationCoordinator,
 )
 from theseo_anysearch.rllib.trainer.results import IterationTimings, TrainResult
 from theseo_anysearch.rllib.trainer.runtime import _detect_num_gpus
 from theseo_anysearch.rllib.trainer.trainer import Trainer
-from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _set_rllib_storage_path
-from theseo_anysearch.experiments.trajectory import VoxelEpisodeData, VoxelStepData
-
 
 # ---------------------------------------------------------------------------
 # 0. _detect_num_gpus — GPU detection helper
@@ -564,6 +562,15 @@ class TestOutputSanity:
         state = json.loads((ckpt / "state.json").read_text())
         assert state["episodes_total"] == 42
 
+    def test_state_json_has_world_compatibility_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state = json.loads((ckpt / "state.json").read_text())
+        assert state["world_contract"]["coordinate_type"] == "u32"
+        assert state["world_contract"]["extent"] == [32, 32, 32]
+        assert len(state["world_fingerprint"]) == 64
+
     def test_latest_json_written_after_checkpoint(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)
         t._algo = FakeAlgo()
@@ -626,6 +633,19 @@ class TestRestore:
         t2 = make_trainer(trainer_settings)
         t2.restore(ckpt)
         assert t2._episodes_total == 55
+
+    def test_restore_rejects_incompatible_world_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state_path = ckpt / "state.json"
+        state = json.loads(state_path.read_text())
+        state["world_contract"]["coordinate_type"] = "u16"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        t2 = make_trainer(trainer_settings)
+        with pytest.raises(ValueError, match="Checkpoint world contract mismatch"):
+            t2.restore(ckpt)
 
     def test_restore_builds_algo_if_none(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)
