@@ -2,6 +2,7 @@ pub mod api;
 pub mod block;
 pub mod chunked;
 pub mod coordinates;
+pub mod disk_backed;
 pub mod hashmap_backend;
 pub mod ingest;
 pub mod regional;
@@ -20,9 +21,12 @@ pub use coordinates::{
     storage_to_task, task_to_storage, CoordinateError, StorageCoord, TaskCoord, WorldExtent,
     WORLD_SCHEMA_VERSION,
 };
+pub use disk_backed::{DiskBackedWorld, DiskCacheMetrics, DiskResidentGuard, PrefetchRequest};
 pub use hashmap_backend::HashMapWorld;
 pub use regional::{
     BoundedRegion, GridRay, InMemoryResidentGuard, RayHit, WorldAccessError, WorldMutation,
     WorldRead, WorldResidency,
 };
-pub use state::{Coord, WorldBackendKind, WorldHandle, WorldState, WORLD_CENTER, WORLD_SIZE};
+pub use state::{
+    Coord, WorldBackendKind, WorldHandle, WorldResidentGuard, WorldState, WORLD_CENTER, WORLD_SIZE,
+};

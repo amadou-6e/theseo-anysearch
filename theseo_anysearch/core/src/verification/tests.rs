@@ -6,7 +6,6 @@ use crate::{
         parity::{
             apply_mutation, capture_abi_read, capture_read, compare_exact, Mutation, ReadProbe,
         },
-        PendingFaultCase,
     },
     voxel::{
         rewards::RewardConfig,
@@ -516,12 +515,6 @@ fn in_memory_residency_contracts_match_exactly() {
         oracle.pin_region(region).unwrap().region(),
         chunked.pin_region(region).unwrap().region()
     );
-}
-
-#[test]
-fn future_faults_remain_explicitly_dependency_gated() {
-    assert_eq!(PendingFaultCase::ShortRead.dependency_issues(), &[224]);
-    assert_eq!(PendingFaultCase::FailedPrefetch.dependency_issues(), &[224]);
 }
 
 #[test]

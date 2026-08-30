@@ -1,10 +1,11 @@
 use super::{
     api::{World, WorldError},
     block::{Block, BlockUpdate},
-    BoundedRegion, ChunkedWorld, HashMapWorld, InMemoryResidentGuard, StorageCoord,
-    WorldAccessError, WorldExtent, WorldMutation, WorldRead, WorldResidency,
+    BoundedRegion, ChunkedWorld, DiskBackedWorld, DiskCacheMetrics, DiskResidentGuard,
+    HashMapWorld, InMemoryResidentGuard, PrefetchRequest, StorageCoord, WorldAccessError,
+    WorldExtent, WorldMutation, WorldRead, WorldResidency,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 pub const WORLD_SIZE: u16 = 1000;
 pub const WORLD_CENTER: (u16, u16, u16) = (500, 500, 500);
@@ -14,12 +15,20 @@ pub type Coord = (u16, u16, u16);
 pub enum WorldBackendKind {
     HashMap,
     Chunked,
+    DiskBacked,
 }
 
 #[derive(Clone, Debug)]
 enum WorldBackend {
     HashMap(HashMapWorld),
     Chunked(ChunkedWorld),
+    DiskBacked(DiskBackedWorld),
+}
+
+#[derive(Debug)]
+pub enum WorldResidentGuard<'a> {
+    InMemory(InMemoryResidentGuard<'a>),
+    Disk(DiskResidentGuard),
 }
 
 /// Cheaply cloneable, immutable ownership of base geometry.
@@ -74,6 +83,41 @@ impl WorldState {
         match self.base.backend.as_ref() {
             WorldBackend::HashMap(_) => WorldBackendKind::HashMap,
             WorldBackend::Chunked(_) => WorldBackendKind::Chunked,
+            WorldBackend::DiskBacked(_) => WorldBackendKind::DiskBacked,
+        }
+    }
+
+    pub fn from_compiled_pack(
+        root: &Path,
+        maximum_decoded_bytes: usize,
+    ) -> Result<Self, WorldAccessError> {
+        Ok(Self {
+            base: WorldHandle::new(WorldBackend::DiskBacked(DiskBackedWorld::open(
+                root,
+                maximum_decoded_bytes,
+            )?)),
+            overlay: HashMap::new(),
+        })
+    }
+
+    pub fn prefetch_region(&self, region: BoundedRegion) -> Result<(), WorldAccessError> {
+        match self.base.backend.as_ref() {
+            WorldBackend::DiskBacked(world) => world.prefetch_region(region),
+            _ => Ok(()),
+        }
+    }
+
+    pub fn disk_cache_metrics(&self) -> Option<DiskCacheMetrics> {
+        match self.base.backend.as_ref() {
+            WorldBackend::DiskBacked(world) => Some(world.metrics()),
+            _ => None,
+        }
+    }
+
+    pub fn request_prefetch_region(&self, region: BoundedRegion) -> Option<PrefetchRequest> {
+        match self.base.backend.as_ref() {
+            WorldBackend::DiskBacked(world) => Some(world.request_prefetch(region)),
+            _ => None,
         }
     }
 
@@ -180,12 +224,17 @@ impl WorldState {
                 let chunk_shape = match self.base.backend.as_ref() {
                     WorldBackend::Chunked(world) => world.chunk_shape(),
                     WorldBackend::HashMap(_) => unreachable!("backend kind was checked"),
+                    WorldBackend::DiskBacked(_) => unreachable!("backend kind was checked"),
                 };
                 WorldBackend::Chunked(
                     ChunkedWorld::new(Self::legacy_extent(), chunk_shape)
                         .expect("positive legacy chunk size must fit the address space"),
                 )
             }
+            WorldBackendKind::DiskBacked => WorldBackend::Chunked(
+                ChunkedWorld::new(self.extent(), WorldExtent::cubic(32))
+                    .expect("compiled extent and chunk shape must be valid"),
+            ),
         };
         for (coord, block) in blocks {
             if Self::in_bounds(coord) {
@@ -229,6 +278,7 @@ impl WorldBackend {
         match self {
             Self::HashMap(world) => world,
             Self::Chunked(world) => world,
+            Self::DiskBacked(world) => world,
         }
     }
 
@@ -236,6 +286,7 @@ impl WorldBackend {
         match self {
             Self::HashMap(world) => world,
             Self::Chunked(world) => world,
+            Self::DiskBacked(_) => panic!("immutable disk backend cannot be mutated directly"),
         }
     }
 }
@@ -274,19 +325,27 @@ impl WorldRead for WorldHandle {
 }
 
 impl WorldResidency for WorldHandle {
-    type Guard<'a> = InMemoryResidentGuard<'a>;
+    type Guard<'a> = WorldResidentGuard<'a>;
 
     fn is_region_resident(&self, region: BoundedRegion) -> bool {
         match self.backend.as_ref() {
             WorldBackend::HashMap(world) => world.is_region_resident(region),
             WorldBackend::Chunked(world) => world.is_region_resident(region),
+            WorldBackend::DiskBacked(world) => world.is_region_resident(region),
         }
     }
 
     fn pin_region(&self, region: BoundedRegion) -> Result<Self::Guard<'_>, WorldAccessError> {
         match self.backend.as_ref() {
-            WorldBackend::HashMap(world) => world.pin_region(region),
-            WorldBackend::Chunked(world) => world.pin_region(region),
+            WorldBackend::HashMap(world) => {
+                world.pin_region(region).map(WorldResidentGuard::InMemory)
+            }
+            WorldBackend::Chunked(world) => {
+                world.pin_region(region).map(WorldResidentGuard::InMemory)
+            }
+            WorldBackend::DiskBacked(world) => {
+                world.pin_region(region).map(WorldResidentGuard::Disk)
+            }
         }
     }
 }
@@ -406,7 +465,7 @@ impl WorldMutation for WorldState {
 }
 
 impl WorldResidency for WorldState {
-    type Guard<'a> = InMemoryResidentGuard<'a>;
+    type Guard<'a> = WorldResidentGuard<'a>;
 
     fn is_region_resident(&self, region: BoundedRegion) -> bool {
         self.base.is_region_resident(region)

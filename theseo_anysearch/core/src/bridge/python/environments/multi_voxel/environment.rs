@@ -1,6 +1,10 @@
 use pyo3::{exceptions::PyValueError, prelude::*};
 
-use crate::voxel::world::{World, BLOCK_KIND_GOAL, BLOCK_KIND_OCCUPIED};
+use crate::voxel::world::{
+    BoundedRegion, StorageCoord, World, WorldExtent, WorldRead, WorldResidency, WorldState,
+    BLOCK_KIND_GOAL, BLOCK_KIND_OCCUPIED,
+};
+use std::path::Path;
 
 use super::models::{PyMultiVoxelObs, PyMultiVoxelStepResult};
 
@@ -21,6 +25,42 @@ fn validate_box_radius(radius: u32) -> PyResult<()> {
 #[pyclass]
 pub struct PyMultiVoxelEnv {
     inner: crate::voxel::MultiAgentVoxelEnv,
+    residency_radius: u32,
+    pending_prefetch: Vec<crate::voxel::world::PrefetchRequest>,
+}
+
+fn cursor_region(cursor: (u16, u16, u16), radius: u32, extent: WorldExtent) -> BoundedRegion {
+    let center = StorageCoord {
+        x: u32::from(cursor.0).min(extent.x - 1),
+        y: u32::from(cursor.1).min(extent.y - 1),
+        z: u32::from(cursor.2).min(extent.z - 1),
+    };
+    BoundedRegion::new(
+        StorageCoord {
+            x: center.x.saturating_sub(radius),
+            y: center.y.saturating_sub(radius),
+            z: center.z.saturating_sub(radius),
+        },
+        StorageCoord {
+            x: center
+                .x
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.x),
+            y: center
+                .y
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.y),
+            z: center
+                .z
+                .saturating_add(radius)
+                .saturating_add(1)
+                .min(extent.z),
+        },
+        extent,
+    )
+    .expect("cursor clamped to a positive finite extent produces a valid region")
 }
 
 #[pymethods]
@@ -94,23 +134,66 @@ impl PyMultiVoxelEnv {
         inner
             .configure_capture_task(hunter_and_hunted_json.as_deref())
             .map_err(PyValueError::new_err)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            residency_radius: 3,
+            pending_prefetch: Vec::new(),
+        })
     }
 
-    pub fn reset(&mut self, seed: u64) -> PyMultiVoxelObs {
+    pub fn reset(&mut self, seed: u64) -> PyResult<PyMultiVoxelObs> {
         let (steps_remaining, voxel_count, cursors, goal_distances) = self.inner.reset(seed);
-        PyMultiVoxelObs {
+        for cursor in &cursors {
+            let region = cursor_region(*cursor, self.residency_radius, self.inner.world.extent());
+            self.inner
+                .world
+                .prefetch_region(region)
+                .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        }
+        Ok(PyMultiVoxelObs {
             steps_remaining,
             voxel_count,
             cursors,
             goal_distances,
-        }
+        })
     }
 
     /// `actions` must be a list of length == agent_count; each value is 0..25.
     pub fn step(&mut self, actions: Vec<i32>) -> PyResult<PyMultiVoxelStepResult> {
         check_actions_len(actions.len(), self.inner.agents.len())?;
+        for request in self.pending_prefetch.drain(..) {
+            request
+                .wait()
+                .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        }
+        let handle = self.inner.world.world_handle();
+        let guards = self
+            .inner
+            .agents
+            .iter()
+            .map(|agent| {
+                handle.pin_region(cursor_region(
+                    agent.cursor,
+                    self.residency_radius,
+                    self.inner.world.extent(),
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
         let r = self.inner.step_all(&actions);
+        drop(guards);
+        self.pending_prefetch = self
+            .inner
+            .agents
+            .iter()
+            .filter_map(|agent| {
+                self.inner.world.request_prefetch_region(cursor_region(
+                    agent.cursor,
+                    self.residency_radius,
+                    self.inner.world.extent(),
+                ))
+            })
+            .collect();
         Ok(PyMultiVoxelStepResult {
             observation: PyMultiVoxelObs {
                 steps_remaining: r.steps_remaining,
@@ -148,6 +231,42 @@ impl PyMultiVoxelEnv {
     /// Call reset() afterwards to start a fresh episode on the new geometry.
     pub fn set_geometry(&mut self, filled_cells: Vec<(u16, u16, u16)>) {
         self.inner.set_geometry(filled_cells);
+    }
+
+    pub fn set_compiled_world(
+        &mut self,
+        root: String,
+        maximum_decoded_bytes: usize,
+    ) -> PyResult<()> {
+        let world = WorldState::from_compiled_pack(Path::new(&root), maximum_decoded_bytes)
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        self.inner.replace_world(world);
+        Ok(())
+    }
+
+    pub fn set_world_residency_radius(&mut self, radius: u32) {
+        self.residency_radius = radius;
+    }
+
+    pub fn world_cache_metrics(&self) -> Option<std::collections::HashMap<String, u64>> {
+        self.inner.world.disk_cache_metrics().map(|metrics| {
+            [
+                ("cache_hits".to_owned(), metrics.cache_hits),
+                ("cache_misses".to_owned(), metrics.cache_misses),
+                ("pack_reads".to_owned(), metrics.pack_reads),
+                ("evictions".to_owned(), metrics.evictions),
+                ("decoded_bytes".to_owned(), metrics.decoded_bytes as u64),
+                ("pinned_bytes".to_owned(), metrics.pinned_bytes as u64),
+                (
+                    "pinned_overcommit_bytes".to_owned(),
+                    metrics.pinned_overcommit_bytes as u64,
+                ),
+                ("resident_chunks".to_owned(), metrics.resident_chunks as u64),
+                ("pinned_chunks".to_owned(), metrics.pinned_chunks as u64),
+            ]
+            .into_iter()
+            .collect()
+        })
     }
 
     /// 6 binary values for agent `agent_idx`'s cardinal face-neighbors (+x,-x,+y,-y,+z,-z).
@@ -339,7 +458,7 @@ mod tests {
     #[test]
     fn box_obs_valid_radius_ok() {
         let mut env = make_env();
-        env.reset(0);
+        env.reset(0).unwrap();
         let obs = env.box_obs(0, 2).unwrap();
         assert_eq!(obs.len(), 125);
     }
@@ -347,7 +466,7 @@ mod tests {
     #[test]
     fn box_obs_excessive_radius_returns_value_error() {
         let mut env = make_env();
-        env.reset(0);
+        env.reset(0).unwrap();
         assert!(env.box_obs(0, MAX_BOX_RADIUS + 1).is_err());
         assert!(validate_box_radius(MAX_BOX_RADIUS + 1).is_err());
     }
@@ -355,7 +474,7 @@ mod tests {
     #[test]
     fn box_obs_radius_near_i32_overflow_returns_value_error_not_panic() {
         let mut env = make_env();
-        env.reset(0);
+        env.reset(0).unwrap();
         // Without the bounds check, `2 * (radius as i32) + 1` overflows i32
         // and the subsequent `as usize` cast produces a huge allocation size.
         assert!(env.box_obs(0, u32::MAX / 2).is_err());

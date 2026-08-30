@@ -33,6 +33,10 @@ from theseo_anysearch.worlds.manifest import (
     world_contract,
     world_contract_fingerprint,
 )
+from theseo_anysearch.worlds.residency import (
+    WorldResidencySettings,
+    stage_compiled_world,
+)
 
 __all__ = [
     "COORDINATE_TYPE",
@@ -54,11 +58,13 @@ __all__ = [
     "WorldManifest",
     "WorldPackCorruptError",
     "WorldPackUnavailableError",
+    "WorldResidencySettings",
     "benchmark_encodings",
     "compile_pool",
     "compile_world",
     "decode_chunk",
     "load_compiled_world",
+    "stage_compiled_world",
     "validate_compiled_world",
     "world_contract",
     "world_contract_fingerprint",

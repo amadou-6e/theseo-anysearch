@@ -262,6 +262,26 @@ class VoxelEnv(RustGymnasiumEnv):
                 else None
             ),
         )
+        compiled_world_path = config.get("compiled_world_path")
+        if compiled_world_path is not None:
+            from theseo_anysearch.worlds.compiler import validate_compiled_world
+
+            compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            env.set_compiled_world(
+                str(compiled.root),
+                int(config.get("world_maximum_decoded_bytes", 256 * 1024 * 1024)),
+            )
+            observation_radius = {
+                "box": int(config.get("box_radius", 2)),
+                "radial": int(config.get("ray_max_len", 16)),
+                "hierarchical_box": max(config.get("box_radii") or [1, 4]),
+            }.get(config.get("obs_mode", "scalar"), 1)
+            movement_radius = int(np.ceil(maximum_movement_distance(config.get("action_mode", "discrete_26"))))
+            env.set_world_residency_radius(
+                observation_radius
+                + movement_radius
+                + int(config.get("world_prefetch_margin", 2))
+            )
 
         # Load fixed or curriculum waypoints if specified.
         wp = None
@@ -648,7 +668,11 @@ class VoxelEnv(RustGymnasiumEnv):
         self._minimum_distance = distance
         self._previous_task_distance = distance
         self._episode_reward_breakdown = {}
-        self._initial_filled = {tuple(coord) for coord in self._rust_env.filled_voxels()}
+        self._initial_filled = (
+            set()
+            if self._config.get("compiled_world_path") is not None
+            else {tuple(coord) for coord in self._rust_env.filled_voxels()}
+        )
         self._last_observation = observation
         info = {
             "task_version": self._task.version,
@@ -806,6 +830,9 @@ class VoxelEnv(RustGymnasiumEnv):
         }
         if self._previous_scenario is not None:
             info["scenario"] = dict(self._previous_scenario)
+        cache_metrics = self._rust_env.world_cache_metrics()
+        if cache_metrics is not None:
+            info["world_cache"] = dict(cache_metrics)
         return observation, reward, terminated, truncated, info
 
     def action_mask(self) -> np.ndarray:
@@ -835,6 +862,7 @@ class VoxelEnv(RustGymnasiumEnv):
             or self._config.get("stl_path")
             or self._config.get("geometry_pool")
             or self._config.get("scenario_provider")
+            or self._config.get("compiled_world_path")
         )
 
     def _observation_space(self) -> gymnasium.Space:
