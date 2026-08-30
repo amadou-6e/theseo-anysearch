@@ -14,17 +14,14 @@ from gymnasium import spaces
 from theseo_anysearch.environments.action_spaces import build_action_space, encode_action
 
 from theseo_anysearch.environments.pettingzoo.base import RustParallelEnv
+from theseo_anysearch.worlds.extent import (
+    maximum_euclidean,
+    maximum_manhattan,
+    resolve_task_extent,
+)
 
 log = logging.getLogger(__name__)
 MAX_VOXEL_KIND = 5.0
-
-
-def _max_manhattan(grid_size: int) -> float:
-    return 3.0 * (grid_size - 1)
-
-
-def _max_euclidean(grid_size: int) -> float:
-    return math.sqrt(3.0) * (grid_size - 1)
 
 
 def _stl_bounding_box(path: str) -> tuple[float, float, float, float]:
@@ -134,10 +131,13 @@ class MultiVoxelEnv(RustParallelEnv):
     def _build_rust_env(self, config: dict) -> Any:
         import theseo_core
 
-        grid_size = config.get("grid_size", 32)
+        extent = resolve_task_extent(config)
+        grid_size = max(extent)
         geometry: list[tuple[int, int, int]] = []
 
-        if config.get("stl_path"):
+        if config.get("compiled_world_path") is not None:
+            geometry = []
+        elif config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
             padding = int(config.get("geometry_padding", 2))
             geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size, padding=padding)
@@ -170,6 +170,7 @@ class MultiVoxelEnv(RustParallelEnv):
             trail_mode=config.get("trail_mode", False),
             geometry=geometry or None,
             grid_size=grid_size,
+            extent=extent,
             step_cost=config.get("step_cost", -0.01),
             goal_reward=config.get("goal_reward", 1.0),
             distance_shaping=config.get("distance_shaping", 0.1),
@@ -192,6 +193,11 @@ class MultiVoxelEnv(RustParallelEnv):
             from theseo_anysearch.worlds.compiler import validate_compiled_world
 
             compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            pack_extent = compiled.manifest.extent.as_tuple()
+            if pack_extent != extent:
+                raise ValueError(
+                    f"configured extent {extent} does not match compiled world {pack_extent}"
+                )
             env.set_compiled_world(
                 str(compiled.root),
                 int(config.get("world_maximum_decoded_bytes", 256 * 1024 * 1024)),
@@ -262,11 +268,11 @@ class MultiVoxelEnv(RustParallelEnv):
         return build_action_space(mode)
 
     def _fanout_obs(self, rust_obs: Any) -> dict:
-        grid_size = self._config.get("grid_size", 32)
+        extent = resolve_task_extent(self._config)
         radius = self._config.get("box_radius", 2)
         ray_max_len = self._config.get("ray_max_len", 16)
         use_euclidean = self._config.get("distance_metric", "euclidean") == "euclidean"
-        norm = max(grid_size - 1, 1)
+        norm = max(max(extent) - 1, 1)
 
         goal_positions = self._rust_env.goal_positions() if self._has_goal() else []
 
@@ -299,9 +305,11 @@ class MultiVoxelEnv(RustParallelEnv):
                     dx, dy, dz = gx - cx, gy - cy, gz - cz
                     eucl = math.sqrt(dx * dx + dy * dy + dz * dz)
                     if use_euclidean:
-                        dist = eucl / _max_euclidean(grid_size)
+                        dist = eucl / max(maximum_euclidean(extent), 1.0)
                     else:
-                        dist = (abs(dx) + abs(dy) + abs(dz)) / _max_manhattan(grid_size)
+                        dist = (abs(dx) + abs(dy) + abs(dz)) / max(
+                            maximum_manhattan(extent), 1
+                        )
                     obs["goal_distance"] = np.array([dist], dtype=np.float32)
                     if eucl > 0.0:
                         obs["goal_direction"] = np.array(

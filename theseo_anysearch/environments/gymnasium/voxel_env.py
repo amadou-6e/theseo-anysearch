@@ -29,16 +29,12 @@ from theseo_anysearch.environments.task import (
     goal_voxels,
     is_success,
 )
+from theseo_anysearch.worlds.extent import maximum_manhattan, resolve_task_extent
 
 log = logging.getLogger(__name__)
 
 MAX_RAY_HIT_TYPE = 5.0
 MAX_VOXEL_KIND = 5.0
-
-
-def _max_manhattan(grid_size: int) -> float:
-    """Maximum Manhattan distance in a cubic grid of given side length."""
-    return 3.0 * (grid_size - 1)
 
 
 class VoxelEnv(RustGymnasiumEnv):
@@ -140,8 +136,9 @@ class VoxelEnv(RustGymnasiumEnv):
     def _init_obs_cache(self, config: dict) -> None:
         """Cache config values and pre-allocate obs buffers. Called from __init__
         and can be called manually in tests that use VoxelEnv.__new__."""
-        grid_size  = config.get("grid_size", 32)
-        self._inv_max_manhattan = 1.0 / _max_manhattan(grid_size)
+        extent = resolve_task_extent(config)
+        self._extent = extent
+        self._inv_max_manhattan = 1.0 / max(maximum_manhattan(extent), 1)
         self._obs_mode          = config.get("obs_mode", "scalar")
         self._box_radius        = config.get("box_radius", 2)
         self._ray_max_len       = config.get("ray_max_len", 16)
@@ -172,10 +169,15 @@ class VoxelEnv(RustGymnasiumEnv):
         from theseo_anysearch.environments.pettingzoo.multi_voxel_env import _load_stl_geometry
         import theseo_core
 
-        grid_size = config.get("grid_size", 32)
+        extent = resolve_task_extent(config)
+        grid_size = max(extent)
         geometry: list[tuple[int, int, int]] = []
 
-        if config.get("stl_path"):
+        if config.get("compiled_world_path") is not None:
+            # The immutable base is attached from the pack below. Never expand
+            # its source boxes/STL back into Python coordinate tuples.
+            geometry = []
+        elif config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
             padding = int(config.get("geometry_padding", 2))
             geometry = _load_stl_geometry(str(config["stl_path"]), scale, grid_size, padding=padding)
@@ -225,6 +227,7 @@ class VoxelEnv(RustGymnasiumEnv):
             trail_mode=config.get("trail_mode", True),
             geometry=geometry or None,
             grid_size=grid_size,
+            extent=extent,
             step_cost=config.get("step_cost", -0.01),
             goal_reward=config.get("goal_reward", 1.0),
             distance_shaping=config.get("distance_shaping", 0.0),
@@ -267,6 +270,11 @@ class VoxelEnv(RustGymnasiumEnv):
             from theseo_anysearch.worlds.compiler import validate_compiled_world
 
             compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            pack_extent = compiled.manifest.extent.as_tuple()
+            if pack_extent != extent:
+                raise ValueError(
+                    f"configured extent {extent} does not match compiled world {pack_extent}"
+                )
             env.set_compiled_world(
                 str(compiled.root),
                 int(config.get("world_maximum_decoded_bytes", 256 * 1024 * 1024)),
@@ -486,8 +494,7 @@ class VoxelEnv(RustGymnasiumEnv):
             if action_mode == "vector_3"
             else offsets_for_mode(action_mode)
         )
-        grid_size = int(self._config.get("grid_size", 32))
-        extent = tuple(self._config.get("extent") or (grid_size, grid_size, grid_size))
+        extent = resolve_task_extent(self._config)
         candidates = None
         candidate_root = self._config.get("scenario_candidate_index")
         world_identity = self._config.get("world_identity_sha256")

@@ -94,16 +94,35 @@ impl RewardConfig {
     }
 
     pub fn base_step_reward(&self, previous_l2: f32, current_l2: f32, grid_size: u16) -> f32 {
+        self.base_step_reward_extent(previous_l2, current_l2, [grid_size; 3])
+    }
+
+    pub fn base_step_reward_extent(
+        &self,
+        previous_l2: f32,
+        current_l2: f32,
+        extent: [u16; 3],
+    ) -> f32 {
         match self.distance_reward_mode {
             DistanceRewardMode::Progress => {
                 self.step_cost + self.distance_shaping * (previous_l2 - current_l2)
             }
-            DistanceRewardMode::Zone => self.zone_reward(current_l2, grid_size),
+            DistanceRewardMode::Zone => self.zone_reward_extent(current_l2, extent),
         }
     }
 
     pub fn zone_reward(&self, distance_l2: f32, grid_size: u16) -> f32 {
-        let max_l2 = (3.0f32).sqrt() * f32::from(grid_size.saturating_sub(1).max(1));
+        self.zone_reward_extent(distance_l2, [grid_size; 3])
+    }
+
+    pub fn zone_reward_extent(&self, distance_l2: f32, extent: [u16; 3]) -> f32 {
+        let max_l2 = extent
+            .into_iter()
+            .map(|axis| f32::from(axis.saturating_sub(1)))
+            .map(|axis| axis * axis)
+            .sum::<f32>()
+            .sqrt()
+            .max(1.0);
         let normalized = (distance_l2 / max_l2).clamp(0.0, 1.0);
         let curved = match self.zone_reward_curve {
             ZoneRewardCurve::Linear => normalized,

@@ -25,6 +25,7 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, str]] = {
     "scale": ("geometry", "scale"),
     "scale_range": ("geometry", "scale_range"),
     "grid_size": ("geometry", "grid_size"),
+    "extent": ("geometry", "extent"),
     "geometry_boxes": ("geometry", "boxes"),
     "geometry_pool_size": ("geometry", "pool_size"),
     "scale_variants_per_map": ("geometry", "scale_variants_per_map"),

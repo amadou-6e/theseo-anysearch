@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from functools import partial
-from itertools import product
 from typing import Any
 
 import numpy as np
@@ -12,6 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import WaypointCurriculumConfig
 from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample_route
+from theseo_anysearch.worlds.extent import (
+    WorldExtent,
+    maximum_euclidean,
+    resolve_task_extent,
+    task_center,
+)
 
 Waypoint = tuple[int, int, int]
 
@@ -260,7 +265,7 @@ class WaypointCurriculum:
         self.state.transitions.append(transition)
         return transition
 
-    def target_distance(self, grid_size: int) -> float:
+    def target_distance(self, extent: WorldExtent | int) -> float:
         """Return the requested separation for the next curriculum stage."""
         assert self.config.initial_start is not None
         assert self.config.initial_goal is not None
@@ -269,7 +274,9 @@ class WaypointCurriculum:
             self.config.initial_goal,
         )
         difficulty = self.config.difficulty
-        grid_diagonal = math.sqrt(3.0) * (grid_size - 1)
+        if isinstance(extent, int):
+            extent = (extent, extent, extent)
+        grid_diagonal = maximum_euclidean(extent)
         maximum = min(difficulty.maximum_distance or grid_diagonal, grid_diagonal)
         next_stage = self.state.stage + 1
         return min(
@@ -297,7 +304,7 @@ class WaypointCurriculum:
             start=self.config.initial_start,
             total_distance=self.config.route_length.resolve(int(env_config.get("max_steps", 200))),
             segment_distance=segment_distance,
-            grid_size=int(env_config.get("grid_size", 32)),
+            extent=resolve_task_extent(env_config),
             action_mode=str(env_config.get("action_mode", "discrete_26")),
             seed=self.config.seed + stage if seed is None else seed,
         )
@@ -410,24 +417,28 @@ class WaypointCurriculum:
     ) -> tuple[Waypoint, Waypoint]:
         """Sample an empty-grid pair whose distance never decreases by stage."""
         self._require_empty_geometry(env_config)
-        grid_size = int(env_config.get("grid_size", 32))
-        if grid_size < 2:
-            raise ValueError("monotonic_distance curriculum requires grid_size >= 2")
+        extent = resolve_task_extent(env_config)
+        if maximum_euclidean(extent) < 1:
+            raise ValueError("monotonic_distance curriculum requires a movable extent")
 
         rng = np.random.default_rng(self.config.seed + self.state.stage + 1)
-        target = self.target_distance(grid_size)
+        target = self.target_distance(extent)
         previous = waypoint_distance(self.state.start, self.state.goal)
         minimum = previous
-        center_value = (grid_size + 1) // 2
-        center = (center_value, center_value, center_value)
-        grid_radius = float(min(center_value - 1, grid_size - center_value))
+        center = task_center(extent)
+        grid_radius = float(
+            min(
+                min(center[index] - 1, extent[index] - center[index])
+                for index in range(3)
+            )
+        )
 
         if target <= grid_radius:
             displacement = self._sample_displacement(
                 rng,
                 target,
                 minimum,
-                grid_size,
+                extent,
                 center=center,
                 excluded=(
                     tuple(
@@ -445,16 +456,16 @@ class WaypointCurriculum:
             rng,
             target,
             minimum,
-            grid_size,
+            extent,
             excluded=tuple(
                 self.state.goal[index] - self.state.start[index]
                 for index in range(3)
             ),
         )
         start_values = []
-        for delta in displacement:
+        for axis, delta in zip(extent, displacement):
             low = 1 if delta >= 0 else 1 - delta
-            high = grid_size - delta if delta >= 0 else grid_size
+            high = axis - delta if delta >= 0 else axis
             start_values.append(int(rng.integers(low, high + 1)))
         start = tuple(start_values)
         goal = tuple(start[index] + displacement[index] for index in range(3))
@@ -465,7 +476,7 @@ class WaypointCurriculum:
         rng: np.random.Generator,
         target: float,
         minimum: float,
-        grid_size: int,
+        extent: WorldExtent,
         *,
         center: Waypoint | None = None,
         excluded: Waypoint | None = None,
@@ -483,7 +494,7 @@ class WaypointCurriculum:
                 continue
             if distance + 1e-9 < minimum or not self._displacement_fits(
                 delta,
-                grid_size,
+                extent,
                 center,
             ):
                 continue
@@ -498,7 +509,7 @@ class WaypointCurriculum:
             rng,
             target,
             minimum,
-            grid_size,
+            extent,
             center,
             excluded,
         )
@@ -506,22 +517,25 @@ class WaypointCurriculum:
     @staticmethod
     def _displacement_fits(
         delta: Waypoint,
-        grid_size: int,
+        extent: WorldExtent,
         center: Waypoint | None,
     ) -> bool:
         if delta == (0, 0, 0):
             return False
         if center is None:
-            return all(abs(value) <= grid_size - 1 for value in delta)
+            return all(
+                abs(value) <= extent[index] - 1
+                for index, value in enumerate(delta)
+            )
         goal = tuple(center[index] + delta[index] for index in range(3))
-        return all(1 <= value <= grid_size for value in goal)
+        return all(1 <= value <= extent[index] for index, value in enumerate(goal))
 
     def _nearest_lattice_displacement(
         self,
         rng: np.random.Generator,
         target: float,
         minimum: float,
-        grid_size: int,
+        extent: WorldExtent,
         center: Waypoint | None,
         excluded: Waypoint | None,
     ) -> Waypoint:
@@ -529,25 +543,17 @@ class WaypointCurriculum:
         best_error = math.inf
         best: list[Waypoint] = []
 
-        if center is not None:
-            candidates = (
-                (
-                    goal_x - center[0],
-                    goal_y - center[1],
-                    goal_z - center[2],
-                )
-                for goal_x in range(1, grid_size + 1)
-                for goal_y in range(1, grid_size + 1)
-                for goal_z in range(1, grid_size + 1)
-            )
-        else:
-            limit = grid_size - 1
-            candidates = (
-                (dx, dy, dz)
-                for dx in range(0, limit + 1)
-                for dy in range(0, limit + 1)
-                for dz in range(0, limit + 1)
-            )
+        # Search only a thin deterministic lattice band around the requested
+        # distance. This avoids the old Cartesian enumeration of the full world.
+        radius = max(1, int(math.ceil(target)) + 1)
+        limits = tuple(min(axis - 1, radius) for axis in extent)
+        candidates = (
+            (dx, dy, dz)
+            for dx in range(-limits[0], limits[0] + 1)
+            for dy in range(-limits[1], limits[1] + 1)
+            for dz in range(-limits[2], limits[2] + 1)
+            if self._displacement_fits((dx, dy, dz), extent, center)
+        )
 
         for delta in candidates:
             if delta == (0, 0, 0) or (center is not None and delta == excluded):
@@ -564,20 +570,10 @@ class WaypointCurriculum:
         if not best:
             raise RuntimeError("could not sample a non-decreasing waypoint distance")
 
-        if center is not None:
-            return best[int(rng.integers(0, len(best)))]
-
-        signed = sorted({
-            tuple(
-                value * sign if value else 0
-                for value, sign in zip(candidate, signs)
-            )
-            for candidate in best
-            for signs in product((-1, 1), repeat=3)
-        } - ({excluded} if excluded is not None else set()))
-        if not signed:
+        choices = sorted(set(best) - ({excluded} if excluded is not None else set()))
+        if not choices:
             raise RuntimeError("could not sample a new waypoint direction at the distance cap")
-        return signed[int(rng.integers(0, len(signed)))]
+        return choices[int(rng.integers(0, len(choices)))]
 
     @staticmethod
     def _require_empty_geometry(env_config: dict[str, Any]) -> None:

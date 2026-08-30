@@ -5,6 +5,21 @@ fn make_env(max_steps: u32) -> VoxelEnv {
     VoxelEnv::new(WorldState::new(), max_steps)
 }
 
+#[test]
+fn non_cubic_extent_masks_each_axis_independently() {
+    let mut env = VoxelEnv::new(WorldState::new(), 10)
+        .with_extent([5, 3, 2])
+        .with_geometry(Vec::new());
+    env.set_waypoints((5, 3, 2), (1, 1, 1));
+    env.reset(1);
+
+    let mask = env.action_mask();
+    for (index, (dx, dy, dz)) in OFFSETS_26.iter().copied().enumerate() {
+        let expected = dx <= 0 && dy <= 0 && dz <= 0;
+        assert_eq!(mask[index] == 1, expected, "offset {:?}", (dx, dy, dz));
+    }
+}
+
 fn make_env_with_geometry() -> VoxelEnv {
     VoxelEnv::new(WorldState::new(), 20)
         .with_geometry(vec![(5, 5, 5), (6, 5, 5)])

@@ -1,7 +1,5 @@
 """Dijkstra search baseline for the voxel environment."""
 
-import networkx as nx
-
 from theseo_anysearch.heuristic.base import BaseVoxelHeuristic
 from theseo_anysearch.heuristic.models import VoxelPosition
 
@@ -11,11 +9,10 @@ class VoxelDijkstraHeuristic(BaseVoxelHeuristic):
 
     def _find_path(
         self,
-        graph: nx.Graph,
         start: VoxelPosition,
         goal: VoxelPosition,
     ) -> list[VoxelPosition]:
-        return nx.dijkstra_path(graph, start, goal, weight="weight")
+        return self._search_path(start, goal, heuristic_weight=0.0)
 
 
 __all__ = ["VoxelDijkstraHeuristic"]

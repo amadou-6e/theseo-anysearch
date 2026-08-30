@@ -25,6 +25,7 @@ pub fn execute_agent_action(
     step: u32,
     max_steps: u32,
     grid_size: u16,
+    extent: [u16; 3],
     observation_filled: usize,
 ) -> Result<AgentActionResult, String> {
     let cursor_raw = coord_to_i32(cursor);
@@ -39,8 +40,10 @@ pub fn execute_agent_action(
     } else {
         cursor_raw
     };
-    let grid = i32::from(grid_size);
-    let in_bounds = destination.iter().all(|value| (1..=grid).contains(value));
+    let in_bounds = destination
+        .iter()
+        .enumerate()
+        .all(|(axis, value)| (1..=i32::from(extent[axis])).contains(value));
     let destination_coord = in_bounds.then(|| raw_to_coord(destination));
     let blocked = destination_coord.is_some_and(|coord| world.is_blocking(coord));
     let context = PredicateContextV2 {
@@ -126,6 +129,16 @@ pub fn execute_agent_action(
             }
         };
         super::single::lifecycle::merge_mutations(&mut mutations, result, grid_size)?;
+    }
+    for coord in [mutations.cursor, mutations.place, mutations.remove]
+        .into_iter()
+        .flatten()
+    {
+        if coord.0 > extent[0] || coord.1 > extent[1] || coord.2 > extent[2] {
+            return Err(format!(
+                "outcome coordinate {coord:?} is outside extent {extent:?}"
+            ));
+        }
     }
     if let Some(target) = mutations.cursor {
         if world.is_blocking(target) && target != cursor {

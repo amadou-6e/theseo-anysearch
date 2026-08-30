@@ -228,3 +228,23 @@ def test_environment_continues_at_intermediate_waypoint():
         assert info["route_waypoint_completion_fraction"] == 1.0
     finally:
         env.close()
+
+
+def test_sample_route_honors_non_cubic_extent_deterministically():
+    from theseo_anysearch.rllib.trainer.waypoint_routes import sample_route
+
+    kwargs = {
+        "start": (3, 2, 2),
+        "total_distance": 8,
+        "segment_distance": 2,
+        "extent": (12, 4, 3),
+        "action_mode": "discrete_26",
+        "seed": 91,
+    }
+    first = sample_route(**kwargs)
+    second = sample_route(**kwargs)
+    assert first == second
+    assert all(
+        1 <= point[0] <= 12 and 1 <= point[1] <= 4 and 1 <= point[2] <= 3
+        for point in first.waypoints
+    )
