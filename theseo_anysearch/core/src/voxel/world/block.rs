@@ -4,7 +4,7 @@ pub const BLOCK_KIND_GOAL: u8 = 3;
 pub const BLOCK_KIND_BOUNDARY: u8 = 4;
 pub const BLOCK_KIND_FILLED: u8 = 5;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Block {
     pub kind: u8,
     pub active: bool,

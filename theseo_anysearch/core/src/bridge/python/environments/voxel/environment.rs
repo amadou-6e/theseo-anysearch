@@ -408,7 +408,7 @@ impl PyVoxelEnv {
     /// Returns all currently filled voxel coordinates as a list of (x, y, z) tuples.
     /// Used to snapshot the world state at episode start for trajectory recording.
     pub fn filled_voxels(&self) -> Vec<(u16, u16, u16)> {
-        self.inner.world().iter_filled().copied().collect()
+        self.inner.world().iter_filled().collect()
     }
 }
 

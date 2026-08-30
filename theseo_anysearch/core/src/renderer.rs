@@ -99,7 +99,7 @@ pub fn render_world(
     let mut faces = Vec::new();
     let mut visible_voxels = 0usize;
 
-    for &(x, y, z) in world.iter_filled() {
+    for (x, y, z) in world.iter_filled() {
         let center = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
         if !in_view_frustum(center, &mvp) {
             continue;

@@ -11,6 +11,60 @@ fn make_env_with_geometry() -> VoxelEnv {
         .with_trail_mode(true)
 }
 
+fn make_backend_env(world: WorldState) -> VoxelEnv {
+    let mut env = VoxelEnv::new(world, 20)
+        .with_grid_size(8)
+        .with_geometry(vec![(4, 4, 4), (5, 4, 4)])
+        .with_trail_mode(true);
+    env.set_waypoints((3, 4, 4), (6, 4, 4));
+    env
+}
+
+#[test]
+fn environment_results_and_masks_match_across_world_backends() {
+    let mut oracle = make_backend_env(WorldState::new_hashmap());
+    let mut chunked = make_backend_env(WorldState::new_chunked(4));
+    let oracle_observation = oracle.reset(17);
+    let chunked_observation = chunked.reset(17);
+    assert_eq!(oracle_observation.filled, chunked_observation.filled);
+    assert_eq!(
+        oracle_observation.steps_remaining,
+        chunked_observation.steps_remaining
+    );
+    assert_eq!(
+        oracle_observation.goal_distance,
+        chunked_observation.goal_distance
+    );
+    assert_eq!(oracle.action_mask(), chunked.action_mask());
+
+    for action in [
+        VoxelAction::Place((2, 2, 2)),
+        VoxelAction::Noop,
+        VoxelAction::Remove((2, 2, 2)),
+    ] {
+        let oracle_result = oracle.step(action.clone());
+        let chunked_result = chunked.step(action);
+        assert_eq!(oracle_result.reward, chunked_result.reward);
+        assert_eq!(oracle_result.done, chunked_result.done);
+        assert_eq!(oracle.last_collision(), chunked.last_collision());
+        assert_eq!(oracle.last_goal_reached(), chunked.last_goal_reached());
+        assert_eq!(oracle.last_terminated(), chunked.last_terminated());
+        assert_eq!(oracle.last_truncated(), chunked.last_truncated());
+        assert_eq!(
+            oracle.last_termination_reason(),
+            chunked.last_termination_reason()
+        );
+        assert_eq!(
+            oracle.last_reward_breakdown(),
+            chunked.last_reward_breakdown()
+        );
+        assert_eq!(
+            oracle.world().iter_filled().collect::<Vec<_>>(),
+            chunked.world().iter_filled().collect::<Vec<_>>()
+        );
+    }
+}
+
 fn zone_reward_config() -> RewardConfig {
     RewardConfig {
         step_cost: -0.05,
@@ -358,7 +412,10 @@ fn configure_action_pipeline_fails_when_native_predicate_load_fails() {
         "construction must fail instead of silently falling back to the builtin predicate"
     );
     let message = result.unwrap_err();
-    assert!(message.contains("bounds"), "error should mention the predicate name: {message}");
+    assert!(
+        message.contains("bounds"),
+        "error should mention the predicate name: {message}"
+    );
 }
 
 #[test]

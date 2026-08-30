@@ -172,7 +172,6 @@ impl Environment for VoxelEnv {
             let filled: HashSet<Coord> = self
                 .world
                 .iter_filled()
-                .copied()
                 .filter(|coord| {
                     self.world
                         .get_block(*coord)
