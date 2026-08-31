@@ -441,6 +441,12 @@ fn centered_box_minimum(focus: (f32, f32, f32), size: f32) -> (f32, f32, f32) {
     (focus.0 - half, focus.1 - half, focus.2 - half)
 }
 
+fn inside_viewer_radius(coordinate: StorageCoord, center: StorageCoord, radius: u32) -> bool {
+    coordinate.x.abs_diff(center.x) <= radius
+        && coordinate.y.abs_diff(center.y) <= radius
+        && coordinate.z.abs_diff(center.z) <= radius
+}
+
 #[cfg(test)]
 mod regional_request_tests {
     use super::*;
@@ -495,6 +501,21 @@ mod regional_request_tests {
             (minimum.0 + size * 0.5, minimum.1 + size * 0.5, minimum.2 + size * 0.5),
             focus
         );
+    }
+
+    #[test]
+    fn render_filter_includes_only_geometry_inside_the_moving_box() {
+        let center = StorageCoord { x: 50, y: 60, z: 70 };
+        assert!(inside_viewer_radius(
+            StorageCoord { x: 34, y: 76, z: 70 },
+            center,
+            16,
+        ));
+        assert!(!inside_viewer_radius(
+            StorageCoord { x: 33, y: 60, z: 70 },
+            center,
+            16,
+        ));
     }
 }
 
@@ -1576,23 +1597,32 @@ impl eframe::App for VoxelReplayApp {
         let display_grid_size = regional_grid_size
             .or_else(|| compiled_mode.then_some((self.visualization_radius * 2 + 1) as f32))
             .unwrap_or(traj_grid_size);
+        let render_center = compiled_mode
+            .then(|| selected_agent_center(&self.trajectories[iter_idx], step_idx))
+            .flatten();
         let geo_list = if compiled_mode {
             active_regional_frame
                 .map(|frame| {
-                    frame.occupied.iter().filter_map(|coordinate| Some((
-                        u16::try_from(coordinate.x).ok()?,
-                        u16::try_from(coordinate.y).ok()?,
-                        u16::try_from(coordinate.z).ok()?,
-                    ))).collect::<Vec<_>>()
+                    frame
+                        .occupied
+                        .iter()
+                        .filter(|coordinate| {
+                            render_center.is_some_and(|center| {
+                                inside_viewer_radius(**coordinate, center, self.visualization_radius)
+                            })
+                        })
+                        .filter_map(|coordinate| Some((
+                            u16::try_from(coordinate.x).ok()?,
+                            u16::try_from(coordinate.y).ok()?,
+                            u16::try_from(coordinate.z).ok()?,
+                        )))
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         } else {
             self.geo_voxels[iter_idx].clone()
         };
-        let render_focus = compiled_mode
-            .then(|| selected_agent_center(&self.trajectories[iter_idx], step_idx))
-            .flatten()
-            .map(|center| camera_relative(center, render_origin));
+        let render_focus = render_center.map(|center| camera_relative(center, render_origin));
         let visible_box_size = if compiled_mode {
             (self.visualization_radius * 2 + 1) as f32
         } else {
@@ -1639,7 +1669,19 @@ impl eframe::App for VoxelReplayApp {
             let geo_color = Color32::from_rgb(120, 120, 130);
             if compiled_mode {
                 let chunk_edge = self.trajectories[iter_idx].world_chunk_edge.max(1);
-                for &chunk in &self.coarse_chunks {
+                for &chunk in self.coarse_chunks.iter().filter(|chunk| {
+                    render_center.is_some_and(|center| {
+                        inside_viewer_radius(
+                            StorageCoord {
+                                x: chunk.x * chunk_edge + chunk_edge / 2,
+                                y: chunk.y * chunk_edge + chunk_edge / 2,
+                                z: chunk.z * chunk_edge + chunk_edge / 2,
+                            },
+                            center,
+                            self.visualization_radius,
+                        )
+                    })
+                }) {
                     draw_coarse_chunk(
                         &painter, chunk, chunk_edge, render_origin, rect, cam, &b,
                     );
@@ -1680,7 +1722,16 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                     .unwrap()
             });
-            let mut face_sorted = self.regional_faces.clone();
+            let mut face_sorted = self
+                .regional_faces
+                .iter()
+                .copied()
+                .filter(|face| {
+                    render_center.is_some_and(|center| {
+                        inside_viewer_radius(face.voxel, center, self.visualization_radius)
+                    })
+                })
+                .collect::<Vec<_>>();
             face_sorted.sort_by(|a, b| {
                 let a = a.voxel;
                 let b = b.voxel;
