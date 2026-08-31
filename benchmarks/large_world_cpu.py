@@ -104,12 +104,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("reset", "scalar", "box", "mask"))
     parser.add_argument("--iterations", type=int, default=10_000)
+    parser.add_argument("--box-radius", type=int, default=4)
     parser.add_argument(
         "--cache-dir", type=Path, default=Path("runtime", "large-world-cpu")
     )
     args = parser.parse_args()
     if args.iterations <= 0:
         raise ValueError("iterations must be positive")
+    if args.box_radius < 0:
+        raise ValueError("box-radius cannot be negative")
     logical_cpu = _pin_to_one_cpu()
     locations = _points(max(args.iterations, 512))
     world = compile_world(
@@ -121,7 +124,7 @@ def main() -> None:
         max_steps=args.iterations + 1,
         trail_mode=False,
         extent=EXTENT,
-        box_radius=4 if args.phase == "box" else None,
+        box_radius=args.box_radius if args.phase == "box" else None,
     )
     environment.set_compiled_world(str(world.root.resolve()), CACHE_BYTES)
     environment.set_world_residency_radius(7)
@@ -145,6 +148,7 @@ def main() -> None:
         json.dumps(
             {
                 "phase": args.phase,
+                "box_radius": args.box_radius if args.phase == "box" else None,
                 "iterations": args.iterations,
                 "logical_cpu": logical_cpu,
                 "extent": EXTENT,

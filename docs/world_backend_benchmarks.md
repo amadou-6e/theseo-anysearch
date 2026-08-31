@@ -56,6 +56,7 @@ Single-CPU compiled-world phase benchmark:
 python benchmarks/large_world_cpu.py reset --iterations 512
 python benchmarks/large_world_cpu.py scalar --iterations 10000
 python benchmarks/large_world_cpu.py box --iterations 10000
+python benchmarks/large_world_cpu.py box --box-radius 16 --iterations 10000
 python benchmarks/large_world_cpu.py mask --iterations 10000
 ```
 
