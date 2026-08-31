@@ -20,6 +20,7 @@ use theseo_core::replay::explain::NativeExplainUi;
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
+use theseo_core::replay::lod::{select_chunks, CameraChunkView, ChunkBudgets};
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
@@ -368,11 +369,19 @@ struct RegionRequestKey {
     step: usize,
     center: StorageCoord,
     radius: u32,
+    camera_revision: u64,
+}
+
+struct LoadedRegion {
+    frame: RegionalReplayFrame,
+    coarse: Vec<ChunkCoord>,
+    considered: usize,
+    detailed: usize,
 }
 
 struct PendingRegion {
     key: RegionRequestKey,
-    receiver: Receiver<Result<RegionalReplayFrame, String>>,
+    receiver: Receiver<Result<LoadedRegion, String>>,
 }
 
 fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
@@ -645,6 +654,32 @@ fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
     painter.circle_filled(cp, 3.0, yellow);
 }
 
+fn draw_coarse_chunk(
+    painter: &egui::Painter,
+    chunk: ChunkCoord,
+    chunk_edge: u32,
+    origin: StorageCoord,
+    rect: Rect,
+    cam: &Camera,
+    bounds: &Bounds,
+) {
+    let coordinate = StorageCoord {
+        x: chunk.x * chunk_edge,
+        y: chunk.y * chunk_edge,
+        z: chunk.z * chunk_edge,
+    };
+    let (x, y, z) = camera_relative(coordinate, origin);
+    let edge = chunk_edge as f32;
+    let corners = [
+        (0.0,0.0,0.0),(edge,0.0,0.0),(edge,edge,0.0),(0.0,edge,0.0),
+        (0.0,0.0,edge),(edge,0.0,edge),(edge,edge,edge),(0.0,edge,edge),
+    ].map(|(dx,dy,dz)| cam.to_screen(x + dx, y + dy, z + dz, rect, bounds));
+    let stroke = Stroke::new(1.0, Color32::from_rgb(70, 100, 130));
+    for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+        painter.line_segment([corners[a], corners[b]], stroke);
+    }
+}
+
 fn draw_marker(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
@@ -750,6 +785,11 @@ struct VoxelReplayApp {
     regional_error: Option<String>,
     render_cache: ChunkRenderCache,
     regional_faces: Vec<ExposedFace>,
+    coarse_chunks: Vec<ChunkCoord>,
+    considered_chunks: usize,
+    detailed_chunks: usize,
+    chunk_budgets: ChunkBudgets,
+    camera_revision: u64,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -800,6 +840,11 @@ impl VoxelReplayApp {
             regional_error: None,
             render_cache: ChunkRenderCache::default(),
             regional_faces: Vec::new(),
+            coarse_chunks: Vec::new(),
+            considered_chunks: 0,
+            detailed_chunks: 0,
+            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
+            camera_revision: 0,
         }
     }
 
@@ -824,6 +869,11 @@ impl VoxelReplayApp {
             regional_error: None,
             render_cache: ChunkRenderCache::default(),
             regional_faces: Vec::new(),
+            coarse_chunks: Vec::new(),
+            considered_chunks: 0,
+            detailed_chunks: 0,
+            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
+            camera_revision: 0,
         };
         app.load_trial(0);
         app
@@ -848,6 +898,7 @@ impl VoxelReplayApp {
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
+        self.coarse_chunks.clear();
     }
 
     fn current_region_key(&self) -> Option<RegionRequestKey> {
@@ -858,6 +909,7 @@ impl VoxelReplayApp {
             step: self.step_idx,
             center: selected_agent_center(trajectory, self.step_idx)?,
             radius: self.visualization_radius,
+            camera_revision: self.camera_revision,
         })
     }
 
@@ -891,10 +943,13 @@ impl VoxelReplayApp {
         let current_key = self.current_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
-                Ok(Ok(frame)) => {
+                Ok(Ok(loaded)) => {
                     if Some(pending.key) == current_key {
-                        self.cache_regional_faces(pending.key, &frame);
-                        self.regional_frame = Some((pending.key, frame));
+                        self.cache_regional_faces(pending.key, &loaded.frame);
+                        self.coarse_chunks = loaded.coarse;
+                        self.considered_chunks = loaded.considered;
+                        self.detailed_chunks = loaded.detailed;
+                        self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
                     }
                 }
@@ -931,11 +986,48 @@ impl VoxelReplayApp {
             &self.trajectories[key.iteration].episode.steps,
             key.step,
         );
+        let chunk_shape = source.chunk_shape();
+        let indexed = source.indexed_chunks();
+        let selection = chunk_shape.map(|shape| {
+            let radius_chunks = (key.radius as f64 / shape.x.max(shape.y).max(shape.z) as f64)
+                .max(1.0) / f64::from(self.camera.zoom.max(0.2));
+            select_chunks(
+                indexed.iter().map(|(chunk, _)| *chunk),
+                CameraChunkView {
+                    center: [
+                        key.center.x as f64 / shape.x as f64,
+                        key.center.y as f64 / shape.y as f64,
+                        key.center.z as f64 / shape.z as f64,
+                    ],
+                    half_extent: [radius_chunks; 3],
+                    forward: [
+                        f64::from(self.camera.yaw.sin()),
+                        f64::from(self.camera.pitch.sin()),
+                        f64::from(self.camera.yaw.cos()),
+                    ],
+                    minimum_forward_dot: -0.5,
+                },
+                self.chunk_budgets,
+            )
+        });
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let result = source
-                .load_agent_region(key.center, key.radius, &mutations)
-                .map_err(|error| format!("regional world load failed: {error:?}"));
+            let result = match selection {
+                Some(selection) if !selection.detailed.is_empty() => source
+                    .load_chunk_selection(
+                        &selection.detailed,
+                        &selection.detailed.iter().chain(&selection.coarse).copied().collect::<Vec<_>>(),
+                        &mutations,
+                    )
+                    .map(|frame| LoadedRegion {
+                        frame,
+                        coarse: selection.coarse,
+                        considered: selection.considered,
+                        detailed: selection.detailed.len(),
+                    }),
+                _ => source.load_agent_region(key.center, key.radius, &mutations)
+                    .map(|frame| LoadedRegion { frame, coarse: Vec::new(), considered: 0, detailed: 0 }),
+            }.map_err(|error| format!("regional world load failed: {error:?}"));
             let _ = sender.send(result);
         });
         self.pending_region = Some(PendingRegion { key, receiver });
@@ -1217,6 +1309,15 @@ impl eframe::App for VoxelReplayApp {
                 {
                     self.requested_region = None;
                 }
+                let budgets_changed = ui.add(Slider::new(&mut self.chunk_budgets.visible, 1..=256)
+                    .text("visible chunks")).changed()
+                    | ui.add(Slider::new(&mut self.chunk_budgets.detailed, 1..=128)
+                        .text("detailed chunks")).changed();
+                self.chunk_budgets.detailed = self.chunk_budgets.detailed
+                    .min(self.chunk_budgets.visible);
+                if budgets_changed {
+                    self.camera_revision = self.camera_revision.wrapping_add(1);
+                }
                 if self.pending_region.is_some() {
                     ui.label(egui::RichText::new("Loading visible region...").weak());
                 }
@@ -1226,6 +1327,12 @@ impl eframe::App for VoxelReplayApp {
                 if let Some((_, frame)) = &self.regional_frame {
                     ui.label(format!("Visible voxels: {}", frame.occupied.len()));
                     ui.label(format!("Exposed faces: {}", self.regional_faces.len()));
+                    ui.label(format!(
+                        "Chunks considered/detailed/coarse: {}/{}/{}",
+                        self.considered_chunks,
+                        self.detailed_chunks,
+                        self.coarse_chunks.len()
+                    ));
                     ui.label(format!(
                         "Mesh cache builds/hits: {}/{}",
                         self.render_cache.builds(), self.render_cache.hits()
@@ -1363,6 +1470,14 @@ impl eframe::App for VoxelReplayApp {
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
             let geo_color = Color32::from_rgb(120, 120, 130);
+            if compiled_mode {
+                let chunk_edge = self.trajectories[iter_idx].world_chunk_edge.max(1);
+                for &chunk in &self.coarse_chunks {
+                    draw_coarse_chunk(
+                        &painter, chunk, chunk_edge, render_origin, rect, cam, &b,
+                    );
+                }
+            }
 
             // Per-agent trail colors (hue-shifted blues/greens/reds).
             let agent_trail_colors = [
@@ -1579,9 +1694,11 @@ impl eframe::App for VoxelReplayApp {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
+            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if scroll_y.abs() > 0.1 {
             self.camera.zoom = (self.camera.zoom * (1.0 + scroll_y * 0.003)).clamp(0.2, 5.0);
+            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if ctx.input(|i| i.key_pressed(Key::R)) {
             self.camera = Camera::default();

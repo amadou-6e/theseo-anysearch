@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::render_cache::ChunkCoord;
 use crate::voxel::world::{
     BoundedRegion, DiskCacheMetrics, StorageCoord, WorldAccessError, WorldRead, WorldState,
 };
@@ -39,6 +40,28 @@ impl RegionalReplaySource {
         Self { world }
     }
 
+    pub fn indexed_chunks(&self) -> Vec<(ChunkCoord, u64)> {
+        self.world
+            .indexed_chunks()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|chunk| {
+                (
+                    ChunkCoord {
+                        x: chunk.coordinate.0,
+                        y: chunk.coordinate.1,
+                        z: chunk.coordinate.2,
+                    },
+                    chunk.occupied_voxels,
+                )
+            })
+            .collect()
+    }
+
+    pub fn chunk_shape(&self) -> Option<crate::voxel::world::WorldExtent> {
+        self.world.disk_chunk_shape()
+    }
+
     pub fn load_agent_region(
         &self,
         center: StorageCoord,
@@ -70,6 +93,109 @@ impl RegionalReplaySource {
             region,
             render_origin: region.minimum,
             occupied,
+            cache_metrics: self.world.disk_cache_metrics(),
+            load_time: started.elapsed(),
+        })
+    }
+
+    pub fn load_chunks(
+        &self,
+        chunks: &[ChunkCoord],
+        mutations: &[ReplayMutation],
+    ) -> Result<Vec<StorageCoord>, WorldAccessError> {
+        let Some(shape) = self.chunk_shape() else {
+            return Err(WorldAccessError::Unsupported);
+        };
+        let extent = self.world.extent();
+        let mut occupied = HashMap::new();
+        for chunk in chunks {
+            let minimum = StorageCoord {
+                x: chunk.x.saturating_mul(shape.x),
+                y: chunk.y.saturating_mul(shape.y),
+                z: chunk.z.saturating_mul(shape.z),
+            };
+            if !extent.contains_storage(minimum) {
+                continue;
+            }
+            let maximum_exclusive = StorageCoord {
+                x: minimum.x.saturating_add(shape.x).min(extent.x),
+                y: minimum.y.saturating_add(shape.y).min(extent.y),
+                z: minimum.z.saturating_add(shape.z).min(extent.z),
+            };
+            let region = BoundedRegion::new(minimum, maximum_exclusive, extent)?;
+            self.world.prefetch_region(region)?;
+            for (coordinate, _) in self.world.blocks_in_region(region)? {
+                occupied.insert(coordinate, true);
+            }
+        }
+        let selected = chunks
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        for mutation in mutations {
+            let chunk = ChunkCoord {
+                x: mutation.coordinate.x / shape.x,
+                y: mutation.coordinate.y / shape.y,
+                z: mutation.coordinate.z / shape.z,
+            };
+            if !selected.contains(&chunk) {
+                continue;
+            }
+            if mutation.occupied {
+                occupied.insert(mutation.coordinate, true);
+            } else {
+                occupied.remove(&mutation.coordinate);
+            }
+        }
+        let mut occupied = occupied.into_keys().collect::<Vec<_>>();
+        occupied.sort_by_key(|coordinate| coordinate.global_key());
+        Ok(occupied)
+    }
+
+    pub fn load_chunk_selection(
+        &self,
+        chunks: &[ChunkCoord],
+        visible_chunks: &[ChunkCoord],
+        mutations: &[ReplayMutation],
+    ) -> Result<RegionalReplayFrame, WorldAccessError> {
+        let started = Instant::now();
+        let Some(shape) = self.chunk_shape() else {
+            return Err(WorldAccessError::Unsupported);
+        };
+        let extent = self.world.extent();
+        let first = visible_chunks
+            .first()
+            .ok_or(WorldAccessError::Unsupported)?;
+        let mut minimum = StorageCoord {
+            x: first.x * shape.x,
+            y: first.y * shape.y,
+            z: first.z * shape.z,
+        };
+        let mut maximum_exclusive = minimum;
+        for chunk in visible_chunks {
+            let origin = StorageCoord {
+                x: chunk.x * shape.x,
+                y: chunk.y * shape.y,
+                z: chunk.z * shape.z,
+            };
+            minimum.x = minimum.x.min(origin.x);
+            minimum.y = minimum.y.min(origin.y);
+            minimum.z = minimum.z.min(origin.z);
+            maximum_exclusive.x = maximum_exclusive
+                .x
+                .max(origin.x.saturating_add(shape.x).min(extent.x));
+            maximum_exclusive.y = maximum_exclusive
+                .y
+                .max(origin.y.saturating_add(shape.y).min(extent.y));
+            maximum_exclusive.z = maximum_exclusive
+                .z
+                .max(origin.z.saturating_add(shape.z).min(extent.z));
+        }
+        let region = BoundedRegion::new(minimum, maximum_exclusive, extent)?;
+        Ok(RegionalReplayFrame {
+            region,
+            render_origin: minimum,
+            occupied: self.load_chunks(chunks, mutations)?,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
         })

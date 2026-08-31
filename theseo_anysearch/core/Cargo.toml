@@ -32,6 +32,10 @@ name = "render-cache-bench"
 path = "src/bin/render_cache_bench.rs"
 
 [[bin]]
+name = "lod-replay-bench"
+path = "src/bin/lod_replay_bench.rs"
+
+[[bin]]
 name = "regional-replay-bench"
 path = "src/bin/regional_replay_bench.rs"
 

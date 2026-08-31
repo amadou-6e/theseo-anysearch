@@ -21,7 +21,9 @@ pub use coordinates::{
     storage_to_task, task_to_storage, CoordinateError, StorageCoord, TaskCoord, WorldExtent,
     WORLD_SCHEMA_VERSION,
 };
-pub use disk_backed::{DiskBackedWorld, DiskCacheMetrics, DiskResidentGuard, PrefetchRequest};
+pub use disk_backed::{
+    DiskBackedWorld, DiskCacheMetrics, DiskResidentGuard, IndexedChunk, PrefetchRequest,
+};
 pub use hashmap_backend::HashMapWorld;
 pub use regional::{
     BoundedRegion, GridRay, InMemoryResidentGuard, RayHit, WorldAccessError, WorldMutation,
