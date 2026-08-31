@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use super::render_cache::ChunkCoord;
 
@@ -21,6 +22,28 @@ pub struct ChunkSelection {
     pub detailed: Vec<ChunkCoord>,
     pub coarse: Vec<ChunkCoord>,
     pub considered: usize,
+}
+
+/// Expands a visible chunk set with indexed neighbors without inventing empty chunks.
+pub fn expand_chunk_halo(
+    visible: &[ChunkCoord],
+    indexed_chunks: impl IntoIterator<Item = ChunkCoord>,
+    rings: u32,
+) -> Vec<ChunkCoord> {
+    let visible = visible.iter().copied().collect::<HashSet<_>>();
+    let mut resident = indexed_chunks
+        .into_iter()
+        .filter(|candidate| {
+            visible.iter().any(|chunk| {
+                chunk.x.abs_diff(candidate.x) <= rings
+                    && chunk.y.abs_diff(candidate.y) <= rings
+                    && chunk.z.abs_diff(candidate.z) <= rings
+            })
+        })
+        .collect::<Vec<_>>();
+    resident.sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
+    resident.dedup();
+    resident
 }
 
 /// Conservatively selects chunks before any voxel payload is decoded.
@@ -136,5 +159,27 @@ mod tests {
             },
         );
         assert_eq!(selected.detailed, vec![ChunkCoord { x: 7, y: 2, z: 1 }]);
+    }
+
+    #[test]
+    fn halo_contains_visible_chunks_and_one_indexed_neighbor_ring() {
+        let resident = expand_chunk_halo(
+            &[ChunkCoord { x: 4, y: 4, z: 4 }],
+            [
+                ChunkCoord { x: 3, y: 4, z: 4 },
+                ChunkCoord { x: 4, y: 4, z: 4 },
+                ChunkCoord { x: 5, y: 5, z: 5 },
+                ChunkCoord { x: 6, y: 4, z: 4 },
+            ],
+            1,
+        );
+        assert_eq!(
+            resident,
+            vec![
+                ChunkCoord { x: 3, y: 4, z: 4 },
+                ChunkCoord { x: 4, y: 4, z: 4 },
+                ChunkCoord { x: 5, y: 5, z: 5 },
+            ]
+        );
     }
 }

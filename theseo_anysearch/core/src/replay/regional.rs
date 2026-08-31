@@ -156,6 +156,7 @@ impl RegionalReplaySource {
         &self,
         chunks: &[ChunkCoord],
         visible_chunks: &[ChunkCoord],
+        resident_chunks: &[ChunkCoord],
         mutations: &[ReplayMutation],
     ) -> Result<RegionalReplayFrame, WorldAccessError> {
         let started = Instant::now();
@@ -163,6 +164,23 @@ impl RegionalReplaySource {
             return Err(WorldAccessError::Unsupported);
         };
         let extent = self.world.extent();
+        for chunk in resident_chunks {
+            let minimum = StorageCoord {
+                x: chunk.x.saturating_mul(shape.x),
+                y: chunk.y.saturating_mul(shape.y),
+                z: chunk.z.saturating_mul(shape.z),
+            };
+            if !extent.contains_storage(minimum) {
+                continue;
+            }
+            let maximum_exclusive = StorageCoord {
+                x: minimum.x.saturating_add(shape.x).min(extent.x),
+                y: minimum.y.saturating_add(shape.y).min(extent.y),
+                z: minimum.z.saturating_add(shape.z).min(extent.z),
+            };
+            self.world
+                .prefetch_region(BoundedRegion::new(minimum, maximum_exclusive, extent)?)?;
+        }
         let first = visible_chunks
             .first()
             .ok_or(WorldAccessError::Unsupported)?;

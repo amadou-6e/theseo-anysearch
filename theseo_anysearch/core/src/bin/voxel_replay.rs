@@ -17,10 +17,10 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
+use theseo_core::replay::lod::{expand_chunk_halo, select_chunks, CameraChunkView, ChunkBudgets};
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
-use theseo_core::replay::lod::{select_chunks, CameraChunkView, ChunkBudgets};
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
@@ -366,10 +366,10 @@ fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RegionRequestKey {
     iteration: usize,
-    step: usize,
     center: StorageCoord,
     radius: u32,
     camera_revision: u64,
+    mutation_revision: u64,
 }
 
 struct LoadedRegion {
@@ -402,6 +402,84 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
         .collect::<Vec<_>>();
     mutations.sort_by_key(|mutation| mutation.coordinate.global_key());
     mutations
+}
+
+fn chunk_stable_center(
+    center: StorageCoord,
+    shape: theseo_core::voxel::world::WorldExtent,
+) -> StorageCoord {
+    StorageCoord {
+        x: center.x / shape.x * shape.x + shape.x / 2,
+        y: center.y / shape.y * shape.y + shape.y / 2,
+        z: center.z / shape.z * shape.z + shape.z / 2,
+    }
+}
+
+fn mutation_revision(mutations: &[ReplayMutation]) -> u64 {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut revision = OFFSET;
+    for mutation in mutations {
+        for byte in mutation
+            .coordinate
+            .x
+            .to_le_bytes()
+            .into_iter()
+            .chain(mutation.coordinate.y.to_le_bytes())
+            .chain(mutation.coordinate.z.to_le_bytes())
+            .chain([u8::from(mutation.occupied)])
+        {
+            revision ^= u64::from(byte);
+            revision = revision.wrapping_mul(PRIME);
+        }
+    }
+    revision
+}
+
+#[cfg(test)]
+mod regional_request_tests {
+    use super::*;
+    use theseo_core::voxel::world::WorldExtent;
+
+    #[test]
+    fn request_center_is_stable_inside_a_chunk() {
+        let shape = WorldExtent { x: 32, y: 16, z: 8 };
+        assert_eq!(
+            chunk_stable_center(StorageCoord { x: 33, y: 18, z: 9 }, shape),
+            chunk_stable_center(StorageCoord { x: 63, y: 31, z: 15 }, shape)
+        );
+        assert_ne!(
+            chunk_stable_center(StorageCoord { x: 63, y: 31, z: 15 }, shape),
+            chunk_stable_center(StorageCoord { x: 64, y: 31, z: 15 }, shape)
+        );
+    }
+
+    #[test]
+    fn request_revision_changes_only_when_resolved_mutations_change() {
+        let first = ReplayMutation {
+            coordinate: StorageCoord { x: 1, y: 2, z: 3 },
+            occupied: true,
+        };
+        assert_eq!(mutation_revision(&[first]), mutation_revision(&[first]));
+        assert_ne!(
+            mutation_revision(&[first]),
+            mutation_revision(&[ReplayMutation {
+                occupied: false,
+                ..first
+            }])
+        );
+    }
+
+    #[test]
+    fn compiled_view_bounds_keep_the_agent_at_screen_center() {
+        let camera = Camera::default();
+        let focus = (27.0, 11.0, 19.0);
+        let bounds = camera.bounds_centered_on(64.0, focus);
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(800.0, 600.0));
+        let screen = camera.to_screen(focus.0, focus.1, focus.2, rect, &bounds);
+        assert!((screen.x - rect.center().x).abs() < f32::EPSILON);
+        assert!((screen.y - rect.center().y).abs() < f32::EPSILON);
+    }
 }
 
 fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
@@ -494,6 +572,19 @@ impl Camera {
         let pw = (max_x - min_x) * 0.05;
         let ph = (max_y - min_y) * 0.05;
         Bounds { min_x: min_x - pw, max_x: max_x + pw, min_y: min_y - ph, max_y: max_y + ph }
+    }
+
+    fn bounds_centered_on(&self, grid_size: f32, focus: (f32, f32, f32)) -> Bounds {
+        let bounds = self.bounds(grid_size);
+        let (center_x, center_y) = self.project(focus.0, focus.1, focus.2);
+        let half_width = (bounds.max_x - bounds.min_x) * 0.5;
+        let half_height = (bounds.max_y - bounds.min_y) * 0.5;
+        Bounds {
+            min_x: center_x - half_width,
+            max_x: center_x + half_width,
+            min_y: center_y - half_height,
+            max_y: center_y + half_height,
+        }
     }
 
     /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
@@ -904,12 +995,20 @@ impl VoxelReplayApp {
     fn current_region_key(&self) -> Option<RegionRequestKey> {
         let trajectory = self.trajectories.get(self.iter_idx)?;
         trajectory.world.as_ref()?;
+        let center = selected_agent_center(trajectory, self.step_idx)?;
+        let center = self
+            .regional_sources
+            .get(self.iter_idx)
+            .and_then(Option::as_ref)
+            .and_then(RegionalReplaySource::chunk_shape)
+            .map_or(center, |shape| chunk_stable_center(center, shape));
+        let mutations = replay_mutations_at(&trajectory.episode.steps, self.step_idx);
         Some(RegionRequestKey {
             iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            center,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
+            mutation_revision: mutation_revision(&mutations),
         })
     }
 
@@ -984,10 +1083,22 @@ impl VoxelReplayApp {
         };
         let mutations = replay_mutations_at(
             &self.trajectories[key.iteration].episode.steps,
-            key.step,
+            self.step_idx,
         );
         let chunk_shape = source.chunk_shape();
-        let indexed = source.indexed_chunks();
+        let mut indexed = source.indexed_chunks();
+        if let Some(shape) = chunk_shape {
+            for mutation in mutations.iter().filter(|mutation| mutation.occupied) {
+                let chunk = ChunkCoord {
+                    x: mutation.coordinate.x / shape.x,
+                    y: mutation.coordinate.y / shape.y,
+                    z: mutation.coordinate.z / shape.z,
+                };
+                if !indexed.iter().any(|(candidate, _)| *candidate == chunk) {
+                    indexed.push((chunk, 0));
+                }
+            }
+        }
         let selection = chunk_shape.map(|shape| {
             let radius_chunks = (key.radius as f64 / shape.x.max(shape.y).max(shape.z) as f64)
                 .max(1.0) / f64::from(self.camera.zoom.max(0.2));
@@ -1013,18 +1124,32 @@ impl VoxelReplayApp {
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let result = match selection {
-                Some(selection) if !selection.detailed.is_empty() => source
-                    .load_chunk_selection(
-                        &selection.detailed,
-                        &selection.detailed.iter().chain(&selection.coarse).copied().collect::<Vec<_>>(),
-                        &mutations,
-                    )
-                    .map(|frame| LoadedRegion {
-                        frame,
-                        coarse: selection.coarse,
-                        considered: selection.considered,
-                        detailed: selection.detailed.len(),
-                    }),
+                Some(selection) if !selection.detailed.is_empty() => {
+                    let visible = selection
+                        .detailed
+                        .iter()
+                        .chain(&selection.coarse)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let resident = expand_chunk_halo(
+                        &visible,
+                        indexed.iter().map(|(chunk, _)| *chunk),
+                        1,
+                    );
+                    source
+                        .load_chunk_selection(
+                            &selection.detailed,
+                            &visible,
+                            &resident,
+                            &mutations,
+                        )
+                        .map(|frame| LoadedRegion {
+                            frame,
+                            coarse: selection.coarse,
+                            considered: selection.considered,
+                            detailed: selection.detailed.len(),
+                        })
+                }
                 _ => source.load_agent_region(key.center, key.radius, &mutations)
                     .map(|frame| LoadedRegion { frame, coarse: Vec::new(), considered: 0, detailed: 0 }),
             }.map_err(|error| format!("regional world load failed: {error:?}"));
@@ -1445,6 +1570,10 @@ impl eframe::App for VoxelReplayApp {
         } else {
             self.geo_voxels[iter_idx].clone()
         };
+        let render_focus = compiled_mode
+            .then(|| selected_agent_center(&self.trajectories[iter_idx], step_idx))
+            .flatten()
+            .map(|center| camera_relative(center, render_origin));
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1463,7 +1592,10 @@ impl eframe::App for VoxelReplayApp {
             );
 
             let cam = &self.camera;
-            let b = cam.bounds(display_grid_size);
+            let b = render_focus.map_or_else(
+                || cam.bounds(display_grid_size),
+                |focus| cam.bounds_centered_on(display_grid_size, focus),
+            );
             // Rear edges render beneath voxels and are occluded by filled space.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
