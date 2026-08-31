@@ -123,7 +123,10 @@ mod tests {
             ],
             CameraChunkView {
                 center: [7.5, 2.5, 1.5],
-                half_extent: [0.6, 0.6, 0.6],
+                // Stop before the adjacent chunk boundary. Selection is
+                // conservative and includes every chunk volume intersecting
+                // the view, not only chunks whose centers lie inside it.
+                half_extent: [0.4, 0.4, 0.4],
                 forward: [1.0, 0.0, 0.0],
                 minimum_forward_dot: -1.0,
             },

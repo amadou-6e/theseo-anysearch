@@ -35,6 +35,10 @@ path = "src/bin/render_cache_bench.rs"
 name = "lod-replay-bench"
 path = "src/bin/lod_replay_bench.rs"
 
+[[bin]]
+name = "regional-replay-bench"
+path = "src/bin/regional_replay_bench.rs"
+
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
