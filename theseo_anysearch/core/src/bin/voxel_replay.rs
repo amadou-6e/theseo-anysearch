@@ -17,7 +17,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
-use theseo_core::replay::lod::{expand_chunk_halo, select_chunks, CameraChunkView, ChunkBudgets};
+use theseo_core::replay::lod::{chunks_intersecting_box, expand_chunk_halo};
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
@@ -368,7 +368,7 @@ struct RegionRequestKey {
     iteration: usize,
     center: StorageCoord,
     radius: u32,
-    camera_revision: u64,
+    visible_revision: u64,
     mutation_revision: u64,
 }
 
@@ -431,6 +431,19 @@ fn mutation_revision(mutations: &[ReplayMutation]) -> u64 {
         {
             revision ^= u64::from(byte);
             revision = revision.wrapping_mul(PRIME);
+        }
+    }
+    revision
+}
+
+fn chunk_selection_revision(chunks: &[ChunkCoord]) -> u64 {
+    let mut revision = 0xcbf29ce484222325_u64;
+    for chunk in chunks {
+        for value in [chunk.x, chunk.y, chunk.z] {
+            for byte in value.to_le_bytes() {
+                revision ^= u64::from(byte);
+                revision = revision.wrapping_mul(0x100000001b3);
+            }
         }
     }
     revision
@@ -919,8 +932,6 @@ struct VoxelReplayApp {
     coarse_chunks: Vec<ChunkCoord>,
     considered_chunks: usize,
     detailed_chunks: usize,
-    chunk_budgets: ChunkBudgets,
-    camera_revision: u64,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -974,8 +985,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
-            camera_revision: 0,
         }
     }
 
@@ -1003,8 +1012,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
-            camera_revision: 0,
         };
         app.load_trial(0);
         app
@@ -1036,18 +1043,34 @@ impl VoxelReplayApp {
         let trajectory = self.trajectories.get(self.iter_idx)?;
         trajectory.world.as_ref()?;
         let center = selected_agent_center(trajectory, self.step_idx)?;
-        let center = self
-            .regional_sources
-            .get(self.iter_idx)
-            .and_then(Option::as_ref)
-            .and_then(RegionalReplaySource::chunk_shape)
-            .map_or(center, |shape| chunk_stable_center(center, shape));
         let mutations = replay_mutations_at(&trajectory.episode.steps, self.step_idx);
+        let source = self.regional_sources.get(self.iter_idx)?.as_ref()?;
+        let (request_center, visible_revision) = match source.chunk_shape() {
+            Some(shape) => {
+                let mut indexed = source.indexed_chunks();
+                for mutation in mutations.iter().filter(|mutation| mutation.occupied) {
+                    let chunk = ChunkCoord {
+                        x: mutation.coordinate.x / shape.x,
+                        y: mutation.coordinate.y / shape.y,
+                        z: mutation.coordinate.z / shape.z,
+                    };
+                    if !indexed.iter().any(|(candidate, _)| *candidate == chunk) {
+                        indexed.push((chunk, 0));
+                    }
+                }
+                let visible = chunks_intersecting_box(
+                    indexed.iter().map(|(chunk, _)| *chunk), center,
+                    self.visualization_radius, shape,
+                );
+                (chunk_stable_center(center, shape), chunk_selection_revision(&visible))
+            }
+            None => (center, 0),
+        };
         Some(RegionRequestKey {
             iteration: self.iter_idx,
-            center,
+            center: request_center,
             radius: self.visualization_radius,
-            camera_revision: self.camera_revision,
+            visible_revision,
             mutation_revision: mutation_revision(&mutations),
         })
     }
@@ -1125,6 +1148,9 @@ impl VoxelReplayApp {
             &self.trajectories[key.iteration].episode.steps,
             self.step_idx,
         );
+        let load_center = selected_agent_center(
+            &self.trajectories[key.iteration], self.step_idx,
+        ).unwrap_or(key.center);
         let chunk_shape = source.chunk_shape();
         let mut indexed = source.indexed_chunks();
         if let Some(shape) = chunk_shape {
@@ -1140,57 +1166,34 @@ impl VoxelReplayApp {
             }
         }
         let selection = chunk_shape.map(|shape| {
-            let radius_chunks = (key.radius as f64 / shape.x.max(shape.y).max(shape.z) as f64)
-                .max(1.0) / f64::from(self.camera.zoom.max(0.2));
-            select_chunks(
-                indexed.iter().map(|(chunk, _)| *chunk),
-                CameraChunkView {
-                    center: [
-                        key.center.x as f64 / shape.x as f64,
-                        key.center.y as f64 / shape.y as f64,
-                        key.center.z as f64 / shape.z as f64,
-                    ],
-                    half_extent: [radius_chunks; 3],
-                    forward: [
-                        f64::from(self.camera.yaw.sin()),
-                        f64::from(self.camera.pitch.sin()),
-                        f64::from(self.camera.yaw.cos()),
-                    ],
-                    minimum_forward_dot: -0.5,
-                },
-                self.chunk_budgets,
-            )
+            let visible = chunks_intersecting_box(
+                indexed.iter().map(|(chunk, _)| *chunk), load_center, key.radius, shape,
+            );
+            let resident = expand_chunk_halo(
+                &visible, indexed.iter().map(|(chunk, _)| *chunk), 1,
+            );
+            (visible, resident)
         });
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let result = match selection {
-                Some(selection) if !selection.detailed.is_empty() => {
-                    let visible = selection
-                        .detailed
-                        .iter()
-                        .chain(&selection.coarse)
-                        .copied()
-                        .collect::<Vec<_>>();
-                    let resident = expand_chunk_halo(
-                        &visible,
-                        indexed.iter().map(|(chunk, _)| *chunk),
-                        1,
-                    );
+                Some((visible, resident)) if !visible.is_empty() => {
+                    let detailed = visible.len();
                     source
                         .load_chunk_selection(
-                            &selection.detailed,
+                            &visible,
                             &visible,
                             &resident,
                             &mutations,
                         )
                         .map(|frame| LoadedRegion {
                             frame,
-                            coarse: selection.coarse,
-                            considered: selection.considered,
-                            detailed: selection.detailed.len(),
+                            coarse: Vec::new(),
+                            considered: detailed,
+                            detailed,
                         })
                 }
-                _ => source.load_agent_region(key.center, key.radius, &mutations)
+                _ => source.load_agent_region(load_center, key.radius, &mutations)
                     .map(|frame| LoadedRegion { frame, coarse: Vec::new(), considered: 0, detailed: 0 }),
             }.map_err(|error| format!("regional world load failed: {error:?}"));
             let _ = sender.send(result);
@@ -1473,15 +1476,6 @@ impl eframe::App for VoxelReplayApp {
                     .text("radius")).changed()
                 {
                     self.requested_region = None;
-                }
-                let budgets_changed = ui.add(Slider::new(&mut self.chunk_budgets.visible, 1..=256)
-                    .text("visible chunks")).changed()
-                    | ui.add(Slider::new(&mut self.chunk_budgets.detailed, 1..=128)
-                        .text("detailed chunks")).changed();
-                self.chunk_budgets.detailed = self.chunk_budgets.detailed
-                    .min(self.chunk_budgets.visible);
-                if budgets_changed {
-                    self.camera_revision = self.camera_revision.wrapping_add(1);
                 }
                 if self.pending_region.is_some() {
                     ui.label(egui::RichText::new("Loading visible region...").weak());
@@ -1920,11 +1914,9 @@ impl eframe::App for VoxelReplayApp {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
-            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if scroll_y.abs() > 0.1 {
             self.camera.zoom = (self.camera.zoom * (1.0 + scroll_y * 0.003)).clamp(0.2, 5.0);
-            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if ctx.input(|i| i.key_pressed(Key::R)) {
             self.camera = Camera::default();

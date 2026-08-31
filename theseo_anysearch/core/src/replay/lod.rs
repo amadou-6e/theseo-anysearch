@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use super::render_cache::ChunkCoord;
+use crate::voxel::world::{StorageCoord, WorldExtent};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraChunkView {
@@ -44,6 +45,46 @@ pub fn expand_chunk_halo(
     resident.sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
     resident.dedup();
     resident
+}
+
+/// Selects every indexed chunk intersecting an agent-centered voxel box.
+pub fn chunks_intersecting_box(
+    indexed_chunks: impl IntoIterator<Item = ChunkCoord>,
+    center: StorageCoord,
+    radius: u32,
+    shape: WorldExtent,
+) -> Vec<ChunkCoord> {
+    let minimum = StorageCoord {
+        x: center.x.saturating_sub(radius),
+        y: center.y.saturating_sub(radius),
+        z: center.z.saturating_sub(radius),
+    };
+    let maximum = StorageCoord {
+        x: center.x.saturating_add(radius),
+        y: center.y.saturating_add(radius),
+        z: center.z.saturating_add(radius),
+    };
+    let minimum_chunk = ChunkCoord {
+        x: minimum.x / shape.x,
+        y: minimum.y / shape.y,
+        z: minimum.z / shape.z,
+    };
+    let maximum_chunk = ChunkCoord {
+        x: maximum.x / shape.x,
+        y: maximum.y / shape.y,
+        z: maximum.z / shape.z,
+    };
+    let mut visible = indexed_chunks
+        .into_iter()
+        .filter(|chunk| {
+            (minimum_chunk.x..=maximum_chunk.x).contains(&chunk.x)
+                && (minimum_chunk.y..=maximum_chunk.y).contains(&chunk.y)
+                && (minimum_chunk.z..=maximum_chunk.z).contains(&chunk.z)
+        })
+        .collect::<Vec<_>>();
+    visible.sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
+    visible.dedup();
+    visible
 }
 
 /// Conservatively selects chunks before any voxel payload is decoded.
@@ -179,6 +220,52 @@ mod tests {
                 ChunkCoord { x: 3, y: 4, z: 4 },
                 ChunkCoord { x: 4, y: 4, z: 4 },
                 ChunkCoord { x: 5, y: 5, z: 5 },
+            ]
+        );
+    }
+
+    #[test]
+    fn moving_box_selects_every_intersecting_chunk_before_crossing_it() {
+        let indexed = [
+            ChunkCoord { x: 0, y: 0, z: 0 },
+            ChunkCoord { x: 1, y: 0, z: 0 },
+            ChunkCoord { x: 2, y: 0, z: 0 },
+        ];
+        let shape = WorldExtent {
+            x: 32,
+            y: 32,
+            z: 32,
+        };
+        assert_eq!(
+            chunks_intersecting_box(
+                indexed,
+                StorageCoord {
+                    x: 16,
+                    y: 16,
+                    z: 16
+                },
+                16,
+                shape,
+            ),
+            vec![
+                ChunkCoord { x: 0, y: 0, z: 0 },
+                ChunkCoord { x: 1, y: 0, z: 0 },
+            ]
+        );
+        assert_eq!(
+            chunks_intersecting_box(
+                indexed,
+                StorageCoord {
+                    x: 48,
+                    y: 16,
+                    z: 16
+                },
+                16,
+                shape,
+            ),
+            vec![
+                ChunkCoord { x: 1, y: 0, z: 0 },
+                ChunkCoord { x: 2, y: 0, z: 0 },
             ]
         );
     }
