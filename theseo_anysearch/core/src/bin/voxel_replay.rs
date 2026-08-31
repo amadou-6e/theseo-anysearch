@@ -10,12 +10,20 @@
 ///   [ / ]      — prev / next iteration (jumps to step 0 of that iter)
 ///   ← / →      — prev / next step within current iteration
 ///   Space      — play / pause (advances through all iterations to the end)
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
+use theseo_core::replay::regional::{
+    camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
+};
+use theseo_core::voxel::world::StorageCoord;
+
+const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
+const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // JSON data model — must match the Python TrajectoryWriter output
@@ -343,6 +351,83 @@ fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
     trajs
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RegionRequestKey {
+    iteration: usize,
+    step: usize,
+    center: StorageCoord,
+    radius: u32,
+}
+
+struct PendingRegion {
+    key: RegionRequestKey,
+    receiver: Receiver<Result<RegionalReplayFrame, String>>,
+}
+
+fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
+    let mut resolved = HashMap::new();
+    for replay_step in steps.iter().take(step.saturating_add(1)) {
+        for mutation in &replay_step.mutations {
+            let coordinate = StorageCoord {
+                x: mutation.coordinate[0],
+                y: mutation.coordinate[1],
+                z: mutation.coordinate[2],
+            };
+            resolved.insert(coordinate, mutation.occupied);
+        }
+    }
+    let mut mutations = resolved
+        .into_iter()
+        .map(|(coordinate, occupied)| ReplayMutation { coordinate, occupied })
+        .collect::<Vec<_>>();
+    mutations.sort_by_key(|mutation| mutation.coordinate.global_key());
+    mutations
+}
+
+fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
+    let episode = &trajectory.episode;
+    let selected = episode.steps.get(step);
+    let coordinate = if trajectory.agent_count > 1 {
+        selected
+            .and_then(|value| value.cursors.first().copied())
+            .or_else(|| episode.start_positions.first().copied().flatten())
+    } else {
+        selected
+            .map(|value| [value.cursor_x, value.cursor_y, value.cursor_z])
+            .or(episode.start_pos)
+    }?;
+    Some(StorageCoord {
+        x: u32::from(coordinate[0]),
+        y: u32::from(coordinate[1]),
+        z: u32::from(coordinate[2]),
+    })
+}
+
+fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalReplaySource>> {
+    trajectories
+        .iter()
+        .map(|trajectory| {
+            let world = trajectory.world.as_ref()?;
+            let manifest = trajectory
+                .source_path
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join(&world.manifest_path);
+            let root = manifest.parent()?;
+            match RegionalReplaySource::open(root, VIEWER_CACHE_BYTES) {
+                Ok(source) => Some(source),
+                Err(error) => {
+                    eprintln!(
+                        "failed to open compiled world for '{}': {error:?}",
+                        trajectory.source_path.display()
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Camera: holds yaw/pitch/zoom and handles projection + screen mapping
 // ---------------------------------------------------------------------------
@@ -410,20 +495,28 @@ struct Bounds { min_x: f32, max_x: f32, min_y: f32, max_y: f32 }
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
-fn depth_key(x: u16, y: u16, z: u16, cam: &Camera) -> f32 {
+fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 {
     let (sy, cy) = (cam.yaw.sin(), cam.yaw.cos());
     let (sp, cp) = (cam.pitch.sin(), cam.pitch.cos());
-    x as f32 * sy * cp + y as f32 * sp + z as f32 * cy * cp
+    let (x, y, z) = camera_relative(
+        StorageCoord { x: u32::from(x), y: u32::from(y), z: u32::from(z) },
+        origin,
+    );
+    x * sy * cp + y * sp + z * cy * cp
 }
 
 fn draw_voxel(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
+    origin: StorageCoord,
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
     outline: bool,
 ) {
-    let (x, y, z) = (cx as f32, cy as f32, cz as f32);
+    let (x, y, z) = camera_relative(
+        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+        origin,
+    );
     let h = 0.5_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
@@ -468,8 +561,11 @@ fn draw_voxel(
 }
 
 fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
-               rect: Rect, cam: &Camera, b: &Bounds) {
-    let (x, y, z) = (cx as f32, cy as f32, cz as f32);
+               origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
+    let (x, y, z) = camera_relative(
+        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+        origin,
+    );
     let h = 0.5_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
@@ -499,11 +595,15 @@ fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
 fn draw_marker(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
+    origin: StorageCoord,
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
-    draw_voxel(painter, cx, cy, cz, rect, cam, b, color, true);
-    let (x, y, z) = (cx as f32, cy as f32, cz as f32);
+    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true);
+    let (x, y, z) = camera_relative(
+        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+        origin,
+    );
     let h = 0.4_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
     let stroke = Stroke::new(2.0, Color32::WHITE);
@@ -589,6 +689,12 @@ struct VoxelReplayApp {
     /// Optional checkpoint-backed native explanation windows.
     explain_ui: Option<NativeExplainUi>,
     explain_tab: bool,
+    regional_sources: Vec<Option<RegionalReplaySource>>,
+    regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
+    pending_region: Option<PendingRegion>,
+    requested_region: Option<RegionRequestKey>,
+    visualization_radius: u32,
+    regional_error: Option<String>,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -618,6 +724,7 @@ impl VoxelReplayApp {
         let geo_voxels = trajectories.iter().map(|t| {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
+        let regional_sources = regional_sources(&trajectories);
         Self {
             camera: Camera::default(),
             occlude_agent: true,
@@ -630,6 +737,12 @@ impl VoxelReplayApp {
             current_trial: 0,
             explain_ui,
             explain_tab,
+            regional_sources,
+            regional_frame: None,
+            pending_region: None,
+            requested_region: None,
+            visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
+            regional_error: None,
         }
     }
 
@@ -646,6 +759,12 @@ impl VoxelReplayApp {
             current_trial: 0,
             explain_ui: None,
             explain_tab: false,
+            regional_sources: Vec::new(),
+            regional_frame: None,
+            pending_region: None,
+            requested_region: None,
+            visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
+            regional_error: None,
         };
         app.load_trial(0);
         app
@@ -663,7 +782,78 @@ impl VoxelReplayApp {
         self.geo_voxels = trajs.iter().map(|t| {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
+        self.regional_sources = regional_sources(&trajs);
         self.trajectories = trajs;
+        self.regional_frame = None;
+        self.pending_region = None;
+        self.requested_region = None;
+        self.regional_error = None;
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(self.iter_idx)?;
+        trajectory.world.as_ref()?;
+        Some(RegionRequestKey {
+            iteration: self.iter_idx,
+            step: self.step_idx,
+            center: selected_agent_center(trajectory, self.step_idx)?,
+            radius: self.visualization_radius,
+        })
+    }
+
+    fn update_regional_geometry(&mut self, ctx: &egui::Context) {
+        let current_key = self.current_region_key();
+        if let Some(pending) = self.pending_region.take() {
+            match pending.receiver.try_recv() {
+                Ok(Ok(frame)) => {
+                    if Some(pending.key) == current_key {
+                        self.regional_frame = Some((pending.key, frame));
+                        self.regional_error = None;
+                    }
+                }
+                Ok(Err(error)) => {
+                    if Some(pending.key) == current_key {
+                        self.regional_error = Some(error);
+                    }
+                }
+                Err(TryRecvError::Empty) => {
+                    self.pending_region = Some(pending);
+                    ctx.request_repaint();
+                    return;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.regional_error = Some("regional world loader disconnected".to_string());
+                }
+            }
+        }
+
+        let Some(key) = current_key else { return; };
+        if self.requested_region == Some(key) {
+            return;
+        }
+        let Some(source) = self
+            .regional_sources
+            .get(key.iteration)
+            .and_then(Option::as_ref)
+            .cloned()
+        else {
+            self.regional_error = Some("compiled world could not be opened".to_string());
+            return;
+        };
+        let mutations = replay_mutations_at(
+            &self.trajectories[key.iteration].episode.steps,
+            key.step,
+        );
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = source
+                .load_agent_region(key.center, key.radius, &mutations)
+                .map_err(|error| format!("regional world load failed: {error:?}"));
+            let _ = sender.send(result);
+        });
+        self.pending_region = Some(PendingRegion { key, receiver });
+        self.requested_region = Some(key);
+        ctx.request_repaint();
     }
 
     fn n_iters(&self) -> usize { self.trajectories.len() }
@@ -715,6 +905,7 @@ impl VoxelReplayApp {
 
 impl eframe::App for VoxelReplayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_regional_geometry(ctx);
 
         // ---- Collect keyboard events (before closures) ----------------------
         let kb_prev_iter   = ctx.input(|i| i.key_pressed(Key::OpenBracket));
@@ -931,6 +1122,35 @@ impl eframe::App for VoxelReplayApp {
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
             ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
+            if self.trajectories[iter_idx].world.is_some() {
+                ui.separator();
+                ui.label(egui::RichText::new("Regional world view").strong());
+                if ui.add(Slider::new(&mut self.visualization_radius, 1..=64)
+                    .text("radius")).changed()
+                {
+                    self.requested_region = None;
+                }
+                if self.pending_region.is_some() {
+                    ui.label(egui::RichText::new("Loading visible region...").weak());
+                }
+                if let Some(error) = &self.regional_error {
+                    ui.colored_label(Color32::from_rgb(230, 100, 100), error);
+                }
+                if let Some((_, frame)) = &self.regional_frame {
+                    ui.label(format!("Visible voxels: {}", frame.occupied.len()));
+                    ui.label(format!("Region load: {:.2} ms", frame.load_time.as_secs_f64() * 1_000.0));
+                    if let Some(metrics) = frame.cache_metrics {
+                        ui.label(format!(
+                            "Chunks: {} resident, {} pinned",
+                            metrics.resident_chunks, metrics.pinned_chunks
+                        ));
+                        ui.label(format!(
+                            "Pack reads: {}  hits/misses: {}/{}",
+                            metrics.pack_reads, metrics.cache_hits, metrics.cache_misses
+                        ));
+                    }
+                }
+            }
             ui.separator();
 
             ui.label(egui::RichText::new("Explainability").strong());
@@ -994,7 +1214,38 @@ impl eframe::App for VoxelReplayApp {
             (ep.steps.clone(), ep.goal_pos, ep.start_pos,
              ep.goal_positions.clone(), ep.start_positions.clone())
         };
-        let geo_list = &self.geo_voxels[iter_idx];
+        let compiled_mode = self.trajectories[iter_idx].world.is_some();
+        let active_regional_frame = self.regional_frame.as_ref().map(|(_, frame)| frame);
+        let render_origin = active_regional_frame
+            .map(|frame| frame.render_origin)
+            .or_else(|| self.current_region_key().map(|key| StorageCoord {
+                x: key.center.x.saturating_sub(key.radius),
+                y: key.center.y.saturating_sub(key.radius),
+                z: key.center.z.saturating_sub(key.radius),
+            }))
+            .unwrap_or(StorageCoord { x: 0, y: 0, z: 0 });
+        let regional_grid_size = active_regional_frame.map(|frame| {
+            let size_x = frame.region.maximum_exclusive.x - frame.region.minimum.x;
+            let size_y = frame.region.maximum_exclusive.y - frame.region.minimum.y;
+            let size_z = frame.region.maximum_exclusive.z - frame.region.minimum.z;
+            size_x.max(size_y).max(size_z) as f32
+        });
+        let display_grid_size = regional_grid_size
+            .or_else(|| compiled_mode.then_some((self.visualization_radius * 2 + 1) as f32))
+            .unwrap_or(traj_grid_size);
+        let geo_list = if compiled_mode {
+            active_regional_frame
+                .map(|frame| {
+                    frame.occupied.iter().filter_map(|coordinate| Some((
+                        u16::try_from(coordinate.x).ok()?,
+                        u16::try_from(coordinate.y).ok()?,
+                        u16::try_from(coordinate.z).ok()?,
+                    ))).collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            self.geo_voxels[iter_idx].clone()
+        };
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1013,9 +1264,9 @@ impl eframe::App for VoxelReplayApp {
             );
 
             let cam = &self.camera;
-            let b = cam.bounds(traj_grid_size);
+            let b = cam.bounds(display_grid_size);
             // Rear edges render beneath voxels and are occluded by filled space.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, traj_grid_size, false);
+            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
@@ -1051,13 +1302,13 @@ impl eframe::App for VoxelReplayApp {
             // Sort geometry back-to-front.
             let mut geo_sorted: Vec<(u16, u16, u16)> = geo_list.iter().copied().collect();
             geo_sorted.sort_by(|a, b| {
-                depth_key(a.0, a.1, a.2, cam)
-                    .partial_cmp(&depth_key(b.0, b.1, b.2, cam))
+                depth_key(a.0, a.1, a.2, render_origin, cam)
+                    .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                     .unwrap()
             });
             if !self.occlude_agent {
                 for &(x, y, z) in &geo_sorted {
-                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
+                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
                 }
             }
 
@@ -1071,7 +1322,7 @@ impl eframe::App for VoxelReplayApp {
                 for ai in 0..n_agents {
                     let trail_color = agent_trail_colors[ai % agent_trail_colors.len()];
                     let mut trail: HashSet<(u16, u16, u16)> = HashSet::new();
-                    for i in 0..trail_end {
+                    for i in 0..if compiled_mode { 0 } else { trail_end } {
                         let s = &render_steps[i];
                         if ai < s.cursors.len() {
                             let c = s.cursors[ai];
@@ -1088,12 +1339,12 @@ impl eframe::App for VoxelReplayApp {
                     }
                     let mut trail_list: Vec<(u16, u16, u16)> = trail.into_iter().collect();
                     trail_list.sort_by(|a, b| {
-                        depth_key(a.0, a.1, a.2, cam)
-                            .partial_cmp(&depth_key(b.0, b.1, b.2, cam))
+                        depth_key(a.0, a.1, a.2, render_origin, cam)
+                            .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                             .unwrap()
                     });
                     for &(x, y, z) in &trail_list {
-                        draw_voxel(&painter, x, y, z, rect, cam, &b, trail_color, true);
+                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, trail_color, true);
                     }
                 }
                 // Draw each agent's current cursor.
@@ -1101,28 +1352,28 @@ impl eframe::App for VoxelReplayApp {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
                         let c = s.cursors[ai];
-                        draw_cursor(&painter, c[0], c[1], c[2], rect, cam, &b);
+                        draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
                     }
                 }
                 // Draw start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
                     if let Some([sx, sy, sz]) = start_opt {
                         let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *sx, *sy, *sz, rect, cam, &b, col);
+                        draw_marker(&painter, *sx, *sy, *sz, render_origin, rect, cam, &b, col);
                     }
                 }
                 // Draw goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
                     if let Some([gx, gy, gz]) = goal_opt {
                         let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *gx, *gy, *gz, rect, cam, &b, col);
+                        draw_marker(&painter, *gx, *gy, *gz, render_origin, rect, cam, &b, col);
                     }
                 }
             } else {
                 // ---- Single-agent path ----
                 let agent_color = agent_trail_colors[0];
                 let mut agent_filled: HashSet<(u16, u16, u16)> = HashSet::new();
-                for i in 0..trail_end {
+                for i in 0..if compiled_mode { 0 } else { trail_end } {
                     let s = &render_steps[i];
                     if s.placed && !geometry.contains(&(s.cursor_x, s.cursor_y, s.cursor_z)) {
                         agent_filled.insert((s.cursor_x, s.cursor_y, s.cursor_z));
@@ -1130,34 +1381,34 @@ impl eframe::App for VoxelReplayApp {
                 }
                 let mut agent_list: Vec<(u16, u16, u16)> = agent_filled.into_iter().collect();
                 agent_list.sort_by(|a, b| {
-                    depth_key(a.0, a.1, a.2, cam)
-                        .partial_cmp(&depth_key(b.0, b.1, b.2, cam))
+                    depth_key(a.0, a.1, a.2, render_origin, cam)
+                        .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                         .unwrap()
                 });
                 for &(x, y, z) in &agent_list {
-                    draw_voxel(&painter, x, y, z, rect, cam, &b, agent_color, true);
+                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, agent_color, true);
                 }
 
                 if let Some([sx, sy, sz]) = render_start {
-                    draw_marker(&painter, sx, sy, sz, rect, cam, &b, tint_dark(agent_trail_colors[0]));
+                    draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
                 }
                 if let Some([gx, gy, gz]) = render_goal {
-                    draw_marker(&painter, gx, gy, gz, rect, cam, &b, tint_light(agent_trail_colors[0]));
+                    draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, rect, cam, &b);
+                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
                 }
             }
 
             if self.occlude_agent {
                 for &(x, y, z) in &geo_sorted {
-                    draw_voxel(&painter, x, y, z, rect, cam, &b, geo_color, false);
+                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
                 }
             }
 
             // Camera-facing and silhouette edges remain visible above the scene.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, traj_grid_size, true);
+            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
 
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
