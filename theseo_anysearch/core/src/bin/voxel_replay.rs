@@ -50,6 +50,29 @@ struct StepData {
     placed_per_agent: Vec<bool>,
     #[serde(default)]
     done: bool,
+    #[serde(default)]
+    mutations: Vec<MutationData>,
+}
+
+#[derive(Deserialize, Clone)]
+struct MutationData {
+    coordinate: [u32; 3],
+    occupied: bool,
+    #[serde(default)]
+    kind: u8,
+    #[serde(default)]
+    active: bool,
+    #[serde(default)]
+    reward_weight: f32,
+}
+
+#[derive(Deserialize, Clone)]
+struct WorldReferenceData {
+    identity_sha256: String,
+    schema_version: u32,
+    coordinate_type: String,
+    extent: [u32; 3],
+    manifest_path: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -133,6 +156,37 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
     let json = std::fs::read_to_string(path).ok()?;
     let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
     traj.source_path = path.to_path_buf();
+    if let Some(world) = &traj.world {
+        let manifest_path = path.parent().unwrap_or(std::path::Path::new(".")).join(
+            &world.manifest_path,
+        );
+        let manifest_text = match std::fs::read_to_string(&manifest_path) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!(
+                    "trajectory '{}' references missing compiled-world manifest '{}': {error}",
+                    path.display(), manifest_path.display()
+                );
+                return None;
+            }
+        };
+        let manifest: serde_json::Value = match serde_json::from_str(&manifest_text) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("compiled-world manifest '{}' is invalid: {error}", manifest_path.display());
+                return None;
+            }
+        };
+        if manifest.get("identity_sha256").and_then(serde_json::Value::as_str)
+            != Some(world.identity_sha256.as_str())
+        {
+            eprintln!(
+                "compiled-world identity mismatch for trajectory '{}': expected {}",
+                path.display(), world.identity_sha256
+            );
+            return None;
+        }
+    }
     if traj.episode.init_filled.is_empty() {
         if let Some(sidecar) = &traj.episode.init_filled_file {
             let npy_path = path.parent().unwrap_or(std::path::Path::new(".")).join(sidecar);
@@ -147,6 +201,10 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
 struct TrajectoryData {
     #[serde(skip)]
     source_path: PathBuf,
+    #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
+    world: Option<WorldReferenceData>,
     experiment_name: String,
     run_id: String,
     iteration: u32,

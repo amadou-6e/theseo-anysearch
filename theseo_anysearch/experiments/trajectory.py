@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import shutil
+import uuid
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -14,6 +18,32 @@ from theseo_anysearch.worlds.extent import resolve_extent
 
 if TYPE_CHECKING:
     from theseo_anysearch.experiments.output import OutputStore
+
+
+TRAJECTORY_SCHEMA_VERSION = 2
+
+
+@dataclass(frozen=True)
+class WorldArtifactReference:
+    """Portable reference to one immutable compiled base world."""
+
+    identity_sha256: str
+    schema_version: int
+    coordinate_type: str
+    extent: tuple[int, int, int]
+    manifest_path: str
+    source_root: Path
+
+
+@dataclass(frozen=True)
+class VoxelMutationData:
+    """Final mutation of one base-world coordinate after a trajectory step."""
+
+    coordinate: tuple[int, int, int]
+    occupied: bool
+    kind: int = 0
+    active: bool = False
+    reward_weight: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +82,7 @@ class VoxelStepData:
     placed: bool       # True if a new voxel was filled this step (Place or trail)
     reward_breakdown: dict[str, float] | None = None
     termination_reason: str = "in_progress"
+    mutations: list[VoxelMutationData] | None = None
 
 
 @dataclass
@@ -99,6 +130,7 @@ class VoxelEpisodeData:
     reward_breakdown: dict[str, float] | None = None
     unshaped_return: float | None = None
     final_info: dict[str, Any] | None = None
+    world: WorldArtifactReference | None = None
 
 
 @dataclass
@@ -261,6 +293,61 @@ class EpisodeRunMetrics:
 # Eval episode collector
 # ---------------------------------------------------------------------------
 
+def _compiled_world_reference(
+    env_config: dict[str, Any],
+) -> WorldArtifactReference | None:
+    raw_path = env_config.get("compiled_world_path")
+    if raw_path is None:
+        return None
+    from theseo_anysearch.worlds.compiler import validate_compiled_world
+
+    compiled = validate_compiled_world(Path(raw_path).resolve())
+    manifest = compiled.manifest
+    identity = manifest.identity_sha256
+    return WorldArtifactReference(
+        identity_sha256=identity,
+        schema_version=manifest.schema_version,
+        coordinate_type=manifest.coordinate_type,
+        extent=manifest.extent.as_tuple(),
+        manifest_path=f"../worlds/{identity}/manifest.json",
+        source_root=compiled.root,
+    )
+
+
+def _overlay_snapshot(env: Any) -> dict[tuple[int, int, int], VoxelMutationData]:
+    rust_env = getattr(env, "_rust_env", None)
+    if rust_env is None or not hasattr(rust_env, "overlay_mutations"):
+        return {}
+    mutations: dict[tuple[int, int, int], VoxelMutationData] = {}
+    for x, y, z, occupied, kind, active, reward_weight in rust_env.overlay_mutations():
+        coordinate = (int(x), int(y), int(z))
+        mutations[coordinate] = VoxelMutationData(
+            coordinate=coordinate,
+            occupied=bool(occupied),
+            kind=int(kind),
+            active=bool(active),
+            reward_weight=float(reward_weight),
+        )
+    return mutations
+
+
+def _overlay_delta(
+    previous: dict[tuple[int, int, int], VoxelMutationData],
+    current: dict[tuple[int, int, int], VoxelMutationData],
+) -> list[VoxelMutationData]:
+    changed = [
+        mutation
+        for coordinate, mutation in current.items()
+        if previous.get(coordinate) != mutation
+    ]
+    # An overlay-only placement can be removed entirely when no immutable base
+    # exists underneath it. Encode that disappearance as an empty resolution.
+    changed.extend(
+        VoxelMutationData(coordinate=coordinate, occupied=False)
+        for coordinate in previous.keys() - current.keys()
+    )
+    return sorted(changed, key=lambda mutation: mutation.coordinate)
+
 @dataclass
 class _VoxelEpisodeState:
     env_config: dict[str, Any]
@@ -271,6 +358,8 @@ class _VoxelEpisodeState:
     goal_pos: tuple[int, int, int] | None
     prev_voxel_count: int
     steps: list[VoxelStepData]
+    world: WorldArtifactReference | None
+    overlay: dict[tuple[int, int, int], VoxelMutationData]
     total_reward: float = 0.0
     final_info: dict[str, Any] | None = None
     done: bool = False
@@ -293,14 +382,16 @@ class _VoxelEpisodeState:
 
         configure_initial_waypoint_curriculum(env, env_config)
         obs, _ = env.reset(seed=seed)
+        world = _compiled_world_reference(env_config)
         init_filled: list[tuple[int, int, int]] = []
         start_pos: tuple[int, int, int] | None = None
         goal_pos: tuple[int, int, int] | None = None
         if hasattr(env, "_rust_env") and env._rust_env is not None:
-            init_filled = [
-                (int(x), int(y), int(z))
-                for x, y, z in env._rust_env.filled_voxels()
-            ]
+            if world is None:
+                init_filled = [
+                    (int(x), int(y), int(z))
+                    for x, y, z in env._rust_env.filled_voxels()
+                ]
             raw_goal = env._rust_env.goal_pos()
             if raw_goal is not None:
                 goal_pos = (
@@ -323,6 +414,8 @@ class _VoxelEpisodeState:
             goal_pos=goal_pos,
             prev_voxel_count=_environment_voxel_count(env, len(init_filled)),
             steps=[],
+            world=world,
+            overlay=_overlay_snapshot(env),
         )
 
     def advance(self, raw_action: Any) -> None:
@@ -338,6 +431,8 @@ class _VoxelEpisodeState:
         cursor = (1, 1, 1)
         if hasattr(self.env, "_rust_env") and self.env._rust_env is not None:
             cursor = self.env._rust_env.cursor_pos()
+        overlay = _overlay_snapshot(self.env)
+        mutations = _overlay_delta(self.overlay, overlay)
         self.steps.append(VoxelStepData(
             step=len(self.steps),
             action=action,
@@ -350,11 +445,13 @@ class _VoxelEpisodeState:
             placed=voxel_count > self.prev_voxel_count,
             reward_breakdown=dict(info.get("reward_breakdown", {})),
             termination_reason=str(info.get("termination_reason", "in_progress")),
+            mutations=mutations,
         ))
         self.total_reward += float(reward)
         self.prev_voxel_count = voxel_count
         self.obs = obs_next
         self.final_info = info
+        self.overlay = overlay
 
     def finish(self) -> VoxelEpisodeData:
         self.close()
@@ -382,6 +479,7 @@ class _VoxelEpisodeState:
                 for step in self.steps
             ),
             final_info=dict(final_info),
+            world=self.world,
         )
 
     def close(self) -> None:
@@ -527,7 +625,8 @@ def collect_heuristic_episode(
     )
 
     rust_env = env._rust_env
-    init_filled = [
+    world = _compiled_world_reference(env_config)
+    init_filled = [] if world is not None else [
         (int(x), int(y), int(z))
         for x, y, z in rust_env.filled_voxels()
     ]
@@ -597,6 +696,7 @@ def collect_heuristic_episode(
         success=replay.goal_reached,
         start_pos=start_pos,
         goal_pos=goal_pos,
+        world=world,
     )
 
 
@@ -613,15 +713,18 @@ def write_heuristic_trajectory(
     """Write a replayer-compatible heuristic reference trajectory."""
 
     json_path = f"trajectories/heuristic_{heuristic_type}.json"
-    init_filled_file = _init_filled_sidecar_path(json_path)
-    _write_init_filled_sidecar(store, init_filled_file, episode.init_filled)
+    init_filled_file = _prepare_geometry_artifact(store, json_path, episode)
     payload = _build_payload(
         episode,
         iteration,
         episode.total_reward,
         experiment_name,
         run_id,
-        init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+        init_filled_file=(
+            init_filled_file.rsplit("/", 1)[-1]
+            if init_filled_file is not None
+            else None
+        ),
     )
     payload["heuristic"] = {"type": heuristic_type, "weight": weight}
     store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
@@ -656,6 +759,7 @@ class MultiVoxelStepData:
     done: bool
     cursors: list[tuple[int, int, int]]   # per-agent cursor AFTER step
     placed: list[bool]           # per-agent: True if a new voxel was filled
+    mutations: list[VoxelMutationData] | None = None
 
 
 @dataclass
@@ -687,6 +791,8 @@ class MultiVoxelEpisodeData:
     goal_positions: list[tuple[int, int, int] | None]
     init_filled: list[tuple[int, int, int]]  # geometry voxels at episode start
     obs_mode: str = "scalar"
+    extent: tuple[int, int, int] = (32, 32, 32)
+    world: WorldArtifactReference | None = None
 
 
 def collect_multi_eval_episode(
@@ -705,13 +811,15 @@ def collect_multi_eval_episode(
         env = MultiVoxelEnv(env_config)
 
     obs, _ = env.reset(seed=seed)
+    world = _compiled_world_reference(env_config)
     agent_count = len(env.possible_agents)
 
     init_filled: list[tuple[int, int, int]] = []
     start_positions: list[tuple[int, int, int] | None] = [None] * agent_count
     goal_positions:  list[tuple[int, int, int] | None] = [None] * agent_count
     if hasattr(env, "_rust_env") and env._rust_env is not None:
-        init_filled = [(int(x), int(y), int(z)) for x, y, z in env._rust_env.filled_voxels()]
+        if world is None:
+            init_filled = [(int(x), int(y), int(z)) for x, y, z in env._rust_env.filled_voxels()]
         for i, pos in enumerate(env._rust_env.cursor_positions()):
             start_positions[i] = (int(pos[0]), int(pos[1]), int(pos[2]))
         for i, pos in enumerate(env._rust_env.goal_positions()):
@@ -723,6 +831,7 @@ def collect_multi_eval_episode(
     steps: list[MultiVoxelStepData] = []
     total_rewards = [0.0] * agent_count
     prev_cursor = {a: start_positions[i] for i, a in enumerate(env.possible_agents)}
+    overlay = _overlay_snapshot(env)
 
     step_count = 0
     while env.agents:
@@ -753,6 +862,7 @@ def collect_multi_eval_episode(
         acts: list[int] = []
         rews: list[float] = []
         native_cursors = env._rust_env.cursor_positions()
+        current_overlay = _overlay_snapshot(env)
 
         for i, agent_id in enumerate(env.possible_agents):
             a = actions.get(agent_id, 0)
@@ -778,7 +888,9 @@ def collect_multi_eval_episode(
             done=done,
             cursors=cursors,
             placed=placed,
+            mutations=_overlay_delta(overlay, current_overlay),
         ))
+        overlay = current_overlay
 
         step_count += 1
         obs = obs_next
@@ -797,6 +909,8 @@ def collect_multi_eval_episode(
         goal_positions=goal_positions,
         init_filled=init_filled,
         obs_mode=str(env_config.get("obs_mode", "scalar")),
+        extent=resolve_extent(env_config),
+        world=world,
     )
 
 
@@ -807,9 +921,10 @@ def _build_multi_payload(
     experiment_name: str,
     run_id: str,
     *,
-    init_filled_file: str,
+    init_filled_file: str | None,
 ) -> dict:
-    return {
+    payload = {
+        "schema_version": TRAJECTORY_SCHEMA_VERSION,
         "experiment_name": experiment_name,
         "run_id": run_id,
         "iteration": iteration,
@@ -817,11 +932,11 @@ def _build_multi_payload(
         "agent_count": episode.agent_count,
         "max_steps": episode.max_steps,
         "obs_mode": episode.obs_mode,
+        "extent": list(episode.extent),
         "episode": {
             "total_reward": sum(episode.total_rewards),
             "steps_taken": len(episode.steps),
             "success": len(episode.steps) < episode.max_steps,
-            "init_filled_file": init_filled_file,
             "start_positions": [list(p) if p else None for p in episode.start_positions],
             "goal_positions":  [list(p) if p else None for p in episode.goal_positions],
             "steps": [
@@ -832,11 +947,14 @@ def _build_multi_payload(
                     "done":            s.done,
                     "cursors":         [list(c) for c in s.cursors],
                     "placed_per_agent": s.placed,
+                    "mutations": _mutation_payloads(s.mutations),
                 }
                 for s in episode.steps
             ],
         },
     }
+    _attach_world_or_legacy_geometry(payload, episode.world, init_filled_file)
+    return payload
 
 
 class MultiTrajectoryWriter:
@@ -861,15 +979,18 @@ class MultiTrajectoryWriter:
         experiment_name: str,
         run_id: str,
     ) -> None:
-        init_filled_file = _init_filled_sidecar_path(json_path)
-        _write_init_filled_sidecar(self._store, init_filled_file, episode.init_filled)
+        init_filled_file = _prepare_geometry_artifact(self._store, json_path, episode)
         payload = _build_multi_payload(
             episode,
             iteration,
             episode_reward_mean,
             experiment_name,
             run_id,
-            init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+            init_filled_file=(
+                init_filled_file.rsplit("/", 1)[-1]
+                if init_filled_file is not None
+                else None
+            ),
         )
         self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
 
@@ -1027,15 +1148,18 @@ class TrajectoryWriter:
         experiment_name: str,
         run_id: str,
     ) -> None:
-        init_filled_file = _init_filled_sidecar_path(json_path)
-        _write_init_filled_sidecar(self._store, init_filled_file, episode.init_filled)
+        init_filled_file = _prepare_geometry_artifact(self._store, json_path, episode)
         payload = _build_payload(
             episode,
             iteration,
             episode_reward_mean,
             experiment_name,
             run_id,
-            init_filled_file=init_filled_file.rsplit("/", 1)[-1],
+            init_filled_file=(
+                init_filled_file.rsplit("/", 1)[-1]
+                if init_filled_file is not None
+                else None
+            ),
         )
         self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
 
@@ -1099,9 +1223,10 @@ def _build_payload(
     experiment_name: str,
     run_id: str,
     *,
-    init_filled_file: str,
+    init_filled_file: str | None,
 ) -> dict:
-    return {
+    payload = {
+        "schema_version": TRAJECTORY_SCHEMA_VERSION,
         "experiment_name": experiment_name,
         "run_id": run_id,
         "iteration": iteration,
@@ -1115,7 +1240,6 @@ def _build_payload(
             "total_reward": episode.total_reward,
             "steps_taken": len(episode.steps),
             "success": episode.success,
-            "init_filled_file": init_filled_file,
             "start_pos": list(episode.start_pos) if episode.start_pos else None,
             "goal_pos": list(episode.goal_pos) if episode.goal_pos else None,
             "steps": [
@@ -1129,11 +1253,96 @@ def _build_payload(
                     "cursor_z": s.cursor_z,
                     "voxel_count": s.voxel_count,
                     "placed": s.placed,
+                    "mutations": _mutation_payloads(s.mutations),
                 }
                 for s in episode.steps
             ],
         },
     }
+    _attach_world_or_legacy_geometry(payload, episode.world, init_filled_file)
+    return payload
+
+
+def _mutation_payloads(
+    mutations: list[VoxelMutationData] | None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "coordinate": list(mutation.coordinate),
+            "occupied": mutation.occupied,
+            "kind": mutation.kind,
+            "active": mutation.active,
+            "reward_weight": mutation.reward_weight,
+        }
+        for mutation in mutations or []
+    ]
+
+
+def _attach_world_or_legacy_geometry(
+    payload: dict[str, Any],
+    world: WorldArtifactReference | None,
+    init_filled_file: str | None,
+) -> None:
+    if world is None:
+        if init_filled_file is None:
+            raise ValueError("legacy trajectory geometry requires an init_filled sidecar")
+        payload["episode"]["init_filled_file"] = init_filled_file
+        return
+    payload["world"] = {
+        "identity_sha256": world.identity_sha256,
+        "schema_version": world.schema_version,
+        "coordinate_type": world.coordinate_type,
+        "extent": list(world.extent),
+        "manifest_path": world.manifest_path,
+    }
+
+
+def _link_or_copy(source: str, destination: str) -> str:
+    try:
+        os.link(source, destination)
+        return destination
+    except OSError:
+        return shutil.copy2(source, destination)
+
+
+def _archive_compiled_world(
+    store: "OutputStore",
+    world: WorldArtifactReference,
+) -> None:
+    from theseo_anysearch.worlds.compiler import validate_compiled_world
+
+    destination = store.root.joinpath("worlds", world.identity_sha256)
+    if destination.is_dir():
+        validate_compiled_world(destination)
+        return
+    temporary = store.root.joinpath(
+        "worlds", f".{world.identity_sha256}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(world.source_root, temporary, copy_function=_link_or_copy)
+    validate_compiled_world(temporary)
+    try:
+        os.replace(temporary, destination)
+    except OSError:
+        if not destination.is_dir():
+            raise
+        shutil.rmtree(temporary)
+    archived = validate_compiled_world(destination)
+    if archived.manifest.identity_sha256 != world.identity_sha256:
+        raise ValueError("archived compiled world identity does not match trajectory")
+
+
+def _prepare_geometry_artifact(
+    store: "OutputStore",
+    json_path: str,
+    episode: VoxelEpisodeData | MultiVoxelEpisodeData,
+) -> str | None:
+    if episode.world is not None:
+        _archive_compiled_world(store, episode.world)
+        return None
+    init_filled_file = _init_filled_sidecar_path(json_path)
+    _write_init_filled_sidecar(store, init_filled_file, episode.init_filled)
+    return init_filled_file
 
 
 def _init_filled_sidecar_path(json_path: str) -> str:

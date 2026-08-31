@@ -16,12 +16,20 @@ import pytest
 from theseo_anysearch.experiments.output import OutputStore
 from theseo_anysearch.experiments.trajectory import (
     EpisodeRunMetrics,
+    MultiTrajectoryWriter,
+    MultiVoxelEpisodeData,
+    MultiVoxelStepData,
     TrajectoryWriter,
     VoxelEpisodeData,
     VoxelStepData,
+    VoxelMutationData,
+    WorldArtifactReference,
     _build_payload,
+    _overlay_delta,
     collect_eval_episode,
 )
+from theseo_anysearch.worlds.compiler import BoxSource, compile_world
+from theseo_anysearch.worlds.manifest import WorldExtent
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +262,125 @@ class TestPayload:
         assert data["episode"]["init_filled_file"].endswith("_init_filled.npy")
         sidecar = Path("trajectories", data["episode"]["init_filled_file"])
         assert store.exists(str(sidecar))
+
+    def test_compiled_world_uses_reference_and_delta_without_base_sidecar(
+        self, tmp_path: Path
+    ) -> None:
+        cache = tmp_path.joinpath("cache")
+        compiled = compile_world(
+            [BoxSource((1, 1, 1), (2, 2, 2))],
+            WorldExtent(x=60_000, y=40_000, z=20_000),
+            cache,
+        )
+        episode = _make_episode(n_steps=1)
+        identity = compiled.manifest.identity_sha256
+        episode.world = WorldArtifactReference(
+            identity_sha256=identity,
+            schema_version=compiled.manifest.schema_version,
+            coordinate_type=compiled.manifest.coordinate_type,
+            extent=compiled.manifest.extent.as_tuple(),
+            manifest_path=f"../worlds/{identity}/manifest.json",
+            source_root=compiled.root,
+        )
+        episode.extent = (60_000, 40_000, 20_000)
+        episode.steps[0].mutations = [
+            VoxelMutationData(
+                coordinate=(59_999, 39_999, 19_999),
+                occupied=True,
+                kind=5,
+                active=True,
+                reward_weight=1.0,
+            )
+        ]
+        store = OutputStore(tmp_path.joinpath("run"))
+        writer = TrajectoryWriter(store, trajectory_every=1, best_trajectory=False)
+        writer.record(episode)
+        writer.on_iteration_end(1, 1.0, "large", "run")
+
+        payload = store.read_json("trajectories/iter_000001.json")
+        assert payload["schema_version"] == 2
+        assert payload["world"]["identity_sha256"] == identity
+        assert payload["world"]["extent"] == [60_000, 40_000, 20_000]
+        assert "init_filled_file" not in payload["episode"]
+        assert payload["episode"]["steps"][0]["mutations"][0]["coordinate"] == [
+            59_999,
+            39_999,
+            19_999,
+        ]
+        assert store.exists(f"worlds/{identity}/manifest.json")
+        assert not any(
+            path.endswith("_init_filled.npy") for path in store.list("trajectories")
+        )
+
+    def test_overlay_delta_encodes_changes_and_disappearances(self) -> None:
+        old = {
+            (1, 2, 3): VoxelMutationData((1, 2, 3), True, 5, True, 1.0),
+            (4, 5, 6): VoxelMutationData((4, 5, 6), True, 5, True, 1.0),
+        }
+        new = {
+            (1, 2, 3): VoxelMutationData((1, 2, 3), False),
+            (7, 8, 9): VoxelMutationData((7, 8, 9), True, 1, True, 0.5),
+        }
+
+        assert _overlay_delta(old, new) == [
+            VoxelMutationData((1, 2, 3), False),
+            VoxelMutationData((4, 5, 6), False),
+            VoxelMutationData((7, 8, 9), True, 1, True, 0.5),
+        ]
+
+    def test_multi_agent_compiled_world_round_trips_overlay_deltas(
+        self, tmp_path: Path
+    ) -> None:
+        compiled = compile_world(
+            [BoxSource((1, 1, 1), (1, 1, 1))],
+            WorldExtent(x=64, y=48, z=32),
+            tmp_path.joinpath("cache"),
+        )
+        identity = compiled.manifest.identity_sha256
+        world = WorldArtifactReference(
+            identity_sha256=identity,
+            schema_version=1,
+            coordinate_type="u32",
+            extent=(64, 48, 32),
+            manifest_path=f"../worlds/{identity}/manifest.json",
+            source_root=compiled.root,
+        )
+        episode = MultiVoxelEpisodeData(
+            agent_count=2,
+            max_steps=5,
+            steps=[
+                MultiVoxelStepData(
+                    step=0,
+                    actions=[1, 2],
+                    rewards=[0.5, 0.25],
+                    done=False,
+                    cursors=[(2, 2, 2), (3, 3, 3)],
+                    placed=[True, False],
+                    mutations=[VoxelMutationData((2, 2, 2), True, 5, True, 1.0)],
+                )
+            ],
+            total_rewards=[0.5, 0.25],
+            start_positions=[(1, 2, 2), (3, 3, 3)],
+            goal_positions=[(4, 2, 2), None],
+            init_filled=[],
+            extent=(64, 48, 32),
+            world=world,
+        )
+        store = OutputStore(tmp_path.joinpath("run"))
+        writer = MultiTrajectoryWriter(
+            store, trajectory_every=1, best_trajectory=False
+        )
+        writer.record(episode)
+        writer.on_iteration_end(1, 0.75, "multi", "run")
+
+        payload = store.read_json("trajectories/iter_000001.json")
+        assert payload["world"]["identity_sha256"] == identity
+        assert payload["episode"]["steps"][0]["mutations"][0]["coordinate"] == [
+            2,
+            2,
+            2,
+        ]
+        assert "init_filled_file" not in payload["episode"]
 
 
 # ---------------------------------------------------------------------------
