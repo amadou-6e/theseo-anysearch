@@ -30,6 +30,12 @@ pub struct DiskCacheMetrics {
     pub pinned_chunks: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexedChunk {
+    pub coordinate: (u32, u32, u32),
+    pub occupied_voxels: u64,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct AxisExtent {
     x: u32,
@@ -78,6 +84,7 @@ struct ChunkLocation {
     byte_length: usize,
     shape: WorldExtent,
     sha256: [u8; 32],
+    occupied_voxels: u64,
 }
 
 #[derive(Debug)]
@@ -355,6 +362,7 @@ impl DiskBackedWorld {
                     byte_length: chunk.byte_length,
                     shape,
                     sha256: parse_sha256(&chunk.sha256)?,
+                    occupied_voxels: chunk.occupied_voxels,
                 },
             );
             block_count = block_count
@@ -506,6 +514,24 @@ impl DiskBackedWorld {
             .lock()
             .expect("disk cache mutex poisoned")
             .metrics
+    }
+
+    pub fn indexed_chunks(&self) -> Vec<IndexedChunk> {
+        let mut chunks = self
+            .inner
+            .locations
+            .iter()
+            .map(|(coordinate, location)| IndexedChunk {
+                coordinate: *coordinate,
+                occupied_voxels: location.occupied_voxels,
+            })
+            .collect::<Vec<_>>();
+        chunks.sort_by_key(|chunk| chunk.coordinate);
+        chunks
+    }
+
+    pub fn chunk_shape(&self) -> WorldExtent {
+        self.inner.chunk_shape
     }
 }
 

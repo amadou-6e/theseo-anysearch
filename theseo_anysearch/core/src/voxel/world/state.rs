@@ -2,8 +2,8 @@ use super::{
     api::{World, WorldError},
     block::{Block, BlockUpdate},
     BoundedRegion, ChunkedWorld, DiskBackedWorld, DiskCacheMetrics, DiskResidentGuard,
-    HashMapWorld, InMemoryResidentGuard, PrefetchRequest, StorageCoord, WorldAccessError,
-    WorldExtent, WorldMutation, WorldRead, WorldResidency,
+    HashMapWorld, InMemoryResidentGuard, IndexedChunk, PrefetchRequest, StorageCoord,
+    WorldAccessError, WorldExtent, WorldMutation, WorldRead, WorldResidency,
 };
 use std::{collections::HashMap, path::Path, sync::Arc};
 
@@ -132,6 +132,20 @@ impl WorldState {
     pub fn disk_cache_metrics(&self) -> Option<DiskCacheMetrics> {
         match self.base.backend.as_ref() {
             WorldBackend::DiskBacked(world) => Some(world.metrics()),
+            _ => None,
+        }
+    }
+
+    pub fn indexed_chunks(&self) -> Option<Vec<IndexedChunk>> {
+        match self.base.backend.as_ref() {
+            WorldBackend::DiskBacked(world) => Some(world.indexed_chunks()),
+            _ => None,
+        }
+    }
+
+    pub fn disk_chunk_shape(&self) -> Option<WorldExtent> {
+        match self.base.backend.as_ref() {
+            WorldBackend::DiskBacked(world) => Some(world.chunk_shape()),
             _ => None,
         }
     }
