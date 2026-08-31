@@ -436,6 +436,11 @@ fn mutation_revision(mutations: &[ReplayMutation]) -> u64 {
     revision
 }
 
+fn centered_box_minimum(focus: (f32, f32, f32), size: f32) -> (f32, f32, f32) {
+    let half = size * 0.5;
+    (focus.0 - half, focus.1 - half, focus.2 - half)
+}
+
 #[cfg(test)]
 mod regional_request_tests {
     use super::*;
@@ -479,6 +484,17 @@ mod regional_request_tests {
         let screen = camera.to_screen(focus.0, focus.1, focus.2, rect, &bounds);
         assert!((screen.x - rect.center().x).abs() < f32::EPSILON);
         assert!((screen.y - rect.center().y).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn visible_region_box_is_centered_on_the_agent() {
+        let focus = (27.0, 11.0, 19.0);
+        let size = 33.0;
+        let minimum = centered_box_minimum(focus, size);
+        assert_eq!(
+            (minimum.0 + size * 0.5, minimum.1 + size * 0.5, minimum.2 + size * 0.5),
+            focus
+        );
     }
 }
 
@@ -795,25 +811,28 @@ fn draw_grid_bounds_layer(
     rect: Rect,
     cam: &Camera,
     b: &Bounds,
+    minimum: (f32, f32, f32),
     grid_size: f32,
     draw_front: bool,
 ) {
     let shadow = Stroke::new(2.5, Color32::from_rgba_premultiplied(0, 0, 0, 180));
     let stroke = Stroke::new(1.25, Color32::from_rgb(80, 255, 140));
-    let lo = 0.5_f32;
-    let hi = grid_size + 0.5;
+    let lo = minimum;
+    let hi = (lo.0 + grid_size, lo.1 + grid_size, lo.2 + grid_size);
     let corners = [
-        (lo, lo, lo), (hi, lo, lo), (hi, hi, lo), (lo, hi, lo),
-        (lo, lo, hi), (hi, lo, hi), (hi, hi, hi), (lo, hi, hi),
+        (lo.0, lo.1, lo.2), (hi.0, lo.1, lo.2),
+        (hi.0, hi.1, lo.2), (lo.0, hi.1, lo.2),
+        (lo.0, lo.1, hi.2), (hi.0, lo.1, hi.2),
+        (hi.0, hi.1, hi.2), (lo.0, hi.1, hi.2),
     ];
     let edges = [
         (0, 1), (1, 2), (2, 3), (3, 0),
         (4, 5), (5, 6), (6, 7), (7, 4),
         (0, 4), (1, 5), (2, 6), (3, 7),
     ];
-    let near_x = if cam.yaw.sin() > 0.0 { hi } else { lo };
-    let near_y = if cam.pitch.sin() > 0.0 { hi } else { lo };
-    let near_z = if cam.yaw.cos() > 0.0 { hi } else { lo };
+    let near_x = if cam.yaw.sin() > 0.0 { hi.0 } else { lo.0 };
+    let near_y = if cam.pitch.sin() > 0.0 { hi.1 } else { lo.1 };
+    let near_z = if cam.yaw.cos() > 0.0 { hi.2 } else { lo.2 };
     let pts: Vec<Pos2> = corners.iter()
         .map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b))
         .collect();
@@ -1574,6 +1593,14 @@ impl eframe::App for VoxelReplayApp {
             .then(|| selected_agent_center(&self.trajectories[iter_idx], step_idx))
             .flatten()
             .map(|center| camera_relative(center, render_origin));
+        let visible_box_size = if compiled_mode {
+            (self.visualization_radius * 2 + 1) as f32
+        } else {
+            display_grid_size
+        };
+        let visible_box_minimum = render_focus
+            .map(|focus| centered_box_minimum(focus, visible_box_size))
+            .unwrap_or((0.5, 0.5, 0.5));
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1597,7 +1624,15 @@ impl eframe::App for VoxelReplayApp {
                 |focus| cam.bounds_centered_on(display_grid_size, focus),
             );
             // Rear edges render beneath voxels and are occluded by filled space.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
+            draw_grid_bounds_layer(
+                &painter,
+                rect,
+                cam,
+                &b,
+                visible_box_minimum,
+                visible_box_size,
+                false,
+            );
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
@@ -1767,7 +1802,15 @@ impl eframe::App for VoxelReplayApp {
             }
 
             // Camera-facing and silhouette edges remain visible above the scene.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
+            draw_grid_bounds_layer(
+                &painter,
+                rect,
+                cam,
+                &b,
+                visible_box_minimum,
+                visible_box_size,
+                true,
+            );
 
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
