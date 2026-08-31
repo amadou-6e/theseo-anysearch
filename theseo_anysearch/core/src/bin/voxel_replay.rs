@@ -20,6 +20,10 @@ use theseo_core::replay::explain::NativeExplainUi;
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
+use theseo_core::replay::render_cache::{
+    chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
+    RenderCacheKey,
+};
 use theseo_core::voxel::world::StorageCoord;
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
@@ -194,6 +198,11 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
             );
             return None;
         }
+        traj.world_chunk_edge = manifest.get("chunk_shape")
+            .and_then(|shape| shape.get("x"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(32);
     }
     if traj.episode.init_filled.is_empty() {
         if let Some(sidecar) = &traj.episode.init_filled_file {
@@ -209,6 +218,8 @@ fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
 struct TrajectoryData {
     #[serde(skip)]
     source_path: PathBuf,
+    #[serde(skip)]
+    world_chunk_edge: u32,
     #[serde(default)]
     schema_version: u32,
     #[serde(default)]
@@ -560,6 +571,48 @@ fn draw_voxel(
     painter.add(Shape::convex_polygon(top_face,  top_col,   stroke));
 }
 
+fn draw_exposed_face(
+    painter: &egui::Painter,
+    face: ExposedFace,
+    origin: StorageCoord,
+    rect: Rect,
+    cam: &Camera,
+    bounds: &Bounds,
+    base: Color32,
+) {
+    let visible = match face.direction {
+        FaceDirection::NegativeX => cam.yaw.sin() < 0.0,
+        FaceDirection::PositiveX => cam.yaw.sin() > 0.0,
+        FaceDirection::NegativeY => cam.pitch.sin() < 0.0,
+        FaceDirection::PositiveY => cam.pitch.sin() > 0.0,
+        FaceDirection::NegativeZ => cam.yaw.cos() < 0.0,
+        FaceDirection::PositiveZ => cam.yaw.cos() > 0.0,
+    };
+    if !visible { return; }
+    let (x, y, z) = camera_relative(face.voxel, origin);
+    let h = 0.5_f32;
+    let corner = |dx, dy, dz| cam.to_screen(x + dx, y + dy, z + dz, rect, bounds);
+    let points = match face.direction {
+        FaceDirection::NegativeX => vec![corner(-h,-h,-h), corner(-h,h,-h), corner(-h,h,h), corner(-h,-h,h)],
+        FaceDirection::PositiveX => vec![corner(h,-h,-h), corner(h,-h,h), corner(h,h,h), corner(h,h,-h)],
+        FaceDirection::NegativeY => vec![corner(-h,-h,-h), corner(-h,-h,h), corner(h,-h,h), corner(h,-h,-h)],
+        FaceDirection::PositiveY => vec![corner(-h,h,-h), corner(h,h,-h), corner(h,h,h), corner(-h,h,h)],
+        FaceDirection::NegativeZ => vec![corner(-h,-h,-h), corner(h,-h,-h), corner(h,h,-h), corner(-h,h,-h)],
+        FaceDirection::PositiveZ => vec![corner(-h,-h,h), corner(-h,h,h), corner(h,h,h), corner(h,-h,h)],
+    };
+    let adjustment = match face.direction {
+        FaceDirection::NegativeY | FaceDirection::PositiveY => 40,
+        FaceDirection::NegativeX | FaceDirection::PositiveX => -10,
+        FaceDirection::NegativeZ | FaceDirection::PositiveZ => -40,
+    };
+    let color = Color32::from_rgb(
+        (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
+        (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
+        (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
+    );
+    painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
 fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
                origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
     let (x, y, z) = camera_relative(
@@ -695,6 +748,8 @@ struct VoxelReplayApp {
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
+    render_cache: ChunkRenderCache,
+    regional_faces: Vec<ExposedFace>,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -743,6 +798,8 @@ impl VoxelReplayApp {
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
+            render_cache: ChunkRenderCache::default(),
+            regional_faces: Vec::new(),
         }
     }
 
@@ -765,6 +822,8 @@ impl VoxelReplayApp {
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
+            render_cache: ChunkRenderCache::default(),
+            regional_faces: Vec::new(),
         };
         app.load_trial(0);
         app
@@ -788,6 +847,7 @@ impl VoxelReplayApp {
         self.pending_region = None;
         self.requested_region = None;
         self.regional_error = None;
+        self.regional_faces.clear();
     }
 
     fn current_region_key(&self) -> Option<RegionRequestKey> {
@@ -801,12 +861,39 @@ impl VoxelReplayApp {
         })
     }
 
+    fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
+        let chunk_edge = self.trajectories[key.iteration].world_chunk_edge.max(1);
+        let occupied = frame.occupied.iter().copied().collect::<HashSet<_>>();
+        let chunks = frame.occupied.iter().map(|coordinate| ChunkCoord {
+            x: coordinate.x / chunk_edge,
+            y: coordinate.y / chunk_edge,
+            z: coordinate.z / chunk_edge,
+        }).collect::<HashSet<_>>();
+        let identity = self.trajectories[key.iteration].world.as_ref()
+            .map(|world| world.identity_sha256.clone()).unwrap_or_default();
+        self.regional_faces.clear();
+        for chunk in chunks {
+            let data = self.render_cache.get_or_build(
+                RenderCacheKey {
+                    world_identity: identity.clone(),
+                    chunk,
+                    overlay_revision: chunk_occupancy_revision(chunk, &occupied, chunk_edge),
+                    settings_revision: 0,
+                },
+                &occupied,
+                chunk_edge,
+            );
+            self.regional_faces.extend_from_slice(&data.faces);
+        }
+    }
+
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
         let current_key = self.current_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(frame)) => {
                     if Some(pending.key) == current_key {
+                        self.cache_regional_faces(pending.key, &frame);
                         self.regional_frame = Some((pending.key, frame));
                         self.regional_error = None;
                     }
@@ -1138,6 +1225,11 @@ impl eframe::App for VoxelReplayApp {
                 }
                 if let Some((_, frame)) = &self.regional_frame {
                     ui.label(format!("Visible voxels: {}", frame.occupied.len()));
+                    ui.label(format!("Exposed faces: {}", self.regional_faces.len()));
+                    ui.label(format!(
+                        "Mesh cache builds/hits: {}/{}",
+                        self.render_cache.builds(), self.render_cache.hits()
+                    ));
                     ui.label(format!("Region load: {:.2} ms", frame.load_time.as_secs_f64() * 1_000.0));
                     if let Some(metrics) = frame.cache_metrics {
                         ui.label(format!(
@@ -1306,9 +1398,23 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                     .unwrap()
             });
+            let mut face_sorted = self.regional_faces.clone();
+            face_sorted.sort_by(|a, b| {
+                let a = a.voxel;
+                let b = b.voxel;
+                depth_key(a.x as u16, a.y as u16, a.z as u16, render_origin, cam)
+                    .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
+                    .unwrap()
+            });
             if !self.occlude_agent {
-                for &(x, y, z) in &geo_sorted {
-                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                if compiled_mode {
+                    for &face in &face_sorted {
+                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                    }
+                } else {
+                    for &(x, y, z) in &geo_sorted {
+                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                    }
                 }
             }
 
@@ -1402,8 +1508,14 @@ impl eframe::App for VoxelReplayApp {
             }
 
             if self.occlude_agent {
-                for &(x, y, z) in &geo_sorted {
-                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                if compiled_mode {
+                    for &face in &face_sorted {
+                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                    }
+                } else {
+                    for &(x, y, z) in &geo_sorted {
+                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                    }
                 }
             }
 
