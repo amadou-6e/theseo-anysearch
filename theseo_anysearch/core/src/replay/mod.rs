@@ -1,3 +1,6 @@
 //! Native replay-viewer components.
 
 pub mod explain;
+pub mod live;
+pub mod regional;
+pub mod render_cache;

@@ -27,6 +27,14 @@ path = "src/bin/pool_explorer.rs"
 name = "world-bench"
 path = "src/bin/world_bench.rs"
 
+[[bin]]
+name = "render-cache-bench"
+path = "src/bin/render_cache_bench.rs"
+
+[[bin]]
+name = "regional-replay-bench"
+path = "src/bin/regional_replay_bench.rs"
+
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
