@@ -221,6 +221,35 @@ impl PyMultiVoxelEnv {
         self.inner.world.iter_filled().collect()
     }
 
+    /// Return the resolved episode overlay without enumerating immutable base geometry.
+    pub fn overlay_mutations(&self) -> Vec<(u32, u32, u32, bool, u8, bool, f32)> {
+        self.inner
+            .world
+            .overlay_mutations()
+            .into_iter()
+            .map(|mutation| match mutation.block {
+                Some(block) => (
+                    mutation.coordinate.x,
+                    mutation.coordinate.y,
+                    mutation.coordinate.z,
+                    true,
+                    block.kind,
+                    block.active,
+                    block.reward_weight,
+                ),
+                None => (
+                    mutation.coordinate.x,
+                    mutation.coordinate.y,
+                    mutation.coordinate.z,
+                    false,
+                    0,
+                    false,
+                    0.0,
+                ),
+            })
+            .collect()
+    }
+
     /// Returns each agent's current cursor position.
     pub fn cursor_positions(&self) -> Vec<(u16, u16, u16)> {
         self.inner.agents.iter().map(|a| a.cursor).collect()

@@ -46,6 +46,12 @@ enum OverlayEntry {
     Tombstone,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverlayMutation {
+    pub coordinate: StorageCoord,
+    pub block: Option<Block>,
+}
+
 #[derive(Clone, Debug)]
 pub struct WorldState {
     base: WorldHandle,
@@ -53,6 +59,22 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub fn overlay_mutations(&self) -> Vec<OverlayMutation> {
+        let mut mutations = self
+            .overlay
+            .iter()
+            .map(|(coordinate, entry)| OverlayMutation {
+                coordinate: *coordinate,
+                block: match entry {
+                    OverlayEntry::Block(block) => Some(block.clone()),
+                    OverlayEntry::Tombstone => None,
+                },
+            })
+            .collect::<Vec<_>>();
+        mutations.sort_by_key(|mutation| mutation.coordinate.global_key());
+        mutations
+    }
+
     pub fn new() -> Self {
         Self::new_chunked(32)
     }
@@ -726,5 +748,36 @@ mod tests {
         world.remove_block((2, 2, 2)).unwrap();
         let hit = world.raycast(ray).unwrap().unwrap();
         assert_eq!(hit.coordinate, StorageCoord { x: 3, y: 3, z: 3 });
+    }
+
+    #[test]
+    fn overlay_mutations_report_blocks_and_tombstones_in_stable_order() {
+        let mut world = WorldState::new_chunked(16);
+        world.replace_base_blocks([(
+            (2, 2, 2),
+            Block {
+                kind: 1,
+                active: true,
+                reward_weight: 0.25,
+            },
+        )]);
+        world.remove_block((2, 2, 2)).unwrap();
+        world
+            .set_block(
+                (1, 1, 1),
+                Block {
+                    kind: 5,
+                    active: true,
+                    reward_weight: 1.0,
+                },
+            )
+            .unwrap();
+
+        let mutations = world.overlay_mutations();
+        assert_eq!(mutations.len(), 2);
+        assert_eq!(mutations[0].coordinate, StorageCoord { x: 1, y: 1, z: 1 });
+        assert_eq!(mutations[0].block.as_ref().map(|block| block.kind), Some(5));
+        assert_eq!(mutations[1].coordinate, StorageCoord { x: 2, y: 2, z: 2 });
+        assert_eq!(mutations[1].block, None);
     }
 }
