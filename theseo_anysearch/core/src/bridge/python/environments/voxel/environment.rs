@@ -630,7 +630,8 @@ impl PyVoxelEnv {
             .collect()
     }
 
-    /// Query one public one-based coordinate without exposing backend chunks.
+    /// Query one public gameplay coordinate against resolved base-plus-overlay state.
+    /// Gameplay coordinates are widened directly; no +/-1 storage shift is applied.
     pub fn world_occupied(&self, coordinate: (u32, u32, u32)) -> PyResult<bool> {
         use crate::voxel::world::{StorageCoord, WorldRead};
         if coordinate.0 == 0
@@ -644,7 +645,6 @@ impl PyVoxelEnv {
         }
         self.inner
             .world()
-            .world_handle()
             .get_block_value(StorageCoord {
                 x: coordinate.0,
                 y: coordinate.1,
@@ -654,7 +654,8 @@ impl PyVoxelEnv {
             .map_err(|error| PyValueError::new_err(format!("{error:?}")))
     }
 
-    /// Query occupied public coordinates in a bounded one-based region.
+    /// Query resolved occupied gameplay coordinates in a bounded region.
+    /// Gameplay coordinates are widened directly; no +/-1 storage shift is applied.
     pub fn world_occupied_in_region(
         &self,
         minimum: (u32, u32, u32),
@@ -682,7 +683,6 @@ impl PyVoxelEnv {
         let values = self
             .inner
             .world()
-            .world_handle()
             .blocks_in_region(region)
             .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
         if values.len() > maximum_results {
@@ -976,5 +976,64 @@ mod tests {
         let types = env.radial_obs_types(16);
         assert_eq!(obs[4], 1.0);
         assert_eq!(types[4], f32::from(BLOCK_KIND_OCCUPIED));
+    }
+
+    #[test]
+    fn world_queries_and_overlay_export_agree_for_overlay_addition() {
+        let env = env_with_block((4, 4, 4), (5, 5, 5));
+        assert!(env.inner.world().is_filled((5, 5, 5)));
+        assert!(env.world_occupied((5, 5, 5)).unwrap());
+        assert_eq!(
+            env.overlay_mutations()
+                .into_iter()
+                .map(|value| (value.0, value.1, value.2, value.3))
+                .collect::<Vec<_>>(),
+            vec![(5, 5, 5, true)]
+        );
+        assert_eq!(
+            env.world_occupied_in_region((5, 5, 5), (6, 6, 6), 1)
+                .unwrap(),
+            vec![(5, 5, 5)]
+        );
+    }
+
+    #[test]
+    fn world_queries_resolve_tombstones_and_replacements() {
+        let mut world = WorldState::new();
+        world.replace_base_blocks([((5, 5, 5), Block::default())]);
+        world.remove_block((5, 5, 5)).unwrap();
+        let mut inner = VoxelEnv::new(world, 100);
+        inner.set_cursor((4, 4, 4));
+        let env = PyVoxelEnv {
+            inner,
+            box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
+        };
+        assert!(!env.world_occupied((5, 5, 5)).unwrap());
+        assert!(env
+            .world_occupied_in_region((5, 5, 5), (6, 6, 6), 1)
+            .unwrap()
+            .is_empty());
+
+        let mut replacement_world = WorldState::new();
+        replacement_world.replace_base_blocks([((5, 5, 5), Block::default())]);
+        replacement_world
+            .set_block(
+                (5, 5, 5),
+                Block {
+                    kind: 4,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        let replacement = PyVoxelEnv {
+            inner: VoxelEnv::new(replacement_world, 100),
+            box_radius: None,
+            residency_radius: 3,
+            pending_prefetch: None,
+        };
+        assert!(replacement.world_occupied((5, 5, 5)).unwrap());
+        assert_eq!(replacement.overlay_mutations()[0].4, 4);
     }
 }
