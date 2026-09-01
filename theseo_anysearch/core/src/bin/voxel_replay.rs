@@ -759,6 +759,29 @@ fn draw_overview_inset(
             [maximum_exclusive.x, maximum_exclusive.y, maximum_exclusive.z],
         );
         let points = mesh.project_vertices(&vertices, camera.yaw, camera.pitch);
+        let mut faces = [
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [2, 3, 7, 6],
+            [1, 2, 6, 5],
+            [3, 0, 4, 7],
+        ];
+        faces.sort_by(|left, right| {
+            let depth = |face: &[usize; 4]| {
+                face.iter().map(|index| points[*index].depth).sum::<f32>() / 4.0
+            };
+            depth(left).total_cmp(&depth(right))
+        });
+        for face in faces {
+            painter.add(Shape::convex_polygon(
+                face.into_iter()
+                    .map(|index| inset_position(points[index], rect, scale))
+                    .collect(),
+                Color32::from_rgba_premultiplied(10, 40, 20, 36),
+                Stroke::NONE,
+            ));
+        }
         for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
             painter.line_segment(
                 [inset_position(points[a], rect, scale), inset_position(points[b], rect, scale)],
@@ -786,6 +809,43 @@ fn draw_overview_inset(
 fn storage_coordinate(coordinate: Option<[u16; 3]>) -> Option<StorageCoord> {
     let [x, y, z] = task_marker_to_storage(coordinate?)?;
     Some(StorageCoord { x, y, z })
+}
+
+fn render_marker_coordinate(
+    coordinate: [u16; 3],
+    compiled_mode: bool,
+) -> Option<[u16; 3]> {
+    if !compiled_mode {
+        return Some(coordinate);
+    }
+    let [x, y, z] = task_marker_to_storage(coordinate)?;
+    Some([
+        u16::try_from(x).ok()?,
+        u16::try_from(y).ok()?,
+        u16::try_from(z).ok()?,
+    ])
+}
+
+#[cfg(test)]
+mod marker_coordinate_tests {
+    use super::render_marker_coordinate;
+
+    #[test]
+    fn compiled_world_markers_convert_from_task_to_storage_coordinates() {
+        assert_eq!(
+            render_marker_coordinate([5, 7, 9], true),
+            Some([4, 6, 8])
+        );
+        assert_eq!(render_marker_coordinate([0, 7, 9], true), None);
+    }
+
+    #[test]
+    fn legacy_world_markers_keep_task_coordinates() {
+        assert_eq!(
+            render_marker_coordinate([5, 7, 9], false),
+            Some([5, 7, 9])
+        );
+    }
 }
 
 /// Back-to-front depth key for painter's algorithm.
@@ -1957,22 +2017,51 @@ impl eframe::App for VoxelReplayApp {
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
-                        let c = s.cursors[ai];
-                        draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                        if let Some(c) = render_marker_coordinate(s.cursors[ai], compiled_mode) {
+                            draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                        }
                     }
                 }
                 // Draw start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
                     if let Some([sx, sy, sz]) = start_opt {
                         let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *sx, *sy, *sz, render_origin, rect, cam, &b, col);
+                        if let Some(coordinate) =
+                            render_marker_coordinate([*sx, *sy, *sz], compiled_mode)
+                        {
+                            draw_marker(
+                                &painter,
+                                coordinate[0],
+                                coordinate[1],
+                                coordinate[2],
+                                render_origin,
+                                rect,
+                                cam,
+                                &b,
+                                col,
+                            );
+                        }
                     }
                 }
                 // Draw goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
                     if let Some([gx, gy, gz]) = goal_opt {
                         let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *gx, *gy, *gz, render_origin, rect, cam, &b, col);
+                        if let Some(coordinate) =
+                            render_marker_coordinate([*gx, *gy, *gz], compiled_mode)
+                        {
+                            draw_marker(
+                                &painter,
+                                coordinate[0],
+                                coordinate[1],
+                                coordinate[2],
+                                render_origin,
+                                rect,
+                                cam,
+                                &b,
+                                col,
+                            );
+                        }
                     }
                 }
             } else {
@@ -1996,14 +2085,56 @@ impl eframe::App for VoxelReplayApp {
                 }
 
                 if let Some([sx, sy, sz]) = render_start {
-                    draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
+                    if let Some(coordinate) =
+                        render_marker_coordinate([sx, sy, sz], compiled_mode)
+                    {
+                        draw_marker(
+                            &painter,
+                            coordinate[0],
+                            coordinate[1],
+                            coordinate[2],
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            tint_dark(agent_trail_colors[0]),
+                        );
+                    }
                 }
                 if let Some([gx, gy, gz]) = render_goal {
-                    draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
+                    if let Some(coordinate) =
+                        render_marker_coordinate([gx, gy, gz], compiled_mode)
+                    {
+                        draw_marker(
+                            &painter,
+                            coordinate[0],
+                            coordinate[1],
+                            coordinate[2],
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            tint_light(agent_trail_colors[0]),
+                        );
+                    }
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
+                    if let Some(coordinate) = render_marker_coordinate(
+                        [s.cursor_x, s.cursor_y, s.cursor_z],
+                        compiled_mode,
+                    ) {
+                        draw_cursor(
+                            &painter,
+                            coordinate[0],
+                            coordinate[1],
+                            coordinate[2],
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                        );
+                    }
                 }
             }
 
