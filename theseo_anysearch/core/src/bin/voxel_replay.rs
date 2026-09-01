@@ -539,16 +539,53 @@ impl Camera {
         let (px, py) = self.project(x, y, z);
         let cx = rect.center().x;
         let cy = rect.center().y;
-        let w  = rect.width()  * self.zoom;
-        let h  = rect.height() * self.zoom;
+        let projected_width = (b.max_x - b.min_x).max(1.0);
+        let projected_height = (b.max_y - b.min_y).max(1.0);
+        let scale = (rect.width() / projected_width)
+            .min(rect.height() / projected_height)
+            * self.zoom;
         Pos2::new(
-            cx + (px - (b.min_x + b.max_x) * 0.5) / (b.max_x - b.min_x).max(1.0) * w,
-            cy + (py - (b.min_y + b.max_y) * 0.5) / (b.max_y - b.min_y).max(1.0) * h,
+            cx + (px - (b.min_x + b.max_x) * 0.5) * scale,
+            cy + (py - (b.min_y + b.max_y) * 0.5) * scale,
         )
     }
 }
 
 struct Bounds { min_x: f32, max_x: f32, min_y: f32, max_y: f32 }
+
+#[cfg(test)]
+mod camera_tests {
+    use super::{Bounds, Camera};
+    use eframe::egui::{Pos2, Rect, Vec2};
+
+    fn test_camera() -> Camera {
+        Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 }
+    }
+
+    #[test]
+    fn screen_mapping_uses_one_scale_for_both_projected_axes() {
+        let camera = test_camera();
+        let bounds = Bounds { min_x: -10.0, max_x: 10.0, min_y: -5.0, max_y: 5.0 };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 100.0));
+
+        let center = camera.to_screen(0.0, 0.0, 0.0, rect, &bounds);
+        let horizontal = camera.to_screen(1.0, 0.0, 0.0, rect, &bounds);
+        let vertical = camera.to_screen(0.0, -1.0, 0.0, rect, &bounds);
+
+        assert_eq!(horizontal.x - center.x, vertical.y - center.y);
+    }
+
+    #[test]
+    fn projected_bounds_are_centered_when_the_viewport_aspect_differs() {
+        let camera = test_camera();
+        let bounds = Bounds { min_x: -10.0, max_x: 10.0, min_y: -5.0, max_y: 5.0 };
+        let rect = Rect::from_min_size(Pos2::new(20.0, 30.0), Vec2::new(300.0, 100.0));
+
+        let center = camera.to_screen(0.0, 0.0, 0.0, rect, &bounds);
+
+        assert_eq!(center, rect.center());
+    }
+}
 
 fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
