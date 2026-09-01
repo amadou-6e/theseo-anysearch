@@ -17,6 +17,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
+use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
@@ -448,6 +449,16 @@ fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalRepla
         .collect()
 }
 
+fn overview_meshes(trajectories: &[TrajectoryData]) -> Vec<Result<OverviewMesh, String>> {
+    trajectories.iter().map(|trajectory| {
+        let world = trajectory.world.as_ref().ok_or("trajectory has no compiled world")?;
+        let manifest = trajectory.source_path.parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(&world.manifest_path);
+        OverviewMesh::load(&manifest, &world.identity_sha256)
+    }).collect()
+}
+
 // ---------------------------------------------------------------------------
 // Camera: holds yaw/pitch/zoom and handles projection + screen mapping
 // ---------------------------------------------------------------------------
@@ -512,6 +523,49 @@ impl Camera {
 }
 
 struct Bounds { min_x: f32, max_x: f32, min_y: f32, max_y: f32 }
+
+fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
+    Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
+}
+
+fn draw_overview_inset(
+    painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
+    size: f32, show_bounds: bool,
+) {
+    let inset_size = outer.width().min(outer.height()).min(size);
+    let rect = Rect::from_min_size(
+        outer.right_bottom() - Vec2::splat(inset_size + 12.0), Vec2::splat(inset_size),
+    );
+    painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
+    painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
+    let projected = mesh.project(camera.yaw, camera.pitch);
+    let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
+    let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
+    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
+    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
+    let scale = (rect.width() / (2.0 * maximum_x))
+        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
+        let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
+        (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
+    }).collect::<Vec<_>>();
+    triangles.sort_by(|left, right| left.0.total_cmp(&right.0));
+    for (_, triangle) in triangles {
+        painter.add(Shape::convex_polygon(
+            triangle.into_iter().map(|point| inset_position(point, rect, scale)).collect(),
+            Color32::from_rgb(105, 130, 150), Stroke::new(0.35, Color32::from_gray(50)),
+        ));
+    }
+    if show_bounds {
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            painter.line_segment(
+                [inset_position(bounds_points[a], rect, scale), inset_position(bounds_points[b], rect, scale)],
+                Stroke::new(1.0, Color32::from_gray(170)),
+            );
+        }
+    }
+    painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
+}
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
@@ -790,6 +844,10 @@ struct VoxelReplayApp {
     detailed_chunks: usize,
     chunk_budgets: ChunkBudgets,
     camera_revision: u64,
+    overview_meshes: Vec<Result<OverviewMesh, String>>,
+    show_overview: bool,
+    show_overview_bounds: bool,
+    overview_size: f32,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -820,6 +878,7 @@ impl VoxelReplayApp {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
         let regional_sources = regional_sources(&trajectories);
+        let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
             occlude_agent: true,
@@ -845,6 +904,10 @@ impl VoxelReplayApp {
             detailed_chunks: 0,
             chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
+            overview_meshes,
+            show_overview: true,
+            show_overview_bounds: true,
+            overview_size: 220.0,
         }
     }
 
@@ -874,6 +937,10 @@ impl VoxelReplayApp {
             detailed_chunks: 0,
             chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
+            overview_meshes: Vec::new(),
+            show_overview: true,
+            show_overview_bounds: true,
+            overview_size: 220.0,
         };
         app.load_trial(0);
         app
@@ -892,6 +959,7 @@ impl VoxelReplayApp {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
         self.regional_sources = regional_sources(&trajs);
+        self.overview_meshes = overview_meshes(&trajs);
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
@@ -1349,6 +1417,16 @@ impl eframe::App for VoxelReplayApp {
                         ));
                     }
                 }
+                ui.separator();
+                ui.label(egui::RichText::new("Global overview").strong());
+                ui.checkbox(&mut self.show_overview, "Show overview");
+                ui.add_enabled_ui(self.show_overview, |ui| {
+                    ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
+                    ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
+                });
+                if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
+                    ui.colored_label(Color32::from_rgb(220, 150, 80), error);
+                }
             }
             ui.separator();
 
@@ -1636,6 +1714,15 @@ impl eframe::App for VoxelReplayApp {
 
             // Camera-facing and silhouette edges remain visible above the scene.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
+
+            if self.show_overview {
+                if let Some(Ok(mesh)) = self.overview_meshes.get(iter_idx) {
+                    draw_overview_inset(
+                        &painter, resp.rect, mesh, cam,
+                        self.overview_size, self.show_overview_bounds,
+                    );
+                }
+            }
 
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
