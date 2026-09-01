@@ -29,7 +29,7 @@ use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
 };
-use theseo_core::voxel::world::StorageCoord;
+use theseo_core::voxel::world::{BoundedRegion, StorageCoord};
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -775,9 +775,22 @@ fn debug_face_color(direction: FaceDirection) -> Color32 {
     }
 }
 
+fn visible_occupancy(
+    occupied: &[StorageCoord],
+    region: BoundedRegion,
+) -> HashSet<StorageCoord> {
+    occupied
+        .iter()
+        .copied()
+        .filter(|coordinate| region.contains(*coordinate))
+        .collect()
+}
+
 #[cfg(test)]
 mod debug_face_color_tests {
-    use super::{debug_face_color, Color32, FaceDirection};
+    use super::{debug_face_color, visible_occupancy, Color32, FaceDirection};
+    use theseo_core::replay::render_cache::{extract_exposed_faces, ChunkCoord};
+    use theseo_core::voxel::world::{BoundedRegion, StorageCoord, WorldExtent};
 
     const DIRECTIONS: [FaceDirection; 6] = [
         FaceDirection::NegativeX,
@@ -810,6 +823,29 @@ mod debug_face_color_tests {
             debug_face_color(FaceDirection::PositiveZ),
             Color32::from_rgb(240, 210, 45)
         );
+    }
+
+    #[test]
+    fn visibility_cut_emits_a_face_even_when_prefetched_geometry_continues() {
+        let inside = StorageCoord { x: 2, y: 2, z: 2 };
+        let outside = StorageCoord { x: 2, y: 3, z: 2 };
+        let region = BoundedRegion::new(
+            StorageCoord { x: 0, y: 0, z: 0 },
+            StorageCoord { x: 4, y: 3, z: 4 },
+            WorldExtent { x: 8, y: 8, z: 8 },
+        )
+        .expect("test region is valid");
+        let occupied = visible_occupancy(&[inside, outside], region);
+
+        let faces = extract_exposed_faces(
+            ChunkCoord { x: 0, y: 0, z: 0 },
+            &occupied,
+            16,
+        );
+
+        assert!(faces.faces.iter().any(|face| {
+            face.voxel == inside && face.direction == FaceDirection::PositiveY
+        }));
     }
 }
 
@@ -1253,8 +1289,11 @@ impl VoxelReplayApp {
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
         let chunk_edge = self.trajectories[key.iteration].world_chunk_edge.max(1);
-        let occupied = frame.occupied.iter().copied().collect::<HashSet<_>>();
-        let chunks = frame.occupied.iter().map(|coordinate| ChunkCoord {
+        // The loaded frame includes a prefetch halo, but geometry is clipped to
+        // the green visibility box. Mesh only that visible set so a surface
+        // continuing into the halo receives a proper section face at the cut.
+        let occupied = visible_occupancy(&frame.occupied, frame.region);
+        let chunks = occupied.iter().map(|coordinate| ChunkCoord {
             x: coordinate.x / chunk_edge,
             y: coordinate.y / chunk_edge,
             z: coordinate.z / chunk_edge,
