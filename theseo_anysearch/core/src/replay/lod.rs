@@ -148,6 +148,23 @@ pub fn select_chunks(
     }
 }
 
+/// Adds chunks required for the agent-local view without subjecting them to
+/// camera direction or LOD budgets. Camera-selected chunks remain available
+/// outside that box, while mandatory chunks are always rendered in detail.
+pub fn include_mandatory_chunks(
+    mut selection: ChunkSelection,
+    mandatory: impl IntoIterator<Item = ChunkCoord>,
+) -> ChunkSelection {
+    let mandatory = mandatory.into_iter().collect::<HashSet<_>>();
+    selection.coarse.retain(|chunk| !mandatory.contains(chunk));
+    selection.detailed.extend(mandatory);
+    selection
+        .detailed
+        .sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
+    selection.detailed.dedup();
+    selection
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +285,26 @@ mod tests {
                 ChunkCoord { x: 2, y: 0, z: 0 },
             ]
         );
+    }
+
+    #[test]
+    fn mandatory_chunks_survive_camera_filter_and_detail_budget() {
+        let mandatory = ChunkCoord { x: 1, y: 0, z: 0 };
+        let selection = select_chunks(
+            [ChunkCoord { x: 0, y: 0, z: 0 }, mandatory],
+            CameraChunkView {
+                center: [0.5, 0.5, 0.5],
+                half_extent: [4.0; 3],
+                forward: [-1.0, 0.0, 0.0],
+                minimum_forward_dot: 0.0,
+            },
+            ChunkBudgets {
+                visible: 1,
+                detailed: 1,
+            },
+        );
+        let selection = include_mandatory_chunks(selection, [mandatory]);
+        assert!(selection.detailed.contains(&mandatory));
+        assert!(!selection.coarse.contains(&mandatory));
     }
 }

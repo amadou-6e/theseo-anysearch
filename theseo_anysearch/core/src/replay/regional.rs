@@ -62,6 +62,10 @@ impl RegionalReplaySource {
         self.world.disk_chunk_shape()
     }
 
+    pub fn extent(&self) -> crate::voxel::world::WorldExtent {
+        self.world.extent()
+    }
+
     pub fn load_agent_region(
         &self,
         center: StorageCoord,
@@ -159,6 +163,40 @@ impl RegionalReplaySource {
         resident_chunks: &[ChunkCoord],
         mutations: &[ReplayMutation],
     ) -> Result<RegionalReplayFrame, WorldAccessError> {
+        self.load_chunk_selection_with_region(
+            chunks,
+            visible_chunks,
+            resident_chunks,
+            mutations,
+            None,
+        )
+    }
+
+    pub fn load_chunk_selection_in_region(
+        &self,
+        chunks: &[ChunkCoord],
+        visible_chunks: &[ChunkCoord],
+        resident_chunks: &[ChunkCoord],
+        mutations: &[ReplayMutation],
+        display_region: BoundedRegion,
+    ) -> Result<RegionalReplayFrame, WorldAccessError> {
+        self.load_chunk_selection_with_region(
+            chunks,
+            visible_chunks,
+            resident_chunks,
+            mutations,
+            Some(display_region),
+        )
+    }
+
+    fn load_chunk_selection_with_region(
+        &self,
+        chunks: &[ChunkCoord],
+        visible_chunks: &[ChunkCoord],
+        resident_chunks: &[ChunkCoord],
+        mutations: &[ReplayMutation],
+        display_region: Option<BoundedRegion>,
+    ) -> Result<RegionalReplayFrame, WorldAccessError> {
         let started = Instant::now();
         let Some(shape) = self.chunk_shape() else {
             return Err(WorldAccessError::Unsupported);
@@ -209,10 +247,11 @@ impl RegionalReplaySource {
                 .z
                 .max(origin.z.saturating_add(shape.z).min(extent.z));
         }
-        let region = BoundedRegion::new(minimum, maximum_exclusive, extent)?;
+        let region =
+            display_region.unwrap_or(BoundedRegion::new(minimum, maximum_exclusive, extent)?);
         Ok(RegionalReplayFrame {
             region,
-            render_origin: minimum,
+            render_origin: region.minimum,
             occupied: self.load_chunks(chunks, mutations)?,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
