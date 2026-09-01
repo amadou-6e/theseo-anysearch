@@ -607,7 +607,7 @@ struct Bounds {
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{overview_inset_scale, Bounds, Camera};
+    use super::{overview_inset_scale, Bounds, Camera, OverviewMesh};
     use eframe::egui::{Pos2, Rect, Vec2};
 
     fn test_camera() -> Camera {
@@ -674,7 +674,11 @@ mod camera_tests {
     #[test]
     fn overview_scale_is_independent_of_camera_rotation() {
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
-        let extent = [128, 64, 32];
+        let mesh = OverviewMesh {
+            vertices: vec![[8, 12, 20], [56, 44, 36]],
+            indices: Vec::new(),
+            extent: [128, 64, 64],
+        };
         let rotations = [(0.0_f32, 0.0_f32), (37.0, 21.0), (145.0, -33.0)];
 
         let scales = rotations.map(|(yaw, pitch)| {
@@ -683,10 +687,27 @@ mod camera_tests {
                 pitch: pitch.to_radians(),
                 ..Camera::default()
             };
-            overview_inset_scale(rect, extent)
+            overview_inset_scale(rect, &mesh)
         });
 
         assert!(scales.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
+    fn overview_scale_fits_occupied_geometry_instead_of_empty_world_space() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(220.0));
+        let compact = OverviewMesh {
+            vertices: vec![[4, 4, 4], [20, 20, 20]],
+            indices: Vec::new(),
+            extent: [128, 128, 128],
+        };
+        let full = OverviewMesh {
+            vertices: vec![[0, 0, 0], [128, 128, 128]],
+            indices: Vec::new(),
+            extent: [128, 128, 128],
+        };
+
+        assert!(overview_inset_scale(rect, &compact) > overview_inset_scale(rect, &full));
     }
 
     #[test]
@@ -727,18 +748,59 @@ mod camera_tests {
     }
 }
 
-fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
-    Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
+fn inset_position(
+    point: ProjectedVertex,
+    center: ProjectedVertex,
+    rect: Rect,
+    scale: f32,
+) -> Pos2 {
+    Pos2::new(
+        rect.center().x + (point.x - center.x) * scale,
+        rect.center().y + (point.y - center.y) * scale,
+    )
 }
 
-fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
-    let diagonal = extent
-        .into_iter()
-        .map(|axis| (axis as f32).powi(2))
+fn overview_occupied_bounds(mesh: &OverviewMesh) -> OverviewMesh {
+    let fallback = mesh.extent;
+    let minimum = (0..3).map(|axis| {
+        mesh.vertices.iter().map(|vertex| vertex[axis]).min().unwrap_or(0)
+    }).collect::<Vec<_>>();
+    let maximum = (0..3).map(|axis| {
+        mesh.vertices.iter().map(|vertex| vertex[axis]).max().unwrap_or(fallback[axis])
+    }).collect::<Vec<_>>();
+    let [x0, y0, z0] = [minimum[0], minimum[1], minimum[2]];
+    let [x1, y1, z1] = [maximum[0], maximum[1], maximum[2]];
+    OverviewMesh {
+        vertices: vec![
+            [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+            [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+        ],
+        indices: Vec::new(),
+        extent: mesh.extent,
+    }
+}
+
+fn overview_inset_scale(rect: Rect, mesh: &OverviewMesh) -> f32 {
+    let bounds = overview_occupied_bounds(mesh);
+    let maximum_extent = mesh.extent.into_iter().max().unwrap_or(1).max(1) as f32;
+    let diagonal = (0..3)
+        .map(|axis| {
+            let span = bounds.vertices[6][axis] - bounds.vertices[0][axis];
+            (span as f32 / maximum_extent).powi(2)
+        })
         .sum::<f32>()
         .sqrt()
         .max(0.001);
     rect.width().min(rect.height()) / diagonal * 0.86
+}
+
+fn projected_center(points: &[ProjectedVertex]) -> ProjectedVertex {
+    let count = points.len().max(1) as f32;
+    ProjectedVertex {
+        x: points.iter().map(|point| point.x).sum::<f32>() / count,
+        y: points.iter().map(|point| point.y).sum::<f32>() / count,
+        depth: points.iter().map(|point| point.depth).sum::<f32>() / count,
+    }
 }
 
 fn draw_overview_inset(
@@ -752,9 +814,10 @@ fn draw_overview_inset(
     painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
     painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
     let projected = mesh.project(camera.yaw, camera.pitch);
-    let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
+    let bounds_mesh = overview_occupied_bounds(mesh);
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
-    let scale = overview_inset_scale(rect, mesh.extent);
+    let center = projected_center(&bounds_points);
+    let scale = overview_inset_scale(rect, mesh);
     let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
         let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
         (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
@@ -762,14 +825,14 @@ fn draw_overview_inset(
     triangles.sort_by(|left, right| left.0.total_cmp(&right.0));
     for (_, triangle) in triangles {
         painter.add(Shape::convex_polygon(
-            triangle.into_iter().map(|point| inset_position(point, rect, scale)).collect(),
+            triangle.into_iter().map(|point| inset_position(point, center, rect, scale)).collect(),
             Color32::from_rgb(105, 130, 150), Stroke::new(0.35, Color32::from_gray(50)),
         ));
     }
     if show_bounds {
         for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
             painter.line_segment(
-                [inset_position(bounds_points[a], rect, scale), inset_position(bounds_points[b], rect, scale)],
+                [inset_position(bounds_points[a], center, rect, scale), inset_position(bounds_points[b], center, rect, scale)],
                 Stroke::new(1.0, Color32::from_gray(170)),
             );
         }
