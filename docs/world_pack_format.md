@@ -9,11 +9,38 @@ Each completed entry contains:
 - `world.pack`: concatenated, independently decodable non-background chunks.
 - `candidates.idx`: versioned coarse-region/kind ranges bound to the world identity.
 - `candidates.bin`: fixed-width public-coordinate spawn, goal, surface, and portal records.
+- `overview.mesh`: one bounded, deterministic indexed mesh for global replay orientation.
 - `COMPLETE`: written last and containing the world identity. Readers reject entries without it.
 
 The compiler selects among a constant-size uniform representation, sorted sparse `u32` indices, and a zlib-compressed dense bitset. Empty chunks are omitted. Selection compares the actual encoded lengths, with `sparse_max_fraction` providing an explicit tuning boundary. Boxes are intersected directly with chunks, and `.npy` pool grids are memory-mapped and visited chunk-by-chunk; neither path creates a full-world list of Python coordinate tuples.
 
 Publication uses the shared heartbeat/token cache lock. A build is written to a unique temporary directory, fully validated, and atomically renamed. Corrupt entries are rebuilt when their source still exists. When only a pack identity is available, corruption raises an explicit `WorldPackUnavailableError` because rebuilding is impossible.
+
+## Global overview mesh
+
+Compilation automatically emits one immutable overview mesh; it does not store
+a runtime LOD hierarchy. ASCII STL inputs use the same normalization transform
+as voxelization and retain their transformed source surface while it fits the
+internal triangle budget. Larger or voxel-native sources use sparse coarse-cell
+aggregation and exposed-face meshing.
+
+OR aggregation preserves thin occupied structures. Each internal candidate
+resolution is then filtered using deterministic 6-connected components. A
+component survives when it is sufficiently long in coarse cells or sufficiently
+dense in represented source voxels. The filtered result feeds the next coarser
+candidate, and only the final selected mesh is stored. Chunk slices are reduced
+directly; dense worlds are not expanded into a full-world Python coordinate
+list for overview generation.
+
+The mesh uses zero-based storage coordinates and little-endian `u32` vertices
+and indices. Its checksum, byte length, counts, source type, voxel scale, and
+algorithm version are recorded in `manifest.json`. The generation constants
+participate in world identity. Older packs may omit the overview and remain
+valid.
+
+There is no YAML configuration for the replayer. Overview visibility, size,
+bounds, and marker presentation are viewer controls implemented independently
+of the compiled-world identity.
 
 ## Runtime residency
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import struct
 import threading
 import time
 from pathlib import Path
@@ -27,6 +29,7 @@ from theseo_anysearch.worlds.compiler import (
     validate_compiled_world,
 )
 from theseo_anysearch.worlds.manifest import WorldExtent
+from theseo_anysearch.worlds.overview import decode_overview_mesh
 
 
 def _read_chunks(root: Path) -> dict[tuple[int, int, int], np.ndarray]:
@@ -80,6 +83,64 @@ def test_identical_inputs_have_identical_identity_and_bytes(tmp_path: Path) -> N
     assert first.manifest.identity_sha256 == second.manifest.identity_sha256
     assert first.pack_path.read_bytes() == second.pack_path.read_bytes()
     assert first.index_path.read_bytes() == second.index_path.read_bytes()
+    assert first.overview_path is not None
+    assert second.overview_path is not None
+    assert first.overview_path.read_bytes() == second.overview_path.read_bytes()
+
+
+def test_compiler_emits_validated_bounded_overview_mesh(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource((1, 1, 1), (6, 5, 4))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+
+    assert compiled.manifest.overview is not None
+    assert compiled.overview_path is not None
+    mesh = decode_overview_mesh(compiled.overview_path.read_bytes())
+    assert len(mesh.vertices) == compiled.manifest.overview.vertex_count
+    assert mesh.triangle_count == compiled.manifest.overview.triangle_count
+    assert mesh.triangle_count <= 10_000
+
+
+def test_overview_corruption_is_detected(tmp_path: Path) -> None:
+    compiled = compile_world(
+        [BoxSource((0, 0, 0), (3, 3, 3))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+    assert compiled.overview_path is not None
+    compiled.overview_path.write_bytes(b"corrupt")
+
+    with pytest.raises(WorldPackCorruptError, match="overview mesh checksum mismatch"):
+        validate_compiled_world(compiled.root)
+
+
+def test_structurally_invalid_overview_is_detected_after_checksum(
+    tmp_path: Path,
+) -> None:
+    compiled = compile_world(
+        [BoxSource((0, 0, 0), (3, 3, 3))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+    )
+    assert compiled.overview_path is not None
+    payload = struct.pack("<4sIII3I", b"AOM1", 1, 0, 3, 0, 0, 0)
+    compiled.overview_path.write_bytes(payload)
+    manifest_path = compiled.root.joinpath(MANIFEST_FILE)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["overview"].update(
+        {
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "byte_length": len(payload),
+            "vertex_count": 0,
+            "triangle_count": 1,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(WorldPackCorruptError, match="overview mesh is invalid"):
+        validate_compiled_world(compiled.root)
 
 
 def test_source_order_does_not_change_identity(tmp_path: Path) -> None:
@@ -135,6 +196,8 @@ def test_stl_source_uses_existing_voxelizer_and_converts_coordinates(
     chunks = _read_chunks(compiled.root)
     assert chunks[(0, 0, 0)][0, 0, 0]
     assert chunks[(1, 1, 1)][3, 3, 3]
+    assert compiled.manifest.overview is not None
+    assert compiled.manifest.overview.source_type == "simplified_source_mesh"
 
 
 def test_ascii_stl_compiles_with_native_voxelizer(tmp_path: Path) -> None:
