@@ -4,9 +4,9 @@ Status: active
 Integration branch: `exp/perception-encoder`
 Specifications:
 
-- `specs/projects/theseo-anysearch/python/perception-encoder-pilots.md`
-- `specs/projects/theseo-anysearch/python/perception-encoder-pretraining.md`
-- `specs/projects/theseo-anysearch/python/perception-encoders.md`
+- [Pilot plan](https://github.com/amadou-6e/specs/blob/main/projects/theseo-anysearch/python/perception-encoder-pilots.md)
+- [Pretraining protocol](https://github.com/amadou-6e/specs/blob/main/projects/theseo-anysearch/python/perception-encoder-pretraining.md)
+- [Architecture review](https://github.com/amadou-6e/specs/blob/main/projects/theseo-anysearch/python/perception-encoders.md)
 
 ## Objective
 
