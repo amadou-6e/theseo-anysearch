@@ -607,7 +607,7 @@ struct Bounds {
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{Bounds, Camera};
+    use super::{overview_inset_scale, Bounds, Camera};
     use eframe::egui::{Pos2, Rect, Vec2};
 
     fn test_camera() -> Camera {
@@ -672,6 +672,24 @@ mod camera_tests {
     }
 
     #[test]
+    fn overview_scale_is_independent_of_camera_rotation() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+        let extent = [128, 64, 32];
+        let rotations = [(0.0_f32, 0.0_f32), (37.0, 21.0), (145.0, -33.0)];
+
+        let scales = rotations.map(|(yaw, pitch)| {
+            let _camera = Camera {
+                yaw: yaw.to_radians(),
+                pitch: pitch.to_radians(),
+                ..Camera::default()
+            };
+            overview_inset_scale(rect, extent)
+        });
+
+        assert!(scales.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
     fn perspective_makes_nearer_equal_sized_objects_larger() {
         let camera = Camera {
             yaw: 0.0,
@@ -713,6 +731,16 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
 }
 
+fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
+    let diagonal = extent
+        .into_iter()
+        .map(|axis| (axis as f32).powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.001);
+    rect.width().min(rect.height()) / diagonal * 0.86
+}
+
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool,
@@ -726,10 +754,7 @@ fn draw_overview_inset(
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
-    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
-    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
-    let scale = (rect.width() / (2.0 * maximum_x))
-        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let scale = overview_inset_scale(rect, mesh.extent);
     let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
         let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
         (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
