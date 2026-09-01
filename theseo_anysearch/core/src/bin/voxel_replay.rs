@@ -848,8 +848,8 @@ struct VoxelReplayApp {
     playing: bool,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
-    /// Whether geometry is drawn after agents and therefore occludes them.
-    occlude_agent: bool,
+    /// Use cached exposed surfaces instead of the original per-voxel cubes.
+    surface_mesh: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -860,6 +860,7 @@ struct VoxelReplayApp {
     regional_sources: Vec<Option<RegionalReplaySource>>,
     regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
     pending_region: Option<PendingRegion>,
+    pending_play_position: Option<(usize, usize)>,
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
@@ -907,7 +908,7 @@ impl VoxelReplayApp {
         let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            surface_mesh: false,
             trajectories,
             geo_voxels,
             iter_idx: 0,
@@ -920,6 +921,7 @@ impl VoxelReplayApp {
             regional_sources,
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -940,7 +942,7 @@ impl VoxelReplayApp {
     fn new_tune(trials: Vec<TrialEntry>) -> Self {
         let mut app = Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            surface_mesh: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
@@ -953,6 +955,7 @@ impl VoxelReplayApp {
             regional_sources: Vec::new(),
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -989,22 +992,34 @@ impl VoxelReplayApp {
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
+        self.pending_play_position = None;
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
         self.coarse_chunks.clear();
     }
 
-    fn current_region_key(&self) -> Option<RegionRequestKey> {
-        let trajectory = self.trajectories.get(self.iter_idx)?;
+    fn region_key(&self, iteration: usize, step: usize) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(iteration)?;
         trajectory.world.as_ref()?;
         Some(RegionRequestKey {
-            iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            iteration,
+            step,
+            center: selected_agent_center(trajectory, step)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        self.region_key(self.iter_idx, self.step_idx)
+    }
+
+    fn desired_region_key(&self) -> Option<RegionRequestKey> {
+        let (iteration, step) = self
+            .pending_play_position
+            .unwrap_or((self.iter_idx, self.step_idx));
+        self.region_key(iteration, step)
     }
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
@@ -1034,7 +1049,7 @@ impl VoxelReplayApp {
     }
 
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
-        let current_key = self.current_region_key();
+        let current_key = self.desired_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(loaded)) => {
@@ -1045,6 +1060,13 @@ impl VoxelReplayApp {
                         self.detailed_chunks = loaded.detailed;
                         self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
+                        if self.pending_play_position
+                            == Some((pending.key.iteration, pending.key.step))
+                        {
+                            self.iter_idx = pending.key.iteration;
+                            self.step_idx = pending.key.step;
+                            self.pending_play_position = None;
+                        }
                     }
                 }
                 Ok(Err(error)) => {
@@ -1165,23 +1187,26 @@ impl VoxelReplayApp {
         ctx.request_repaint();
     }
 
-    fn n_iters(&self) -> usize { self.trajectories.len() }
-    fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
+    fn regional_view_ready(&self) -> bool {
+        let Some(key) = self.current_region_key() else {
+            return true;
+        };
+        self.pending_region.is_none()
+            && self.regional_frame.as_ref().map(|(loaded, _)| *loaded) == Some(key)
+    }
 
-    /// Advance one step during play.  Returns false when the run is fully finished.
-    fn play_advance(&mut self) -> bool {
-        let n = self.n_steps();
-        if self.step_idx + 1 < n {
-            self.step_idx += 1;
-            true
+    fn next_play_position(&self) -> Option<(usize, usize)> {
+        if self.step_idx + 1 < self.n_steps() {
+            Some((self.iter_idx, self.step_idx + 1))
         } else if self.iter_idx + 1 < self.n_iters() {
-            self.iter_idx += 1;
-            self.step_idx = 0;
-            true
+            Some((self.iter_idx + 1, 0))
         } else {
-            false
+            None
         }
     }
+
+    fn n_iters(&self) -> usize { self.trajectories.len() }
+    fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
     fn apply_events(&mut self, ev: UiEvents) {
         // Iteration navigation (always resets step to 0)
@@ -1208,6 +1233,9 @@ impl VoxelReplayApp {
                 self.iter_idx = 0;
                 self.step_idx = 0;
             }
+        }
+        if !self.playing {
+            self.pending_play_position = None;
         }
     }
 }
@@ -1430,7 +1458,6 @@ impl eframe::App for VoxelReplayApp {
             if ui.button(play_label).clicked() { ev.toggle_play = true; }
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
-            ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
@@ -1447,9 +1474,6 @@ impl eframe::App for VoxelReplayApp {
                     .min(self.chunk_budgets.visible);
                 if budgets_changed {
                     self.camera_revision = self.camera_revision.wrapping_add(1);
-                }
-                if self.pending_region.is_some() {
-                    ui.label(egui::RichText::new("Loading visible region...").weak());
                 }
                 if let Some(error) = &self.regional_error {
                     ui.colored_label(Color32::from_rgb(230, 100, 100), error);
@@ -1674,15 +1698,13 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
                     .unwrap()
             });
-            if !self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
+            if compiled_mode && self.surface_mesh {
+                for &face in &face_sorted {
+                    draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                }
+            } else {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
                 }
             }
 
@@ -1775,18 +1797,6 @@ impl eframe::App for VoxelReplayApp {
                 }
             }
 
-            if self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
-                }
-            }
-
             // Camera-facing and silhouette edges remain visible above the scene.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
 
@@ -1867,10 +1877,22 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Auto-play: advance one step per frame --------------------------
-        if self.playing {
-            let still_going = self.play_advance();
-            if !still_going { self.playing = false; }
+        if self.playing
+            && self.pending_play_position.is_none()
+            && self.regional_view_ready()
+        {
+            let next = self.next_play_position();
+            if next.is_none() {
+                self.playing = false;
+            } else if self.trajectories[self.iter_idx].world.is_some() {
+                self.pending_play_position = next;
+            } else if let Some((iteration, step)) = next {
+                self.iter_idx = iteration;
+                self.step_idx = step;
+            }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        } else if self.playing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
 }
