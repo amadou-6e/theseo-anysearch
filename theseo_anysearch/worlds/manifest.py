@@ -68,6 +68,24 @@ class WorldChunkManifest(BaseModel):
     decoded_byte_length: int = Field(default=0, ge=0)
 
 
+class WorldOverviewManifest(BaseModel):
+    """Integrity and generation metadata for one immutable overview mesh."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    relative_path: Literal["overview.mesh"] = "overview.mesh"
+    format: Literal["indexed_u32_le"] = "indexed_u32_le"
+    coordinate_space: Literal["storage"] = "storage"
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_length: int = Field(gt=0, le=2**63 - 1)
+    vertex_count: int = Field(ge=0, le=2**32 - 1)
+    triangle_count: int = Field(ge=0, le=(2**32 - 1) // 3)
+    source_type: Literal["voxel_downsample", "simplified_source_mesh"]
+    voxel_scale: WorldExtent
+    algorithm_version: int = Field(ge=1)
+
+
 class WorldManifest(BaseModel):
     """Foundational identity for a compiled large finite world."""
 
@@ -75,9 +93,7 @@ class WorldManifest(BaseModel):
 
     schema_version: Literal[1] = WORLD_SCHEMA_VERSION
     coordinate_type: Literal["u32"] = COORDINATE_TYPE
-    storage_coordinate_convention: Literal["zero_based"] = (
-        STORAGE_COORDINATE_CONVENTION
-    )
+    storage_coordinate_convention: Literal["zero_based"] = STORAGE_COORDINATE_CONVENTION
     environment_coordinate_convention: Literal["one_based"] = (
         ENVIRONMENT_COORDINATE_CONVENTION
     )
@@ -91,6 +107,7 @@ class WorldManifest(BaseModel):
     voxel_scale: float = Field(default=1.0, gt=0.0)
     compiler: dict[str, Any] = Field(default_factory=dict)
     pack_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    overview: WorldOverviewManifest | None = None
 
     @model_validator(mode="after")
     def validate_environment_min(self) -> WorldManifest:

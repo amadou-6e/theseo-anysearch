@@ -13,7 +13,7 @@ import zlib
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,13 +31,28 @@ from theseo_anysearch.worlds.manifest import (
     WorldChunkManifest,
     WorldExtent,
     WorldManifest,
+    WorldOverviewManifest,
+)
+from theseo_anysearch.worlds.overview import (
+    MIN_DENSE_COMPONENT_SOURCE_VOXELS,
+    MIN_OVERVIEW_COMPONENT_CELLS,
+    MIN_OVERVIEW_COMPONENT_DENSITY,
+    OVERVIEW_ALGORITHM_VERSION,
+    OVERVIEW_FILE,
+    OVERVIEW_TARGET_AXIS_CELLS,
+    OVERVIEW_TRIANGLE_BUDGET,
+    OverviewMesh,
+    build_overview_from_chunks,
+    build_stl_overview_mesh,
+    decode_overview_mesh,
+    encode_overview_mesh,
 )
 
 PACK_FILE = "world.pack"
 INDEX_FILE = "index.json"
 MANIFEST_FILE = "manifest.json"
 COMPLETE_FILE = "COMPLETE"
-COMPILER_SCHEMA_VERSION = 2
+COMPILER_SCHEMA_VERSION = 3
 _CHUNK_MAGIC = b"AWC1"
 _ENCODING_IDS = {"uniform": 1, "sparse_u32": 2, "dense_zlib": 3}
 
@@ -106,6 +121,12 @@ class CompiledWorld:
     def index_path(self) -> Path:
         return self.root.joinpath(INDEX_FILE)
 
+    @property
+    def overview_path(self) -> Path | None:
+        if self.manifest.overview is None:
+            return None
+        return self.root.joinpath(self.manifest.overview.relative_path)
+
 
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -161,6 +182,14 @@ def compiler_identity(
         "extent": list(extent.as_tuple()),
         "config": config.model_dump(mode="json"),
         "sources": source_contracts,
+        "overview": {
+            "algorithm_version": OVERVIEW_ALGORITHM_VERSION,
+            "target_axis_cells": OVERVIEW_TARGET_AXIS_CELLS,
+            "triangle_budget": OVERVIEW_TRIANGLE_BUDGET,
+            "min_component_cells": MIN_OVERVIEW_COMPONENT_CELLS,
+            "min_component_density": MIN_OVERVIEW_COMPONENT_DENSITY,
+            "min_dense_component_source_voxels": MIN_DENSE_COMPONENT_SOURCE_VOXELS,
+        },
     }
     return _sha256_bytes(_canonical_json(contract)), contract
 
@@ -414,6 +443,8 @@ def _write_pack(
     config: WorldCompilerConfig,
     identity: str,
     contract: dict[str, Any],
+    overview_mesh: OverviewMesh,
+    overview_source_type: Literal["voxel_downsample", "simplified_source_mesh"],
 ) -> None:
     root.mkdir(parents=True)
     entries: list[WorldChunkManifest] = []
@@ -453,6 +484,18 @@ def _write_pack(
         os.fsync(pack.fileno())
     pack_sha = _sha256_file(pack_path)
     source_sha = _sha256_bytes(_canonical_json(contract["sources"]))
+    overview_payload = encode_overview_mesh(overview_mesh)
+    root.joinpath(OVERVIEW_FILE).write_bytes(overview_payload)
+    overview = WorldOverviewManifest(
+        relative_path=OVERVIEW_FILE,
+        sha256=_sha256_bytes(overview_payload),
+        byte_length=len(overview_payload),
+        vertex_count=len(overview_mesh.vertices),
+        triangle_count=overview_mesh.triangle_count,
+        source_type=overview_source_type,
+        voxel_scale=WorldExtent.from_value(overview_mesh.voxel_scale),
+        algorithm_version=OVERVIEW_ALGORITHM_VERSION,
+    )
     manifest = WorldManifest(
         extent=extent,
         chunk_shape=WorldExtent.from_value(config.chunk_shape),
@@ -465,6 +508,7 @@ def _write_pack(
             "identity_contract": contract,
         },
         pack_sha256=pack_sha,
+        overview=overview,
     )
     root.joinpath(INDEX_FILE).write_bytes(_canonical_json(index))
     root.joinpath(MANIFEST_FILE).write_text(
@@ -571,6 +615,37 @@ def validate_compiled_world(root: Path, *, verify_chunks: bool = True) -> Compil
         )
     if _sha256_file(root.joinpath(PACK_FILE)) != manifest.pack_sha256:
         raise WorldPackCorruptError("world pack checksum mismatch")
+    if manifest.overview is not None:
+        if manifest.overview.algorithm_version != OVERVIEW_ALGORITHM_VERSION:
+            raise WorldPackCorruptError(
+                "overview mesh algorithm version is unsupported"
+            )
+        overview_path = root.joinpath(manifest.overview.relative_path)
+        try:
+            overview_payload = overview_path.read_bytes()
+        except OSError as error:
+            raise WorldPackCorruptError("overview mesh is unavailable") from error
+        if (
+            len(overview_payload) != manifest.overview.byte_length
+            or _sha256_bytes(overview_payload) != manifest.overview.sha256
+        ):
+            raise WorldPackCorruptError("overview mesh checksum mismatch")
+        try:
+            overview_mesh = decode_overview_mesh(overview_payload)
+        except ValueError as error:
+            raise WorldPackCorruptError("overview mesh is invalid") from error
+        if (
+            len(overview_mesh.vertices) != manifest.overview.vertex_count
+            or overview_mesh.triangle_count != manifest.overview.triangle_count
+        ):
+            raise WorldPackCorruptError("overview mesh metadata does not match payload")
+        limits = manifest.extent.as_tuple()
+        if any(
+            vertex[axis] > limits[axis]
+            for vertex in overview_mesh.vertices
+            for axis in range(3)
+        ):
+            raise WorldPackCorruptError("overview mesh vertex exceeds world extent")
     try:
         CandidateIndexHandle(root, world_identity=manifest.identity_sha256)
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -671,7 +746,36 @@ def compile_world(
                     _add_npy(chunks, source, extent, shape)
                 else:
                     _add_stl(chunks, source, extent, shape)
-            _write_pack(temporary, chunks, extent, resolved_config, identity, contract)
+            if len(source_list) == 1 and isinstance(source_list[0], StlSource):
+                stl_source = source_list[0]
+                overview_mesh = build_stl_overview_mesh(
+                    stl_source.path,
+                    stl_source.scale,
+                    extent,
+                    stl_source.padding,
+                )
+                if overview_mesh.triangle_count <= OVERVIEW_TRIANGLE_BUDGET:
+                    overview_source_type = "simplified_source_mesh"
+                else:
+                    overview_mesh = build_overview_from_chunks(
+                        chunks, extent, resolved_config.chunk_shape
+                    )
+                    overview_source_type = "voxel_downsample"
+            else:
+                overview_mesh = build_overview_from_chunks(
+                    chunks, extent, resolved_config.chunk_shape
+                )
+                overview_source_type = "voxel_downsample"
+            _write_pack(
+                temporary,
+                chunks,
+                extent,
+                resolved_config,
+                identity,
+                contract,
+                overview_mesh,
+                overview_source_type,
+            )
             write_candidate_index(
                 temporary,
                 identity,
