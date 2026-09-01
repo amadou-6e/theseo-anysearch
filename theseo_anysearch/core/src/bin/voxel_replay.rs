@@ -29,7 +29,7 @@ use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
 };
-use theseo_core::voxel::world::StorageCoord;
+use theseo_core::voxel::world::{BoundedRegion, StorageCoord};
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -607,7 +607,9 @@ struct Bounds {
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{overview_region_vertices, Bounds, Camera, StorageCoord};
+    use super::{
+        overview_inset_scale, overview_region_vertices, Bounds, Camera, StorageCoord,
+    };
     use eframe::egui::{Pos2, Rect, Vec2};
 
     fn test_camera() -> Camera {
@@ -669,6 +671,35 @@ mod camera_tests {
             first.screen_scale(rect, &first_bounds),
             second.screen_scale(rect, &second_bounds),
         );
+    }
+
+    #[test]
+    fn overview_scale_is_independent_of_camera_rotation() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+        let extent = [128, 64, 32];
+        let rotations = [(0.0_f32, 0.0_f32), (37.0, 21.0), (145.0, -33.0)];
+
+        let scales = rotations.map(|(yaw, pitch)| {
+            let _camera = Camera {
+                yaw: yaw.to_radians(),
+                pitch: pitch.to_radians(),
+                ..Camera::default()
+            };
+            overview_inset_scale(rect, extent)
+        });
+
+        assert!(scales.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
+    fn overview_scale_uses_normalized_full_world_extent() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+
+        let small = overview_inset_scale(rect, [128, 128, 128]);
+        let large = overview_inset_scale(rect, [1024, 1024, 1024]);
+
+        assert!((small - large).abs() < f32::EPSILON);
+        assert!(small > 100.0);
     }
 
     #[test]
@@ -746,6 +777,19 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
 }
 
+fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
+    // OverviewMesh vertices are normalized by the largest world axis. Keep the
+    // full-world bounds in frame without applying the raw extent a second time.
+    let maximum_extent = extent.into_iter().max().unwrap_or(1).max(1) as f32;
+    let diagonal = extent
+        .into_iter()
+        .map(|axis| (axis as f32 / maximum_extent).powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.001);
+    rect.width().min(rect.height()) / diagonal * 0.86
+}
+
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool,
@@ -760,10 +804,7 @@ fn draw_overview_inset(
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
-    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
-    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
-    let scale = (rect.width() / (2.0 * maximum_x))
-        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let scale = overview_inset_scale(rect, mesh.extent);
     let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
         let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
         (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
@@ -828,6 +869,91 @@ fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 
     x * sy * cp + y * sp + z * cy * cp
 }
 
+fn debug_face_color(direction: FaceDirection) -> Color32 {
+    match direction {
+        FaceDirection::NegativeX => Color32::from_rgb(230, 55, 55),
+        FaceDirection::PositiveX => Color32::from_rgb(40, 220, 220),
+        FaceDirection::NegativeY => Color32::from_rgb(55, 190, 70),
+        FaceDirection::PositiveY => Color32::from_rgb(230, 70, 220),
+        FaceDirection::NegativeZ => Color32::from_rgb(55, 95, 235),
+        FaceDirection::PositiveZ => Color32::from_rgb(240, 210, 45),
+    }
+}
+
+fn visible_occupancy(
+    occupied: &[StorageCoord],
+    region: BoundedRegion,
+) -> HashSet<StorageCoord> {
+    occupied
+        .iter()
+        .copied()
+        .filter(|coordinate| region.contains(*coordinate))
+        .collect()
+}
+
+#[cfg(test)]
+mod debug_face_color_tests {
+    use super::{debug_face_color, visible_occupancy, Color32, FaceDirection};
+    use theseo_core::replay::render_cache::{extract_exposed_faces, ChunkCoord};
+    use theseo_core::voxel::world::{BoundedRegion, StorageCoord, WorldExtent};
+
+    const DIRECTIONS: [FaceDirection; 6] = [
+        FaceDirection::NegativeX,
+        FaceDirection::PositiveX,
+        FaceDirection::NegativeY,
+        FaceDirection::PositiveY,
+        FaceDirection::NegativeZ,
+        FaceDirection::PositiveZ,
+    ];
+
+    #[test]
+    fn all_six_directions_have_unique_colors() {
+        let mut colors = DIRECTIONS
+            .map(debug_face_color)
+            .map(|color| color.to_array())
+            .to_vec();
+        colors.sort_unstable();
+        colors.dedup();
+
+        assert_eq!(colors.len(), DIRECTIONS.len());
+    }
+
+    #[test]
+    fn direction_color_mapping_is_stable() {
+        assert_eq!(
+            debug_face_color(FaceDirection::NegativeX),
+            Color32::from_rgb(230, 55, 55)
+        );
+        assert_eq!(
+            debug_face_color(FaceDirection::PositiveZ),
+            Color32::from_rgb(240, 210, 45)
+        );
+    }
+
+    #[test]
+    fn visibility_cut_emits_a_face_even_when_prefetched_geometry_continues() {
+        let inside = StorageCoord { x: 2, y: 2, z: 2 };
+        let outside = StorageCoord { x: 2, y: 3, z: 2 };
+        let region = BoundedRegion::new(
+            StorageCoord { x: 0, y: 0, z: 0 },
+            StorageCoord { x: 4, y: 3, z: 4 },
+            WorldExtent { x: 8, y: 8, z: 8 },
+        )
+        .expect("test region is valid");
+        let occupied = visible_occupancy(&[inside, outside], region);
+
+        let faces = extract_exposed_faces(
+            ChunkCoord { x: 0, y: 0, z: 0 },
+            &occupied,
+            16,
+        );
+
+        assert!(faces.faces.iter().any(|face| {
+            face.voxel == inside && face.direction == FaceDirection::PositiveY
+        }));
+    }
+}
+
 fn draw_voxel(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
@@ -835,6 +961,7 @@ fn draw_voxel(
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
     outline: bool,
+    debug_face_colors: bool,
 ) {
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
@@ -871,9 +998,36 @@ fn draw_voxel(
         )
     };
     let (r, g, bl) = (base.r(), base.g(), base.b());
-    let top_col   = shade(r, g, bl,  40);
-    let facex_col = shade(r, g, bl, -10);
-    let facez_col = shade(r, g, bl, -40);
+    let top_direction = if hy > 0.0 {
+        FaceDirection::PositiveY
+    } else {
+        FaceDirection::NegativeY
+    };
+    let x_direction = if hx > 0.0 {
+        FaceDirection::PositiveX
+    } else {
+        FaceDirection::NegativeX
+    };
+    let z_direction = if hz > 0.0 {
+        FaceDirection::PositiveZ
+    } else {
+        FaceDirection::NegativeZ
+    };
+    let top_col = if debug_face_colors {
+        debug_face_color(top_direction)
+    } else {
+        shade(r, g, bl, 40)
+    };
+    let facex_col = if debug_face_colors {
+        debug_face_color(x_direction)
+    } else {
+        shade(r, g, bl, -10)
+    };
+    let facez_col = if debug_face_colors {
+        debug_face_color(z_direction)
+    } else {
+        shade(r, g, bl, -40)
+    };
 
     let stroke = if outline { Stroke::new(0.5, Color32::from_gray(30)) } else { Stroke::NONE };
 
@@ -891,6 +1045,7 @@ fn draw_exposed_face(
     cam: &Camera,
     bounds: &Bounds,
     base: Color32,
+    debug_face_colors: bool,
 ) {
     let visible = match face.direction {
         FaceDirection::NegativeX => cam.yaw.sin() < 0.0,
@@ -917,11 +1072,15 @@ fn draw_exposed_face(
         FaceDirection::NegativeX | FaceDirection::PositiveX => -10,
         FaceDirection::NegativeZ | FaceDirection::PositiveZ => -40,
     };
-    let color = Color32::from_rgb(
-        (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
-        (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
-        (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
-    );
+    let color = if debug_face_colors {
+        debug_face_color(face.direction)
+    } else {
+        Color32::from_rgb(
+            (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
+            (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
+            (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
+        )
+    };
     painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
@@ -990,7 +1149,7 @@ fn draw_marker(
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
-    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true);
+    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true, false);
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
         origin,
@@ -1097,6 +1256,7 @@ struct VoxelReplayApp {
     show_overview: bool,
     show_overview_bounds: bool,
     overview_size: f32,
+    debug_face_colors: bool,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -1157,6 +1317,7 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            debug_face_colors: false,
         }
     }
 
@@ -1190,6 +1351,7 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            debug_face_colors: false,
         };
         app.load_trial(0);
         app
@@ -1232,8 +1394,11 @@ impl VoxelReplayApp {
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
         let chunk_edge = self.trajectories[key.iteration].world_chunk_edge.max(1);
-        let occupied = frame.occupied.iter().copied().collect::<HashSet<_>>();
-        let chunks = frame.occupied.iter().map(|coordinate| ChunkCoord {
+        // The loaded frame includes a prefetch halo, but geometry is clipped to
+        // the green visibility box. Mesh only that visible set so a surface
+        // continuing into the halo receives a proper section face at the cut.
+        let occupied = visible_occupancy(&frame.occupied, frame.region);
+        let chunks = occupied.iter().map(|coordinate| ChunkCoord {
             x: coordinate.x / chunk_edge,
             y: coordinate.y / chunk_edge,
             z: coordinate.z / chunk_edge,
@@ -1662,8 +1827,26 @@ impl eframe::App for VoxelReplayApp {
                     Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
                         .suffix("°")
                         .text("field of view"),
-                );
+                    );
             });
+            ui.separator();
+            ui.label(egui::RichText::new("Render diagnostics").strong());
+            ui.checkbox(&mut self.debug_face_colors, "Color faces by direction");
+            if self.debug_face_colors {
+                for (direction, label) in [
+                    (FaceDirection::NegativeX, "-X"),
+                    (FaceDirection::PositiveX, "+X"),
+                    (FaceDirection::NegativeY, "-Y"),
+                    (FaceDirection::PositiveY, "+Y"),
+                    (FaceDirection::NegativeZ, "-Z"),
+                    (FaceDirection::PositiveZ, "+Z"),
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(debug_face_color(direction), "■");
+                        ui.label(label);
+                    });
+                }
+            }
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
@@ -1910,11 +2093,32 @@ impl eframe::App for VoxelReplayApp {
             if !self.occlude_agent {
                 if compiled_mode {
                     for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                        draw_exposed_face(
+                            &painter,
+                            face,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            self.debug_face_colors,
+                        );
                     }
                 } else {
                     for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            false,
+                            self.debug_face_colors,
+                        );
                     }
                 }
             }
@@ -1951,7 +2155,19 @@ impl eframe::App for VoxelReplayApp {
                             .unwrap()
                     });
                     for &(x, y, z) in &trail_list {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, trail_color, true);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            trail_color,
+                            true,
+                            false,
+                        );
                     }
                 }
                 // Draw each agent's current cursor.
@@ -1993,7 +2209,19 @@ impl eframe::App for VoxelReplayApp {
                         .unwrap()
                 });
                 for &(x, y, z) in &agent_list {
-                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, agent_color, true);
+                    draw_voxel(
+                        &painter,
+                        x,
+                        y,
+                        z,
+                        render_origin,
+                        rect,
+                        cam,
+                        &b,
+                        agent_color,
+                        true,
+                        false,
+                    );
                 }
 
                 if let Some([sx, sy, sz]) = render_start {
@@ -2011,11 +2239,32 @@ impl eframe::App for VoxelReplayApp {
             if self.occlude_agent {
                 if compiled_mode {
                     for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                        draw_exposed_face(
+                            &painter,
+                            face,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            self.debug_face_colors,
+                        );
                     }
                 } else {
                     for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            false,
+                            self.debug_face_colors,
+                        );
                     }
                 }
             }
@@ -2121,6 +2370,7 @@ fn main() -> eframe::Result<()> {
     let mut explain_run: Option<PathBuf> = None;
     let mut checkpoint = "latest".to_string();
     let mut open_observation_editor = false;
+    let mut debug_face_colors = false;
     let mut index = 0;
     while index < raw_args.len() {
         match raw_args[index].as_str() {
@@ -2149,6 +2399,7 @@ fn main() -> eframe::Result<()> {
                 }
             }
             "--open-observation-editor" => open_observation_editor = true,
+            "--debug-face-colors" => debug_face_colors = true,
             value => args.push(value.to_string()),
         }
         index += 1;
@@ -2157,6 +2408,7 @@ fn main() -> eframe::Result<()> {
         eprintln!("Usage:");
         eprintln!("  voxel-replay --tune-dir <tune-run-dir>     Navigate tune trials");
         eprintln!("  voxel-replay <file1.json> [file2.json ...] Replay specific files");
+        eprintln!("  --debug-face-colors                       Start with direction colors enabled");
         eprintln!();
         eprintln!("Keyboard shortcuts:");
         eprintln!("  T / Y       next / prev trial  (tune mode only)");
@@ -2191,7 +2443,11 @@ fn main() -> eframe::Result<()> {
         return eframe::run_native(
             "Voxel Replay",
             options,
-            Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new_tune(trials)))),
+            Box::new(move |_cc| {
+                let mut app = VoxelReplayApp::new_tune(trials);
+                app.debug_face_colors = debug_face_colors;
+                Ok(Box::new(app))
+            }),
         );
     }
 
@@ -2234,6 +2490,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Voxel Replay",
         options,
-        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories, explain_ui)))),
+        Box::new(move |_cc| {
+            let mut app = VoxelReplayApp::new(trajectories, explain_ui);
+            app.debug_face_colors = debug_face_colors;
+            Ok(Box::new(app))
+        }),
     )
 }
