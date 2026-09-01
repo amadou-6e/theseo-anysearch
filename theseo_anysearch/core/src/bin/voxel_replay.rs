@@ -17,11 +17,14 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
+use theseo_core::replay::lod::{
+    chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
+    CameraChunkView, ChunkBudgets,
+};
 use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
-    camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
+    agent_region, camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
-use theseo_core::replay::lod::{select_chunks, CameraChunkView, ChunkBudgets};
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
@@ -30,6 +33,29 @@ use theseo_core::voxel::world::StorageCoord;
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+fn chunk_intersects_region(
+    chunk: ChunkCoord,
+    chunk_edge: u32,
+    region: theseo_core::voxel::world::BoundedRegion,
+) -> bool {
+    let minimum = StorageCoord {
+        x: chunk.x.saturating_mul(chunk_edge),
+        y: chunk.y.saturating_mul(chunk_edge),
+        z: chunk.z.saturating_mul(chunk_edge),
+    };
+    let maximum_exclusive = StorageCoord {
+        x: minimum.x.saturating_add(chunk_edge),
+        y: minimum.y.saturating_add(chunk_edge),
+        z: minimum.z.saturating_add(chunk_edge),
+    };
+    minimum.x < region.maximum_exclusive.x
+        && maximum_exclusive.x > region.minimum.x
+        && minimum.y < region.maximum_exclusive.y
+        && maximum_exclusive.y > region.minimum.y
+        && minimum.z < region.maximum_exclusive.z
+        && maximum_exclusive.z > region.minimum.z
+}
 
 // ---------------------------------------------------------------------------
 // JSON data model — must match the Python TrajectoryWriter output
@@ -1055,11 +1081,29 @@ impl VoxelReplayApp {
             key.step,
         );
         let chunk_shape = source.chunk_shape();
-        let indexed = source.indexed_chunks();
+        let mut indexed = source.indexed_chunks();
+        if let Some(shape) = chunk_shape {
+            for mutation in &mutations {
+                let chunk = ChunkCoord {
+                    x: mutation.coordinate.x / shape.x,
+                    y: mutation.coordinate.y / shape.y,
+                    z: mutation.coordinate.z / shape.z,
+                };
+                if !indexed.iter().any(|(candidate, _)| *candidate == chunk) {
+                    indexed.push((chunk, 0));
+                }
+            }
+        }
         let selection = chunk_shape.map(|shape| {
+            let mandatory = chunks_intersecting_box(
+                indexed.iter().map(|(chunk, _)| *chunk),
+                key.center,
+                key.radius,
+                shape,
+            );
             let radius_chunks = (key.radius as f64 / shape.x.max(shape.y).max(shape.z) as f64)
                 .max(1.0) / f64::from(self.camera.zoom.max(0.2));
-            select_chunks(
+            let selected = select_chunks(
                 indexed.iter().map(|(chunk, _)| *chunk),
                 CameraChunkView {
                     center: [
@@ -1076,16 +1120,34 @@ impl VoxelReplayApp {
                     minimum_forward_dot: -0.5,
                 },
                 self.chunk_budgets,
-            )
+            );
+            let selection = include_mandatory_chunks(selected, mandatory.iter().copied());
+            let mut visible = selection.detailed.iter().chain(&selection.coarse)
+                .copied().collect::<Vec<_>>();
+            visible.sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
+            visible.dedup();
+            let mut resident = expand_chunk_halo(
+                &mandatory,
+                indexed.iter().map(|(chunk, _)| *chunk),
+                1,
+            );
+            resident.extend(visible.iter().copied());
+            resident.sort_by_key(|chunk| (chunk.x, chunk.y, chunk.z));
+            resident.dedup();
+            (selection, visible, resident)
         });
+        let display_region = agent_region(key.center, key.radius, source.extent());
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let result = match selection {
-                Some(selection) if !selection.detailed.is_empty() => source
-                    .load_chunk_selection(
+            let result = match (selection, display_region) {
+                (Some((selection, visible, resident)), Ok(display_region))
+                    if !selection.detailed.is_empty() => source
+                    .load_chunk_selection_in_region(
                         &selection.detailed,
-                        &selection.detailed.iter().chain(&selection.coarse).copied().collect::<Vec<_>>(),
+                        &visible,
+                        &resident,
                         &mutations,
+                        display_region,
                     )
                     .map(|frame| LoadedRegion {
                         frame,
@@ -1513,11 +1575,13 @@ impl eframe::App for VoxelReplayApp {
         let geo_list = if compiled_mode {
             active_regional_frame
                 .map(|frame| {
-                    frame.occupied.iter().filter_map(|coordinate| Some((
-                        u16::try_from(coordinate.x).ok()?,
-                        u16::try_from(coordinate.y).ok()?,
-                        u16::try_from(coordinate.z).ok()?,
-                    ))).collect::<Vec<_>>()
+                    frame.occupied.iter()
+                        .filter(|coordinate| frame.region.contains(**coordinate))
+                        .filter_map(|coordinate| Some((
+                            u16::try_from(coordinate.x).ok()?,
+                            u16::try_from(coordinate.y).ok()?,
+                            u16::try_from(coordinate.z).ok()?,
+                        ))).collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         } else {
@@ -1550,7 +1614,11 @@ impl eframe::App for VoxelReplayApp {
             let geo_color = Color32::from_rgb(120, 120, 130);
             if compiled_mode {
                 let chunk_edge = self.trajectories[iter_idx].world_chunk_edge.max(1);
-                for &chunk in &self.coarse_chunks {
+                for &chunk in self.coarse_chunks.iter().filter(|chunk| {
+                    active_regional_frame.is_some_and(|frame| {
+                        chunk_intersects_region(**chunk, chunk_edge, frame.region)
+                    })
+                }) {
                     draw_coarse_chunk(
                         &painter, chunk, chunk_edge, render_origin, rect, cam, &b,
                     );
@@ -1591,7 +1659,14 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                     .unwrap()
             });
-            let mut face_sorted = self.regional_faces.clone();
+            let mut face_sorted = self.regional_faces.iter().copied()
+                .filter(|face| {
+                    active_regional_frame.map_or(
+                        true,
+                        |frame| frame.region.contains(face.voxel),
+                    )
+                })
+                .collect::<Vec<_>>();
             face_sorted.sort_by(|a, b| {
                 let a = a.voxel;
                 let b = b.voxel;
