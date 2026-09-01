@@ -109,13 +109,15 @@ impl OverviewMesh {
                 let x = (f64::from(vertex[0]) - center[0]) / scale;
                 let y = (f64::from(vertex[1]) - center[1]) / scale;
                 let z = (f64::from(vertex[2]) - center[2]) / scale;
-                let xr = x * cy - z * sy;
-                let zr = x * sy + z * cy;
-                let yr = y * cp - zr * sp;
-                let depth = y * sp + zr * cp;
+                // Voxel worlds are Z-up: yaw rotates the horizontal X/Y
+                // plane, then pitch tilts height Z against horizontal depth.
+                let xr = x * cy - y * sy;
+                let horizontal_depth = x * sy + y * cy;
+                let vertical = z * cp - horizontal_depth * sp;
+                let depth = z * sp + horizontal_depth * cp;
                 ProjectedVertex {
                     x: xr as f32,
-                    y: -yr as f32,
+                    y: -vertical as f32,
                     depth: depth as f32,
                 }
             })
@@ -238,6 +240,19 @@ mod tests {
         let points = mesh.project(0.0, 0.0);
         assert!(points[0].x > points[1].x);
         assert!((points[0].x - points[1].x - 1.0 / 60_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn projection_uses_z_as_vertical_axis() {
+        let mesh = OverviewMesh {
+            vertices: vec![[5, 5, 5], [5, 5, 6], [5, 6, 5]],
+            indices: vec![],
+            extent: [10, 10, 10],
+        };
+        let points = mesh.project(0.0, 0.0);
+        assert!(points[1].y < points[0].y);
+        assert_eq!(points[2].y, points[0].y);
+        assert!(points[2].depth > points[0].depth);
     }
 
     #[test]
