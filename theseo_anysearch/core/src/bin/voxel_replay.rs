@@ -493,11 +493,19 @@ struct Camera {
     yaw:   f32,   // radians — rotates x/z plane
     pitch: f32,   // radians — tilts up/down
     zoom:  f32,   // scale multiplier (1.0 = default)
+    perspective: bool,
+    field_of_view_degrees: f32,
 }
 
 impl Camera {
     fn default() -> Self {
-        Self { yaw: 45.0_f32.to_radians(), pitch: 30.0_f32.to_radians(), zoom: 1.0 }
+        Self {
+            yaw: 45.0_f32.to_radians(),
+            pitch: 30.0_f32.to_radians(),
+            zoom: 1.0,
+            perspective: false,
+            field_of_view_degrees: 45.0,
+        }
     }
 
     /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
@@ -507,6 +515,14 @@ impl Camera {
         let yr  = y * self.pitch.cos() - zr * self.pitch.sin();
         let zr2 = y * self.pitch.sin() + zr * self.pitch.cos();
         (xr, -(yr - zr2 * 0.05))
+    }
+
+    fn camera_space(&self, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
+        let xr = x * self.yaw.cos() - z * self.yaw.sin();
+        let zr = x * self.yaw.sin() + z * self.yaw.cos();
+        let yr = y * self.pitch.cos() - zr * self.pitch.sin();
+        let depth = y * self.pitch.sin() + zr * self.pitch.cos();
+        (xr, -yr, depth)
     }
 
     /// Axis-aligned bounding box of the full grid in projected 2-D space.
@@ -539,6 +555,7 @@ impl Camera {
             // its 3-D diagonal. Keep this span independent of yaw and pitch so
             // orbiting never changes the apparent zoom.
             uniform_span: grid_size * 3.0_f32.sqrt() * 1.1,
+            world_center: (lo + hi) * 0.5,
         }
     }
 
@@ -549,6 +566,25 @@ impl Camera {
     /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
     #[inline]
     fn to_screen(&self, x: f32, y: f32, z: f32, rect: Rect, b: &Bounds) -> Pos2 {
+        if self.perspective {
+            let (px, py, depth) = self.camera_space(
+                x - b.world_center,
+                y - b.world_center,
+                z - b.world_center,
+            );
+            let camera_distance = b.uniform_span.max(1.0);
+            let near_plane = camera_distance * 0.01;
+            let distance = (camera_distance - depth).max(near_plane);
+            let half_fov = (self.field_of_view_degrees.clamp(15.0, 100.0) * 0.5)
+                .to_radians();
+            let focal_pixels = rect.width().min(rect.height()) * 0.5
+                / half_fov.tan()
+                * self.zoom;
+            return Pos2::new(
+                rect.center().x + px / distance * focal_pixels,
+                rect.center().y + py / distance * focal_pixels,
+            );
+        }
         let (px, py) = self.project(x, y, z);
         let cx = rect.center().x;
         let cy = rect.center().y;
@@ -566,6 +602,7 @@ struct Bounds {
     min_y: f32,
     max_y: f32,
     uniform_span: f32,
+    world_center: f32,
 }
 
 #[cfg(test)]
@@ -574,7 +611,7 @@ mod camera_tests {
     use eframe::egui::{Pos2, Rect, Vec2};
 
     fn test_camera() -> Camera {
-        Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 }
+        Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() }
     }
 
     #[test]
@@ -586,6 +623,7 @@ mod camera_tests {
             min_y: -5.0,
             max_y: 5.0,
             uniform_span: 20.0,
+            world_center: 0.0,
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 100.0));
 
@@ -605,6 +643,7 @@ mod camera_tests {
             min_y: -5.0,
             max_y: 5.0,
             uniform_span: 20.0,
+            world_center: 0.0,
         };
         let rect = Rect::from_min_size(Pos2::new(20.0, 30.0), Vec2::new(300.0, 100.0));
 
@@ -615,11 +654,12 @@ mod camera_tests {
 
     #[test]
     fn orbiting_does_not_change_the_screen_scale() {
-        let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 };
+        let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() };
         let second = Camera {
             yaw: 67.0_f32.to_radians(),
             pitch: 41.0_f32.to_radians(),
             zoom: 1.0,
+            ..Camera::default()
         };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(360.0, 200.0));
         let first_bounds = first.bounds(32.0);
@@ -629,6 +669,43 @@ mod camera_tests {
             first.screen_scale(rect, &first_bounds),
             second.screen_scale(rect, &second_bounds),
         );
+    }
+
+    #[test]
+    fn perspective_makes_nearer_equal_sized_objects_larger() {
+        let camera = Camera {
+            yaw: 0.0,
+            pitch: 0.0,
+            perspective: true,
+            ..Camera::default()
+        };
+        let bounds = camera.bounds(32.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0));
+        let center = bounds.world_center;
+        let far_center = camera.to_screen(center, center, center - 8.0, rect, &bounds);
+        let far_edge = camera.to_screen(center + 1.0, center, center - 8.0, rect, &bounds);
+        let near_center = camera.to_screen(center, center, center + 8.0, rect, &bounds);
+        let near_edge = camera.to_screen(center + 1.0, center, center + 8.0, rect, &bounds);
+
+        assert!(near_edge.x - near_center.x > far_edge.x - far_center.x);
+    }
+
+    #[test]
+    fn perspective_preserves_aspect_ratio() {
+        let camera = Camera {
+            yaw: 0.0,
+            pitch: 0.0,
+            perspective: true,
+            ..Camera::default()
+        };
+        let bounds = camera.bounds(32.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 240.0));
+        let center = bounds.world_center;
+        let origin = camera.to_screen(center, center, center, rect, &bounds);
+        let horizontal = camera.to_screen(center + 1.0, center, center, rect, &bounds);
+        let vertical = camera.to_screen(center, center - 1.0, center, rect, &bounds);
+
+        assert_eq!(horizontal.x - origin.x, vertical.y - origin.y);
     }
 }
 
@@ -1513,6 +1590,16 @@ impl eframe::App for VoxelReplayApp {
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
             ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
+            ui.separator();
+            ui.label(egui::RichText::new("Camera projection").strong());
+            ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
+            ui.add_enabled_ui(self.camera.perspective, |ui| {
+                ui.add(
+                    Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
+                        .suffix("°")
+                        .text("field of view"),
+                );
+            });
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
