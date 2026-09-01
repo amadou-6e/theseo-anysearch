@@ -530,7 +530,20 @@ impl Camera {
         }
         let pw = (max_x - min_x) * 0.05;
         let ph = (max_y - min_y) * 0.05;
-        Bounds { min_x: min_x - pw, max_x: max_x + pw, min_y: min_y - ph, max_y: max_y + ph }
+        Bounds {
+            min_x: min_x - pw,
+            max_x: max_x + pw,
+            min_y: min_y - ph,
+            max_y: max_y + ph,
+            // A cube's largest possible orthographic projection is bounded by
+            // its 3-D diagonal. Keep this span independent of yaw and pitch so
+            // orbiting never changes the apparent zoom.
+            uniform_span: grid_size * 3.0_f32.sqrt() * 1.1,
+        }
+    }
+
+    fn screen_scale(&self, rect: Rect, bounds: &Bounds) -> f32 {
+        rect.width().min(rect.height()) / bounds.uniform_span.max(1.0) * self.zoom
     }
 
     /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
@@ -539,11 +552,7 @@ impl Camera {
         let (px, py) = self.project(x, y, z);
         let cx = rect.center().x;
         let cy = rect.center().y;
-        let projected_width = (b.max_x - b.min_x).max(1.0);
-        let projected_height = (b.max_y - b.min_y).max(1.0);
-        let scale = (rect.width() / projected_width)
-            .min(rect.height() / projected_height)
-            * self.zoom;
+        let scale = self.screen_scale(rect, b);
         Pos2::new(
             cx + (px - (b.min_x + b.max_x) * 0.5) * scale,
             cy + (py - (b.min_y + b.max_y) * 0.5) * scale,
@@ -551,7 +560,13 @@ impl Camera {
     }
 }
 
-struct Bounds { min_x: f32, max_x: f32, min_y: f32, max_y: f32 }
+struct Bounds {
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+    uniform_span: f32,
+}
 
 #[cfg(test)]
 mod camera_tests {
@@ -565,7 +580,13 @@ mod camera_tests {
     #[test]
     fn screen_mapping_uses_one_scale_for_both_projected_axes() {
         let camera = test_camera();
-        let bounds = Bounds { min_x: -10.0, max_x: 10.0, min_y: -5.0, max_y: 5.0 };
+        let bounds = Bounds {
+            min_x: -10.0,
+            max_x: 10.0,
+            min_y: -5.0,
+            max_y: 5.0,
+            uniform_span: 20.0,
+        };
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 100.0));
 
         let center = camera.to_screen(0.0, 0.0, 0.0, rect, &bounds);
@@ -578,12 +599,36 @@ mod camera_tests {
     #[test]
     fn projected_bounds_are_centered_when_the_viewport_aspect_differs() {
         let camera = test_camera();
-        let bounds = Bounds { min_x: -10.0, max_x: 10.0, min_y: -5.0, max_y: 5.0 };
+        let bounds = Bounds {
+            min_x: -10.0,
+            max_x: 10.0,
+            min_y: -5.0,
+            max_y: 5.0,
+            uniform_span: 20.0,
+        };
         let rect = Rect::from_min_size(Pos2::new(20.0, 30.0), Vec2::new(300.0, 100.0));
 
         let center = camera.to_screen(0.0, 0.0, 0.0, rect, &bounds);
 
         assert_eq!(center, rect.center());
+    }
+
+    #[test]
+    fn orbiting_does_not_change_the_screen_scale() {
+        let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 };
+        let second = Camera {
+            yaw: 67.0_f32.to_radians(),
+            pitch: 41.0_f32.to_radians(),
+            zoom: 1.0,
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(360.0, 200.0));
+        let first_bounds = first.bounds(32.0);
+        let second_bounds = second.bounds(32.0);
+
+        assert_eq!(
+            first.screen_scale(rect, &first_bounds),
+            second.screen_scale(rect, &second_bounds),
+        );
     }
 }
 
