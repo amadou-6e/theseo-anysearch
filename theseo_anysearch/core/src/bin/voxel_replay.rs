@@ -2223,6 +2223,7 @@ fn main() -> eframe::Result<()> {
     let mut explain_run: Option<PathBuf> = None;
     let mut checkpoint = "latest".to_string();
     let mut open_observation_editor = false;
+    let mut debug_face_colors = false;
     let mut index = 0;
     while index < raw_args.len() {
         match raw_args[index].as_str() {
@@ -2251,6 +2252,7 @@ fn main() -> eframe::Result<()> {
                 }
             }
             "--open-observation-editor" => open_observation_editor = true,
+            "--debug-face-colors" => debug_face_colors = true,
             value => args.push(value.to_string()),
         }
         index += 1;
@@ -2259,6 +2261,7 @@ fn main() -> eframe::Result<()> {
         eprintln!("Usage:");
         eprintln!("  voxel-replay --tune-dir <tune-run-dir>     Navigate tune trials");
         eprintln!("  voxel-replay <file1.json> [file2.json ...] Replay specific files");
+        eprintln!("  --debug-face-colors                       Start with direction colors enabled");
         eprintln!();
         eprintln!("Keyboard shortcuts:");
         eprintln!("  T / Y       next / prev trial  (tune mode only)");
@@ -2293,7 +2296,11 @@ fn main() -> eframe::Result<()> {
         return eframe::run_native(
             "Voxel Replay",
             options,
-            Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new_tune(trials)))),
+            Box::new(move |_cc| {
+                let mut app = VoxelReplayApp::new_tune(trials);
+                app.debug_face_colors = debug_face_colors;
+                Ok(Box::new(app))
+            }),
         );
     }
 
@@ -2336,6 +2343,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Voxel Replay",
         options,
-        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories, explain_ui)))),
+        Box::new(move |_cc| {
+            let mut app = VoxelReplayApp::new(trajectories, explain_ui);
+            app.debug_face_colors = debug_face_colors;
+            Ok(Box::new(app))
+        }),
     )
 }
