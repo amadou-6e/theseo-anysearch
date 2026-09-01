@@ -848,8 +848,6 @@ struct VoxelReplayApp {
     playing: bool,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
-    /// Whether geometry is drawn after agents and therefore occludes them.
-    occlude_agent: bool,
     /// Use cached exposed surfaces instead of the original per-voxel cubes.
     surface_mesh: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
@@ -909,7 +907,6 @@ impl VoxelReplayApp {
         let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
-            occlude_agent: true,
             surface_mesh: false,
             trajectories,
             geo_voxels,
@@ -943,7 +940,6 @@ impl VoxelReplayApp {
     fn new_tune(trials: Vec<TrialEntry>) -> Self {
         let mut app = Self {
             camera: Camera::default(),
-            occlude_agent: true,
             surface_mesh: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
@@ -1434,7 +1430,6 @@ impl eframe::App for VoxelReplayApp {
             if ui.button(play_label).clicked() { ev.toggle_play = true; }
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
-            ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
@@ -1682,15 +1677,13 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
                     .unwrap()
             });
-            if !self.occlude_agent {
-                if compiled_mode && self.surface_mesh {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
+            if compiled_mode && self.surface_mesh {
+                for &face in &face_sorted {
+                    draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                }
+            } else {
+                for &(x, y, z) in &geo_sorted {
+                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
                 }
             }
 
@@ -1780,18 +1773,6 @@ impl eframe::App for VoxelReplayApp {
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
-                }
-            }
-
-            if self.occlude_agent {
-                if compiled_mode && self.surface_mesh {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
                 }
             }
 
