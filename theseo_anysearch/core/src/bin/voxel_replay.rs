@@ -490,7 +490,7 @@ fn overview_meshes(trajectories: &[TrajectoryData]) -> Vec<Result<OverviewMesh, 
 // ---------------------------------------------------------------------------
 
 struct Camera {
-    yaw:   f32,   // radians — rotates horizontal x/y plane
+    yaw:   f32,   // radians — rotates x/z plane
     pitch: f32,   // radians — tilts up/down
     zoom:  f32,   // scale multiplier (1.0 = default)
 }
@@ -502,10 +502,11 @@ impl Camera {
 
     /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
     fn project(&self, x: f32, y: f32, z: f32) -> (f32, f32) {
-        let xr = x * self.yaw.cos() - y * self.yaw.sin();
-        let horizontal_depth = x * self.yaw.sin() + y * self.yaw.cos();
-        let vertical = z * self.pitch.cos() - horizontal_depth * self.pitch.sin();
-        (xr, -vertical)
+        let xr  = x * self.yaw.cos() - z * self.yaw.sin();
+        let zr  = x * self.yaw.sin() + z * self.yaw.cos();
+        let yr  = y * self.pitch.cos() - zr * self.pitch.sin();
+        let zr2 = y * self.pitch.sin() + zr * self.pitch.cos();
+        (xr, -(yr - zr2 * 0.05))
     }
 
     /// Axis-aligned bounding box of the full grid in projected 2-D space.
@@ -601,7 +602,7 @@ fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 
         StorageCoord { x: u32::from(x), y: u32::from(y), z: u32::from(z) },
         origin,
     );
-    x * sy * cp + y * cy * cp + z * sp
+    x * sy * cp + y * sp + z * cy * cp
 }
 
 fn draw_voxel(
@@ -620,24 +621,23 @@ fn draw_voxel(
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
     // Select the visible face on each axis based on camera orientation.
-    // The Z-up "to-camera" direction is
-    // (sin(yaw)*cos(pitch), cos(yaw)*cos(pitch), sin(pitch)).
+    // The "to-camera" direction is (sin(yaw)*cos(pitch), sin(pitch), cos(yaw)*cos(pitch)).
     // A face with outward normal N is visible when dot(N, to_cam) > 0.
     let hx = if cam.yaw.sin() > 0.0 { h } else { -h };   // +X visible when sin(yaw)>0
-    let hy = if cam.yaw.cos() > 0.0 { h } else { -h };   // +Y visible when cos(yaw)>0
-    let hz = if cam.pitch.sin() > 0.0 { h } else { -h }; // +Z (top) visible when sin(pitch)>0
+    let hy = if cam.pitch.sin() > 0.0 { h } else { -h }; // +Y (top) visible when sin(pitch)>0
+    let hz = if cam.yaw.cos() > 0.0 { h } else { -h };   // +Z visible when cos(yaw)>0
 
     let top_face = vec![
-        corner(-h, -h, hz), corner( h, -h, hz),
-        corner( h,  h, hz), corner(-h,  h, hz),
+        corner(-h, hy, -h), corner( h, hy, -h),
+        corner( h, hy,  h), corner(-h, hy,  h),
     ];
     let face_x = vec![
         corner(hx, -h, -h), corner(hx, -h,  h),
         corner(hx,  h,  h), corner(hx,  h, -h),
     ];
-    let face_y = vec![
-        corner(-h, hy, -h), corner( h, hy, -h),
-        corner( h, hy,  h), corner(-h, hy,  h),
+    let face_z = vec![
+        corner(-h, -h, hz), corner( h, -h, hz),
+        corner( h,  h, hz), corner(-h,  h, hz),
     ];
 
     let shade = |r: u8, g: u8, bl: u8, amount: i32| -> Color32 {
@@ -655,7 +655,7 @@ fn draw_voxel(
     let stroke = if outline { Stroke::new(0.5, Color32::from_gray(30)) } else { Stroke::NONE };
 
     // Draw back-to-front within the voxel (z-face furthest, then x-face, then top).
-    painter.add(Shape::convex_polygon(face_y,    facez_col, stroke));
+    painter.add(Shape::convex_polygon(face_z,    facez_col, stroke));
     painter.add(Shape::convex_polygon(face_x,    facex_col, stroke));
     painter.add(Shape::convex_polygon(top_face,  top_col,   stroke));
 }
@@ -672,10 +672,10 @@ fn draw_exposed_face(
     let visible = match face.direction {
         FaceDirection::NegativeX => cam.yaw.sin() < 0.0,
         FaceDirection::PositiveX => cam.yaw.sin() > 0.0,
-        FaceDirection::NegativeY => cam.yaw.cos() < 0.0,
-        FaceDirection::PositiveY => cam.yaw.cos() > 0.0,
-        FaceDirection::NegativeZ => cam.pitch.sin() < 0.0,
-        FaceDirection::PositiveZ => cam.pitch.sin() > 0.0,
+        FaceDirection::NegativeY => cam.pitch.sin() < 0.0,
+        FaceDirection::PositiveY => cam.pitch.sin() > 0.0,
+        FaceDirection::NegativeZ => cam.yaw.cos() < 0.0,
+        FaceDirection::PositiveZ => cam.yaw.cos() > 0.0,
     };
     if !visible { return; }
     let (x, y, z) = camera_relative(face.voxel, origin);
@@ -690,20 +690,16 @@ fn draw_exposed_face(
         FaceDirection::PositiveZ => vec![corner(-h,-h,h), corner(-h,h,h), corner(h,h,h), corner(h,-h,h)],
     };
     let adjustment = match face.direction {
-        FaceDirection::NegativeZ | FaceDirection::PositiveZ => 40,
+        FaceDirection::NegativeY | FaceDirection::PositiveY => 40,
         FaceDirection::NegativeX | FaceDirection::PositiveX => -10,
-        FaceDirection::NegativeY | FaceDirection::PositiveY => -40,
+        FaceDirection::NegativeZ | FaceDirection::PositiveZ => -40,
     };
     let color = Color32::from_rgb(
         (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
         (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
         (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
     );
-    painter.add(Shape::convex_polygon(
-        points,
-        color,
-        Stroke::new(0.35, Color32::from_gray(45)),
-    ));
+    painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
 fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
@@ -805,8 +801,8 @@ fn draw_grid_bounds_layer(
         (0, 4), (1, 5), (2, 6), (3, 7),
     ];
     let near_x = if cam.yaw.sin() > 0.0 { hi } else { lo };
-    let near_y = if cam.yaw.cos() > 0.0 { hi } else { lo };
-    let near_z = if cam.pitch.sin() > 0.0 { hi } else { lo };
+    let near_y = if cam.pitch.sin() > 0.0 { hi } else { lo };
+    let near_z = if cam.yaw.cos() > 0.0 { hi } else { lo };
     let pts: Vec<Pos2> = corners.iter()
         .map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b))
         .collect();
@@ -1118,8 +1114,8 @@ impl VoxelReplayApp {
                     half_extent: [radius_chunks; 3],
                     forward: [
                         f64::from(self.camera.yaw.sin()),
-                        f64::from(self.camera.yaw.cos()),
                         f64::from(self.camera.pitch.sin()),
+                        f64::from(self.camera.yaw.cos()),
                     ],
                     minimum_forward_dot: -0.5,
                 },
