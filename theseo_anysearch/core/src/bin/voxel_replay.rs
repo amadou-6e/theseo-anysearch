@@ -1441,10 +1441,6 @@ impl eframe::App for VoxelReplayApp {
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
-                ui.checkbox(
-                    &mut self.surface_mesh,
-                    "Use surface mesh (faster, hides voxel depth)",
-                );
                 if ui.add(Slider::new(&mut self.visualization_radius, 1..=64)
                     .text("radius")).changed()
                 {
@@ -1458,9 +1454,6 @@ impl eframe::App for VoxelReplayApp {
                     .min(self.chunk_budgets.visible);
                 if budgets_changed {
                     self.camera_revision = self.camera_revision.wrapping_add(1);
-                }
-                if self.pending_region.is_some() {
-                    ui.label(egui::RichText::new("Loading visible region...").weak());
                 }
                 if let Some(error) = &self.regional_error {
                     ui.colored_label(Color32::from_rgb(230, 100, 100), error);
