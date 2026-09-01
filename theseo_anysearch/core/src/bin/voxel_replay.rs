@@ -850,6 +850,8 @@ struct VoxelReplayApp {
     camera: Camera,
     /// Whether geometry is drawn after agents and therefore occludes them.
     occlude_agent: bool,
+    /// Use cached exposed surfaces instead of the original per-voxel cubes.
+    surface_mesh: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -908,6 +910,7 @@ impl VoxelReplayApp {
         Self {
             camera: Camera::default(),
             occlude_agent: true,
+            surface_mesh: false,
             trajectories,
             geo_voxels,
             iter_idx: 0,
@@ -941,6 +944,7 @@ impl VoxelReplayApp {
         let mut app = Self {
             camera: Camera::default(),
             occlude_agent: true,
+            surface_mesh: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
@@ -1434,6 +1438,10 @@ impl eframe::App for VoxelReplayApp {
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
+                ui.checkbox(
+                    &mut self.surface_mesh,
+                    "Use surface mesh (faster, hides voxel depth)",
+                );
                 if ui.add(Slider::new(&mut self.visualization_radius, 1..=64)
                     .text("radius")).changed()
                 {
@@ -1675,7 +1683,7 @@ impl eframe::App for VoxelReplayApp {
                     .unwrap()
             });
             if !self.occlude_agent {
-                if compiled_mode {
+                if compiled_mode && self.surface_mesh {
                     for &face in &face_sorted {
                         draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
                     }
@@ -1776,7 +1784,7 @@ impl eframe::App for VoxelReplayApp {
             }
 
             if self.occlude_agent {
-                if compiled_mode {
+                if compiled_mode && self.surface_mesh {
                     for &face in &face_sorted {
                         draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
                     }
