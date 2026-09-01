@@ -529,8 +529,12 @@ impl Camera {
 
     /// Axis-aligned bounding box of the full grid in projected 2-D space.
     fn bounds(&self, grid_size: f32) -> Bounds {
-        let lo = 0.5f32;
-        let hi = grid_size + 0.5;
+        self.bounds_from_first_center(grid_size, 1.0)
+    }
+
+    fn bounds_from_first_center(&self, grid_size: f32, first_center: f32) -> Bounds {
+        let lo = first_center - 0.5;
+        let hi = first_center + grid_size - 0.5;
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
         let mut min_y = f32::INFINITY;
@@ -708,6 +712,14 @@ mod camera_tests {
         let vertical = camera.to_screen(center, center - 1.0, center, rect, &bounds);
 
         assert_eq!(horizontal.x - origin.x, vertical.y - origin.y);
+    }
+
+    #[test]
+    fn zero_based_compiled_region_is_centered_on_its_middle_voxel() {
+        let camera = test_camera();
+        let bounds = camera.bounds_from_first_center(33.0, 0.0);
+
+        assert_eq!(bounds.world_center, 16.0);
     }
 }
 
@@ -1040,12 +1052,13 @@ fn draw_grid_bounds_layer(
     cam: &Camera,
     b: &Bounds,
     grid_size: f32,
+    first_center: f32,
     draw_front: bool,
 ) {
     let shadow = Stroke::new(2.5, Color32::from_rgba_premultiplied(0, 0, 0, 180));
     let stroke = Stroke::new(1.25, Color32::from_rgb(80, 255, 140));
-    let lo = 0.5_f32;
-    let hi = grid_size + 0.5;
+    let lo = first_center - 0.5;
+    let hi = first_center + grid_size - 0.5;
     let corners = [
         (lo, lo, lo), (hi, lo, lo), (hi, hi, lo), (lo, hi, lo),
         (lo, lo, hi), (hi, lo, hi), (hi, hi, hi), (lo, hi, hi),
@@ -1846,6 +1859,7 @@ impl eframe::App for VoxelReplayApp {
              ep.goal_positions.clone(), ep.start_positions.clone())
         };
         let compiled_mode = self.trajectories[iter_idx].world.is_some();
+        let first_display_center = if compiled_mode { 0.0 } else { 1.0 };
         let active_regional_frame = self.regional_frame.as_ref().map(|(_, frame)| frame);
         let render_origin = active_regional_frame
             .map(|frame| frame.render_origin)
@@ -1897,9 +1911,17 @@ impl eframe::App for VoxelReplayApp {
             );
 
             let cam = &self.camera;
-            let b = cam.bounds(display_grid_size);
+            let b = cam.bounds_from_first_center(display_grid_size, first_display_center);
             // Rear edges render beneath voxels and are occluded by filled space.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
+            draw_grid_bounds_layer(
+                &painter,
+                rect,
+                cam,
+                &b,
+                display_grid_size,
+                first_display_center,
+                false,
+            );
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
@@ -2151,7 +2173,15 @@ impl eframe::App for VoxelReplayApp {
             }
 
             // Camera-facing and silhouette edges remain visible above the scene.
-            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
+            draw_grid_bounds_layer(
+                &painter,
+                rect,
+                cam,
+                &b,
+                display_grid_size,
+                first_display_center,
+                true,
+            );
 
             if self.show_overview {
                 if let Some(Ok(mesh)) = self.overview_meshes.get(iter_idx) {
