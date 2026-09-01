@@ -17,7 +17,9 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
-use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
+use theseo_core::replay::overview::{
+    box_vertices, task_marker_to_storage, OverviewMesh, ProjectedVertex,
+};
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
@@ -405,23 +407,23 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
     mutations
 }
 
-fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
+fn selected_agent_center(
+    trajectory: &TrajectoryData,
+    step: usize,
+    selected_agent: usize,
+) -> Option<StorageCoord> {
     let episode = &trajectory.episode;
     let selected = episode.steps.get(step);
     let coordinate = if trajectory.agent_count > 1 {
         selected
-            .and_then(|value| value.cursors.first().copied())
-            .or_else(|| episode.start_positions.first().copied().flatten())
+            .and_then(|value| value.cursors.get(selected_agent).copied())
+            .or_else(|| episode.start_positions.get(selected_agent).copied().flatten())
     } else {
         selected
             .map(|value| [value.cursor_x, value.cursor_y, value.cursor_z])
             .or(episode.start_pos)
     }?;
-    Some(StorageCoord {
-        x: u32::from(coordinate[0]),
-        y: u32::from(coordinate[1]),
-        z: u32::from(coordinate[2]),
-    })
+    storage_coordinate(Some(coordinate))
 }
 
 fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalReplaySource>> {
@@ -531,6 +533,8 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool,
+    visible_region: Option<(StorageCoord, StorageCoord)>,
+    agent: Option<StorageCoord>, start: Option<StorageCoord>, goal: Option<StorageCoord>,
 ) {
     let inset_size = outer.width().min(outer.height()).min(size);
     let rect = Rect::from_min_size(
@@ -564,7 +568,39 @@ fn draw_overview_inset(
             );
         }
     }
+    if let Some((minimum, maximum_exclusive)) = visible_region {
+        let vertices = box_vertices(
+            [minimum.x, minimum.y, minimum.z],
+            [maximum_exclusive.x, maximum_exclusive.y, maximum_exclusive.z],
+        );
+        let points = mesh.project_vertices(&vertices, camera.yaw, camera.pitch);
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            painter.line_segment(
+                [inset_position(points[a], rect, scale), inset_position(points[b], rect, scale)],
+                Stroke::new(2.0, Color32::from_rgb(70, 255, 120)),
+            );
+        }
+    }
+    for (coordinate, color, radius) in [
+        (start, Color32::from_rgb(80, 170, 255), 3.5),
+        (goal, Color32::from_rgb(255, 100, 210), 3.5),
+        (agent, Color32::YELLOW, 5.0),
+    ] {
+        if let Some(coordinate) = coordinate {
+            let point = mesh.project_vertices(
+                &[[coordinate.x, coordinate.y, coordinate.z]], camera.yaw, camera.pitch,
+            )[0];
+            let screen = inset_position(point, rect, scale);
+            painter.circle_filled(screen, radius + 1.5, Color32::BLACK);
+            painter.circle_filled(screen, radius, color);
+        }
+    }
     painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
+}
+
+fn storage_coordinate(coordinate: Option<[u16; 3]>) -> Option<StorageCoord> {
+    let [x, y, z] = task_marker_to_storage(coordinate?)?;
+    Some(StorageCoord { x, y, z })
 }
 
 /// Back-to-front depth key for painter's algorithm.
@@ -848,6 +884,10 @@ struct VoxelReplayApp {
     show_overview: bool,
     show_overview_bounds: bool,
     overview_size: f32,
+    selected_agent: usize,
+    show_overview_agent: bool,
+    show_overview_start: bool,
+    show_overview_goal: bool,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -908,6 +948,10 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            selected_agent: 0,
+            show_overview_agent: true,
+            show_overview_start: true,
+            show_overview_goal: true,
         }
     }
 
@@ -941,6 +985,10 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            selected_agent: 0,
+            show_overview_agent: true,
+            show_overview_start: true,
+            show_overview_goal: true,
         };
         app.load_trial(0);
         app
@@ -952,6 +1000,7 @@ impl VoxelReplayApp {
         self.iter_idx = 0;
         self.step_idx = 0;
         self.playing = false;
+        self.selected_agent = 0;
 
         let traj_dir = self.tune_trials[idx].trajectory_dir.clone();
         let trajs = load_trial_trajectories(&traj_dir);
@@ -975,7 +1024,7 @@ impl VoxelReplayApp {
         Some(RegionRequestKey {
             iteration: self.iter_idx,
             step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            center: selected_agent_center(trajectory, self.step_idx, self.selected_agent)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
@@ -1219,6 +1268,7 @@ impl eframe::App for VoxelReplayApp {
                 traj.agent_count,
             )
         };
+        self.selected_agent = self.selected_agent.min(agent_count.saturating_sub(1) as usize);
         let current_trajectory_path = self.trajectories[iter_idx].source_path.clone();
 
         let explain_available = self.explain_ui.as_ref()
@@ -1423,6 +1473,19 @@ impl eframe::App for VoxelReplayApp {
                 ui.add_enabled_ui(self.show_overview, |ui| {
                     ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
                     ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
+                    if agent_count > 1 {
+                        let previous = self.selected_agent;
+                        ui.add(Slider::new(
+                            &mut self.selected_agent,
+                            0..=agent_count.saturating_sub(1) as usize,
+                        ).text("selected agent"));
+                        if self.selected_agent != previous {
+                            self.requested_region = None;
+                        }
+                    }
+                    ui.checkbox(&mut self.show_overview_agent, "Show selected agent");
+                    ui.checkbox(&mut self.show_overview_start, "Show start");
+                    ui.checkbox(&mut self.show_overview_goal, "Show goal");
                 });
                 if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
                     ui.colored_label(Color32::from_rgb(220, 150, 80), error);
@@ -1717,9 +1780,31 @@ impl eframe::App for VoxelReplayApp {
 
             if self.show_overview {
                 if let Some(Ok(mesh)) = self.overview_meshes.get(iter_idx) {
+                    let visible_region = active_regional_frame.map(|frame| {
+                        (frame.region.minimum, frame.region.maximum_exclusive)
+                    });
+                    let agent = self.show_overview_agent.then(|| {
+                        selected_agent_center(
+                            &self.trajectories[iter_idx], step_idx, self.selected_agent,
+                        )
+                    }).flatten();
+                    let start = if is_multi {
+                        render_start_positions.get(self.selected_agent).copied().flatten()
+                    } else {
+                        render_start
+                    };
+                    let goal = if is_multi {
+                        render_goal_positions.get(self.selected_agent).copied().flatten()
+                    } else {
+                        render_goal
+                    };
                     draw_overview_inset(
                         &painter, resp.rect, mesh, cam,
                         self.overview_size, self.show_overview_bounds,
+                        visible_region,
+                        agent,
+                        self.show_overview_start.then(|| storage_coordinate(start)).flatten(),
+                        self.show_overview_goal.then(|| storage_coordinate(goal)).flatten(),
                     );
                 }
             }

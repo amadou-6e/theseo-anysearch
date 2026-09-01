@@ -23,6 +23,29 @@ pub struct ProjectedVertex {
     pub depth: f32,
 }
 
+pub fn box_vertices(minimum: [u32; 3], maximum_exclusive: [u32; 3]) -> [[u32; 3]; 8] {
+    let [x0, y0, z0] = minimum;
+    let [x1, y1, z1] = maximum_exclusive;
+    [
+        [x0, y0, z0],
+        [x1, y0, z0],
+        [x1, y1, z0],
+        [x0, y1, z0],
+        [x0, y0, z1],
+        [x1, y0, z1],
+        [x1, y1, z1],
+        [x0, y1, z1],
+    ]
+}
+
+pub fn task_marker_to_storage(coordinate: [u16; 3]) -> Option<[u32; 3]> {
+    Some([
+        u32::from(coordinate[0]).checked_sub(1)?,
+        u32::from(coordinate[1]).checked_sub(1)?,
+        u32::from(coordinate[2]).checked_sub(1)?,
+    ])
+}
+
 #[derive(Deserialize)]
 struct Manifest {
     identity_sha256: String,
@@ -99,11 +122,21 @@ impl OverviewMesh {
 
     /// Project after f64 centering/scaling, before conversion to f32.
     pub fn project(&self, yaw: f32, pitch: f32) -> Vec<ProjectedVertex> {
+        self.project_vertices(&self.vertices, yaw, pitch)
+    }
+
+    /// Project dynamic storage-coordinate indicators using the mesh transform.
+    pub fn project_vertices(
+        &self,
+        vertices: &[[u32; 3]],
+        yaw: f32,
+        pitch: f32,
+    ) -> Vec<ProjectedVertex> {
         let center = self.extent.map(|value| f64::from(value) * 0.5);
         let scale = f64::from(*self.extent.iter().max().unwrap_or(&1)).max(1.0);
         let (sy, cy) = f64::from(yaw).sin_cos();
         let (sp, cp) = f64::from(pitch).sin_cos();
-        self.vertices
+        vertices
             .iter()
             .map(|vertex| {
                 let x = (f64::from(vertex[0]) - center[0]) / scale;
@@ -238,6 +271,39 @@ mod tests {
         let points = mesh.project(0.0, 0.0);
         assert!(points[0].x > points[1].x);
         assert!((points[0].x - points[1].x - 1.0 / 60_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dynamic_indicators_use_the_exact_mesh_coordinate_transform() {
+        let mesh = OverviewMesh {
+            vertices: vec![[50, 25, 10]],
+            indices: vec![],
+            extent: [100, 50, 20],
+        };
+        assert_eq!(
+            mesh.project(0.4, -0.2),
+            mesh.project_vertices(&[[50, 25, 10]], 0.4, -0.2)
+        );
+    }
+
+    #[test]
+    fn indicator_box_uses_exact_clipped_region_boundaries() {
+        let vertices = box_vertices([0, 43, 27], [6, 48, 32]);
+        assert!(vertices.contains(&[0, 43, 27]));
+        assert!(vertices.contains(&[6, 48, 32]));
+        assert!(vertices.iter().all(|vertex| vertex[0] <= 6));
+        assert!(vertices.iter().all(|vertex| vertex[1] <= 48));
+        assert!(vertices.iter().all(|vertex| vertex[2] <= 32));
+    }
+
+    #[test]
+    fn task_markers_convert_once_to_storage_coordinates() {
+        assert_eq!(task_marker_to_storage([1, 1, 1]), Some([0, 0, 0]));
+        assert_eq!(
+            task_marker_to_storage([60_000, 40_000, 20_000]),
+            Some([59_999, 39_999, 19_999])
+        );
+        assert_eq!(task_marker_to_storage([0, 1, 1]), None);
     }
 
     #[test]
