@@ -602,7 +602,9 @@ fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 
         StorageCoord { x: u32::from(x), y: u32::from(y), z: u32::from(z) },
         origin,
     );
-    x * sy * cp + y * sp + z * cy * cp
+    // Camera-space positive depth points into the scene. Negate it so lower
+    // values are farther away, matching the painter's ascending sort.
+    -(x * sy * cp + y * sp + z * cy * cp)
 }
 
 fn draw_voxel(
@@ -621,11 +623,12 @@ fn draw_voxel(
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
     // Select the visible face on each axis based on camera orientation.
-    // The "to-camera" direction is (sin(yaw)*cos(pitch), sin(pitch), cos(yaw)*cos(pitch)).
+    // Projection depth points from the camera into the scene, so the vector
+    // from a voxel back toward the camera has the opposite signs.
     // A face with outward normal N is visible when dot(N, to_cam) > 0.
-    let hx = if cam.yaw.sin() > 0.0 { h } else { -h };   // +X visible when sin(yaw)>0
-    let hy = if cam.pitch.sin() > 0.0 { h } else { -h }; // +Y (top) visible when sin(pitch)>0
-    let hz = if cam.yaw.cos() > 0.0 { h } else { -h };   // +Z visible when cos(yaw)>0
+    let hx = if cam.yaw.sin() < 0.0 { h } else { -h };
+    let hy = if cam.pitch.sin() < 0.0 { h } else { -h };
+    let hz = if cam.yaw.cos() < 0.0 { h } else { -h };
 
     let top_face = vec![
         corner(-h, hy, -h), corner( h, hy, -h),
@@ -670,12 +673,12 @@ fn draw_exposed_face(
     base: Color32,
 ) {
     let visible = match face.direction {
-        FaceDirection::NegativeX => cam.yaw.sin() < 0.0,
-        FaceDirection::PositiveX => cam.yaw.sin() > 0.0,
-        FaceDirection::NegativeY => cam.pitch.sin() < 0.0,
-        FaceDirection::PositiveY => cam.pitch.sin() > 0.0,
-        FaceDirection::NegativeZ => cam.yaw.cos() < 0.0,
-        FaceDirection::PositiveZ => cam.yaw.cos() > 0.0,
+        FaceDirection::NegativeX => cam.yaw.sin() > 0.0,
+        FaceDirection::PositiveX => cam.yaw.sin() < 0.0,
+        FaceDirection::NegativeY => cam.pitch.sin() > 0.0,
+        FaceDirection::PositiveY => cam.pitch.sin() < 0.0,
+        FaceDirection::NegativeZ => cam.yaw.cos() > 0.0,
+        FaceDirection::PositiveZ => cam.yaw.cos() < 0.0,
     };
     if !visible { return; }
     let (x, y, z) = camera_relative(face.voxel, origin);
@@ -800,9 +803,9 @@ fn draw_grid_bounds_layer(
         (4, 5), (5, 6), (6, 7), (7, 4),
         (0, 4), (1, 5), (2, 6), (3, 7),
     ];
-    let near_x = if cam.yaw.sin() > 0.0 { hi } else { lo };
-    let near_y = if cam.pitch.sin() > 0.0 { hi } else { lo };
-    let near_z = if cam.yaw.cos() > 0.0 { hi } else { lo };
+    let near_x = if cam.yaw.sin() < 0.0 { hi } else { lo };
+    let near_y = if cam.pitch.sin() < 0.0 { hi } else { lo };
+    let near_z = if cam.yaw.cos() < 0.0 { hi } else { lo };
     let pts: Vec<Pos2> = corners.iter()
         .map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b))
         .collect();
