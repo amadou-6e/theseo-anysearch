@@ -1,6 +1,6 @@
 # Perception Encoder Experiment Work Plan
 
-Status: proposed
+Status: active
 Integration branch: `exp/perception-encoder`
 Specifications:
 
@@ -18,20 +18,20 @@ and a decision record.
 
 ## Work packages
 
-| ID | Work package | Primary ownership | Depends on |
-|---|---|---|---|
-| F0 | Pilot contracts, resolved configuration, run manifest, and decision-record schema | `garden/pilots/`, narrow additions to `garden/data_config.py` | none |
-| F1 | Geometry-disjoint corpus, immutable split/query hashes, micro-scenes, and exact occupancy/ESDF/topology targets | `garden/collect.py`, `garden/dataset.py`, new `garden/targets.py` and `garden/splits.py` | F0 |
-| F2 | Frozen probes, controls, topology/collapse metrics, paired geometry bootstrap, and calibrated learning-curve reporting | new `garden/evaluation/` package | F0 |
-| F3 | Encoder output contract and Tiny dense residual, tri-planar, shared-pyramid, and optional sparse backbones | `garden/models/backbones.py`, `garden/models/outputs.py` | F0 |
-| F4 | Update-based training runtime, T0-T3 objective wrappers, sparse/mask-aware path, mask isolation, and resource accounting | `garden/trainer.py`, new `garden/models/objectives.py` and `garden/masking.py` | F0 |
-| F5 | P0 contract gate and reproducible pilot command integrating F1-F4 | `garden/pilots/runner.py`, micro-scene integration tests, CLI wiring | F1, F2, F3, F4 |
-| E1 | Execute P1-P2 objective and training-mechanics pilots | locked configs and reports under `experiments/perception_encoder/` | F5 |
-| E2 | Execute P3 architecture feasibility profiling | locked configs and reports under `experiments/perception_encoder/` | F5 |
-| E3 | Execute P4 architecture signal and P4D observation-density checks | locked configs and reports; no new unscoped framework code | E1, E2 |
-| E4 | Execute P5 field-of-view micro-ablation | locked configs and reports | E3 |
-| E5 | Execute P6 objective-by-architecture interaction check | locked configs and reports | E1, E3, E4 |
-| E6 | Execute P7 fresh-seed confirmation and P8 radius-128 viability smoke | locked configs, final pilot decision, artifact hashes | E5 |
+| ID | Issue and branch | Work package | Primary ownership | Depends on |
+|---|---|---|---|---|
+| F0 | [#272](https://github.com/amadou-6e/theseo-anysearch/issues/272), `exp/272` | Pilot contracts, resolved configuration, run manifest, and decision-record schema | `garden/pilots/`, narrow additions to `garden/data_config.py` | none |
+| F1 | [#273](https://github.com/amadou-6e/theseo-anysearch/issues/273), `exp/273` | Geometry-disjoint corpus, immutable split/query hashes, micro-scenes, and exact occupancy/ESDF/topology targets | `garden/collect.py`, `garden/dataset.py`, new `garden/targets.py` and `garden/splits.py` | F0 (#272) |
+| F2 | [#274](https://github.com/amadou-6e/theseo-anysearch/issues/274), `exp/274` | Frozen probes, controls, topology/collapse metrics, paired geometry bootstrap, and calibrated learning-curve reporting | new `garden/evaluation/` package | F0 (#272) |
+| F3 | [#275](https://github.com/amadou-6e/theseo-anysearch/issues/275), `exp/275` | Encoder output contract and Tiny dense residual, tri-planar, shared-pyramid, and optional sparse backbones | `garden/models/backbones.py`, `garden/models/outputs.py` | F0 (#272) |
+| F4 | [#276](https://github.com/amadou-6e/theseo-anysearch/issues/276), `exp/276` | Update-based training runtime, T0-T3 objective wrappers, sparse/mask-aware path, mask isolation, and resource accounting | `garden/trainer.py`, new `garden/models/objectives.py` and `garden/masking.py` | F0 (#272) |
+| F5 | [#277](https://github.com/amadou-6e/theseo-anysearch/issues/277), `exp/277` | P0 contract gate and reproducible pilot command integrating F1-F4 | `garden/pilots/runner.py`, micro-scene integration tests, CLI wiring | F1-F4 (#273-#276) |
+| E1 | [#278](https://github.com/amadou-6e/theseo-anysearch/issues/278), `exp/278` | Execute P1-P2 objective and training-mechanics pilots | locked configs and reports under `experiments/perception_encoder/` | F5 (#277) |
+| E2 | [#279](https://github.com/amadou-6e/theseo-anysearch/issues/279), `exp/279` | Execute P3 architecture feasibility profiling | locked configs and reports under `experiments/perception_encoder/` | F5 (#277) |
+| E3 | [#280](https://github.com/amadou-6e/theseo-anysearch/issues/280), `exp/280` | Execute P4 architecture signal and P4D observation-density checks | locked configs and reports; no new unscoped framework code | E1-E2 (#278-#279) |
+| E4 | [#281](https://github.com/amadou-6e/theseo-anysearch/issues/281), `exp/281` | Execute P5 field-of-view micro-ablation | locked configs and reports | E3 (#280) |
+| E5 | [#282](https://github.com/amadou-6e/theseo-anysearch/issues/282), `exp/282` | Execute P6 objective-by-architecture interaction check | locked configs and reports | E1, E3-E4 (#278, #280-#281) |
+| E6 | [#283](https://github.com/amadou-6e/theseo-anysearch/issues/283), `exp/283` | Execute P7 fresh-seed confirmation and P8 radius-128 viability smoke | locked configs, final pilot decision, artifact hashes | E5 (#282) |
 
 If an execution task exposes a reusable implementation defect, open a new focused issue
 instead of expanding that experiment branch. Failed and inconclusive runs still produce
