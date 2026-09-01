@@ -59,20 +59,20 @@ fn main() {
         .collect::<Vec<_>>();
     let refinement_started = Instant::now();
     source
-        .load_chunk_selection(&selection.detailed, &visible, &[])
+        .load_chunk_selection(&selection.detailed, &visible, &visible, &[])
         .unwrap();
     let first_refinement_ms = refinement_started.elapsed().as_secs_f64() * 1_000.0;
     let mut samples = Vec::with_capacity(SAMPLES);
     for _ in 0..SAMPLES {
         let started = Instant::now();
         source
-            .load_chunk_selection(&selection.detailed, &visible, &[])
+            .load_chunk_selection(&selection.detailed, &visible, &visible, &[])
             .unwrap();
         samples.push(started.elapsed().as_secs_f64() * 1_000.0);
     }
     samples.sort_by(f64::total_cmp);
     let metrics = source
-        .load_chunk_selection(&selection.detailed, &visible, &[])
+        .load_chunk_selection(&selection.detailed, &visible, &visible, &[])
         .unwrap()
         .cache_metrics
         .unwrap();
