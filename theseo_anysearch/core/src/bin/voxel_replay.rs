@@ -17,10 +17,11 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
 use theseo_core::replay::explain::NativeExplainUi;
-use theseo_core::replay::lod::{chunks_intersecting_box, expand_chunk_halo};
+use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
     camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
 };
+use theseo_core::replay::lod::{select_chunks, CameraChunkView, ChunkBudgets};
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
@@ -366,10 +367,10 @@ fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RegionRequestKey {
     iteration: usize,
+    step: usize,
     center: StorageCoord,
     radius: u32,
-    visible_revision: u64,
-    mutation_revision: u64,
+    camera_revision: u64,
 }
 
 struct LoadedRegion {
@@ -402,134 +403,6 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
         .collect::<Vec<_>>();
     mutations.sort_by_key(|mutation| mutation.coordinate.global_key());
     mutations
-}
-
-fn chunk_stable_center(
-    center: StorageCoord,
-    shape: theseo_core::voxel::world::WorldExtent,
-) -> StorageCoord {
-    StorageCoord {
-        x: center.x / shape.x * shape.x + shape.x / 2,
-        y: center.y / shape.y * shape.y + shape.y / 2,
-        z: center.z / shape.z * shape.z + shape.z / 2,
-    }
-}
-
-fn mutation_revision(mutations: &[ReplayMutation]) -> u64 {
-    const OFFSET: u64 = 0xcbf29ce484222325;
-    const PRIME: u64 = 0x100000001b3;
-    let mut revision = OFFSET;
-    for mutation in mutations {
-        for byte in mutation
-            .coordinate
-            .x
-            .to_le_bytes()
-            .into_iter()
-            .chain(mutation.coordinate.y.to_le_bytes())
-            .chain(mutation.coordinate.z.to_le_bytes())
-            .chain([u8::from(mutation.occupied)])
-        {
-            revision ^= u64::from(byte);
-            revision = revision.wrapping_mul(PRIME);
-        }
-    }
-    revision
-}
-
-fn chunk_selection_revision(chunks: &[ChunkCoord]) -> u64 {
-    let mut revision = 0xcbf29ce484222325_u64;
-    for chunk in chunks {
-        for value in [chunk.x, chunk.y, chunk.z] {
-            for byte in value.to_le_bytes() {
-                revision ^= u64::from(byte);
-                revision = revision.wrapping_mul(0x100000001b3);
-            }
-        }
-    }
-    revision
-}
-
-fn centered_box_minimum(focus: (f32, f32, f32), size: f32) -> (f32, f32, f32) {
-    let half = size * 0.5;
-    (focus.0 - half, focus.1 - half, focus.2 - half)
-}
-
-fn inside_viewer_radius(coordinate: StorageCoord, center: StorageCoord, radius: u32) -> bool {
-    coordinate.x.abs_diff(center.x) <= radius
-        && coordinate.y.abs_diff(center.y) <= radius
-        && coordinate.z.abs_diff(center.z) <= radius
-}
-
-#[cfg(test)]
-mod regional_request_tests {
-    use super::*;
-    use theseo_core::voxel::world::WorldExtent;
-
-    #[test]
-    fn request_center_is_stable_inside_a_chunk() {
-        let shape = WorldExtent { x: 32, y: 16, z: 8 };
-        assert_eq!(
-            chunk_stable_center(StorageCoord { x: 33, y: 18, z: 9 }, shape),
-            chunk_stable_center(StorageCoord { x: 63, y: 31, z: 15 }, shape)
-        );
-        assert_ne!(
-            chunk_stable_center(StorageCoord { x: 63, y: 31, z: 15 }, shape),
-            chunk_stable_center(StorageCoord { x: 64, y: 31, z: 15 }, shape)
-        );
-    }
-
-    #[test]
-    fn request_revision_changes_only_when_resolved_mutations_change() {
-        let first = ReplayMutation {
-            coordinate: StorageCoord { x: 1, y: 2, z: 3 },
-            occupied: true,
-        };
-        assert_eq!(mutation_revision(&[first]), mutation_revision(&[first]));
-        assert_ne!(
-            mutation_revision(&[first]),
-            mutation_revision(&[ReplayMutation {
-                occupied: false,
-                ..first
-            }])
-        );
-    }
-
-    #[test]
-    fn compiled_view_bounds_keep_the_agent_at_screen_center() {
-        let camera = Camera::default();
-        let focus = (27.0, 11.0, 19.0);
-        let bounds = camera.bounds_centered_on(64.0, focus);
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(800.0, 600.0));
-        let screen = camera.to_screen(focus.0, focus.1, focus.2, rect, &bounds);
-        assert!((screen.x - rect.center().x).abs() < f32::EPSILON);
-        assert!((screen.y - rect.center().y).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn visible_region_box_is_centered_on_the_agent() {
-        let focus = (27.0, 11.0, 19.0);
-        let size = 33.0;
-        let minimum = centered_box_minimum(focus, size);
-        assert_eq!(
-            (minimum.0 + size * 0.5, minimum.1 + size * 0.5, minimum.2 + size * 0.5),
-            focus
-        );
-    }
-
-    #[test]
-    fn render_filter_includes_only_geometry_inside_the_moving_box() {
-        let center = StorageCoord { x: 50, y: 60, z: 70 };
-        assert!(inside_viewer_radius(
-            StorageCoord { x: 34, y: 76, z: 70 },
-            center,
-            16,
-        ));
-        assert!(!inside_viewer_radius(
-            StorageCoord { x: 33, y: 60, z: 70 },
-            center,
-            16,
-        ));
-    }
 }
 
 fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
@@ -574,6 +447,16 @@ fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalRepla
             }
         })
         .collect()
+}
+
+fn overview_meshes(trajectories: &[TrajectoryData]) -> Vec<Result<OverviewMesh, String>> {
+    trajectories.iter().map(|trajectory| {
+        let world = trajectory.world.as_ref().ok_or("trajectory has no compiled world")?;
+        let manifest = trajectory.source_path.parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(&world.manifest_path);
+        OverviewMesh::load(&manifest, &world.identity_sha256)
+    }).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -624,19 +507,6 @@ impl Camera {
         Bounds { min_x: min_x - pw, max_x: max_x + pw, min_y: min_y - ph, max_y: max_y + ph }
     }
 
-    fn bounds_centered_on(&self, grid_size: f32, focus: (f32, f32, f32)) -> Bounds {
-        let bounds = self.bounds(grid_size);
-        let (center_x, center_y) = self.project(focus.0, focus.1, focus.2);
-        let half_width = (bounds.max_x - bounds.min_x) * 0.5;
-        let half_height = (bounds.max_y - bounds.min_y) * 0.5;
-        Bounds {
-            min_x: center_x - half_width,
-            max_x: center_x + half_width,
-            min_y: center_y - half_height,
-            max_y: center_y + half_height,
-        }
-    }
-
     /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
     #[inline]
     fn to_screen(&self, x: f32, y: f32, z: f32, rect: Rect, b: &Bounds) -> Pos2 {
@@ -653,6 +523,49 @@ impl Camera {
 }
 
 struct Bounds { min_x: f32, max_x: f32, min_y: f32, max_y: f32 }
+
+fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
+    Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
+}
+
+fn draw_overview_inset(
+    painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
+    size: f32, show_bounds: bool,
+) {
+    let inset_size = outer.width().min(outer.height()).min(size);
+    let rect = Rect::from_min_size(
+        outer.right_bottom() - Vec2::splat(inset_size + 12.0), Vec2::splat(inset_size),
+    );
+    painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
+    painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
+    let projected = mesh.project(camera.yaw, camera.pitch);
+    let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
+    let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
+    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
+    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
+    let scale = (rect.width() / (2.0 * maximum_x))
+        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
+        let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
+        (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
+    }).collect::<Vec<_>>();
+    triangles.sort_by(|left, right| left.0.total_cmp(&right.0));
+    for (_, triangle) in triangles {
+        painter.add(Shape::convex_polygon(
+            triangle.into_iter().map(|point| inset_position(point, rect, scale)).collect(),
+            Color32::from_rgb(105, 130, 150), Stroke::new(0.35, Color32::from_gray(50)),
+        ));
+    }
+    if show_bounds {
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            painter.line_segment(
+                [inset_position(bounds_points[a], rect, scale), inset_position(bounds_points[b], rect, scale)],
+                Stroke::new(1.0, Color32::from_gray(170)),
+            );
+        }
+    }
+    painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
+}
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
@@ -845,28 +758,25 @@ fn draw_grid_bounds_layer(
     rect: Rect,
     cam: &Camera,
     b: &Bounds,
-    minimum: (f32, f32, f32),
     grid_size: f32,
     draw_front: bool,
 ) {
     let shadow = Stroke::new(2.5, Color32::from_rgba_premultiplied(0, 0, 0, 180));
     let stroke = Stroke::new(1.25, Color32::from_rgb(80, 255, 140));
-    let lo = minimum;
-    let hi = (lo.0 + grid_size, lo.1 + grid_size, lo.2 + grid_size);
+    let lo = 0.5_f32;
+    let hi = grid_size + 0.5;
     let corners = [
-        (lo.0, lo.1, lo.2), (hi.0, lo.1, lo.2),
-        (hi.0, hi.1, lo.2), (lo.0, hi.1, lo.2),
-        (lo.0, lo.1, hi.2), (hi.0, lo.1, hi.2),
-        (hi.0, hi.1, hi.2), (lo.0, hi.1, hi.2),
+        (lo, lo, lo), (hi, lo, lo), (hi, hi, lo), (lo, hi, lo),
+        (lo, lo, hi), (hi, lo, hi), (hi, hi, hi), (lo, hi, hi),
     ];
     let edges = [
         (0, 1), (1, 2), (2, 3), (3, 0),
         (4, 5), (5, 6), (6, 7), (7, 4),
         (0, 4), (1, 5), (2, 6), (3, 7),
     ];
-    let near_x = if cam.yaw.sin() > 0.0 { hi.0 } else { lo.0 };
-    let near_y = if cam.pitch.sin() > 0.0 { hi.1 } else { lo.1 };
-    let near_z = if cam.yaw.cos() > 0.0 { hi.2 } else { lo.2 };
+    let near_x = if cam.yaw.sin() > 0.0 { hi } else { lo };
+    let near_y = if cam.pitch.sin() > 0.0 { hi } else { lo };
+    let near_z = if cam.yaw.cos() > 0.0 { hi } else { lo };
     let pts: Vec<Pos2> = corners.iter()
         .map(|&(x, y, z)| cam.to_screen(x, y, z, rect, b))
         .collect();
@@ -932,6 +842,12 @@ struct VoxelReplayApp {
     coarse_chunks: Vec<ChunkCoord>,
     considered_chunks: usize,
     detailed_chunks: usize,
+    chunk_budgets: ChunkBudgets,
+    camera_revision: u64,
+    overview_meshes: Vec<Result<OverviewMesh, String>>,
+    show_overview: bool,
+    show_overview_bounds: bool,
+    overview_size: f32,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -962,6 +878,7 @@ impl VoxelReplayApp {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
         let regional_sources = regional_sources(&trajectories);
+        let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
             occlude_agent: true,
@@ -985,6 +902,12 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
+            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
+            camera_revision: 0,
+            overview_meshes,
+            show_overview: true,
+            show_overview_bounds: true,
+            overview_size: 220.0,
         }
     }
 
@@ -1012,6 +935,12 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
+            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
+            camera_revision: 0,
+            overview_meshes: Vec::new(),
+            show_overview: true,
+            show_overview_bounds: true,
+            overview_size: 220.0,
         };
         app.load_trial(0);
         app
@@ -1030,6 +959,7 @@ impl VoxelReplayApp {
             t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
         }).collect();
         self.regional_sources = regional_sources(&trajs);
+        self.overview_meshes = overview_meshes(&trajs);
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
@@ -1042,36 +972,12 @@ impl VoxelReplayApp {
     fn current_region_key(&self) -> Option<RegionRequestKey> {
         let trajectory = self.trajectories.get(self.iter_idx)?;
         trajectory.world.as_ref()?;
-        let center = selected_agent_center(trajectory, self.step_idx)?;
-        let mutations = replay_mutations_at(&trajectory.episode.steps, self.step_idx);
-        let source = self.regional_sources.get(self.iter_idx)?.as_ref()?;
-        let (request_center, visible_revision) = match source.chunk_shape() {
-            Some(shape) => {
-                let mut indexed = source.indexed_chunks();
-                for mutation in mutations.iter().filter(|mutation| mutation.occupied) {
-                    let chunk = ChunkCoord {
-                        x: mutation.coordinate.x / shape.x,
-                        y: mutation.coordinate.y / shape.y,
-                        z: mutation.coordinate.z / shape.z,
-                    };
-                    if !indexed.iter().any(|(candidate, _)| *candidate == chunk) {
-                        indexed.push((chunk, 0));
-                    }
-                }
-                let visible = chunks_intersecting_box(
-                    indexed.iter().map(|(chunk, _)| *chunk), center,
-                    self.visualization_radius, shape,
-                );
-                (chunk_stable_center(center, shape), chunk_selection_revision(&visible))
-            }
-            None => (center, 0),
-        };
         Some(RegionRequestKey {
             iteration: self.iter_idx,
-            center: request_center,
+            step: self.step_idx,
+            center: selected_agent_center(trajectory, self.step_idx)?,
             radius: self.visualization_radius,
-            visible_revision,
-            mutation_revision: mutation_revision(&mutations),
+            camera_revision: self.camera_revision,
         })
     }
 
@@ -1146,54 +1052,48 @@ impl VoxelReplayApp {
         };
         let mutations = replay_mutations_at(
             &self.trajectories[key.iteration].episode.steps,
-            self.step_idx,
+            key.step,
         );
-        let load_center = selected_agent_center(
-            &self.trajectories[key.iteration], self.step_idx,
-        ).unwrap_or(key.center);
         let chunk_shape = source.chunk_shape();
-        let mut indexed = source.indexed_chunks();
-        if let Some(shape) = chunk_shape {
-            for mutation in mutations.iter().filter(|mutation| mutation.occupied) {
-                let chunk = ChunkCoord {
-                    x: mutation.coordinate.x / shape.x,
-                    y: mutation.coordinate.y / shape.y,
-                    z: mutation.coordinate.z / shape.z,
-                };
-                if !indexed.iter().any(|(candidate, _)| *candidate == chunk) {
-                    indexed.push((chunk, 0));
-                }
-            }
-        }
+        let indexed = source.indexed_chunks();
         let selection = chunk_shape.map(|shape| {
-            let visible = chunks_intersecting_box(
-                indexed.iter().map(|(chunk, _)| *chunk), load_center, key.radius, shape,
-            );
-            let resident = expand_chunk_halo(
-                &visible, indexed.iter().map(|(chunk, _)| *chunk), 1,
-            );
-            (visible, resident)
+            let radius_chunks = (key.radius as f64 / shape.x.max(shape.y).max(shape.z) as f64)
+                .max(1.0) / f64::from(self.camera.zoom.max(0.2));
+            select_chunks(
+                indexed.iter().map(|(chunk, _)| *chunk),
+                CameraChunkView {
+                    center: [
+                        key.center.x as f64 / shape.x as f64,
+                        key.center.y as f64 / shape.y as f64,
+                        key.center.z as f64 / shape.z as f64,
+                    ],
+                    half_extent: [radius_chunks; 3],
+                    forward: [
+                        f64::from(self.camera.yaw.sin()),
+                        f64::from(self.camera.pitch.sin()),
+                        f64::from(self.camera.yaw.cos()),
+                    ],
+                    minimum_forward_dot: -0.5,
+                },
+                self.chunk_budgets,
+            )
         });
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let result = match selection {
-                Some((visible, resident)) if !visible.is_empty() => {
-                    let detailed = visible.len();
-                    source
-                        .load_chunk_selection(
-                            &visible,
-                            &visible,
-                            &resident,
-                            &mutations,
-                        )
-                        .map(|frame| LoadedRegion {
-                            frame,
-                            coarse: Vec::new(),
-                            considered: detailed,
-                            detailed,
-                        })
-                }
-                _ => source.load_agent_region(load_center, key.radius, &mutations)
+                Some(selection) if !selection.detailed.is_empty() => source
+                    .load_chunk_selection(
+                        &selection.detailed,
+                        &selection.detailed.iter().chain(&selection.coarse).copied().collect::<Vec<_>>(),
+                        &mutations,
+                    )
+                    .map(|frame| LoadedRegion {
+                        frame,
+                        coarse: selection.coarse,
+                        considered: selection.considered,
+                        detailed: selection.detailed.len(),
+                    }),
+                _ => source.load_agent_region(key.center, key.radius, &mutations)
                     .map(|frame| LoadedRegion { frame, coarse: Vec::new(), considered: 0, detailed: 0 }),
             }.map_err(|error| format!("regional world load failed: {error:?}"));
             let _ = sender.send(result);
@@ -1477,6 +1377,15 @@ impl eframe::App for VoxelReplayApp {
                 {
                     self.requested_region = None;
                 }
+                let budgets_changed = ui.add(Slider::new(&mut self.chunk_budgets.visible, 1..=256)
+                    .text("visible chunks")).changed()
+                    | ui.add(Slider::new(&mut self.chunk_budgets.detailed, 1..=128)
+                        .text("detailed chunks")).changed();
+                self.chunk_budgets.detailed = self.chunk_budgets.detailed
+                    .min(self.chunk_budgets.visible);
+                if budgets_changed {
+                    self.camera_revision = self.camera_revision.wrapping_add(1);
+                }
                 if self.pending_region.is_some() {
                     ui.label(egui::RichText::new("Loading visible region...").weak());
                 }
@@ -1507,6 +1416,16 @@ impl eframe::App for VoxelReplayApp {
                             metrics.pack_reads, metrics.cache_hits, metrics.cache_misses
                         ));
                     }
+                }
+                ui.separator();
+                ui.label(egui::RichText::new("Global overview").strong());
+                ui.checkbox(&mut self.show_overview, "Show overview");
+                ui.add_enabled_ui(self.show_overview, |ui| {
+                    ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
+                    ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
+                });
+                if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
+                    ui.colored_label(Color32::from_rgb(220, 150, 80), error);
                 }
             }
             ui.separator();
@@ -1591,40 +1510,19 @@ impl eframe::App for VoxelReplayApp {
         let display_grid_size = regional_grid_size
             .or_else(|| compiled_mode.then_some((self.visualization_radius * 2 + 1) as f32))
             .unwrap_or(traj_grid_size);
-        let render_center = compiled_mode
-            .then(|| selected_agent_center(&self.trajectories[iter_idx], step_idx))
-            .flatten();
         let geo_list = if compiled_mode {
             active_regional_frame
                 .map(|frame| {
-                    frame
-                        .occupied
-                        .iter()
-                        .filter(|coordinate| {
-                            render_center.is_some_and(|center| {
-                                inside_viewer_radius(**coordinate, center, self.visualization_radius)
-                            })
-                        })
-                        .filter_map(|coordinate| Some((
-                            u16::try_from(coordinate.x).ok()?,
-                            u16::try_from(coordinate.y).ok()?,
-                            u16::try_from(coordinate.z).ok()?,
-                        )))
-                        .collect::<Vec<_>>()
+                    frame.occupied.iter().filter_map(|coordinate| Some((
+                        u16::try_from(coordinate.x).ok()?,
+                        u16::try_from(coordinate.y).ok()?,
+                        u16::try_from(coordinate.z).ok()?,
+                    ))).collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         } else {
             self.geo_voxels[iter_idx].clone()
         };
-        let render_focus = render_center.map(|center| camera_relative(center, render_origin));
-        let visible_box_size = if compiled_mode {
-            (self.visualization_radius * 2 + 1) as f32
-        } else {
-            display_grid_size
-        };
-        let visible_box_minimum = render_focus
-            .map(|focus| centered_box_minimum(focus, visible_box_size))
-            .unwrap_or((0.5, 0.5, 0.5));
 
         // Collect camera drag / scroll BEFORE the closure (avoid borrow conflict)
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1643,39 +1541,16 @@ impl eframe::App for VoxelReplayApp {
             );
 
             let cam = &self.camera;
-            let b = render_focus.map_or_else(
-                || cam.bounds(display_grid_size),
-                |focus| cam.bounds_centered_on(display_grid_size, focus),
-            );
+            let b = cam.bounds(display_grid_size);
             // Rear edges render beneath voxels and are occluded by filled space.
-            draw_grid_bounds_layer(
-                &painter,
-                rect,
-                cam,
-                &b,
-                visible_box_minimum,
-                visible_box_size,
-                false,
-            );
+            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
             let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
 
             let geo_color = Color32::from_rgb(120, 120, 130);
             if compiled_mode {
                 let chunk_edge = self.trajectories[iter_idx].world_chunk_edge.max(1);
-                for &chunk in self.coarse_chunks.iter().filter(|chunk| {
-                    render_center.is_some_and(|center| {
-                        inside_viewer_radius(
-                            StorageCoord {
-                                x: chunk.x * chunk_edge + chunk_edge / 2,
-                                y: chunk.y * chunk_edge + chunk_edge / 2,
-                                z: chunk.z * chunk_edge + chunk_edge / 2,
-                            },
-                            center,
-                            self.visualization_radius,
-                        )
-                    })
-                }) {
+                for &chunk in &self.coarse_chunks {
                     draw_coarse_chunk(
                         &painter, chunk, chunk_edge, render_origin, rect, cam, &b,
                     );
@@ -1716,16 +1591,7 @@ impl eframe::App for VoxelReplayApp {
                     .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
                     .unwrap()
             });
-            let mut face_sorted = self
-                .regional_faces
-                .iter()
-                .copied()
-                .filter(|face| {
-                    render_center.is_some_and(|center| {
-                        inside_viewer_radius(face.voxel, center, self.visualization_radius)
-                    })
-                })
-                .collect::<Vec<_>>();
+            let mut face_sorted = self.regional_faces.clone();
             face_sorted.sort_by(|a, b| {
                 let a = a.voxel;
                 let b = b.voxel;
@@ -1847,15 +1713,16 @@ impl eframe::App for VoxelReplayApp {
             }
 
             // Camera-facing and silhouette edges remain visible above the scene.
-            draw_grid_bounds_layer(
-                &painter,
-                rect,
-                cam,
-                &b,
-                visible_box_minimum,
-                visible_box_size,
-                true,
-            );
+            draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
+
+            if self.show_overview {
+                if let Some(Ok(mesh)) = self.overview_meshes.get(iter_idx) {
+                    draw_overview_inset(
+                        &painter, resp.rect, mesh, cam,
+                        self.overview_size, self.show_overview_bounds,
+                    );
+                }
+            }
 
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
@@ -1914,9 +1781,11 @@ impl eframe::App for VoxelReplayApp {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
+            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if scroll_y.abs() > 0.1 {
             self.camera.zoom = (self.camera.zoom * (1.0 + scroll_y * 0.003)).clamp(0.2, 5.0);
+            self.camera_revision = self.camera_revision.wrapping_add(1);
         }
         if ctx.input(|i| i.key_pressed(Key::R)) {
             self.camera = Camera::default();

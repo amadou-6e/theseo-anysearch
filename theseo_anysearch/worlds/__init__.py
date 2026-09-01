@@ -30,6 +30,7 @@ from theseo_anysearch.worlds.manifest import (
     WorldChunkManifest,
     WorldExtent,
     WorldManifest,
+    WorldOverviewManifest,
     world_contract,
     world_contract_fingerprint,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "WorldCompilerConfig",
     "WorldExtent",
     "WorldManifest",
+    "WorldOverviewManifest",
     "WorldPackCorruptError",
     "WorldPackUnavailableError",
     "WorldResidencySettings",
