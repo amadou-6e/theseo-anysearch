@@ -44,3 +44,10 @@ Do not use personal or tool-specific prefixes such as `agent/`. Do not replace t
 ## Base branches
 
 Normal feature, fix, and experiment work targets `develop`. Use `develop/<issue-number>` or `master/<issue-number>` only when the issue explicitly concerns those integration or release lines. Changes reach `master` through the repository's release process unless an approved hotfix issue says otherwise.
+
+The perception-encoder program is the approved exception. Its task branches are still
+named `exp/<issue-number>`, but they branch from and target `exp/perception-encoder`.
+Accepted squash commits are selectively cherry-picked through a reviewed
+`develop/<promotion-issue>` branch; the integration branch is never merged wholesale
+into `develop`. See the root `AGENTS.md` and
+`docs/perception-encoder-experiment-work-plan.md` for the exact workflow.
