@@ -690,6 +690,17 @@ mod camera_tests {
     }
 
     #[test]
+    fn overview_scale_uses_normalized_full_world_extent() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+
+        let small = overview_inset_scale(rect, [128, 128, 128]);
+        let large = overview_inset_scale(rect, [1024, 1024, 1024]);
+
+        assert!((small - large).abs() < f32::EPSILON);
+        assert!(small > 100.0);
+    }
+
+    #[test]
     fn perspective_makes_nearer_equal_sized_objects_larger() {
         let camera = Camera {
             yaw: 0.0,
@@ -732,9 +743,12 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
 }
 
 fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
+    // OverviewMesh vertices are normalized by the largest world axis. Keep the
+    // full-world bounds in frame without applying the raw extent a second time.
+    let maximum_extent = extent.into_iter().max().unwrap_or(1).max(1) as f32;
     let diagonal = extent
         .into_iter()
-        .map(|axis| (axis as f32).powi(2))
+        .map(|axis| (axis as f32 / maximum_extent).powi(2))
         .sum::<f32>()
         .sqrt()
         .max(0.001);
