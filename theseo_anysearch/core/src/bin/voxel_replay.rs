@@ -607,7 +607,7 @@ struct Bounds {
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{Bounds, Camera};
+    use super::{overview_region_vertices, Bounds, Camera, StorageCoord};
     use eframe::egui::{Pos2, Rect, Vec2};
 
     fn test_camera() -> Camera {
@@ -707,6 +707,39 @@ mod camera_tests {
 
         assert_eq!(horizontal.x - origin.x, vertical.y - origin.y);
     }
+
+    #[test]
+    fn overview_region_vertices_preserve_exact_loaded_bounds() {
+        let vertices = overview_region_vertices(
+            StorageCoord { x: 10, y: 20, z: 30 },
+            StorageCoord { x: 43, y: 53, z: 63 },
+        );
+
+        assert!(vertices.contains(&[10, 20, 30]));
+        assert!(vertices.contains(&[43, 53, 63]));
+    }
+}
+
+fn overview_region_vertices(
+    minimum: StorageCoord,
+    maximum_exclusive: StorageCoord,
+) -> [[u32; 3]; 8] {
+    let (x0, y0, z0) = (minimum.x, minimum.y, minimum.z);
+    let (x1, y1, z1) = (
+        maximum_exclusive.x,
+        maximum_exclusive.y,
+        maximum_exclusive.z,
+    );
+    [
+        [x0, y0, z0],
+        [x1, y0, z0],
+        [x1, y1, z0],
+        [x0, y1, z0],
+        [x0, y0, z1],
+        [x1, y0, z1],
+        [x1, y1, z1],
+        [x0, y1, z1],
+    ]
 }
 
 fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
@@ -716,6 +749,7 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool,
+    visible_region: Option<(StorageCoord, StorageCoord)>,
 ) {
     let inset_size = outer.width().min(outer.height()).min(size);
     let rect = Rect::from_min_size(
@@ -746,6 +780,36 @@ fn draw_overview_inset(
             painter.line_segment(
                 [inset_position(bounds_points[a], rect, scale), inset_position(bounds_points[b], rect, scale)],
                 Stroke::new(1.0, Color32::from_gray(170)),
+            );
+        }
+    }
+    if let Some((minimum, maximum_exclusive)) = visible_region {
+        let region_mesh = OverviewMesh {
+            vertices: overview_region_vertices(minimum, maximum_exclusive).to_vec(),
+            indices: Vec::new(),
+            extent: mesh.extent,
+        };
+        let points = region_mesh.project(camera.yaw, camera.pitch);
+        for face in [
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [2, 3, 7, 6],
+            [1, 2, 6, 5],
+            [3, 0, 4, 7],
+        ] {
+            painter.add(Shape::convex_polygon(
+                face.into_iter()
+                    .map(|index| inset_position(points[index], rect, scale))
+                    .collect(),
+                Color32::from_rgba_premultiplied(10, 40, 20, 36),
+                Stroke::NONE,
+            ));
+        }
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            painter.line_segment(
+                [inset_position(points[a], rect, scale), inset_position(points[b], rect, scale)],
+                Stroke::new(2.0, Color32::from_rgb(70, 255, 120)),
             );
         }
     }
@@ -1964,6 +2028,9 @@ impl eframe::App for VoxelReplayApp {
                     draw_overview_inset(
                         &painter, resp.rect, mesh, cam,
                         self.overview_size, self.show_overview_bounds,
+                        active_regional_frame.map(|frame| {
+                            (frame.region.minimum, frame.region.maximum_exclusive)
+                        }),
                     );
                 }
             }
