@@ -14,6 +14,10 @@ results do not enter `develop` before the preregistered comparisons are complete
   wholesale back into `develop`.
 - Each scoped task has a GitHub issue and branch `exp/<issue-number>`. Create the branch
   from the latest `origin/exp/perception-encoder`, not directly from `develop`.
+- Every task issue and frozen run manifest must link the governing specs files at one
+  exact `amadou-6e/specs` commit SHA, never at a moving branch. A methodology revision
+  requires a recorded deviation plus new preregistration, dataset, and run identities;
+  it does not silently alter an active experiment.
 - Task pull requests target `exp/perception-encoder`. Use a squash merge so each task
   has one reviewable integration commit. Reference the issue and record its result,
   artifacts, validation, and disposition (`promote`, `retain`, or `reject`). Because
