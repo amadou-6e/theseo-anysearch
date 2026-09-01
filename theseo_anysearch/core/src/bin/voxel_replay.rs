@@ -1165,6 +1165,14 @@ impl VoxelReplayApp {
         ctx.request_repaint();
     }
 
+    fn regional_view_ready(&self) -> bool {
+        let Some(key) = self.current_region_key() else {
+            return true;
+        };
+        self.pending_region.is_none()
+            && self.regional_frame.as_ref().map(|(loaded, _)| *loaded) == Some(key)
+    }
+
     fn n_iters(&self) -> usize { self.trajectories.len() }
     fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
@@ -1856,10 +1864,12 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Auto-play: advance one step per frame --------------------------
-        if self.playing {
+        if self.playing && self.regional_view_ready() {
             let still_going = self.play_advance();
             if !still_going { self.playing = false; }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        } else if self.playing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
 }
