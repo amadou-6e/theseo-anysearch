@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 import typer
 
+from theseo_anysearch.cli.commands import benchmark as benchmark_cmd
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
 from theseo_anysearch.cli.commands import garden as garden_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
@@ -134,7 +135,8 @@ def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
         scale = env.geometry__scale
         scale_range = env.geometry__scale_range
         if scale_range:
-            table.add_row("scale range", f"{scale_range[0]} – {scale_range[1]}")
+            table.add_row("scale range",
+                          f"{scale_range[0]} – {scale_range[1]}")
         elif scale is not None:
             table.add_row("scale", str(scale))
     table.add_row("grid size", str(getattr(env, "grid_size", 32)))
@@ -149,19 +151,23 @@ def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
 
     # Model
     mc = experiment.model_cfg
-    custom_model = (mc.get("custom_model") if isinstance(mc, dict) else getattr(mc, "custom_model", None)) if mc else None
+    custom_model = (mc.get("custom_model") if isinstance(mc, dict) else
+                    getattr(mc, "custom_model", None)) if mc else None
     if custom_model:
         table.add_row("", "")
         table.add_row("model", str(custom_model))
-        cmc = (mc.get("custom_model_config") if isinstance(mc, dict) else getattr(mc, "custom_model_config", None)) or {}
+        cmc = (mc.get("custom_model_config") if isinstance(mc, dict) else
+               getattr(mc, "custom_model_config", None)) or {}
         if cmc.get("pretrained_encoder"):
             table.add_row("encoder", str(cmc["pretrained_encoder"]))
-            table.add_row("freeze encoder", str(cmc.get("freeze_encoder", False)))
+            table.add_row("freeze encoder",
+                          str(cmc.get("freeze_encoder", False)))
 
     # Algo highlights
     ac = experiment.algorithm_config or {}
     lr = ac.get("lr") if isinstance(ac, dict) else getattr(ac, "lr", None)
-    bs = ac.get("train_batch_size") if isinstance(ac, dict) else getattr(ac, "train_batch_size", None)
+    bs = ac.get("train_batch_size") if isinstance(ac, dict) else getattr(
+        ac, "train_batch_size", None)
     if lr is not None or bs is not None:
         table.add_row("", "")
     if lr is not None:
@@ -176,12 +182,18 @@ def _print_run_summary(name: str, experiment, config_path: Path | None) -> None:
         table.add_row("config", str(config_path))
 
     try:
-        console.print(Panel(table, title="[bold]Starting run[/bold]", title_align="left"), new_line_start=True)
+        console.print(Panel(table,
+                            title="[bold]Starting run[/bold]",
+                            title_align="left"),
+                      new_line_start=True)
     except UnicodeEncodeError:
-        typer.echo(f"\nRunning '{name}' ({experiment.training.algorithm}, {experiment.training.iterations} iters) ...")
+        typer.echo(
+            f"\nRunning '{name}' ({experiment.training.algorithm}, {experiment.training.iterations} iters) ..."
+        )
 
 
-def _print_tune_summary(name: str, experiment, config_path: Path | None, tag: str | None) -> None:
+def _print_tune_summary(name: str, experiment, config_path: Path | None,
+                        tag: str | None) -> None:
     """Print a Rich panel summarising a tune sweep before it starts."""
     import sys
     from rich.console import Console
@@ -221,14 +233,20 @@ def _print_tune_summary(name: str, experiment, config_path: Path | None, tag: st
     table.add_row("tensorboard", f"anysearch tensorboard {name}")
 
     try:
-        console.print(Panel(table, title="[bold]Starting tune sweep[/bold]", title_align="left"), new_line_start=True)
+        console.print(Panel(table,
+                            title="[bold]Starting tune sweep[/bold]",
+                            title_align="left"),
+                      new_line_start=True)
     except UnicodeEncodeError:
-        typer.echo(f"\nTune sweep '{name}' ({experiment.training.algorithm}, {getattr(tc, 'num_samples', '?')} trials) ...")
+        typer.echo(
+            f"\nTune sweep '{name}' ({experiment.training.algorithm}, {getattr(tc, 'num_samples', '?')} trials) ..."
+        )
 
 
 # ---------------------------------------------------------------------------
 # Geometry pool validation (used by run before starting training)
 # ---------------------------------------------------------------------------
+
 
 def _resolve_geometry_pool_path(experiment: Any, config_path: Path) -> Any:
     """Return experiment with geometry_pool.pool_dir resolved to an absolute path.
@@ -263,10 +281,8 @@ def _check_geometry_pool(experiment: Any, config_path: Path) -> None:
     if not pool_cfg:
         return
 
-    pool_dir_raw = (
-        pool_cfg.get("pool_dir") if isinstance(pool_cfg, dict)
-        else getattr(pool_cfg, "pool_dir", None)
-    )
+    pool_dir_raw = (pool_cfg.get("pool_dir") if isinstance(pool_cfg, dict) else
+                    getattr(pool_cfg, "pool_dir", None))
     if not pool_dir_raw:
         return
 
@@ -298,19 +314,24 @@ def _check_geometry_pool(experiment: Any, config_path: Path) -> None:
 # Hot path: run
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def run(
     ref: str = typer.Argument(
         ...,
-        help="Experiment directory or registered name (e.g. ppo-baseline or usage/experiments/ppo).",
+        help=
+        "Experiment directory or registered name (e.g. ppo-baseline or usage/experiments/ppo).",
     ),
     tag: Optional[str] = typer.Option(
-        None, "--tag", "-t", help="Sweep tag / output subdirectory name (tune sweeps only)."
-    ),
+        None,
+        "--tag",
+        "-t",
+        help="Sweep tag / output subdirectory name (tune sweeps only)."),
     resume_tune: bool = typer.Option(
         False,
         "--resume-tune",
-        help="Resume the most recent interrupted tune sweep segment for the selected tag.",
+        help=
+        "Resume the most recent interrupted tune sweep segment for the selected tag.",
     ),
     extra_trials: int = typer.Option(
         0,
@@ -318,12 +339,15 @@ def run(
         help="Append more trials to an existing completed tune sweep tag.",
     ),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", help="Override output location (default: the experiment directory)."
-    ),
+        None,
+        "--output-dir",
+        help="Override output location (default: the experiment directory)."),
 ) -> None:
     """Start a training run or sweep from an experiment directory or YAML file."""
     from theseo_anysearch.cli.registry import (
-        RegistryAccessError, add_experiment, resolve_config_and_dir,
+        RegistryAccessError,
+        add_experiment,
+        resolve_config_and_dir,
     )
     from theseo_anysearch.experiments.loader import expand_sweep, load_experiment
     from theseo_anysearch.experiments.models import ExperimentConfig, SweepConfig
@@ -338,7 +362,8 @@ def run(
     # Auto-register under the config yaml path (name = yaml stem).
     # For canonical names like config.yaml inside a dedicated directory, register
     # the directory instead so the name comes from the directory basename.
-    _reg_path = experiment_dir if config_path.name in ("config.yaml", "experiment.yaml") else config_path
+    _reg_path = experiment_dir if config_path.name in (
+        "config.yaml", "experiment.yaml") else config_path
     try:
         name = add_experiment(_reg_path)
     except RegistryAccessError as exc:
@@ -354,8 +379,10 @@ def run(
     # --output-dir overrides the output_dir already resolved by load_experiment
     def _apply_output(exp: ExperimentConfig, out: Path) -> ExperimentConfig:
         return exp.model_copy(
-            update={"experiment": exp.experiment.model_copy(update={"output_dir": out})}
-        )
+            update={
+                "experiment": exp.experiment.model_copy(
+                    update={"output_dir": out})
+            })
 
     effective_output = output_dir if output_dir is not None else experiment.experiment.output_dir
 
@@ -393,15 +420,18 @@ def run(
 # Hot path: list
 # ---------------------------------------------------------------------------
 
+
 @app.command(name="list")
 def list_experiments(
     ref: Optional[str] = typer.Argument(
         None,
-        help="Registered name or directory to scope to (default: all registered experiments).",
+        help=
+        "Registered name or directory to scope to (default: all registered experiments).",
     ),
-    short: bool = typer.Option(
-        False, "--short", "-s", help="Omit the experiment YAML contents."
-    ),
+    short: bool = typer.Option(False,
+                               "--short",
+                               "-s",
+                               help="Omit the experiment YAML contents."),
 ) -> None:
     """List runs and sweeps. No argument shows all registered experiments."""
     from theseo_anysearch.cli.registry import load_registry, _resolve_dir, resolve_config_and_dir
@@ -436,10 +466,12 @@ def list_experiments(
     for display_name, stored_path in dirs.items():
         # Resolve config yaml and experiment directory from stored path
         try:
-            config_path, experiment_dir = resolve_config_and_dir(str(stored_path))
+            config_path, experiment_dir = resolve_config_and_dir(
+                str(stored_path))
         except Exception:
             config_path = None
-            experiment_dir = stored_path if stored_path.is_dir() else stored_path.parent
+            experiment_dir = stored_path if stored_path.is_dir(
+            ) else stored_path.parent
 
         # Resolve output_dir and experiment name from raw YAML (avoids importing torch/ray)
         resolved_out: Path | None = None
@@ -454,7 +486,8 @@ def list_experiments(
                 if out_raw is not None:
                     yaml_dir = config_path.resolve().parent
                     out_path = Path(out_raw)
-                    resolved_out = (yaml_dir / out_path).resolve() if not out_path.is_absolute() else out_path
+                    resolved_out = (yaml_dir / out_path).resolve(
+                    ) if not out_path.is_absolute() else out_path
                 else:
                     resolved_out = config_path.resolve().parent
             except Exception:
@@ -484,7 +517,9 @@ def list_experiments(
             lines.append(meta)
 
         # Runs table
-        run_table = Table(box=None, show_header=bool(runs), padding=(0, 1, 0, 0))
+        run_table = Table(box=None,
+                          show_header=bool(runs),
+                          padding=(0, 1, 0, 0))
         run_table.add_column("TAG / RUN ID", style="cyan", min_width=18)
         run_table.add_column("STATUS", min_width=14)
         run_table.add_column("STARTED")
@@ -499,13 +534,18 @@ def list_experiments(
                 label = r["run_id"]
                 if "sweep_trials" in r:
                     label += f"  [dim]({r['sweep_trials']} trials)[/dim]"
-                run_table.add_row(label, Text(status, style=status_style), started)
+                run_table.add_row(label, Text(status, style=status_style),
+                                  started)
             lines.append(run_table)
 
         # Show yaml content unless --short
         if scoped and not short and config_path and config_path.exists():
             lines.append(Text(""))
-            lines.append(Syntax(config_path.read_text(), "yaml", theme="ansi_dark", line_numbers=False))
+            lines.append(
+                Syntax(config_path.read_text(),
+                       "yaml",
+                       theme="ansi_dark",
+                       line_numbers=False))
 
         from rich.console import Group
         content = Group(*lines)
@@ -520,29 +560,34 @@ def list_experiments(
             if not runs:
                 typer.echo("  (no runs found)")
             else:
-                typer.echo(f"  {'TAG / RUN ID':<18} {'STATUS':<14} {'STARTED'}")
+                typer.echo(
+                    f"  {'TAG / RUN ID':<18} {'STATUS':<14} {'STARTED'}")
                 for r in reversed(runs):
-                    started = r["start_time"][:10] if r.get("start_time") else "?"
-                    typer.echo(f"  {r['run_id']:<18} {r['status']:<14} {started}")
+                    started = r["start_time"][:10] if r.get(
+                        "start_time") else "?"
+                    typer.echo(
+                        f"  {r['run_id']:<18} {r['status']:<14} {started}")
             if scoped and not short and config_path and config_path.exists():
                 typer.echo(config_path.read_text())
 
-    typer.echo(
-        "\n  To replay:   anysearch replay <name:tag>\n"
-        "  To inspect:  anysearch inspect <name:run_id>\n"
-        "  TensorBoard: anysearch tensorboard <name:tag-or-run_id>"
-    )
+    typer.echo("\n  To replay:   anysearch replay <name:tag>\n"
+               "  To inspect:  anysearch inspect <name:run_id>\n"
+               "  TensorBoard: anysearch tensorboard <name:tag-or-run_id>")
 
 
 # ---------------------------------------------------------------------------
 # add (register an experiment directory)
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def add(
-    directory: Path = typer.Argument(..., help="Experiment directory to register."),
+    directory: Path = typer.Argument(...,
+                                     help="Experiment directory to register."),
     name: Optional[str] = typer.Argument(
-        None, help="Short name (default: experiment.name from config, then dir basename)."
+        None,
+        help=
+        "Short name (default: experiment.name from config, then dir basename)."
     ),
 ) -> None:
     """Register an experiment YAML or directory under a short name."""
@@ -573,7 +618,10 @@ def add(
     table.add_row("name", registered_name)
     table.add_row("path", str(directory.resolve()))
     try:
-        console.print(Panel(table, title="[bold]Registered[/bold]", title_align="left"), new_line_start=True)
+        console.print(Panel(table,
+                            title="[bold]Registered[/bold]",
+                            title_align="left"),
+                      new_line_start=True)
     except UnicodeEncodeError:
         typer.echo(f"Registered: {registered_name} -> {directory.resolve()}")
 
@@ -584,7 +632,8 @@ def add(
 
 
 def _dir_size_mb(path: Path) -> float:
-    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / 1_048_576
+    return sum(f.stat().st_size
+               for f in path.rglob("*") if f.is_file()) / 1_048_576
 
 
 def _summarise_run_dir(path: Path) -> str:
@@ -607,12 +656,17 @@ def _summarise_run_dir(path: Path) -> str:
 def delete(
     ref: str = typer.Argument(
         ...,
-        help="Experiment name (delete all runs + deregister) or name:run_id (delete one run).",
+        help=
+        "Experiment name (delete all runs + deregister) or name:run_id (delete one run).",
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt."),
+    force: bool = typer.Option(False,
+                               "--force",
+                               "-f",
+                               help="Skip confirmation prompt."),
     cached: bool = typer.Option(
-        False, "--cached", help="Only remove from registry — do not delete any files."
-    ),
+        False,
+        "--cached",
+        help="Only remove from registry — do not delete any files."),
 ) -> None:
     """Delete run output directories and/or deregister an experiment.
 
@@ -646,7 +700,8 @@ def delete(
             out_raw = exp.get("output_dir")
             if out_raw is not None:
                 p = Path(out_raw)
-                base = (config_path.parent / p).resolve() if not p.is_absolute() else p
+                base = (config_path.parent /
+                        p).resolve() if not p.is_absolute() else p
             else:
                 base = config_path.parent.resolve()
             if experiment_name:
@@ -690,7 +745,9 @@ def delete(
 
     # Show what will happen
     if cached:
-        console.print(f"\n[bold]Registry entry to remove:[/bold] {name_in_registry or '(not registered)'}")
+        console.print(
+            f"\n[bold]Registry entry to remove:[/bold] {name_in_registry or '(not registered)'}"
+        )
         console.print("[dim]Files will not be touched (--cached).[/dim]\n")
     else:
         table = Table(box=None, show_header=True, padding=(0, 2, 0, 0))
@@ -699,7 +756,8 @@ def delete(
         for d in dirs_to_delete:
             table.add_row(str(d), _summarise_run_dir(d))
         if run_id is None and name_in_registry:
-            console.print(f"\n[bold]Will deregister:[/bold] {name_in_registry}")
+            console.print(
+                f"\n[bold]Will deregister:[/bold] {name_in_registry}")
         console.print(table)
 
     if not force:
@@ -717,25 +775,31 @@ def delete(
     if run_id is None and name_in_registry:
         from theseo_anysearch.cli.registry import RegistryAccessError, save_registry
         try:
-            save_registry({k: v for k, v in reg.items() if k != name_in_registry})
+            save_registry({
+                k: v
+                for k, v in reg.items() if k != name_in_registry
+            })
         except RegistryAccessError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(1)
-        console.print(f"  [dim]Removed[/dim]  {name_in_registry} from registry")
+        console.print(
+            f"  [dim]Removed[/dim]  {name_in_registry} from registry")
 
 
 # ---------------------------------------------------------------------------
 # inspect
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def inspect(
     ref: str = typer.Argument(
-        ..., help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"
-    ),
+        ...,
+        help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", help="Override experiment directory search root."
-    ),
+        None,
+        "--output-dir",
+        help="Override experiment directory search root."),
 ) -> None:
     """Print resolved config, metrics, and artifact paths for a run."""
     from theseo_anysearch.cli.registry import resolve_ref
@@ -743,7 +807,9 @@ def inspect(
 
     experiment_dir, run_id = resolve_ref(ref)
     if run_id is None:
-        typer.echo("Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4", err=True)
+        typer.echo(
+            "Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4",
+            err=True)
         raise typer.Exit(1)
 
     search_root = output_dir if output_dir is not None else experiment_dir
@@ -756,14 +822,16 @@ def inspect(
 # resume
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def resume(
     ref: str = typer.Argument(
-        ..., help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"
-    ),
+        ...,
+        help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", help="Override experiment directory search root."
-    ),
+        None,
+        "--output-dir",
+        help="Override experiment directory search root."),
 ) -> None:
     """Continue training from the latest checkpoint."""
     from theseo_anysearch.cli.registry import resolve_ref
@@ -773,7 +841,9 @@ def resume(
 
     experiment_dir, run_id = resolve_ref(ref)
     if run_id is None:
-        typer.echo("Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4", err=True)
+        typer.echo(
+            "Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4",
+            err=True)
         raise typer.Exit(1)
 
     search_root = output_dir if output_dir is not None else experiment_dir
@@ -799,14 +869,16 @@ def resume(
 # repeat
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def repeat(
     ref: str = typer.Argument(
-        ..., help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"
-    ),
+        ...,
+        help="<name:run_id> or <dir:run_id> — e.g. ppo-baseline:a1b2c3d4"),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", help="Override experiment directory search root."
-    ),
+        None,
+        "--output-dir",
+        help="Override experiment directory search root."),
 ) -> None:
     """Re-run from scratch with the same config (new run_id)."""
     from theseo_anysearch.cli.registry import resolve_ref
@@ -816,7 +888,9 @@ def repeat(
 
     experiment_dir, run_id = resolve_ref(ref)
     if run_id is None:
-        typer.echo("Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4", err=True)
+        typer.echo(
+            "Error: ref must include a run_id, e.g. ppo-baseline:a1b2c3d4",
+            err=True)
         raise typer.Exit(1)
 
     search_root = output_dir if output_dir is not None else experiment_dir
@@ -842,15 +916,21 @@ def repeat(
 # tensorboard
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def tensorboard(
     ref: Optional[str] = typer.Argument(
         None,
-        help="Experiment reference: registered name, name:run_id, name:tag, or directory. "
-             "Omit to use the current directory.",
+        help=
+        "Experiment reference: registered name, name:run_id, name:tag, or directory. "
+        "Omit to use the current directory.",
     ),
-    port: int = typer.Option(6006, "--port", help="Port to serve TensorBoard on."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind TensorBoard to."),
+    port: int = typer.Option(6006,
+                             "--port",
+                             help="Port to serve TensorBoard on."),
+    host: str = typer.Option("127.0.0.1",
+                             "--host",
+                             help="Host to bind TensorBoard to."),
 ) -> None:
     """Launch TensorBoard for an experiment, run, or sweep."""
     import shutil
@@ -885,13 +965,15 @@ def tensorboard(
                 out_raw = raw.get("experiment", {}).get("output_dir")
                 if out_raw is not None:
                     p = Path(out_raw)
-                    output_dir = (config_path.parent / p).resolve() if not p.is_absolute() else p
+                    output_dir = (config_path.parent /
+                                  p).resolve() if not p.is_absolute() else p
                 else:
                     output_dir = config_path.parent.resolve()
             except Exception:
                 pass
 
-        base = output_dir or (experiment_dir.resolve() if experiment_dir else Path(".").resolve())
+        base = output_dir or (experiment_dir.resolve()
+                              if experiment_dir else Path(".").resolve())
         if identifier is not None:
             candidate = base / identifier
             logdir = candidate if candidate.exists() else base
@@ -917,7 +999,11 @@ def tensorboard(
 
     try:
         subprocess.run(
-            [tb_exe, "--logdir", str(logdir), "--host", host, "--port", str(port)],
+            [
+                tb_exe, "--logdir",
+                str(logdir), "--host", host, "--port",
+                str(port)
+            ],
             check=True,
         )
     except KeyboardInterrupt:
@@ -925,7 +1011,8 @@ def tensorboard(
     except subprocess.CalledProcessError:
         typer.echo(
             f"Error: TensorBoard exited with an error. "
-            f"If port {port} is already in use, try: anysearch tensorboard {ref or ''} --port {port + 1}".strip(),
+            f"If port {port} is already in use, try: anysearch tensorboard {ref or ''} --port {port + 1}"
+            .strip(),
             err=True,
         )
         raise typer.Exit(1)
@@ -939,23 +1026,26 @@ def tensorboard(
 # show-data
 # ---------------------------------------------------------------------------
 
+
 @app.command(name="show-data")
 def show_data(
     source: Path = typer.Argument(
-        ..., help="YAML experiment config, .stl file, .npy pool entry, or pool directory."
+        ...,
+        help=
+        "YAML experiment config, .stl file, .npy pool entry, or pool directory."
     ),
     scale: Optional[float] = typer.Option(
-        None, "--scale", help="Override: voxels on the longest edge."
-    ),
+        None, "--scale", help="Override: voxels on the longest edge."),
     grid_size: Optional[int] = typer.Option(
-        None, "--grid-size", "-g", help="Override: voxel grid side length."
-    ),
+        None, "--grid-size", "-g", help="Override: voxel grid side length."),
     padding: int = typer.Option(
-        2, "--padding", help="Free voxels on each side of the geometry (circumnavigation margin)."
-    ),
-    no_viewer: bool = typer.Option(
-        False, "--no-viewer", help="Skip opening the eframe viewer."
-    ),
+        2,
+        "--padding",
+        help=
+        "Free voxels on each side of the geometry (circumnavigation margin)."),
+    no_viewer: bool = typer.Option(False,
+                                   "--no-viewer",
+                                   help="Skip opening the eframe viewer."),
 ) -> None:
     """Show geometry stats and open the voxelized geometry in the eframe viewer."""
     import collections
@@ -974,14 +1064,17 @@ def show_data(
         raise typer.Exit(1)
 
     # --- .npy pool entry or pool directory → pool-explorer binary ---
-    if source.suffix.lower() == ".npy" or (source.is_dir() and (source / "pool_meta.json").exists()):
+    if source.suffix.lower() == ".npy" or (
+            source.is_dir() and (source / "pool_meta.json").exists()):
         import subprocess
         import sys
 
         suffix = ".exe" if sys.platform == "win32" else ""
         candidates = [
-            Path("theseo_anysearch/core/target/release") / f"pool-explorer{suffix}",
-            Path("theseo_anysearch/core/target/debug") / f"pool-explorer{suffix}",
+            Path("theseo_anysearch/core/target/release") /
+            f"pool-explorer{suffix}",
+            Path("theseo_anysearch/core/target/debug") /
+            f"pool-explorer{suffix}",
         ]
         binary = next((p for p in candidates if p.exists()), None)
         if binary is None:
@@ -1030,37 +1123,35 @@ def show_data(
     console.print(
         f"[dim]Voxelizing {stl_path.name}  scale={eff_scale}  grid={eff_grid}  padding={padding}...[/dim]"
     )
-    geometry = _load_stl_geometry(str(stl_path), eff_scale, eff_grid, padding=padding)
+    geometry = _load_stl_geometry(str(stl_path),
+                                  eff_scale,
+                                  eff_grid,
+                                  padding=padding)
 
-    total = eff_grid ** 3
+    total = eff_grid**3
     filled = len(geometry)
     free = total - filled
     fill_pct = 100.0 * filled / total
 
     # BFS connectivity on navigable (free) voxels.
     filled_set = set(geometry)
-    free_cells = [
-        (x, y, z)
-        for x in range(1, eff_grid + 1)
-        for y in range(1, eff_grid + 1)
-        for z in range(1, eff_grid + 1)
-        if (x, y, z) not in filled_set
-    ]
+    free_cells = [(x, y, z) for x in range(1, eff_grid + 1)
+                  for y in range(1, eff_grid + 1)
+                  for z in range(1, eff_grid + 1)
+                  if (x, y, z) not in filled_set]
     connected = 0
     if free_cells:
         visited: set[tuple[int, int, int]] = {free_cells[0]}
-        q: collections.deque[tuple[int, int, int]] = collections.deque([free_cells[0]])
+        q: collections.deque[tuple[int, int,
+                                   int]] = collections.deque([free_cells[0]])
         while q:
             cx, cy, cz = q.popleft()
-            for dx, dy, dz in ((1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)):
+            for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0),
+                               (0, 0, 1), (0, 0, -1)):
                 nb = (cx + dx, cy + dy, cz + dz)
-                if (
-                    nb not in visited
-                    and nb not in filled_set
-                    and 1 <= nb[0] <= eff_grid
-                    and 1 <= nb[1] <= eff_grid
-                    and 1 <= nb[2] <= eff_grid
-                ):
+                if (nb not in visited and nb not in filled_set
+                        and 1 <= nb[0] <= eff_grid and 1 <= nb[1] <= eff_grid
+                        and 1 <= nb[2] <= eff_grid):
                     visited.add(nb)
                     q.append(nb)
         connected = len(visited)
@@ -1081,23 +1172,28 @@ def show_data(
     table.add_column(style="dim", min_width=20)
     table.add_column(overflow="fold")
     table.add_row("stl", stl_path.name)
-    table.add_row("scale", f"{eff_scale:.1f}  (longest edge -> {eff_scale:.0f} voxels)")
+    table.add_row(
+        "scale", f"{eff_scale:.1f}  (longest edge -> {eff_scale:.0f} voxels)")
     table.add_row("grid", f"{eff_grid}^3 = {total:,} voxels total")
     table.add_row("padding", str(padding))
     table.add_row("", "")
     table.add_row("filled (geometry)", f"{filled:,}  ({fill_pct:.1f}%)")
     table.add_row("free (navigable)", f"{free:,}  ({100-fill_pct:.1f}%)")
     conn_label = "[green]OK[/green]" if conn_ok else "[red]LOW[/red]"
-    table.add_row("connected free", f"{connected:,} / {free:,}  ({conn_pct:.1f}%)  {conn_label}")
+    table.add_row(
+        "connected free",
+        f"{connected:,} / {free:,}  ({conn_pct:.1f}%)  {conn_label}")
     table.add_row("geometry bounds", bounds)
     try:
-        console.print(Panel(table, title="[bold]Geometry preview[/bold]", title_align="left"), new_line_start=True)
+        console.print(Panel(table,
+                            title="[bold]Geometry preview[/bold]",
+                            title_align="left"),
+                      new_line_start=True)
     except UnicodeEncodeError:
         typer.echo(
             f"\nGeometry preview: {stl_path.name}  scale={eff_scale}  grid={eff_grid}^3"
             f"\n  filled={filled:,} ({fill_pct:.1f}%)  free={free:,}  connected={connected:,} ({conn_pct:.1f}%)"
-            f"\n  bounds: {bounds}"
-        )
+            f"\n  bounds: {bounds}")
 
     if not no_viewer:
         import subprocess
@@ -1138,27 +1234,51 @@ def show_data(
 # extract
 # ---------------------------------------------------------------------------
 
+
 @app.command(name="extract")
 def extract(
-    sources: list[Path] = typer.Argument(
+        sources: list[Path] = typer.
+    Argument(
         ...,
         help=(
             "STL files, folders of STL files, or a single YAML extract config. "
-            "If a YAML file is provided all other flags are read from it."
-        ),
+            "If a YAML file is provided all other flags are read from it."),
     ),
-    target: int = typer.Option(40, "--target", "-n", help="Base geometries per source STL."),
-    scale_min: float = typer.Option(100.0, "--scale-min", help="Minimum scale (voxels on longest edge)."),
-    scale_max: float = typer.Option(500.0, "--scale-max", help="Maximum scale."),
-    rotate: bool = typer.Option(True, "--rotate/--no-rotate", help="Random SO(3) rotation per sample."),
-    pool_dir: Optional[Path] = typer.Option(None, "--pool-dir", help="Output directory for the geometry pool."),
-    workers: int = typer.Option(4, "--workers", "-w", help="Parallel worker processes."),
-    resume: bool = typer.Option(False, "--resume", help="Skip already-written .npy files."),
-    min_fill_pct: float = typer.Option(5.0, "--min-fill-pct", help="Reject if filled < N%%."),
-    min_free_pct: float = typer.Option(10.0, "--min-free-pct", help="Reject if free < N%%."),
-    no_connectivity_check: bool = typer.Option(False, "--no-connectivity-check"),
-    padding: int = typer.Option(2, "--padding", help="Free voxels on each side of the geometry."),
-    seed: int = typer.Option(0, "--seed", help="Base random seed."),
+        target: int = typer.Option(40,
+                                   "--target",
+                                   "-n",
+                                   help="Base geometries per source STL."),
+        scale_min: float = typer.Option(
+            100.0,
+            "--scale-min",
+            help="Minimum scale (voxels on longest edge)."),
+        scale_max: float = typer.Option(500.0,
+                                        "--scale-max",
+                                        help="Maximum scale."),
+        rotate: bool = typer.Option(True,
+                                    "--rotate/--no-rotate",
+                                    help="Random SO(3) rotation per sample."),
+        pool_dir: Optional[Path] = typer.Option(
+            None, "--pool-dir",
+            help="Output directory for the geometry pool."),
+        workers: int = typer.Option(4,
+                                    "--workers",
+                                    "-w",
+                                    help="Parallel worker processes."),
+        resume: bool = typer.Option(False,
+                                    "--resume",
+                                    help="Skip already-written .npy files."),
+        min_fill_pct: float = typer.Option(5.0,
+                                           "--min-fill-pct",
+                                           help="Reject if filled < N%%."),
+        min_free_pct: float = typer.Option(10.0,
+                                           "--min-free-pct",
+                                           help="Reject if free < N%%."),
+        no_connectivity_check: bool = typer.Option(False,
+                                                   "--no-connectivity-check"),
+        padding: int = typer.Option(
+            2, "--padding", help="Free voxels on each side of the geometry."),
+        seed: int = typer.Option(0, "--seed", help="Base random seed."),
 ) -> None:
     """Build a geometry pool from STL files for training-time diversity.
 
@@ -1197,7 +1317,9 @@ def extract(
         import yaml  # type: ignore[import-untyped]
         cfg = yaml.safe_load(sources[0].read_text())
         ec = cfg.get("extract", {})
-        eff_pool_dir = Path(ec.get("pool_dir", str(pool_dir or "runtime/geometry_pools/default")))
+        eff_pool_dir = Path(
+            ec.get("pool_dir", str(pool_dir
+                                   or "runtime/geometry_pools/default")))
         eff_target = ec.get("target_per_source", target)
         sr = ec.get("scale_range", [scale_min, scale_max])
         eff_scale_min, eff_scale_max = float(sr[0]), float(sr[1])
@@ -1205,7 +1327,8 @@ def extract(
         eff_workers = ec.get("workers", workers)
         eff_min_fill_pct = ec.get("min_fill_pct", min_fill_pct)
         eff_min_free_pct = ec.get("min_free_pct", min_free_pct)
-        eff_connectivity_check = ec.get("connectivity_check", not no_connectivity_check)
+        eff_connectivity_check = ec.get("connectivity_check",
+                                        not no_connectivity_check)
         raw_sources = ec.get("sources", [])
         for s in raw_sources:
             p = Path(s)
@@ -1231,14 +1354,20 @@ def extract(
             elif src.name.endswith(".3dmap.zip") and src.exists():
                 map_files.append(src)
             else:
-                typer.echo(f"Warning: {src} is not a .stl/.3dmap.zip file or folder — skipping", err=True)
+                typer.echo(
+                    f"Warning: {src} is not a .stl/.3dmap.zip file or folder — skipping",
+                    err=True)
 
     if not stl_files and not map_files:
-        typer.echo("Error: no .stl or .3dmap.zip files found in the given sources.", err=True)
+        typer.echo(
+            "Error: no .stl or .3dmap.zip files found in the given sources.",
+            err=True)
         raise typer.Exit(1)
 
     if eff_pool_dir is None:
-        typer.echo("Error: --pool-dir is required (or set pool_dir in YAML config).", err=True)
+        typer.echo(
+            "Error: --pool-dir is required (or set pool_dir in YAML config).",
+            err=True)
         raise typer.Exit(1)
 
     # STL grid_size derived from scale_max; map grid_size = int(scale_max) directly (crop window)
@@ -1280,13 +1409,15 @@ app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(mlflow_cmd.app, name="mlflow")
 app.add_typer(ray_cmd.app, name="ray")
 app.add_typer(garden_cmd.app, name="garden")
+app.add_typer(benchmark_cmd.app, name="benchmark")
 
 # Deprecated groups — kept for backward compatibility
 app.add_typer(
     experiment_cmd.app,
     name="experiment",
     deprecated=True,
-    help="[deprecated] Use top-level anysearch run / inspect / resume / repeat / list.",
+    help=
+    "[deprecated] Use top-level anysearch run / inspect / resume / repeat / list.",
 )
 app.add_typer(
     train_cmd.app,

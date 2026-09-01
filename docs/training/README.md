@@ -106,6 +106,11 @@ training:
 GPU capacity for the learner; the latter is normally left at zero because voxel
 environment stepping and rollout policy inference run on CPU. A nonzero rollout
 GPU value also increases each Tune trial's placement-group GPU requirement.
+
+Use the [resource benchmark](resource-benchmark.md) to measure an efficient
+combination of vectorized environments and rollout workers for a specific
+experiment and machine.
+
 ## Early stopping
 
 Standard training can stop before its hard `iterations` limit when deterministic
