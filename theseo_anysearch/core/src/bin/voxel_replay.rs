@@ -860,6 +860,7 @@ struct VoxelReplayApp {
     regional_sources: Vec<Option<RegionalReplaySource>>,
     regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
     pending_region: Option<PendingRegion>,
+    pending_play_position: Option<(usize, usize)>,
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
@@ -920,6 +921,7 @@ impl VoxelReplayApp {
             regional_sources,
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -953,6 +955,7 @@ impl VoxelReplayApp {
             regional_sources: Vec::new(),
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -989,22 +992,34 @@ impl VoxelReplayApp {
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
+        self.pending_play_position = None;
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
         self.coarse_chunks.clear();
     }
 
-    fn current_region_key(&self) -> Option<RegionRequestKey> {
-        let trajectory = self.trajectories.get(self.iter_idx)?;
+    fn region_key(&self, iteration: usize, step: usize) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(iteration)?;
         trajectory.world.as_ref()?;
         Some(RegionRequestKey {
-            iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            iteration,
+            step,
+            center: selected_agent_center(trajectory, step)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        self.region_key(self.iter_idx, self.step_idx)
+    }
+
+    fn desired_region_key(&self) -> Option<RegionRequestKey> {
+        let (iteration, step) = self
+            .pending_play_position
+            .unwrap_or((self.iter_idx, self.step_idx));
+        self.region_key(iteration, step)
     }
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
@@ -1034,7 +1049,7 @@ impl VoxelReplayApp {
     }
 
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
-        let current_key = self.current_region_key();
+        let current_key = self.desired_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(loaded)) => {
@@ -1045,6 +1060,13 @@ impl VoxelReplayApp {
                         self.detailed_chunks = loaded.detailed;
                         self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
+                        if self.pending_play_position
+                            == Some((pending.key.iteration, pending.key.step))
+                        {
+                            self.iter_idx = pending.key.iteration;
+                            self.step_idx = pending.key.step;
+                            self.pending_play_position = None;
+                        }
                     }
                 }
                 Ok(Err(error)) => {
@@ -1173,23 +1195,18 @@ impl VoxelReplayApp {
             && self.regional_frame.as_ref().map(|(loaded, _)| *loaded) == Some(key)
     }
 
-    fn n_iters(&self) -> usize { self.trajectories.len() }
-    fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
-
-    /// Advance one step during play.  Returns false when the run is fully finished.
-    fn play_advance(&mut self) -> bool {
-        let n = self.n_steps();
-        if self.step_idx + 1 < n {
-            self.step_idx += 1;
-            true
+    fn next_play_position(&self) -> Option<(usize, usize)> {
+        if self.step_idx + 1 < self.n_steps() {
+            Some((self.iter_idx, self.step_idx + 1))
         } else if self.iter_idx + 1 < self.n_iters() {
-            self.iter_idx += 1;
-            self.step_idx = 0;
-            true
+            Some((self.iter_idx + 1, 0))
         } else {
-            false
+            None
         }
     }
+
+    fn n_iters(&self) -> usize { self.trajectories.len() }
+    fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
     fn apply_events(&mut self, ev: UiEvents) {
         // Iteration navigation (always resets step to 0)
@@ -1216,6 +1233,9 @@ impl VoxelReplayApp {
                 self.iter_idx = 0;
                 self.step_idx = 0;
             }
+        }
+        if !self.playing {
+            self.pending_play_position = None;
         }
     }
 }
@@ -1857,9 +1877,19 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Auto-play: advance one step per frame --------------------------
-        if self.playing && self.regional_view_ready() {
-            let still_going = self.play_advance();
-            if !still_going { self.playing = false; }
+        if self.playing
+            && self.pending_play_position.is_none()
+            && self.regional_view_ready()
+        {
+            let next = self.next_play_position();
+            if next.is_none() {
+                self.playing = false;
+            } else if self.trajectories[self.iter_idx].world.is_some() {
+                self.pending_play_position = next;
+            } else if let Some((iteration, step)) = next {
+                self.iter_idx = iteration;
+                self.step_idx = step;
+            }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         } else if self.playing {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
