@@ -764,6 +764,55 @@ fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 
     x * sy * cp + y * sp + z * cy * cp
 }
 
+fn debug_face_color(direction: FaceDirection) -> Color32 {
+    match direction {
+        FaceDirection::NegativeX => Color32::from_rgb(230, 55, 55),
+        FaceDirection::PositiveX => Color32::from_rgb(40, 220, 220),
+        FaceDirection::NegativeY => Color32::from_rgb(55, 190, 70),
+        FaceDirection::PositiveY => Color32::from_rgb(230, 70, 220),
+        FaceDirection::NegativeZ => Color32::from_rgb(55, 95, 235),
+        FaceDirection::PositiveZ => Color32::from_rgb(240, 210, 45),
+    }
+}
+
+#[cfg(test)]
+mod debug_face_color_tests {
+    use super::{debug_face_color, Color32, FaceDirection};
+
+    const DIRECTIONS: [FaceDirection; 6] = [
+        FaceDirection::NegativeX,
+        FaceDirection::PositiveX,
+        FaceDirection::NegativeY,
+        FaceDirection::PositiveY,
+        FaceDirection::NegativeZ,
+        FaceDirection::PositiveZ,
+    ];
+
+    #[test]
+    fn all_six_directions_have_unique_colors() {
+        let mut colors = DIRECTIONS
+            .map(debug_face_color)
+            .map(|color| color.to_array())
+            .to_vec();
+        colors.sort_unstable();
+        colors.dedup();
+
+        assert_eq!(colors.len(), DIRECTIONS.len());
+    }
+
+    #[test]
+    fn direction_color_mapping_is_stable() {
+        assert_eq!(
+            debug_face_color(FaceDirection::NegativeX),
+            Color32::from_rgb(230, 55, 55)
+        );
+        assert_eq!(
+            debug_face_color(FaceDirection::PositiveZ),
+            Color32::from_rgb(240, 210, 45)
+        );
+    }
+}
+
 fn draw_voxel(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
@@ -771,6 +820,7 @@ fn draw_voxel(
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
     outline: bool,
+    debug_face_colors: bool,
 ) {
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
@@ -807,9 +857,36 @@ fn draw_voxel(
         )
     };
     let (r, g, bl) = (base.r(), base.g(), base.b());
-    let top_col   = shade(r, g, bl,  40);
-    let facex_col = shade(r, g, bl, -10);
-    let facez_col = shade(r, g, bl, -40);
+    let top_direction = if hy > 0.0 {
+        FaceDirection::PositiveY
+    } else {
+        FaceDirection::NegativeY
+    };
+    let x_direction = if hx > 0.0 {
+        FaceDirection::PositiveX
+    } else {
+        FaceDirection::NegativeX
+    };
+    let z_direction = if hz > 0.0 {
+        FaceDirection::PositiveZ
+    } else {
+        FaceDirection::NegativeZ
+    };
+    let top_col = if debug_face_colors {
+        debug_face_color(top_direction)
+    } else {
+        shade(r, g, bl, 40)
+    };
+    let facex_col = if debug_face_colors {
+        debug_face_color(x_direction)
+    } else {
+        shade(r, g, bl, -10)
+    };
+    let facez_col = if debug_face_colors {
+        debug_face_color(z_direction)
+    } else {
+        shade(r, g, bl, -40)
+    };
 
     let stroke = if outline { Stroke::new(0.5, Color32::from_gray(30)) } else { Stroke::NONE };
 
@@ -827,6 +904,7 @@ fn draw_exposed_face(
     cam: &Camera,
     bounds: &Bounds,
     base: Color32,
+    debug_face_colors: bool,
 ) {
     let visible = match face.direction {
         FaceDirection::NegativeX => cam.yaw.sin() < 0.0,
@@ -853,11 +931,15 @@ fn draw_exposed_face(
         FaceDirection::NegativeX | FaceDirection::PositiveX => -10,
         FaceDirection::NegativeZ | FaceDirection::PositiveZ => -40,
     };
-    let color = Color32::from_rgb(
-        (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
-        (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
-        (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
-    );
+    let color = if debug_face_colors {
+        debug_face_color(face.direction)
+    } else {
+        Color32::from_rgb(
+            (i32::from(base.r()) + adjustment).clamp(0, 255) as u8,
+            (i32::from(base.g()) + adjustment).clamp(0, 255) as u8,
+            (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
+        )
+    };
     painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
@@ -926,7 +1008,7 @@ fn draw_marker(
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
-    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true);
+    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true, false);
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
         origin,
@@ -1033,6 +1115,7 @@ struct VoxelReplayApp {
     show_overview: bool,
     show_overview_bounds: bool,
     overview_size: f32,
+    debug_face_colors: bool,
 }
 
 /// UI events collected during a frame; applied to state after all closures finish.
@@ -1093,6 +1176,7 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            debug_face_colors: false,
         }
     }
 
@@ -1126,6 +1210,7 @@ impl VoxelReplayApp {
             show_overview: true,
             show_overview_bounds: true,
             overview_size: 220.0,
+            debug_face_colors: false,
         };
         app.load_trial(0);
         app
@@ -1598,8 +1683,26 @@ impl eframe::App for VoxelReplayApp {
                     Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
                         .suffix("°")
                         .text("field of view"),
-                );
+                    );
             });
+            ui.separator();
+            ui.label(egui::RichText::new("Render diagnostics").strong());
+            ui.checkbox(&mut self.debug_face_colors, "Color faces by direction");
+            if self.debug_face_colors {
+                for (direction, label) in [
+                    (FaceDirection::NegativeX, "-X"),
+                    (FaceDirection::PositiveX, "+X"),
+                    (FaceDirection::NegativeY, "-Y"),
+                    (FaceDirection::PositiveY, "+Y"),
+                    (FaceDirection::NegativeZ, "-Z"),
+                    (FaceDirection::PositiveZ, "+Z"),
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(debug_face_color(direction), "■");
+                        ui.label(label);
+                    });
+                }
+            }
             if self.trajectories[iter_idx].world.is_some() {
                 ui.separator();
                 ui.label(egui::RichText::new("Regional world view").strong());
@@ -1846,11 +1949,32 @@ impl eframe::App for VoxelReplayApp {
             if !self.occlude_agent {
                 if compiled_mode {
                     for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                        draw_exposed_face(
+                            &painter,
+                            face,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            self.debug_face_colors,
+                        );
                     }
                 } else {
                     for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            false,
+                            self.debug_face_colors,
+                        );
                     }
                 }
             }
@@ -1887,7 +2011,19 @@ impl eframe::App for VoxelReplayApp {
                             .unwrap()
                     });
                     for &(x, y, z) in &trail_list {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, trail_color, true);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            trail_color,
+                            true,
+                            false,
+                        );
                     }
                 }
                 // Draw each agent's current cursor.
@@ -1929,7 +2065,19 @@ impl eframe::App for VoxelReplayApp {
                         .unwrap()
                 });
                 for &(x, y, z) in &agent_list {
-                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, agent_color, true);
+                    draw_voxel(
+                        &painter,
+                        x,
+                        y,
+                        z,
+                        render_origin,
+                        rect,
+                        cam,
+                        &b,
+                        agent_color,
+                        true,
+                        false,
+                    );
                 }
 
                 if let Some([sx, sy, sz]) = render_start {
@@ -1947,11 +2095,32 @@ impl eframe::App for VoxelReplayApp {
             if self.occlude_agent {
                 if compiled_mode {
                     for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
+                        draw_exposed_face(
+                            &painter,
+                            face,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            self.debug_face_colors,
+                        );
                     }
                 } else {
                     for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
+                        draw_voxel(
+                            &painter,
+                            x,
+                            y,
+                            z,
+                            render_origin,
+                            rect,
+                            cam,
+                            &b,
+                            geo_color,
+                            false,
+                            self.debug_face_colors,
+                        );
                     }
                 }
             }
@@ -2054,6 +2223,7 @@ fn main() -> eframe::Result<()> {
     let mut explain_run: Option<PathBuf> = None;
     let mut checkpoint = "latest".to_string();
     let mut open_observation_editor = false;
+    let mut debug_face_colors = false;
     let mut index = 0;
     while index < raw_args.len() {
         match raw_args[index].as_str() {
@@ -2082,6 +2252,7 @@ fn main() -> eframe::Result<()> {
                 }
             }
             "--open-observation-editor" => open_observation_editor = true,
+            "--debug-face-colors" => debug_face_colors = true,
             value => args.push(value.to_string()),
         }
         index += 1;
@@ -2090,6 +2261,7 @@ fn main() -> eframe::Result<()> {
         eprintln!("Usage:");
         eprintln!("  voxel-replay --tune-dir <tune-run-dir>     Navigate tune trials");
         eprintln!("  voxel-replay <file1.json> [file2.json ...] Replay specific files");
+        eprintln!("  --debug-face-colors                       Start with direction colors enabled");
         eprintln!();
         eprintln!("Keyboard shortcuts:");
         eprintln!("  T / Y       next / prev trial  (tune mode only)");
@@ -2124,7 +2296,11 @@ fn main() -> eframe::Result<()> {
         return eframe::run_native(
             "Voxel Replay",
             options,
-            Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new_tune(trials)))),
+            Box::new(move |_cc| {
+                let mut app = VoxelReplayApp::new_tune(trials);
+                app.debug_face_colors = debug_face_colors;
+                Ok(Box::new(app))
+            }),
         );
     }
 
@@ -2167,6 +2343,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Voxel Replay",
         options,
-        Box::new(move |_cc| Ok(Box::new(VoxelReplayApp::new(trajectories, explain_ui)))),
+        Box::new(move |_cc| {
+            let mut app = VoxelReplayApp::new(trajectories, explain_ui);
+            app.debug_face_colors = debug_face_colors;
+            Ok(Box::new(app))
+        }),
     )
 }
