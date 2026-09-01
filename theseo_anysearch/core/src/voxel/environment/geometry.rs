@@ -80,6 +80,9 @@ fn reachable_from_boundary(
 /// reachable from the grid boundary (i.e. not enclosed inside a cavity).
 pub(super) fn compute_surface_cells(geometry: &[Coord], extent: [u16; 3]) -> Vec<Coord> {
     use std::collections::HashSet;
+    if geometry.is_empty() {
+        return Vec::new();
+    }
     let geo_set: HashSet<Coord> = geometry.iter().copied().collect();
     let reachable = reachable_from_boundary(&geo_set, extent);
 
@@ -126,4 +129,14 @@ pub(super) fn manhattan(a: Coord, b: Coord) -> u32 {
     let dy = (a.1 as i32 - b.1 as i32).unsigned_abs();
     let dz = (a.2 as i32 - b.2 as i32).unsigned_abs();
     dx + dy + dz
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_geometry_does_not_scan_large_extent() {
+        assert!(compute_surface_cells(&[], [60_000, 40_000, 20_000]).is_empty());
+    }
 }
