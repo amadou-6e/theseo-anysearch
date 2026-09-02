@@ -14,6 +14,60 @@ class GeometryValidationConfig(BaseModel):
     maximum_attempts: int = Field(default=1, ge=1)
     maximum_search_nodes: int = Field(default=100_000, ge=1)
     recovery_margin_steps: int = Field(default=0, ge=0)
+    clearance_radius: int | None = Field(default=None, ge=1)
+    difficulty_bands: tuple["RoutingDifficultyBand", ...] = ()
+    accepted_difficulty_bands: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_bands(self) -> "GeometryValidationConfig":
+        names = [band.name for band in self.difficulty_bands]
+        if len(names) != len(set(names)):
+            raise ValueError("geometry validation difficulty-band names must be unique")
+        unknown = set(self.accepted_difficulty_bands) - set(names)
+        if unknown:
+            raise ValueError(f"accepted difficulty bands are not defined: {sorted(unknown)}")
+        return self
+
+
+class NumericRange(BaseModel):
+    """Inclusive numeric interval used by a routing-difficulty band."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    minimum: float | None = None
+    maximum: float | None = None
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> "NumericRange":
+        if self.minimum is None and self.maximum is None:
+            raise ValueError("difficulty range must define minimum or maximum")
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("difficulty range minimum cannot exceed maximum")
+        return self
+
+
+class RoutingDifficultyBand(BaseModel):
+    """Named conjunction of routing-descriptor ranges."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str = Field(min_length=1)
+    path_length: NumericRange | None = None
+    detour_ratio: NumericRange | None = None
+    direction_changes: NumericRange | None = None
+    vertical_displacement: NumericRange | None = None
+    expansion_count: NumericRange | None = None
+
+    @model_validator(mode="after")
+    def require_constraint(self) -> "RoutingDifficultyBand":
+        fields = (
+            self.path_length,
+            self.detour_ratio,
+            self.direction_changes,
+            self.vertical_displacement,
+            self.expansion_count,
+        )
+        if not any(item is not None for item in fields):
+            raise ValueError("difficulty band must constrain at least one descriptor")
+        return self
 
 
 class GeometryConfig(BaseModel):

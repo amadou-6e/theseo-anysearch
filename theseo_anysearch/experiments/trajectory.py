@@ -131,6 +131,8 @@ class VoxelEpisodeData:
     unshaped_return: float | None = None
     final_info: dict[str, Any] | None = None
     world: WorldArtifactReference | None = None
+    routing_difficulty: dict[str, Any] | None = None
+    difficulty_band: str | None = None
 
 
 @dataclass
@@ -360,6 +362,7 @@ class _VoxelEpisodeState:
     steps: list[VoxelStepData]
     world: WorldArtifactReference | None
     overlay: dict[tuple[int, int, int], VoxelMutationData]
+    initial_info: dict[str, Any]
     total_reward: float = 0.0
     final_info: dict[str, Any] | None = None
     done: bool = False
@@ -381,7 +384,7 @@ class _VoxelEpisodeState:
         )
 
         configure_initial_waypoint_curriculum(env, env_config)
-        obs, _ = env.reset(seed=seed)
+        obs, initial_info = env.reset(seed=seed)
         world = _compiled_world_reference(env_config)
         init_filled: list[tuple[int, int, int]] = []
         start_pos: tuple[int, int, int] | None = None
@@ -416,6 +419,7 @@ class _VoxelEpisodeState:
             steps=[],
             world=world,
             overlay=_overlay_snapshot(env),
+            initial_info=dict(initial_info),
         )
 
     def advance(self, raw_action: Any) -> None:
@@ -480,6 +484,16 @@ class _VoxelEpisodeState:
             ),
             final_info=dict(final_info),
             world=self.world,
+            routing_difficulty=(
+                self.initial_info.get("geometry_feasibility", {}).get(
+                    "routing_difficulty"
+                )
+            ),
+            difficulty_band=(
+                self.initial_info.get("geometry_feasibility", {}).get(
+                    "difficulty_band"
+                )
+            ),
         )
 
     def close(self) -> None:
@@ -617,7 +631,7 @@ def collect_heuristic_episode(
         from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
         env = VoxelEnv(env_config)
-    env.reset(seed=seed)
+    _, initial_info = env.reset(seed=seed)
 
     from theseo_anysearch.heuristic import (
         VoxelReplanningAStarHeuristic,
@@ -697,6 +711,12 @@ def collect_heuristic_episode(
         start_pos=start_pos,
         goal_pos=goal_pos,
         world=world,
+        routing_difficulty=(
+            initial_info.get("geometry_feasibility", {}).get("routing_difficulty")
+        ),
+        difficulty_band=(
+            initial_info.get("geometry_feasibility", {}).get("difficulty_band")
+        ),
     )
 
 

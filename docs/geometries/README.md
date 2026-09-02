@@ -38,6 +38,14 @@ env:
       maximum_attempts: 16
       maximum_search_nodes: 100000
       recovery_margin_steps: 8
+      clearance_radius: 4
+      difficulty_bands:
+        - name: direct
+          detour_ratio: {maximum: 1.0}
+        - name: obstacle_detour
+          detour_ratio: {minimum: 1.01}
+          direction_changes: {minimum: 2}
+      accepted_difficulty_bands: [obstacle_detour]
     pool:
       pool_dir: runtime/geometry_pools/highres
       augmentation:
@@ -71,6 +79,15 @@ Validation runs after waypoint-curriculum sampling, so the active curriculum
 segment is checked against the final augmented geometry. For multi-waypoint
 routes, this gate covers the active segment; whole-route feasibility is a
 separate concern.
+
+The accepted A* path also produces deterministic routing descriptors: empty-grid
+direct distance, shortest-path length, detour ratio, direction changes, vertical
+displacement, and expansion count. Clearance statistics are included only when
+`clearance_radius` is set and use bounded face-direction queries. Named bands
+are conjunctions of inclusive descriptor ranges; configurations with empty or
+contradictory ranges fail during settings validation. The matched band and raw
+descriptors are written to reset diagnostics and single-agent trajectory
+artifacts. They do not alter curriculum advancement.
 
 Legacy fields such as `env.stl_path`, `env.grid_size`, and `env.geometry_pool` remain loadable during migration. Do not combine them with `env.geometry` in the same configuration.
 
