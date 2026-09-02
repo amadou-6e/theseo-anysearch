@@ -98,7 +98,6 @@ def test_shared_geometry_validation_is_translated_to_runtime() -> None:
         "maximum_search_nodes": 1234,
         "recovery_margin_steps": 5,
     }
-
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
         exposed_nested_fields: ClassVar[tuple[str, ...]] = ("geometry",)

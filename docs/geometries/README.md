@@ -46,6 +46,11 @@ env:
           box_min_size: [2, 2, 2]
           box_max_size: [20, 20, 20]
           prob: 1.0
+        feasibility:
+          enabled: true
+          maximum_attempts: 16
+          maximum_search_nodes: 100000
+          recovery_margin_steps: 8
 ```
 
 Opt-in `geometry.validation` applies the same structural and task-feasibility
