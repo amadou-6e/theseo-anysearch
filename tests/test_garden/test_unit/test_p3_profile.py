@@ -42,3 +42,28 @@ def test_decision_retains_complete_dense_profiles_and_reports_sparse_unavailable
     assert decision["retained"] == list(CANDIDATES)
     assert "sparse_residual" in decision["rejected"]
     assert decision["quality_claim"] is False
+    assert decision["parameter_match_within_10_percent"] is True
+
+
+def test_resource_rejection_requires_both_regressions_and_no_new_contract() -> None:
+    cells = [_cell(candidate, radius) for candidate in CANDIDATES for radius in RADII]
+    index = next(
+        index
+        for index, cell in enumerate(cells)
+        if cell.candidate == "dense_residual" and cell.radius == 32
+    )
+    original = cells[index]
+    cells[index] = ProfileCell(
+        **(
+            original.__dict__
+            | {
+                "latency_p95_ms": 2,
+                "peak_training_allocated_bytes": 2,
+                "output_contract": "legacy_global_v1",
+            }
+        )
+    )
+    decision = decide(cells)
+    assert decision["rejected"]["dense_residual"] == [
+        "p3_memory_and_latency_over_150_percent"
+    ]

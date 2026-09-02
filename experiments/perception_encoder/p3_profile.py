@@ -263,17 +263,48 @@ def decide(cells: list[ProfileCell]) -> dict[str, object]:
     }
     rejected: dict[str, list[str]] = {}
     retained: list[str] = []
+    retained_reasons: dict[str, list[str]] = {}
+    complete_cells = [cell for cell in cells if cell.status == "completed"]
+    parameter_ratio = max(cell.parameters for cell in complete_cells) / min(
+        cell.parameters for cell in complete_cells
+    )
+    reference_radius_32 = next(
+        cell
+        for cell in cells
+        if cell.candidate == "current_dense" and cell.radius == 32
+    )
     for candidate, candidate_cells in by_candidate.items():
-        if len(candidate_cells) != len(RADII) or any(cell.status != "completed" for cell in candidate_cells):
+        if len(candidate_cells) != len(RADII) or any(
+            cell.status != "completed" for cell in candidate_cells
+        ):
             rejected[candidate] = ["incomplete_or_failed_profile"]
-        else:
-            retained.append(candidate)
+            continue
+        radius_32 = next(cell for cell in candidate_cells if cell.radius == 32)
+        exceeds_both = (
+            radius_32.peak_training_allocated_bytes
+            > 1.5 * reference_radius_32.peak_training_allocated_bytes
+            and radius_32.latency_p95_ms
+            > 1.5 * reference_radius_32.latency_p95_ms
+        )
+        adds_required_contract = radius_32.output_contract == "global_scale_local_v1"
+        if candidate != "current_dense" and exceeds_both and not adds_required_contract:
+            rejected[candidate] = ["p3_memory_and_latency_over_150_percent"]
+            continue
+        retained.append(candidate)
+        retained_reasons[candidate] = [
+            "reference_control"
+            if candidate == "current_dense"
+            else "passed_output_oom_and_resource_rule"
+        ]
     sparse = pilot_backbone_capabilities()["sparse_residual"]
     rejected["sparse_residual"] = [sparse.reason or "optional_backend_unavailable"]
     return {
         "decision": "tie",
         "retained": retained[:5],
+        "retained_reasons": retained_reasons,
         "rejected": rejected,
+        "parameter_match_ratio": parameter_ratio,
+        "parameter_match_within_10_percent": parameter_ratio <= 1.10,
         "quality_claim": False,
         "next_pilot": "P4",
     }
@@ -341,6 +372,9 @@ def run(output: Path, *, warmup: int, measured: int, training_steps: int) -> dic
         "spec_commit": "f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d",
         "dataset_identity": "not_applicable_random_weight_profile",
         "query_identity": "not_applicable_random_weight_profile",
+        "resolved_config_sha256": hashlib.sha256(
+            Path(__file__).with_name("p3-config.yaml").read_bytes()
+        ).hexdigest(),
         "configuration": {
             "batch_size": 1,
             "precision": "fp32",
