@@ -1311,6 +1311,12 @@ struct VoxelReplayApp {
     regional_sources: Vec<Option<RegionalReplaySource>>,
     regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
     pending_region: Option<PendingRegion>,
+    /// The (iteration, step) autoplay wants to move to next. Set instead of
+    /// mutating iter_idx/step_idx directly so the displayed step and its
+    /// regional frame publish together: iter_idx/step_idx only change once
+    /// the region for this exact position has finished loading (see
+    /// update_regional_geometry), never before.
+    pending_play_position: Option<(usize, usize)>,
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
@@ -1372,6 +1378,7 @@ impl VoxelReplayApp {
             regional_sources,
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1406,6 +1413,7 @@ impl VoxelReplayApp {
             regional_sources: Vec::new(),
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1442,22 +1450,50 @@ impl VoxelReplayApp {
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
+        self.pending_play_position = None;
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
         self.coarse_chunks.clear();
     }
 
-    fn current_region_key(&self) -> Option<RegionRequestKey> {
-        let trajectory = self.trajectories.get(self.iter_idx)?;
+    fn region_key(&self, iteration: usize, step: usize) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(iteration)?;
         trajectory.world.as_ref()?;
         Some(RegionRequestKey {
-            iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            iteration,
+            step,
+            center: selected_agent_center(trajectory, step)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        self.region_key(self.iter_idx, self.step_idx)
+    }
+
+    /// The key for whatever position autoplay wants to move to next, or the
+    /// current position if nothing is pending. update_regional_geometry
+    /// loads against this, not current_region_key, so a background load can
+    /// be requested and land before iter_idx/step_idx themselves change.
+    fn desired_region_key(&self) -> Option<RegionRequestKey> {
+        let (iteration, step) = self
+            .pending_play_position
+            .unwrap_or((self.iter_idx, self.step_idx));
+        self.region_key(iteration, step)
+    }
+
+    /// True once the region actually on screen matches the current
+    /// iter/step and nothing is still loading -- i.e. it's safe for
+    /// autoplay to move on. Trajectories with no compiled world have no
+    /// region to wait for, so they're always ready.
+    fn regional_view_ready(&self) -> bool {
+        let Some(key) = self.current_region_key() else {
+            return true;
+        };
+        self.pending_region.is_none()
+            && self.regional_frame.as_ref().map(|(loaded, _)| *loaded) == Some(key)
     }
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
@@ -1487,7 +1523,7 @@ impl VoxelReplayApp {
     }
 
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
-        let current_key = self.current_region_key();
+        let current_key = self.desired_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(loaded)) => {
@@ -1498,6 +1534,16 @@ impl VoxelReplayApp {
                         self.detailed_chunks = loaded.detailed;
                         self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
+                        // Publish the step this region belongs to at the same
+                        // time as the region itself, so the two are never
+                        // observed out of sync.
+                        if self.pending_play_position
+                            == Some((pending.key.iteration, pending.key.step))
+                        {
+                            self.iter_idx = pending.key.iteration;
+                            self.step_idx = pending.key.step;
+                            self.pending_play_position = None;
+                        }
                     }
                 }
                 Ok(Err(error)) => {
@@ -1621,18 +1667,15 @@ impl VoxelReplayApp {
     fn n_iters(&self) -> usize { self.trajectories.len() }
     fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
-    /// Advance one step during play.  Returns false when the run is fully finished.
-    fn play_advance(&mut self) -> bool {
-        let n = self.n_steps();
-        if self.step_idx + 1 < n {
-            self.step_idx += 1;
-            true
+    /// The (iteration, step) one play-advance from now, without mutating
+    /// anything -- None once the run is fully finished.
+    fn next_play_position(&self) -> Option<(usize, usize)> {
+        if self.step_idx + 1 < self.n_steps() {
+            Some((self.iter_idx, self.step_idx + 1))
         } else if self.iter_idx + 1 < self.n_iters() {
-            self.iter_idx += 1;
-            self.step_idx = 0;
-            true
+            Some((self.iter_idx + 1, 0))
         } else {
-            false
+            None
         }
     }
 
@@ -1661,6 +1704,10 @@ impl VoxelReplayApp {
                 self.iter_idx = 0;
                 self.step_idx = 0;
             }
+        }
+
+        if !self.playing {
+            self.pending_play_position = None;
         }
     }
 }
@@ -2316,10 +2363,28 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Auto-play: advance one step per frame --------------------------
-        if self.playing {
-            let still_going = self.play_advance();
-            if !still_going { self.playing = false; }
+        // Legacy (non-compiled) trajectories have no region to wait for, so
+        // they advance immediately, as before. Compiled trajectories only
+        // request the next position (pending_play_position); iter_idx/
+        // step_idx themselves only move once update_regional_geometry has
+        // confirmed that position's region has actually finished loading,
+        // so the visible region is never observed a step (or several)
+        // behind the displayed step.
+        if self.playing && self.pending_play_position.is_none() && self.regional_view_ready() {
+            let next = self.next_play_position();
+            if next.is_none() {
+                self.playing = false;
+            } else if self.trajectories[self.iter_idx].world.is_some() {
+                self.pending_play_position = next;
+            } else if let Some((iteration, step)) = next {
+                self.iter_idx = iteration;
+                self.step_idx = step;
+            }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        } else if self.playing {
+            // Still waiting on the previous step's region: poll faster so
+            // the eventual repeat check doesn't add its own extra latency.
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
         // Reconcile regional geometry (main-view region and the minimap's
@@ -2468,6 +2533,64 @@ mod minimap_region_tracking_tests {
             15,
             "visibility-field cube must move by exactly the agent's displacement"
         );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Reproduces exactly what the autoplay block at the end of `update()`
+    /// does each tick, without a live egui frame: check regional_view_ready,
+    /// set pending_play_position instead of touching step_idx directly, then
+    /// let update_regional_geometry settle it. Proves the displayed step and
+    /// its region can never be observed out of sync during autoplay -- the
+    /// actual bug report this guards against ("a few ms, but can also be a
+    /// few steps behind").
+    #[test]
+    fn autoplay_does_not_advance_the_displayed_step_until_its_region_has_loaded() {
+        let root = std::env::temp_dir().join(format!(
+            "theseo-autoplay-sync-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        let identity = "a".repeat(64);
+        write_fixture_world(&root, &identity);
+        write_fixture_trajectory(&root, &identity);
+
+        let trajectories = load_trial_trajectories(&root.join("trajectories"));
+        let mut app = VoxelReplayApp::new(trajectories, None);
+        let ctx = egui::Context::default();
+        app.playing = true;
+        app.step_idx = 0;
+        wait_for_region(&mut app, &ctx, 0);
+
+        // One autoplay tick: the view is ready (step 0's region just
+        // resolved), so this must request step 1 without touching step_idx
+        // yet.
+        assert!(app.regional_view_ready());
+        let next = app.next_play_position();
+        assert_eq!(next, Some((0, 1)));
+        app.pending_play_position = next;
+
+        assert_eq!(
+            app.step_idx, 0,
+            "step_idx must not move the instant a play-advance is requested"
+        );
+        // The autoplay block's actual re-trigger guard is
+        // pending_play_position.is_none() -- once a position is pending, a
+        // second tick must not also request a step, however many frames
+        // pass before it resolves.
+        assert!(
+            app.pending_play_position.is_some(),
+            "a pending play position must block further autoplay requests until it resolves"
+        );
+
+        // Only once update_regional_geometry has actually loaded step 1's
+        // region does step_idx catch up -- never before, never several
+        // steps ahead of it.
+        wait_for_region(&mut app, &ctx, 1);
+        assert_eq!(app.step_idx, 1, "step_idx must publish together with its region");
+        assert_eq!(app.pending_play_position, None);
 
         std::fs::remove_dir_all(&root).unwrap();
     }
