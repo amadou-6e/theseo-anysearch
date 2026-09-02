@@ -1,6 +1,7 @@
 """Tests for mask isolation, objectives, EMA, and update-counted training."""
 from __future__ import annotations
 
+import pytest
 import torch
 from torch import nn
 
@@ -49,6 +50,19 @@ def test_patch_mask_is_reproducible_and_hides_occupied_values() -> None:
     assert first.actual_ratio >= 0.40
     assert torch.all((first.hidden_mask & occupancy.bool()).flatten(1).any(dim=1))
     assert sum(first.center_strata.values()) > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_patch_mask_matches_cpu_selection_on_cuda() -> None:
+    occupancy = torch.zeros(2, 1, 9, 9, 9)
+    occupancy[:, :, 4, 4, 4] = 1
+    expected = sample_patch_mask(occupancy, ratio=0.40, patch_side=2, seed=4)
+    actual = sample_patch_mask(
+        occupancy.cuda(), ratio=0.40, patch_side=2, seed=4
+    )
+    assert torch.equal(actual.hidden_mask.cpu(), expected.hidden_mask)
+    assert actual.actual_ratio == expected.actual_ratio
+    assert actual.center_strata == expected.center_strata
 
 
 def test_dense_mask_aware_encoder_passes_intervention_and_jacobian_gates() -> None:
