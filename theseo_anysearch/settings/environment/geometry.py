@@ -6,6 +6,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class GeometryValidationConfig(BaseModel):
+    """Opt-in structural and task-feasibility validation budgets."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    maximum_attempts: int = Field(default=1, ge=1)
+    maximum_search_nodes: int = Field(default=100_000, ge=1)
+    recovery_margin_steps: int = Field(default=0, ge=0)
+
+
 class GeometryConfig(BaseModel):
     """Geometry source and voxelization settings."""
 
@@ -28,6 +38,10 @@ class GeometryConfig(BaseModel):
     scale_variants_per_map: int = Field(default=4, ge=1, description="Scale variants generated for each source geometry.")
     padding: int = Field(default=2, ge=0, description="Empty voxel padding around imported geometry.")
     pool: dict[str, Any] | None = Field(None, description="Geometry-pool generation and augmentation settings.")
+    validation: GeometryValidationConfig = Field(
+        default_factory=GeometryValidationConfig,
+        description="Shared geometry and navigation-task validation settings.",
+    )
     compiled_world_path: Path | None = Field(
         None, description="Validated compiled-world directory loaded lazily by each worker."
     )

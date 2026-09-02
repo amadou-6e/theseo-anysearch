@@ -33,6 +33,11 @@ A precomputed pool can be configured as follows:
 env:
   geometry:
     grid_size: 64
+    validation:
+      enabled: true
+      maximum_attempts: 16
+      maximum_search_nodes: 100000
+      recovery_margin_steps: 8
     pool:
       pool_dir: runtime/geometry_pools/highres
       augmentation:
@@ -48,7 +53,9 @@ env:
           recovery_margin_steps: 8
 ```
 
-Opt-in `feasibility` validation rejects augmented samples whose selected start
+Opt-in `geometry.validation` applies the same structural and task-feasibility
+contracts to fixed boxes, fixed STL geometry, pools, and augmented pools. It
+rejects samples whose selected start
 or goal is occupied, whose task has no A* path using the configured action
 mode, or whose shortest path plus `recovery_margin_steps` exceeds
 `max_steps`. `maximum_attempts` and `maximum_search_nodes` are mandatory,
@@ -56,6 +63,9 @@ positive bounds. Exhausting either budget fails explicitly; it never falls
 back to an unaugmented or easier geometry. Reset info reports the attempt
 count, categorized rejection counts, and accepted shortest-path length under
 `geometry_feasibility`.
+
+The earlier `geometry.pool.augmentation.feasibility` location remains accepted
+for compatibility, but new configurations should use `geometry.validation`.
 
 Validation runs after waypoint-curriculum sampling, so the active curriculum
 segment is checked against the final augmented geometry. For multi-waypoint

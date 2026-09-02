@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from unittest.mock import patch
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 
@@ -184,3 +185,45 @@ def test_disabled_gate_preserves_impossible_geometry(tmp_path):
     _, info = VoxelEnv(config).reset(seed=11)
 
     assert "geometry_feasibility" not in info
+
+
+def test_shared_validator_rejects_fixed_box_geometry() -> None:
+    config = {
+        "grid_size": 5,
+        "max_steps": 20,
+        "trail_mode": False,
+        "waypoints": {"start": (2, 2, 2), "goal": (4, 2, 2)},
+        "geometry_boxes": [[4, 2, 2, 4, 2, 2]],
+        "geometry_validation": {
+            "enabled": True,
+            "maximum_attempts": 1,
+            "maximum_search_nodes": 1_000,
+            "recovery_margin_steps": 0,
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="occupied_goal"):
+        VoxelEnv(config).reset(seed=11)
+
+
+def test_shared_validator_rejects_fixed_stl_geometry() -> None:
+    config = {
+        "grid_size": 5,
+        "max_steps": 20,
+        "trail_mode": False,
+        "stl_path": "synthetic.stl",
+        "waypoints": {"start": (2, 2, 2), "goal": (4, 2, 2)},
+        "geometry_validation": {
+            "enabled": True,
+            "maximum_attempts": 1,
+            "maximum_search_nodes": 1_000,
+            "recovery_margin_steps": 0,
+        },
+    }
+
+    with patch(
+        "theseo_anysearch.environments.pettingzoo.multi_voxel_env._load_stl_geometry",
+        return_value=[(4, 2, 2)],
+    ):
+        with pytest.raises(RuntimeError, match="occupied_goal"):
+            VoxelEnv(config).reset(seed=11)

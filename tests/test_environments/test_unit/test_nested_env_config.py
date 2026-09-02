@@ -79,6 +79,25 @@ def test_geometry_feasibility_budgets_are_validated() -> None:
             }
         )
 
+
+def test_shared_geometry_validation_is_translated_to_runtime() -> None:
+    configured = EnvConfig(
+        geometry={
+            "validation": {
+                "enabled": True,
+                "maximum_attempts": 7,
+                "maximum_search_nodes": 1234,
+                "recovery_margin_steps": 5,
+            }
+        }
+    )
+
+    assert configured.to_runtime_dict()["geometry_validation"] == {
+        "enabled": True,
+        "maximum_attempts": 7,
+        "maximum_search_nodes": 1234,
+        "recovery_margin_steps": 5,
+    }
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
         exposed_nested_fields: ClassVar[tuple[str, ...]] = ("geometry",)
