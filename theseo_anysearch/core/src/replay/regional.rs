@@ -15,10 +15,26 @@ pub struct ReplayMutation {
     pub occupied: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderOrigin {
+    pub x: i64,
+    pub y: i64,
+    pub z: i64,
+}
+
+impl From<StorageCoord> for RenderOrigin {
+    fn from(coordinate: StorageCoord) -> Self {
+        Self {
+            x: i64::from(coordinate.x),
+            y: i64::from(coordinate.y),
+            z: i64::from(coordinate.z),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RegionalReplayFrame {
     pub region: BoundedRegion,
-    pub render_origin: StorageCoord,
     pub occupied: Vec<StorageCoord>,
     pub cache_metrics: Option<DiskCacheMetrics>,
     pub load_time: Duration,
@@ -95,7 +111,6 @@ impl RegionalReplaySource {
         occupied.sort_by_key(|coordinate| coordinate.global_key());
         Ok(RegionalReplayFrame {
             region,
-            render_origin: region.minimum,
             occupied,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
@@ -251,7 +266,6 @@ impl RegionalReplaySource {
             display_region.unwrap_or(BoundedRegion::new(minimum, maximum_exclusive, extent)?);
         Ok(RegionalReplayFrame {
             region,
-            render_origin: region.minimum,
             occupied: self.load_chunks(chunks, mutations)?,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
@@ -289,11 +303,27 @@ pub fn agent_region(
     BoundedRegion::new(minimum, maximum_exclusive, extent)
 }
 
-pub fn camera_relative(coordinate: StorageCoord, render_origin: StorageCoord) -> (f32, f32, f32) {
+/// Returns the origin that maps an agent-centered view's first voxel center to
+/// local coordinate 1. Unlike a storage coordinate, this origin may extend
+/// below zero when the agent is near a world boundary.
+pub fn agent_view_render_origin(center: StorageCoord, radius: u32) -> RenderOrigin {
+    let radius = i64::from(radius);
+    RenderOrigin {
+        x: i64::from(center.x) - radius - 1,
+        y: i64::from(center.y) - radius - 1,
+        z: i64::from(center.z) - radius - 1,
+    }
+}
+
+pub fn camera_relative(
+    coordinate: StorageCoord,
+    render_origin: impl Into<RenderOrigin>,
+) -> (f32, f32, f32) {
+    let render_origin = render_origin.into();
     (
-        (i64::from(coordinate.x) - i64::from(render_origin.x)) as f32,
-        (i64::from(coordinate.y) - i64::from(render_origin.y)) as f32,
-        (i64::from(coordinate.z) - i64::from(render_origin.z)) as f32,
+        (i64::from(coordinate.x) - render_origin.x) as f32,
+        (i64::from(coordinate.y) - render_origin.y) as f32,
+        (i64::from(coordinate.z) - render_origin.z) as f32,
     )
 }
 
@@ -421,7 +451,7 @@ mod tests {
                 z: 700
             }]
         );
-        assert_ne!(first.render_origin, teleported.render_origin);
+        assert_ne!(first.region, teleported.region);
     }
 
     #[test]
@@ -453,5 +483,23 @@ mod tests {
             ),
             (15.0, 15.0, 15.0)
         );
+    }
+
+    #[test]
+    fn agent_view_origin_stays_centered_at_world_boundaries() {
+        let radius = 16;
+        let center = StorageCoord { x: 2, y: 9, z: 16 };
+        let origin = agent_view_render_origin(center, radius);
+
+        assert_eq!(camera_relative(center, origin), (17.0, 17.0, 17.0));
+        assert_eq!(
+            camera_relative(StorageCoord { x: 18, y: 9, z: 16 }, origin).0,
+            33.0
+        );
+        assert_eq!(
+            camera_relative(StorageCoord { x: 19, y: 9, z: 16 }, origin).0,
+            34.0
+        );
+        assert!(origin.x < 0);
     }
 }
