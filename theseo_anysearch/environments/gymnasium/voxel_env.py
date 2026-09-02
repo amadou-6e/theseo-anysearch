@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import gymnasium
+import networkx as nx
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
