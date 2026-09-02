@@ -87,6 +87,9 @@ def test_exact_action_mode_and_episode_budget_are_enforced(tmp_path):
         _config(pool, action_mode="discrete_26", **diagonal)
     ).reset(seed=11)
     assert info["geometry_feasibility"]["accepted_plan_steps"] == 1
+    assert len(info["accepted_task_identity"]) == 64
+    assert info["accepted_task"]["action_mode"] == "discrete_26"
+    assert info["accepted_task"]["seed"] == 11
 
     with pytest.raises(RuntimeError, match="episode_budget_exceeded"):
         VoxelEnv(_config(pool, action_mode="discrete_6", **diagonal)).reset(seed=11)

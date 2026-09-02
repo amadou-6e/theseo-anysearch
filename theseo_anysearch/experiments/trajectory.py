@@ -133,6 +133,7 @@ class VoxelEpisodeData:
     world: WorldArtifactReference | None = None
     routing_difficulty: dict[str, Any] | None = None
     difficulty_band: str | None = None
+    accepted_task: dict[str, Any] | None = None
 
 
 @dataclass
@@ -494,6 +495,7 @@ class _VoxelEpisodeState:
                     "difficulty_band"
                 )
             ),
+            accepted_task=self.initial_info.get("accepted_task"),
         )
 
     def close(self) -> None:
@@ -717,6 +719,7 @@ def collect_heuristic_episode(
         difficulty_band=(
             initial_info.get("geometry_feasibility", {}).get("difficulty_band")
         ),
+        accepted_task=initial_info.get("accepted_task"),
     )
 
 

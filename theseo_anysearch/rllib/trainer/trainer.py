@@ -7,6 +7,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
+from theseo_anysearch.environments.task_identity import configured_task_contract
 from theseo_anysearch.rllib.trainer.base import BaseTrainer
 from theseo_anysearch.rllib.trainer.checkpointing import (
     CheckpointManager,
@@ -53,6 +54,7 @@ class Trainer(BaseTrainer):
         self._checkpoints = CheckpointManager(
             self._output_dir,
             world_contract(config.env.to_runtime_dict()),
+            configured_task_contract(config.env.to_runtime_dict()),
         )
         self._lifecycle = TrainingLifecycle(self._output_dir)
         from theseo_anysearch.experiments.custom_metrics import (
