@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
+from pydantic import ValidationError
+
 from theseo_anysearch.environment_rules.models import EnvironmentRuleMetadata, RuleKind
 from theseo_anysearch.environment_rules.registry import (
     EnvironmentRuleRegistry,
@@ -28,12 +30,17 @@ def _native_manifest(config_path: Path | None):
         discover_native_manifest,
     )
 
-    manifest_path = discover_native_manifest(config_path)
-    if manifest_path is None:
-        return None
-    return NativeExtensionManifest.model_validate_json(
-        manifest_path.read_text(encoding="utf-8")
-    )
+    try:
+        manifest_path = discover_native_manifest(config_path)
+        if manifest_path is None:
+            return None
+        return NativeExtensionManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except ValidationError as exc:
+        raise EnvironmentRulePreflightError(
+            f"native extension rule metadata is incompatible: {exc.errors()[0]['msg']}"
+        ) from None
 
 
 def _register_native_rules(
@@ -42,6 +49,10 @@ def _register_native_rules(
 ) -> None:
     manifest = _native_manifest(config_path)
     if manifest is None:
+        return
+    if manifest.rule_metadata:
+        for rule in manifest.rule_metadata:
+            registry.register(rule, replace_identical_name=True)
         return
     for kind, names in (
         ("predicate", manifest.predicates),

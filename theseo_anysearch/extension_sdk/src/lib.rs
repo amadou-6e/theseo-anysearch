@@ -3,6 +3,9 @@ extern crate self as anysearch_extension;
 use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+pub use anysearch_environment_rule_contract::{
+    EnvironmentRuleMetadata, RuleKind, RuleReference, RULE_METADATA_SCHEMA_VERSION,
+};
 pub use anysearch_extension_macros::{
     anysearch_outcome, anysearch_predicate, anysearch_reward, anysearch_scenario,
     anysearch_scenario_v2,
@@ -11,6 +14,36 @@ pub use anysearch_extension_macros::{
 pub const ABI_VERSION: u32 = 2;
 pub const MAX_REWARD_COMPONENTS: usize = 8;
 pub const MAX_COMPONENT_NAME_BYTES: usize = 63;
+pub const MAX_RULE_METADATA_BYTES: usize = 65_536;
+
+/// Serialize rule metadata through the stable variable-length JSON ABI.
+///
+/// # Safety
+/// `output` must reference `output_capacity` writable bytes and
+/// `required_length` must be a valid writable pointer.
+pub unsafe fn export_rule_metadata_v1(
+    output: *mut u8,
+    output_capacity: usize,
+    required_length: *mut usize,
+    metadata: &EnvironmentRuleMetadata,
+) -> i32 {
+    if required_length.is_null() {
+        return 1;
+    }
+    if metadata.validate().is_err() {
+        return 2;
+    }
+    let encoded = match serde_json::to_vec(metadata) {
+        Ok(value) if value.len() <= MAX_RULE_METADATA_BYTES => value,
+        _ => return 2,
+    };
+    *required_length = encoded.len();
+    if output.is_null() || output_capacity < encoded.len() {
+        return 3;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len());
+    0
+}
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct ScenarioContext {
@@ -1026,7 +1059,12 @@ mod tests {
         RewardResult::add(penalty).with_component("collision_penalty", penalty)
     }
 
-    #[anysearch_predicate]
+    #[anysearch_predicate(
+        version = 2,
+        environment_families = "voxel,surface",
+        dependencies = "predicate:bounds",
+        conflicts = "outcome:remove"
+    )]
     fn deny_blocked(context: &PredicateContext) -> PredicateResult {
         if context.destination_blocked {
             PredicateResult::deny()
@@ -1369,6 +1407,35 @@ mod tests {
         );
         assert_eq!(outcome_result.cursor, [3, 2, 2]);
         assert_eq!(outcome_result.place_coord, [3, 2, 2]);
+    }
+
+    #[test]
+    fn attribute_exports_typed_rule_metadata() {
+        let mut output = vec![0; MAX_RULE_METADATA_BYTES];
+        let mut length = 0;
+
+        let status = unsafe {
+            anysearch_rule_metadata_predicate_deny_blocked_v1(
+                output.as_mut_ptr(),
+                output.len(),
+                &mut length,
+            )
+        };
+
+        assert_eq!(status, 0);
+        let metadata: EnvironmentRuleMetadata = serde_json::from_slice(&output[..length]).unwrap();
+        assert_eq!(metadata.name, "deny_blocked");
+        assert_eq!(metadata.kind, RuleKind::Predicate);
+        assert_eq!(metadata.version, 2);
+        assert_eq!(metadata.environment_families, ["voxel", "surface"]);
+        assert_eq!(
+            metadata.dependencies,
+            [RuleReference::new(RuleKind::Predicate, "bounds")]
+        );
+        assert_eq!(
+            metadata.conflicts,
+            [RuleReference::new(RuleKind::Outcome, "remove")]
+        );
     }
     #[test]
     fn attribute_generates_and_encodes_v2_export() {

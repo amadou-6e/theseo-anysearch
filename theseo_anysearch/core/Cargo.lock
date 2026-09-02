@@ -190,6 +190,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "anysearch-environment-rule-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3528,6 +3535,7 @@ dependencies = [
 name = "theseo-core"
 version = "0.1.0"
 dependencies = [
+ "anysearch-environment-rule-contract",
  "eframe",
  "egui",
  "flate2",
