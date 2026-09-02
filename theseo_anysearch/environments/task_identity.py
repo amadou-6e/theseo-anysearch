@@ -71,6 +71,11 @@ def configured_geometry_identity(env_config: dict[str, Any]) -> str:
             )
     return _identity(
         {
+            "provider": env_config.get("geometry_provider"),
+            "provider_parameters": env_config.get("geometry_provider_parameters") or {},
+            "provider_source": _file_content_identity(
+                env_config.get("geometry_module_path")
+            ),
             "compiled_world": env_config.get("world_identity_sha256"),
             "stl": _file_content_identity(env_config.get("stl_path")),
             "stls": sorted(

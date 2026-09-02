@@ -179,6 +179,9 @@ class Trainer(BaseTrainer):
         scenario_source = self._output_dir.joinpath("scenarios.py")
         if scenario_source.is_file():
             runtime["scenario_module_path"] = str(scenario_source.resolve())
+        geometry_source = self._output_dir.joinpath("geometry.py")
+        if geometry_source.is_file():
+            runtime["geometry_module_path"] = str(geometry_source.resolve())
         return runtime
 
     # ------------------------------------------------------------------
