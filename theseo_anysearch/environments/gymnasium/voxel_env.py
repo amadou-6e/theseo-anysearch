@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import gymnasium
+import networkx as nx
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
@@ -617,7 +618,9 @@ class VoxelEnv(RustGymnasiumEnv):
                 for key in (
                     "maximum_search_nodes",
                     "recovery_margin_steps",
+                    "clearance_radius",
                     "difficulty_bands",
+                    "accepted_difficulty_bands",
                 )
             },
             geometry_validation=geometry_result,

@@ -64,6 +64,33 @@ def test_semantic_changes_invalidate_task_identity(change) -> None:
     assert _manifest().identity_sha256 != _manifest(**change).identity_sha256
 
 
+@pytest.mark.parametrize(
+    "planner_settings",
+    [
+        {"maximum_search_nodes": 100, "clearance_radius": 3},
+        {
+            "maximum_search_nodes": 100,
+            "accepted_difficulty_bands": ["easy", "hard"],
+        },
+    ],
+)
+def test_validator_settings_invalidate_task_identity(planner_settings) -> None:
+    baseline = _manifest()
+    changed = accepted_task_manifest(
+        coordinates=[(2, 2, 2), (3, 2, 2)],
+        seed=1,
+        start=(1, 1, 1),
+        route=[(4, 4, 4)],
+        action_mode="discrete_26",
+        transformations={"paste_boxes": {"num_boxes": 2}},
+        planner_settings=planner_settings,
+        geometry_validation=baseline.geometry_validation,
+        task_feasibility=baseline.task_feasibility,
+    )
+
+    assert baseline.identity_sha256 != changed.identity_sha256
+
+
 def test_evaluation_suite_reuses_exact_membership_and_rejects_changes(tmp_path: Path) -> None:
     path = tmp_path.joinpath("evaluation_suite.json")
     expected = build_evaluation_suite([_manifest(seed=1), _manifest(seed=2, band="hard")])

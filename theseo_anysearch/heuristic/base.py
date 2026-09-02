@@ -18,6 +18,10 @@ from theseo_anysearch.heuristic.search import PlannerBudgetExceeded, astar_path
 from theseo_anysearch.worlds.extent import contains_task_coordinate, resolve_extent
 
 
+class PlannerBudgetExceeded(RuntimeError):
+    """Raised when a bounded heuristic search exceeds its node budget."""
+
+
 class BaseVoxelHeuristic(ABC):
     """Provide environment translation, graph construction, and plan replay."""
 
