@@ -23,13 +23,16 @@ use theseo_core::replay::lod::{
 };
 use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
-    agent_region, camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
+    agent_region, agent_view_render_origin, camera_relative, RegionalReplayFrame,
+    RegionalReplaySource, RenderOrigin, ReplayMutation,
 };
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
 };
-use theseo_core::voxel::world::{BoundedRegion, StorageCoord};
+use theseo_core::voxel::world::{
+    task_to_storage, BoundedRegion, StorageCoord, TaskCoord, WorldExtent,
+};
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -432,6 +435,7 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
 }
 
 fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
+    let world = trajectory.world.as_ref()?;
     let episode = &trajectory.episode;
     let selected = episode.steps.get(step);
     let coordinate = if trajectory.agent_count > 1 {
@@ -443,11 +447,117 @@ fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<Sto
             .map(|value| [value.cursor_x, value.cursor_y, value.cursor_z])
             .or(episode.start_pos)
     }?;
-    Some(StorageCoord {
-        x: u32::from(coordinate[0]),
-        y: u32::from(coordinate[1]),
-        z: u32::from(coordinate[2]),
-    })
+    task_position_to_storage(coordinate, world.extent)
+}
+
+fn task_position_to_storage(coordinate: [u16; 3], extent: [u32; 3]) -> Option<StorageCoord> {
+    task_to_storage(
+        TaskCoord {
+            x: u32::from(coordinate[0]),
+            y: u32::from(coordinate[1]),
+            z: u32::from(coordinate[2]),
+        },
+        WorldExtent {
+            x: extent[0],
+            y: extent[1],
+            z: extent[2],
+        },
+    )
+    .ok()
+}
+
+fn render_position(
+    coordinate: [u16; 3],
+    compiled_extent: Option<[u32; 3]>,
+) -> Option<[u16; 3]> {
+    let Some(extent) = compiled_extent else {
+        return Some(coordinate);
+    };
+    let storage = task_position_to_storage(coordinate, extent)?;
+    Some([
+        u16::try_from(storage.x).ok()?,
+        u16::try_from(storage.y).ok()?,
+        u16::try_from(storage.z).ok()?,
+    ])
+}
+
+#[cfg(test)]
+mod regional_view_alignment_tests {
+    use super::{
+        agent_region, agent_view_render_origin, camera_relative, task_position_to_storage, Camera,
+    };
+    use theseo_core::replay::overview::OverviewMesh;
+    use theseo_core::voxel::world::{StorageCoord, WorldExtent};
+
+    const EXTENT: [u32; 3] = [128, 96, 64];
+
+    #[test]
+    fn task_positions_drive_storage_culling_and_an_agent_centered_view() {
+        let radius = 16;
+        let boundary_voxel = StorageCoord { x: 20, y: 20, z: 20 };
+        let last_inside = task_position_to_storage([5, 10, 15], EXTENT).unwrap();
+        let first_outside = task_position_to_storage([4, 10, 16], EXTENT).unwrap();
+        let extent = WorldExtent { x: 128, y: 96, z: 64 };
+
+        assert!(agent_region(last_inside, radius, extent)
+            .unwrap()
+            .contains(boundary_voxel));
+        assert!(!agent_region(first_outside, radius, extent)
+            .unwrap()
+            .contains(boundary_voxel));
+
+        let inside_origin = agent_view_render_origin(last_inside, radius);
+        let outside_origin = agent_view_render_origin(first_outside, radius);
+        assert_eq!(
+            camera_relative(last_inside, inside_origin),
+            (17.0, 17.0, 17.0)
+        );
+        assert_eq!(
+            camera_relative(first_outside, outside_origin),
+            (17.0, 17.0, 17.0)
+        );
+        assert_eq!(camera_relative(boundary_voxel, inside_origin).0, 33.0);
+        assert_eq!(camera_relative(boundary_voxel, outside_origin).0, 34.0);
+
+        let camera = Camera::default();
+        let overview = OverviewMesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            extent: EXTENT,
+        };
+        let overview_agent = overview.project_point(
+            [
+                f64::from(last_inside.x),
+                f64::from(last_inside.y),
+                f64::from(last_inside.z),
+            ],
+            camera.yaw,
+            camera.pitch,
+        );
+        let overview_voxel = overview.project_point(
+            [
+                f64::from(boundary_voxel.x),
+                f64::from(boundary_voxel.y),
+                f64::from(boundary_voxel.z),
+            ],
+            camera.yaw,
+            camera.pitch,
+        );
+        let local_agent = camera_relative(last_inside, inside_origin);
+        let local_voxel = camera_relative(boundary_voxel, inside_origin);
+        let projected_agent = camera.project(local_agent.0, local_agent.1, local_agent.2);
+        let projected_voxel = camera.project(local_voxel.0, local_voxel.1, local_voxel.2);
+        let overview_scale = EXTENT.into_iter().max().unwrap() as f32;
+
+        assert!((projected_voxel.0 - projected_agent.0
+            - (overview_voxel.x - overview_agent.x) * overview_scale)
+            .abs()
+            < 1e-4);
+        assert!((projected_voxel.1 - projected_agent.1
+            - (overview_voxel.y - overview_agent.y) * overview_scale)
+            .abs()
+            < 1e-4);
+    }
 }
 
 fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalReplaySource>> {
@@ -715,7 +825,7 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
 
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
-    size: f32, show_bounds: bool,
+    size: f32, show_bounds: bool, agent_view: Option<(StorageCoord, u32)>,
 ) {
     let inset_size = outer.width().min(outer.height()).min(size);
     let rect = Rect::from_min_size(
@@ -749,12 +859,46 @@ fn draw_overview_inset(
             );
         }
     }
+    if let Some((center, radius)) = agent_view {
+        let radius = f64::from(radius) + 0.5;
+        let center = [
+            f64::from(center.x),
+            f64::from(center.y),
+            f64::from(center.z),
+        ];
+        let lo = center.map(|value| value - radius);
+        let hi = center.map(|value| value + radius);
+        let corners = [
+            [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
+            [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+            [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
+            [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]],
+        ];
+        let points = corners.map(|point| {
+            inset_position(
+                mesh.project_point(point, camera.yaw, camera.pitch),
+                rect,
+                scale,
+            )
+        });
+        let overlay_painter = painter.with_clip_rect(rect);
+        let stroke = Stroke::new(1.0, Color32::from_rgb(80, 255, 140));
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            overlay_painter.line_segment([points[a], points[b]], stroke);
+        }
+        let agent = mesh.project_point(center, camera.yaw, camera.pitch);
+        overlay_painter.circle_filled(
+            inset_position(agent, rect, scale),
+            2.5,
+            Color32::from_rgb(255, 230, 0),
+        );
+    }
     painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
 }
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
-fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 {
+fn depth_key(x: u16, y: u16, z: u16, origin: RenderOrigin, cam: &Camera) -> f32 {
     let (sy, cy) = (cam.yaw.sin(), cam.yaw.cos());
     let (sp, cp) = (cam.pitch.sin(), cam.pitch.cos());
     let (x, y, z) = camera_relative(
@@ -852,7 +996,7 @@ mod debug_face_color_tests {
 fn draw_voxel(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
     outline: bool,
@@ -935,7 +1079,7 @@ fn draw_voxel(
 fn draw_exposed_face(
     painter: &egui::Painter,
     face: ExposedFace,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect,
     cam: &Camera,
     bounds: &Bounds,
@@ -980,7 +1124,7 @@ fn draw_exposed_face(
 }
 
 fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
-               origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
+               origin: RenderOrigin, rect: Rect, cam: &Camera, b: &Bounds) {
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
         origin,
@@ -1015,7 +1159,7 @@ fn draw_coarse_chunk(
     painter: &egui::Painter,
     chunk: ChunkCoord,
     chunk_edge: u32,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect,
     cam: &Camera,
     bounds: &Bounds,
@@ -1040,7 +1184,7 @@ fn draw_coarse_chunk(
 fn draw_marker(
     painter: &egui::Painter,
     cx: u16, cy: u16, cz: u16,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
@@ -1865,22 +2009,23 @@ impl eframe::App for VoxelReplayApp {
              ep.goal_positions.clone(), ep.start_positions.clone())
         };
         let compiled_mode = self.trajectories[iter_idx].world.is_some();
-        let active_regional_frame = self.regional_frame.as_ref().map(|(_, frame)| frame);
-        let render_origin = active_regional_frame
-            .map(|frame| frame.render_origin)
-            .or_else(|| self.current_region_key().map(|key| StorageCoord {
-                x: key.center.x.saturating_sub(key.radius),
-                y: key.center.y.saturating_sub(key.radius),
-                z: key.center.z.saturating_sub(key.radius),
-            }))
-            .unwrap_or(StorageCoord { x: 0, y: 0, z: 0 });
-        let regional_grid_size = active_regional_frame.map(|frame| {
-            let size_x = frame.region.maximum_exclusive.x - frame.region.minimum.x;
-            let size_y = frame.region.maximum_exclusive.y - frame.region.minimum.y;
-            let size_z = frame.region.maximum_exclusive.z - frame.region.minimum.z;
-            size_x.max(size_y).max(size_z) as f32
-        });
-        let display_grid_size = regional_grid_size
+        let compiled_extent = self.trajectories[iter_idx]
+            .world
+            .as_ref()
+            .map(|world| world.extent);
+        let active_regional = self.regional_frame.as_ref();
+        let active_regional_frame = active_regional.map(|(_, frame)| frame);
+        let active_region_key = active_regional
+            .map(|(key, _)| *key)
+            .or_else(|| self.current_region_key());
+        // The storage load region is clamped at world boundaries. Rendering
+        // uses the unclamped, logical agent view so the green box stays
+        // centered and describes the exact culling boundary.
+        let render_origin = active_region_key
+            .map(|key| agent_view_render_origin(key.center, key.radius))
+            .unwrap_or_default();
+        let display_grid_size = active_region_key
+            .map(|key| key.radius.saturating_mul(2).saturating_add(1) as f32)
             .or_else(|| compiled_mode.then_some((self.visualization_radius * 2 + 1) as f32))
             .unwrap_or(traj_grid_size);
         let geo_list = if compiled_mode {
@@ -2069,22 +2214,27 @@ impl eframe::App for VoxelReplayApp {
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
-                        let c = s.cursors[ai];
-                        draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                        if let Some(c) = render_position(s.cursors[ai], compiled_extent) {
+                            draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                        }
                     }
                 }
                 // Draw start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
-                    if let Some([sx, sy, sz]) = start_opt {
+                    if let Some([sx, sy, sz]) = start_opt
+                        .and_then(|position| render_position(position, compiled_extent))
+                    {
                         let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *sx, *sy, *sz, render_origin, rect, cam, &b, col);
+                        draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, col);
                     }
                 }
                 // Draw goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
-                    if let Some([gx, gy, gz]) = goal_opt {
+                    if let Some([gx, gy, gz]) = goal_opt
+                        .and_then(|position| render_position(position, compiled_extent))
+                    {
                         let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *gx, *gy, *gz, render_origin, rect, cam, &b, col);
+                        draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, col);
                     }
                 }
             } else {
@@ -2119,15 +2269,24 @@ impl eframe::App for VoxelReplayApp {
                     );
                 }
 
-                if let Some([sx, sy, sz]) = render_start {
+                if let Some([sx, sy, sz]) = render_start
+                    .and_then(|position| render_position(position, compiled_extent))
+                {
                     draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
                 }
-                if let Some([gx, gy, gz]) = render_goal {
+                if let Some([gx, gy, gz]) = render_goal
+                    .and_then(|position| render_position(position, compiled_extent))
+                {
                     draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
+                    if let Some([cx, cy, cz]) = render_position(
+                        [s.cursor_x, s.cursor_y, s.cursor_z],
+                        compiled_extent,
+                    ) {
+                        draw_cursor(&painter, cx, cy, cz, render_origin, rect, cam, &b);
+                    }
                 }
             }
 
@@ -2172,6 +2331,7 @@ impl eframe::App for VoxelReplayApp {
                     draw_overview_inset(
                         &painter, resp.rect, mesh, cam,
                         self.overview_size, self.show_overview_bounds,
+                        active_region_key.map(|key| (key.center, key.radius)),
                     );
                 }
             }

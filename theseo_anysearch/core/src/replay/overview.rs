@@ -99,27 +99,44 @@ impl OverviewMesh {
 
     /// Project after f64 centering/scaling, before conversion to f32.
     pub fn project(&self, yaw: f32, pitch: f32) -> Vec<ProjectedVertex> {
+        self.vertices
+            .iter()
+            .map(|vertex| {
+                self.project_point(
+                    [
+                        f64::from(vertex[0]),
+                        f64::from(vertex[1]),
+                        f64::from(vertex[2]),
+                    ],
+                    yaw,
+                    pitch,
+                )
+            })
+            .collect()
+    }
+
+    /// Project one absolute storage-space point with the overview transform.
+    /// Floating-point input allows logical view bounds to extend half a voxel
+    /// beyond the storage extent.
+    pub fn project_point(&self, point: [f64; 3], yaw: f32, pitch: f32) -> ProjectedVertex {
         let center = self.extent.map(|value| f64::from(value) * 0.5);
         let scale = f64::from(*self.extent.iter().max().unwrap_or(&1)).max(1.0);
         let (sy, cy) = f64::from(yaw).sin_cos();
         let (sp, cp) = f64::from(pitch).sin_cos();
-        self.vertices
-            .iter()
-            .map(|vertex| {
-                let x = (f64::from(vertex[0]) - center[0]) / scale;
-                let y = (f64::from(vertex[1]) - center[1]) / scale;
-                let z = (f64::from(vertex[2]) - center[2]) / scale;
-                let xr = x * cy - z * sy;
-                let zr = x * sy + z * cy;
-                let yr = y * cp - zr * sp;
-                let depth = y * sp + zr * cp;
-                ProjectedVertex {
-                    x: xr as f32,
-                    y: -yr as f32,
-                    depth: depth as f32,
-                }
-            })
-            .collect()
+        let x = (point[0] - center[0]) / scale;
+        let y = (point[1] - center[1]) / scale;
+        let z = (point[2] - center[2]) / scale;
+        let xr = x * cy - z * sy;
+        let zr = x * sy + z * cy;
+        let yr = y * cp - zr * sp;
+        let depth = y * sp + zr * cp;
+        ProjectedVertex {
+            x: xr as f32,
+            // Match the main replay camera's small depth lift exactly so
+            // orbiting does not make the overview appear to counter-rotate.
+            y: -(yr - depth * 0.05) as f32,
+            depth: depth as f32,
+        }
     }
 
     pub fn bounds_vertices(&self) -> Vec<[u32; 3]> {
