@@ -1,0 +1,222 @@
+{
+  "accelerator_hours": 0.013952034999998027,
+  "code_sha": "4e15fd96885bbe3c39e7575171b7df2d058c3a48",
+  "decision_record": {
+    "decision": "tie",
+    "disposition": "retain",
+    "next_pilot": "P1",
+    "reason": "shared harness passed; P0 selects nothing and eligible recipes advance to P1",
+    "rejected": [],
+    "rejection_rules": {},
+    "retained": [
+      "T0",
+      "T1",
+      "T2",
+      "T3"
+    ]
+  },
+  "hardware": {
+    "cuda_runtime": "12.6",
+    "device": "NVIDIA GeForce RTX 3060 Ti",
+    "torch": "2.13.0+cu126",
+    "total_memory_bytes": 8589279232
+  },
+  "integration_base_sha": "0b8476f90a5da45b060bd641daedb8f5468d0189",
+  "issue": 277,
+  "objective_overfit": {
+    "T0": {
+      "encoder_state_changed": true,
+      "final_loss": 0.00013798500003758818,
+      "finite": true,
+      "fraction_reduced": 0.9998688120244364,
+      "initial_loss": 1.0518113374710083,
+      "passed": true,
+      "resources": {
+        "checkpoint_bytes": 912812,
+        "dense_masked_voxels_skipped": 0,
+        "encoded_views": 32000,
+        "observations": 32000,
+        "trainable_parameters": 228203,
+        "updates": 500,
+        "valid_voxels": 23328000,
+        "wall_seconds": 5.3119364000012865
+      },
+      "updates": 500
+    },
+    "T1": {
+      "encoder_state_changed": true,
+      "final_loss": 0.00035340036265552044,
+      "finite": true,
+      "fraction_reduced": 0.999481826240418,
+      "initial_loss": 0.6820113062858582,
+      "passed": true,
+      "resources": {
+        "checkpoint_bytes": 913668,
+        "dense_masked_voxels_skipped": 0,
+        "encoded_views": 32000,
+        "observations": 32000,
+        "trainable_parameters": 228171,
+        "updates": 500,
+        "valid_voxels": 23328000,
+        "wall_seconds": 8.493718700003228
+      },
+      "updates": 500
+    },
+    "T2": {
+      "encoder_state_changed": true,
+      "final_loss": 0.0005079004331491888,
+      "finite": true,
+      "fraction_reduced": 0.998324858777722,
+      "initial_loss": 0.30319857597351074,
+      "passed": true,
+      "resources": {
+        "checkpoint_bytes": 912740,
+        "dense_masked_voxels_skipped": 0,
+        "encoded_views": 32000,
+        "observations": 32000,
+        "trainable_parameters": 228185,
+        "updates": 500,
+        "valid_voxels": 23328000,
+        "wall_seconds": 5.192980100007844
+      },
+      "updates": 500
+    },
+    "T3": {
+      "encoder_state_changed": true,
+      "final_loss": 0.002656542928889394,
+      "finite": true,
+      "fraction_reduced": 0.9915513486167633,
+      "initial_loss": 0.3144339621067047,
+      "passed": true,
+      "resources": {
+        "checkpoint_bytes": 914680,
+        "dense_masked_voxels_skipped": 0,
+        "encoded_views": 64000,
+        "observations": 32000,
+        "trainable_parameters": 228424,
+        "updates": 500,
+        "valid_voxels": 23328000,
+        "wall_seconds": 12.54269529999874
+      },
+      "updates": 500
+    }
+  },
+  "pilot": "P0",
+  "preregistration_contract_sha256": "26c6bd55a8442f33463efceff0ccd2de71c0c68287677b22c4132862dc6f285b",
+  "preregistration_sha256": "26c6bd55a8442f33463efceff0ccd2de71c0c68287677b22c4132862dc6f285b",
+  "report_payload_sha256": "ac2318d292a5249e2eeb60cde63d94e0062f2bde009647b2f56b42e679d70eb5",
+  "resolved_config_sha256": "b9ca438dd077f984b20519e0aae5eed684505ad07b620e3c934ecbe28f3fddf7",
+  "score_anchor_calibration": {
+    "boundary_f1": {
+      "ceiling": 1.0,
+      "ceiling_source": "P0 exact supervised-oracle fixture v1",
+      "floor": 0.6666666666666666,
+      "floor_source": "P0 analytic frequency/fixed-random/PCA control fixture v1",
+      "higher_is_better": true
+    },
+    "clearance_nmae": {
+      "ceiling": 0.0,
+      "ceiling_source": "P0 exact supervised-oracle fixture v1",
+      "floor": 0.1,
+      "floor_source": "P0 analytic frequency/fixed-random/PCA control fixture v1",
+      "higher_is_better": false
+    },
+    "geodesic_nmae": {
+      "ceiling": 0.0,
+      "ceiling_source": "P0 exact supervised-oracle fixture v1",
+      "floor": 0.1,
+      "floor_source": "P0 analytic frequency/fixed-random/PCA control fixture v1",
+      "higher_is_better": false
+    },
+    "occupied_iou": {
+      "ceiling": 1.0,
+      "ceiling_source": "P0 exact supervised-oracle fixture v1",
+      "floor": 0.5,
+      "floor_source": "P0 analytic frequency/fixed-random/PCA control fixture v1",
+      "higher_is_better": true
+    },
+    "reachability_auprc": {
+      "ceiling": 1.0,
+      "ceiling_source": "P0 exact supervised-oracle fixture v1",
+      "floor": 0.75,
+      "floor_source": "P0 analytic frequency/fixed-random/PCA control fixture v1",
+      "higher_is_better": true
+    }
+  },
+  "shared_gates": {
+    "architecture_outputs": {
+      "passed": true
+    },
+    "architecture_training": {
+      "candidates": {
+        "current_dense": {
+          "batches": 20,
+          "encoder_state_changed": true,
+          "finite_gradients": true,
+          "passed": true
+        },
+        "dense_mask_aware": {
+          "batches": 20,
+          "encoder_state_changed": true,
+          "finite_gradients": true,
+          "passed": true
+        },
+        "dense_residual": {
+          "batches": 20,
+          "encoder_state_changed": true,
+          "finite_gradients": true,
+          "passed": true
+        },
+        "shared_pyramid": {
+          "batches": 20,
+          "encoder_state_changed": true,
+          "finite_gradients": true,
+          "passed": true
+        },
+        "triplanar": {
+          "batches": 20,
+          "encoder_state_changed": true,
+          "finite_gradients": true,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    "frozen_state": {
+      "passed": true
+    },
+    "learning_curve": {
+      "coverage_95": 1.0,
+      "median_absolute_error": 0.022904846338847262,
+      "passed": true
+    },
+    "mask_isolation": {
+      "hidden_jacobian_max_abs": 0.0,
+      "intervention_max_abs": 0.0,
+      "mask_only_shortcut_advantage": 0.0,
+      "passed": true
+    },
+    "metric_behavior": {
+      "passed": true
+    },
+    "paired_bootstrap": {
+      "passed": true
+    },
+    "target_oracles": {
+      "passed": true
+    }
+  },
+  "spec_commit": "f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d",
+  "status": "completed",
+  "trial_counts": {
+    "cap": 4,
+    "completed": 4,
+    "failed": 0,
+    "skipped": 0
+  },
+  "validity_flags": [
+    "direction_finding_only",
+    "synthetic_mesh_import_fixture_is_not_external_out_of_family_evidence",
+    "P0_selects_nothing"
+  ]
+}
