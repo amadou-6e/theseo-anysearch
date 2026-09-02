@@ -1,0 +1,24 @@
+{
+  "decision_record": {
+    "decision": "no_viable_direction",
+    "disposition": "reject",
+    "next_pilot": null,
+    "rejected": [],
+    "rejection_rules": {
+      "P2": [
+        "P1_retained_no_bundles"
+      ]
+    },
+    "retained": []
+  },
+  "issue": 278,
+  "pilot": "P2",
+  "status": "blocked",
+  "validity_limits": [
+    "direction_finding_only",
+    "synthetic_mesh_import_fixture_is_not_external_out_of_family_evidence",
+    "P0_analytic_normalization_anchors_are_corpus_miscalibrated",
+    "current_encoder_false_open_reference_is_unavailable",
+    "probe_optimizer_was_frozen_after_P0_implementation_but_before_P1_candidate_results"
+  ]
+}
