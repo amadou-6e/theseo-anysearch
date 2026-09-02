@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import gymnasium
+import networkx as nx
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
@@ -82,6 +83,8 @@ class VoxelEnv(RustGymnasiumEnv):
         self._route_remaining: list[tuple[int, int, int]] = []
         self._route_waypoint_count = 0
         self._route_waypoints_reached = 0
+        self._active_start: tuple[int, int, int] | None = None
+        self._active_goal: tuple[int, int, int] | None = None
         self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
         self._curriculum_stage_probabilities: list[float] = []
         self._scenario_provider = None
@@ -89,6 +92,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._scenario_scope = str(config.get("scenario_scope", "training"))
         self._previous_scenario: dict[str, Any] | None = None
         self._scenario_geometry: tuple[tuple[int, int, int], ...] = ()
+        self._last_feasibility_diagnostics: dict[str, Any] | None = None
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -323,6 +327,8 @@ class VoxelEnv(RustGymnasiumEnv):
         if wp:
             start = tuple(wp["start"])
             goal = tuple(wp["goal"])
+            self._active_start = start
+            self._active_goal = goal
             env.set_waypoints(
                 start,
                 goal,
@@ -337,6 +343,8 @@ class VoxelEnv(RustGymnasiumEnv):
                 raise ValueError("A configured task goal requires waypoints_file to provide the episode start")
             start = tuple(wp["start"])
             goal = configured_targets[0]
+            self._active_start = start
+            self._active_goal = goal
             env.set_waypoints(
                 start,
                 goal,
@@ -410,21 +418,109 @@ class VoxelEnv(RustGymnasiumEnv):
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if self._geo_pool is not None:
             from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
-            grid = self._geo_pool.sample()
-            paste_cfg = self._augmentation_config.get("paste_boxes")
-            if paste_cfg:
-                grid = paste_boxes(grid, paste_cfg, self._obs_rng)
-            cells = GeometryPool.grid_to_cells(grid)
-            self._rust_env.set_geometry(cells)
-            self._scenario_geometry = tuple(cells)
-            log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
-            if self._configured_route:
-                self._activate_route(self._configured_route)
-            self._apply_pending_waypoints()
-            self._apply_pending_route()
-            self._sample_curriculum_waypoints()
-            self._apply_scenario(seed)
-            return self._reset_task_state(super().reset(seed=seed, options=options))
+            configured_feasibility = self._augmentation_config.get("feasibility")
+            feasibility = (
+                configured_feasibility
+                if configured_feasibility
+                and configured_feasibility.get("enabled", True)
+                else None
+            )
+            maximum_attempts = int((feasibility or {}).get("maximum_attempts", 1))
+            if feasibility and maximum_attempts < 1:
+                raise ValueError("geometry_pool.augmentation.feasibility.maximum_attempts must be positive")
+            if feasibility and int(feasibility.get("maximum_search_nodes", 0)) < 1:
+                raise ValueError(
+                    "geometry_pool.augmentation.feasibility.maximum_search_nodes must be positive"
+                )
+            if feasibility and int(feasibility.get("recovery_margin_steps", 0)) < 0:
+                raise ValueError(
+                    "geometry_pool.augmentation.feasibility.recovery_margin_steps "
+                    "must be non-negative"
+                )
+            rejections: dict[str, int] = {}
+            accepted_plan_steps: int | None = None
+            reset_seed = (
+                int(seed)
+                if seed is not None
+                else int(self._config.get("seed", 42)) + self._reset_count + 1
+            )
+            if feasibility:
+                self._obs_rng = np.random.default_rng(reset_seed)
+            configured_waypoints = self._config.get("waypoints")
+            curriculum = self._config.get("waypoint_curriculum") or {}
+            if not configured_waypoints and curriculum.get("enabled"):
+                configured_waypoints = {
+                    "start": curriculum.get("initial_start"),
+                    "goal": curriculum.get("initial_goal"),
+                }
+            if not configured_waypoints and self._config.get("waypoints_file"):
+                configured_waypoints = self._load_waypoints(
+                    self._config["waypoints_file"]
+                )
+            configured_start = (
+                tuple(configured_waypoints["start"])
+                if configured_waypoints and configured_waypoints.get("start")
+                else None
+            )
+            configured_goal = (
+                tuple(configured_waypoints["goal"])
+                if configured_waypoints and configured_waypoints.get("goal")
+                else None
+            )
+            task_targets = goal_voxels(self._task.goal, None)
+            if task_targets:
+                configured_goal = tuple(task_targets[0])
+            for attempt in range(1, maximum_attempts + 1):
+                grid = self._geo_pool.sample(
+                    rng=self._obs_rng if feasibility else None
+                ).copy()
+                paste_cfg = self._augmentation_config.get("paste_boxes")
+                if paste_cfg:
+                    grid = paste_boxes(grid, paste_cfg, self._obs_rng)
+                cells = GeometryPool.grid_to_cells(grid)
+                self._rust_env.set_geometry(cells)
+                self._scenario_geometry = tuple(cells)
+                log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
+                if self._configured_route:
+                    self._activate_route(self._configured_route)
+                elif configured_start is not None and configured_goal is not None:
+                    self._rust_env.set_waypoints(
+                        configured_start,
+                        configured_goal,
+                        self._segment_length(configured_start, configured_goal),
+                    )
+                self._apply_pending_waypoints()
+                self._apply_pending_route()
+                self._sample_curriculum_waypoints()
+                self._apply_scenario(seed)
+                endpoint_rejection = self._endpoint_feasibility_rejection()
+                if feasibility and endpoint_rejection is not None:
+                    rejections[endpoint_rejection] = (
+                        rejections.get(endpoint_rejection, 0) + 1
+                    )
+                    continue
+                rust_observation = self._rust_env.reset(reset_seed)
+                reset_result = (self._obs_to_numpy(rust_observation), {})
+                if not feasibility:
+                    break
+                rejection, accepted_plan_steps = self._feasibility_rejection(feasibility)
+                if rejection is None:
+                    break
+                rejections[rejection] = rejections.get(rejection, 0) + 1
+            else:
+                raise RuntimeError(
+                    "augmented task feasibility exhausted after "
+                    f"{maximum_attempts} attempts; rejections={rejections}"
+                )
+            if feasibility:
+                self._last_feasibility_diagnostics = {
+                    "enabled": True,
+                    "attempts": attempt,
+                    "rejections": rejections,
+                    "accepted_plan_steps": accepted_plan_steps,
+                }
+            self._reset_count += 1
+            return self._reset_task_state(reset_result)
 
         scale_range = self._config.get("scale_range")
         stl_path = self._config.get("stl_path")
@@ -442,6 +538,42 @@ class VoxelEnv(RustGymnasiumEnv):
         self._sample_curriculum_waypoints()
         self._apply_scenario(seed)
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _feasibility_rejection(
+        self, config: dict[str, Any]
+    ) -> tuple[str | None, int | None]:
+        """Return the categorized reason that the installed task is infeasible."""
+        from theseo_anysearch.heuristic import PlannerBudgetExceeded, VoxelAStarOracle
+
+        if self._active_start is None or self._active_goal is None:
+            return "missing_goal", None
+        try:
+            plan = VoxelAStarOracle(
+                self,
+                maximum_search_nodes=int(config["maximum_search_nodes"]),
+            ).plan()
+        except PlannerBudgetExceeded:
+            return "planner_budget_exhausted", None
+        except nx.NetworkXNoPath:
+            return "no_path", None
+        except nx.NodeNotFound:
+            return "invalid_endpoint", None
+        steps = len(plan.action_indices)
+        maximum_steps = int(self._config.get("max_steps", 200))
+        recovery_margin = int(config.get("recovery_margin_steps", 0))
+        if steps + recovery_margin > maximum_steps:
+            return "episode_budget_exceeded", steps
+        return None, steps
+
+    def _endpoint_feasibility_rejection(self) -> str | None:
+        """Validate selected endpoints before reset adds task marker blocks."""
+        if self._active_start is None or self._active_goal is None:
+            return "missing_goal"
+        if self._rust_env.world_occupied(self._active_start):
+            return "occupied_start"
+        if self._rust_env.world_occupied(self._active_goal):
+            return "occupied_goal"
+        return None
 
     def _apply_scenario(self, seed: int | None) -> None:
         """Invoke the configured reset hook and install its validated route."""
@@ -597,6 +729,8 @@ class VoxelEnv(RustGymnasiumEnv):
             return
         start, goal = self._pending_waypoints
         self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
+        self._active_start = start
+        self._active_goal = goal
         self._route_remaining = []
         self._route_waypoint_count = 1
         self._route_waypoints_reached = 0
@@ -618,6 +752,8 @@ class VoxelEnv(RustGymnasiumEnv):
         self._rust_env.set_waypoints(
             start, waypoints[0], self._segment_length(start, waypoints[0])
         )
+        self._active_start = start
+        self._active_goal = waypoints[0]
         self._route_remaining = waypoints[1:]
         self._route_waypoint_count = len(waypoints)
         self._route_waypoints_reached = 0
@@ -660,6 +796,8 @@ class VoxelEnv(RustGymnasiumEnv):
         self._route_waypoint_count = 1
         self._route_waypoints_reached = 0
         self._rust_env.set_waypoints(start, goal, self._segment_length(start, goal))
+        self._active_start = tuple(start)
+        self._active_goal = tuple(goal)
         self._config["waypoints"] = {"start": start, "goal": goal}
 
     def _reset_task_state(self, reset_result):
@@ -687,6 +825,8 @@ class VoxelEnv(RustGymnasiumEnv):
         }
         if self._previous_scenario is not None:
             info["scenario"] = dict(self._previous_scenario)
+        if self._last_feasibility_diagnostics is not None:
+            info["geometry_feasibility"] = dict(self._last_feasibility_diagnostics)
         return observation, info
 
     def step(self, action):

@@ -41,7 +41,26 @@ env:
           box_min_size: [2, 2, 2]
           box_max_size: [20, 20, 20]
           prob: 1.0
+        feasibility:
+          enabled: true
+          maximum_attempts: 16
+          maximum_search_nodes: 100000
+          recovery_margin_steps: 8
 ```
+
+Opt-in `feasibility` validation rejects augmented samples whose selected start
+or goal is occupied, whose task has no A* path using the configured action
+mode, or whose shortest path plus `recovery_margin_steps` exceeds
+`max_steps`. `maximum_attempts` and `maximum_search_nodes` are mandatory,
+positive bounds. Exhausting either budget fails explicitly; it never falls
+back to an unaugmented or easier geometry. Reset info reports the attempt
+count, categorized rejection counts, and accepted shortest-path length under
+`geometry_feasibility`.
+
+Validation runs after waypoint-curriculum sampling, so the active curriculum
+segment is checked against the final augmented geometry. For multi-waypoint
+routes, this gate covers the active segment; whole-route feasibility is a
+separate concern.
 
 Legacy fields such as `env.stl_path`, `env.grid_size`, and `env.geometry_pool` remain loadable during migration. Do not combine them with `env.geometry` in the same configuration.
 

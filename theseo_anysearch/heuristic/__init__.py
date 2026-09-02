@@ -4,6 +4,7 @@ from theseo_anysearch.heuristic.models import (
     VoxelOraclePlan,
     VoxelOracleReplay,
 )
+from theseo_anysearch.heuristic.base import PlannerBudgetExceeded
 from theseo_anysearch.heuristic.voxel import (
     build_voxel_heuristic,
     VoxelAStarOracle,
@@ -20,4 +21,5 @@ __all__ = [
     "VoxelOracleReplay",
     "VoxelReplanningAStarHeuristic",
     "VoxelWeightedAStarHeuristic",
+    "PlannerBudgetExceeded",
 ]

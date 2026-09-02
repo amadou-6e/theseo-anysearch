@@ -82,13 +82,14 @@ class GeometryPool:
     def meta(self) -> dict:
         return self._meta
 
-    def sample(self) -> np.ndarray:
+    def sample(self, rng: np.random.Generator | None = None) -> np.ndarray:
         """Return a randomly sampled voxel grid (uint8, shape (G,G,G)).
 
         Thread-safe: the RNG is locked before use.
         """
+        selected_rng = self._rng if rng is None else rng
         with self._lock:
-            idx = int(self._rng.integers(0, len(self._files)))
+            idx = int(selected_rng.integers(0, len(self._files)))
         path = self._files[idx]
         grid = np.load(path)
         if grid.dtype != np.uint8:

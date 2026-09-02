@@ -65,6 +65,20 @@ def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
     with pytest.raises(ValidationError, match="cannot be mixed.*rewards"):
         EnvConfig(goal_reward=2.0, rewards={"goal_reward": 3.0})
 
+
+def test_geometry_feasibility_budgets_are_validated() -> None:
+    with pytest.raises(ValidationError, match="maximum_attempts must be positive"):
+        GeometryConfig(
+            pool={
+                "augmentation": {
+                    "feasibility": {
+                        "maximum_attempts": 0,
+                        "maximum_search_nodes": 100,
+                    }
+                }
+            }
+        )
+
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
         exposed_nested_fields: ClassVar[tuple[str, ...]] = ("geometry",)
