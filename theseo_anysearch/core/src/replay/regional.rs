@@ -35,7 +35,6 @@ impl From<StorageCoord> for RenderOrigin {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RegionalReplayFrame {
     pub region: BoundedRegion,
-    pub render_origin: StorageCoord,
     pub occupied: Vec<StorageCoord>,
     pub cache_metrics: Option<DiskCacheMetrics>,
     pub load_time: Duration,
@@ -112,7 +111,6 @@ impl RegionalReplaySource {
         occupied.sort_by_key(|coordinate| coordinate.global_key());
         Ok(RegionalReplayFrame {
             region,
-            render_origin: region.minimum,
             occupied,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
@@ -268,7 +266,6 @@ impl RegionalReplaySource {
             display_region.unwrap_or(BoundedRegion::new(minimum, maximum_exclusive, extent)?);
         Ok(RegionalReplayFrame {
             region,
-            render_origin: region.minimum,
             occupied: self.load_chunks(chunks, mutations)?,
             cache_metrics: self.world.disk_cache_metrics(),
             load_time: started.elapsed(),
@@ -454,7 +451,7 @@ mod tests {
                 z: 700
             }]
         );
-        assert_ne!(first.render_origin, teleported.render_origin);
+        assert_ne!(first.region, teleported.region);
     }
 
     #[test]

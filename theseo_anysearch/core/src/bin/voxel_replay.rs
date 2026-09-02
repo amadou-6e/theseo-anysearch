@@ -22,7 +22,7 @@ use theseo_core::replay::lod::{
     chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
     CameraChunkView, ChunkBudgets,
 };
-use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
+use theseo_core::replay::overview::{project_orthographic, OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
     agent_region, agent_view_render_origin, camera_relative, RegionalReplayFrame,
     RegionalReplaySource, RenderOrigin, ReplayMutation,
@@ -76,11 +76,11 @@ struct StepData {
     #[serde(default)]
     reward: f32,
     #[serde(default)]
-    cursor_x: u16,
+    cursor_x: u32,
     #[serde(default)]
-    cursor_y: u16,
+    cursor_y: u32,
     #[serde(default)]
-    cursor_z: u16,
+    cursor_z: u32,
     #[serde(default)]
     voxel_count: u32,
     #[serde(default)]
@@ -91,7 +91,7 @@ struct StepData {
     #[serde(default)]
     rewards: Vec<f32>,
     #[serde(default)]
-    cursors: Vec<[u16; 3]>,
+    cursors: Vec<[u32; 3]>,
     #[serde(default)]
     placed_per_agent: Vec<bool>,
     #[serde(default)]
@@ -132,14 +132,14 @@ struct EpisodeData {
     init_filled_file: Option<String>,
     steps: Vec<StepData>,
     #[serde(default)]
-    start_pos: Option<[u16; 3]>,
+    start_pos: Option<[u32; 3]>,
     #[serde(default)]
-    goal_pos: Option<[u16; 3]>,
+    goal_pos: Option<[u32; 3]>,
     // Multi-agent
     #[serde(default)]
-    start_positions: Vec<Option<[u16; 3]>>,
+    start_positions: Vec<Option<[u32; 3]>>,
     #[serde(default)]
-    goal_positions: Vec<Option<[u16; 3]>>,
+    goal_positions: Vec<Option<[u32; 3]>>,
 }
 
 fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
@@ -422,7 +422,16 @@ fn regional_playback_ready(
     loaded: Option<RegionRequestKey>,
     load_failed: bool,
 ) -> bool {
-    load_failed || current.is_none() || current == loaded
+    // Camera revision changes only the view-dependent LOD request. The loaded
+    // occupancy still represents the same episode step and visibility box, so
+    // an orbit should refresh detail asynchronously without pausing playback.
+    load_failed
+        || current.is_none()
+        || matches!((current, loaded), (Some(current), Some(loaded))
+            if current.iteration == loaded.iteration
+                && current.step == loaded.step
+                && current.center == loaded.center
+                && current.radius == loaded.radius)
 }
 
 fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
@@ -445,6 +454,8 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
     mutations
 }
 
+/// Resolve the selected agent only for compiled-world regional rendering.
+/// Legacy in-memory trajectories intentionally use their original grid path.
 fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
     let world = trajectory.world.as_ref()?;
     let episode = &trajectory.episode;
@@ -461,12 +472,12 @@ fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<Sto
     task_position_to_storage(coordinate, world.extent)
 }
 
-fn task_position_to_storage(coordinate: [u16; 3], extent: [u32; 3]) -> Option<StorageCoord> {
+fn task_position_to_storage(coordinate: [u32; 3], extent: [u32; 3]) -> Option<StorageCoord> {
     task_to_storage(
         TaskCoord {
-            x: u32::from(coordinate[0]),
-            y: u32::from(coordinate[1]),
-            z: u32::from(coordinate[2]),
+            x: coordinate[0],
+            y: coordinate[1],
+            z: coordinate[2],
         },
         WorldExtent {
             x: extent[0],
@@ -478,25 +489,24 @@ fn task_position_to_storage(coordinate: [u16; 3], extent: [u32; 3]) -> Option<St
 }
 
 fn render_position(
-    coordinate: [u16; 3],
+    coordinate: [u32; 3],
     compiled_extent: Option<[u32; 3]>,
-) -> Option<[u16; 3]> {
+) -> Option<StorageCoord> {
     let Some(extent) = compiled_extent else {
-        return Some(coordinate);
+        return Some(StorageCoord {
+            x: coordinate[0],
+            y: coordinate[1],
+            z: coordinate[2],
+        });
     };
-    let storage = task_position_to_storage(coordinate, extent)?;
-    Some([
-        u16::try_from(storage.x).ok()?,
-        u16::try_from(storage.y).ok()?,
-        u16::try_from(storage.z).ok()?,
-    ])
+    task_position_to_storage(coordinate, extent)
 }
 
 #[cfg(test)]
 mod regional_view_alignment_tests {
     use super::{
         agent_region, agent_view_render_origin, camera_relative, regional_playback_ready,
-        task_position_to_storage, Camera, RegionRequestKey,
+        render_position, task_position_to_storage, Camera, RegionRequestKey,
     };
     use theseo_core::replay::overview::OverviewMesh;
     use theseo_core::voxel::world::{StorageCoord, WorldExtent};
@@ -517,6 +527,15 @@ mod regional_view_alignment_tests {
     fn task_positions_drive_storage_culling_and_an_agent_centered_view() {
         let radius = 16;
         let boundary_voxel = StorageCoord { x: 20, y: 20, z: 20 };
+        let storage_origin = StorageCoord { x: 0, y: 0, z: 0 };
+        assert_eq!(
+            task_position_to_storage([1, 1, 1], EXTENT),
+            Some(storage_origin)
+        );
+        assert_eq!(
+            camera_relative(storage_origin, agent_view_render_origin(storage_origin, radius)),
+            (17.0, 17.0, 17.0)
+        );
         let last_inside = task_position_to_storage([5, 10, 15], EXTENT).unwrap();
         let first_outside = task_position_to_storage([4, 10, 16], EXTENT).unwrap();
         let extent = WorldExtent { x: 128, y: 96, z: 64 };
@@ -541,7 +560,11 @@ mod regional_view_alignment_tests {
         assert_eq!(camera_relative(boundary_voxel, inside_origin).0, 33.0);
         assert_eq!(camera_relative(boundary_voxel, outside_origin).0, 34.0);
 
-        let camera = Camera::default();
+        let camera = Camera {
+            yaw: 73.0_f32.to_radians(),
+            pitch: -41.0_f32.to_radians(),
+            ..Camera::default()
+        };
         let overview = OverviewMesh {
             vertices: Vec::new(),
             indices: Vec::new(),
@@ -582,6 +605,14 @@ mod regional_view_alignment_tests {
     }
 
     #[test]
+    fn marker_positions_preserve_storage_coordinates_above_u16() {
+        assert_eq!(
+            render_position([70_001, 2, 3], Some([100_000, 10, 10])),
+            Some(StorageCoord { x: 70_000, y: 1, z: 2 })
+        );
+    }
+
+    #[test]
     fn playback_waits_for_the_current_regional_frame_after_replay_wraps() {
         let final_frame = region_key(11);
         let replay_start = region_key(0);
@@ -596,6 +627,12 @@ mod regional_view_alignment_tests {
             Some(replay_start),
             false,
         ));
+        let mut rotated_frame = replay_start;
+        rotated_frame.camera_revision = 1;
+        assert!(
+            regional_playback_ready(Some(rotated_frame), Some(replay_start), false),
+            "camera-only LOD refreshes must not stall episode playback",
+        );
         assert!(regional_playback_ready(None, None, false));
         assert!(regional_playback_ready(Some(replay_start), None, true));
     }
@@ -661,11 +698,12 @@ impl Camera {
 
     /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
     fn project(&self, x: f32, y: f32, z: f32) -> (f32, f32) {
-        let xr  = x * self.yaw.cos() - z * self.yaw.sin();
-        let zr  = x * self.yaw.sin() + z * self.yaw.cos();
-        let yr  = y * self.pitch.cos() - zr * self.pitch.sin();
-        let zr2 = y * self.pitch.sin() + zr * self.pitch.cos();
-        (xr, -(yr - zr2 * 0.05))
+        let projected = project_orthographic(
+            [f64::from(x), f64::from(y), f64::from(z)],
+            self.yaw,
+            self.pitch,
+        );
+        (projected.x, projected.y)
     }
 
     fn camera_space(&self, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
@@ -939,11 +977,11 @@ fn draw_overview_inset(
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
-fn depth_key(x: u16, y: u16, z: u16, origin: RenderOrigin, cam: &Camera) -> f32 {
+fn depth_key(x: u32, y: u32, z: u32, origin: RenderOrigin, cam: &Camera) -> f32 {
     let (sy, cy) = (cam.yaw.sin(), cam.yaw.cos());
     let (sp, cp) = (cam.pitch.sin(), cam.pitch.cos());
     let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(x), y: u32::from(y), z: u32::from(z) },
+        StorageCoord { x, y, z },
         origin,
     );
     x * sy * cp + y * sp + z * cy * cp
@@ -1036,7 +1074,7 @@ mod debug_face_color_tests {
 
 fn draw_voxel(
     painter: &egui::Painter,
-    cx: u16, cy: u16, cz: u16,
+    cx: u32, cy: u32, cz: u32,
     origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
@@ -1044,7 +1082,7 @@ fn draw_voxel(
     debug_face_colors: bool,
 ) {
     let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+        StorageCoord { x: cx, y: cy, z: cz },
         origin,
     );
     let h = 0.5_f32;
@@ -1164,12 +1202,9 @@ fn draw_exposed_face(
     painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
 }
 
-fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
+fn draw_cursor(painter: &egui::Painter, coordinate: StorageCoord,
                origin: RenderOrigin, rect: Rect, cam: &Camera, b: &Bounds) {
-    let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
-        origin,
-    );
+    let (x, y, z) = camera_relative(coordinate, origin);
     let h = 0.5_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
@@ -1224,16 +1259,25 @@ fn draw_coarse_chunk(
 
 fn draw_marker(
     painter: &egui::Painter,
-    cx: u16, cy: u16, cz: u16,
+    coordinate: StorageCoord,
     origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
-    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true, false);
-    let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+    draw_voxel(
+        painter,
+        coordinate.x,
+        coordinate.y,
+        coordinate.z,
         origin,
+        rect,
+        cam,
+        b,
+        color,
+        true,
+        false,
     );
+    let (x, y, z) = camera_relative(coordinate, origin);
     let h = 0.4_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
     let stroke = Stroke::new(2.0, Color32::WHITE);
@@ -1301,7 +1345,7 @@ struct VoxelReplayApp {
     /// All loaded trajectories, sorted by iteration number.
     trajectories: Vec<TrajectoryData>,
     /// Geometry voxel lists (unsorted — sorted per frame based on camera).
-    geo_voxels: Vec<Vec<(u16, u16, u16)>>,
+    geo_voxels: Vec<Vec<(u32, u32, u32)>>,
     /// Which trajectory (iteration) we are currently viewing.
     iter_idx: usize,
     /// Which step within the current trajectory.
@@ -1367,7 +1411,9 @@ impl VoxelReplayApp {
     fn new(trajectories: Vec<TrajectoryData>, explain_ui: Option<NativeExplainUi>) -> Self {
         let explain_tab = explain_ui.as_ref().map(|ui| ui.observation_open).unwrap_or(false);
         let geo_voxels = trajectories.iter().map(|t| {
-            t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
+            t.episode.init_filled.iter().map(|c| {
+                (u32::from(c[0]), u32::from(c[1]), u32::from(c[2]))
+            }).collect()
         }).collect();
         let regional_sources = regional_sources(&trajectories);
         let overview_meshes = overview_meshes(&trajectories);
@@ -1453,7 +1499,9 @@ impl VoxelReplayApp {
         let traj_dir = self.tune_trials[idx].trajectory_dir.clone();
         let trajs = load_trial_trajectories(&traj_dir);
         self.geo_voxels = trajs.iter().map(|t| {
-            t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
+            t.episode.init_filled.iter().map(|c| {
+                (u32::from(c[0]), u32::from(c[1]), u32::from(c[2]))
+            }).collect()
         }).collect();
         self.regional_sources = regional_sources(&trajs);
         self.overview_meshes = overview_meshes(&trajs);
@@ -2113,11 +2161,8 @@ impl eframe::App for VoxelReplayApp {
                 .map(|frame| {
                     frame.occupied.iter()
                         .filter(|coordinate| frame.region.contains(**coordinate))
-                        .filter_map(|coordinate| Some((
-                            u16::try_from(coordinate.x).ok()?,
-                            u16::try_from(coordinate.y).ok()?,
-                            u16::try_from(coordinate.z).ok()?,
-                        ))).collect::<Vec<_>>()
+                        .map(|coordinate| (coordinate.x, coordinate.y, coordinate.z))
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         } else {
@@ -2145,7 +2190,7 @@ impl eframe::App for VoxelReplayApp {
             // Rear edges render beneath voxels and are occluded by filled space.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
-            let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
+            let geometry: HashSet<(u32, u32, u32)> = geo_list.iter().copied().collect();
 
             let geo_color = Color32::from_rgb(120, 120, 130);
             if compiled_mode {
@@ -2189,7 +2234,7 @@ impl eframe::App for VoxelReplayApp {
             let trail_end = (step_idx + 1).min(render_steps.len());
 
             // Sort geometry back-to-front.
-            let mut geo_sorted: Vec<(u16, u16, u16)> = geo_list.iter().copied().collect();
+            let mut geo_sorted: Vec<(u32, u32, u32)> = geo_list.iter().copied().collect();
             geo_sorted.sort_by(|a, b| {
                 depth_key(a.0, a.1, a.2, render_origin, cam)
                     .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
@@ -2206,8 +2251,8 @@ impl eframe::App for VoxelReplayApp {
             face_sorted.sort_by(|a, b| {
                 let a = a.voxel;
                 let b = b.voxel;
-                depth_key(a.x as u16, a.y as u16, a.z as u16, render_origin, cam)
-                    .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
+                depth_key(a.x, a.y, a.z, render_origin, cam)
+                    .partial_cmp(&depth_key(b.x, b.y, b.z, render_origin, cam))
                     .unwrap()
             });
             if !self.occlude_agent {
@@ -2252,7 +2297,7 @@ impl eframe::App for VoxelReplayApp {
 
                 for ai in 0..n_agents {
                     let trail_color = agent_trail_colors[ai % agent_trail_colors.len()];
-                    let mut trail: HashSet<(u16, u16, u16)> = HashSet::new();
+                    let mut trail: HashSet<(u32, u32, u32)> = HashSet::new();
                     for i in 0..if compiled_mode { 0 } else { trail_end } {
                         let s = &render_steps[i];
                         if ai < s.cursors.len() {
@@ -2268,7 +2313,7 @@ impl eframe::App for VoxelReplayApp {
                             }
                         }
                     }
-                    let mut trail_list: Vec<(u16, u16, u16)> = trail.into_iter().collect();
+                    let mut trail_list: Vec<(u32, u32, u32)> = trail.into_iter().collect();
                     trail_list.sort_by(|a, b| {
                         depth_key(a.0, a.1, a.2, render_origin, cam)
                             .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
@@ -2295,39 +2340,39 @@ impl eframe::App for VoxelReplayApp {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
                         if let Some(c) = render_position(s.cursors[ai], compiled_extent) {
-                            draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                            draw_cursor(&painter, c, render_origin, rect, cam, &b);
                         }
                     }
                 }
                 // Draw start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
-                    if let Some([sx, sy, sz]) = start_opt
+                    if let Some(position) = start_opt
                         .and_then(|position| render_position(position, compiled_extent))
                     {
                         let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, col);
+                        draw_marker(&painter, position, render_origin, rect, cam, &b, col);
                     }
                 }
                 // Draw goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
-                    if let Some([gx, gy, gz]) = goal_opt
+                    if let Some(position) = goal_opt
                         .and_then(|position| render_position(position, compiled_extent))
                     {
                         let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, col);
+                        draw_marker(&painter, position, render_origin, rect, cam, &b, col);
                     }
                 }
             } else {
                 // ---- Single-agent path ----
                 let agent_color = agent_trail_colors[0];
-                let mut agent_filled: HashSet<(u16, u16, u16)> = HashSet::new();
+                let mut agent_filled: HashSet<(u32, u32, u32)> = HashSet::new();
                 for i in 0..if compiled_mode { 0 } else { trail_end } {
                     let s = &render_steps[i];
                     if s.placed && !geometry.contains(&(s.cursor_x, s.cursor_y, s.cursor_z)) {
                         agent_filled.insert((s.cursor_x, s.cursor_y, s.cursor_z));
                     }
                 }
-                let mut agent_list: Vec<(u16, u16, u16)> = agent_filled.into_iter().collect();
+                let mut agent_list: Vec<(u32, u32, u32)> = agent_filled.into_iter().collect();
                 agent_list.sort_by(|a, b| {
                     depth_key(a.0, a.1, a.2, render_origin, cam)
                         .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
@@ -2349,23 +2394,23 @@ impl eframe::App for VoxelReplayApp {
                     );
                 }
 
-                if let Some([sx, sy, sz]) = render_start
+                if let Some(position) = render_start
                     .and_then(|position| render_position(position, compiled_extent))
                 {
-                    draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
+                    draw_marker(&painter, position, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
                 }
-                if let Some([gx, gy, gz]) = render_goal
+                if let Some(position) = render_goal
                     .and_then(|position| render_position(position, compiled_extent))
                 {
-                    draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
+                    draw_marker(&painter, position, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    if let Some([cx, cy, cz]) = render_position(
+                    if let Some(position) = render_position(
                         [s.cursor_x, s.cursor_y, s.cursor_z],
                         compiled_extent,
                     ) {
-                        draw_cursor(&painter, cx, cy, cz, render_origin, rect, cam, &b);
+                        draw_cursor(&painter, position, render_origin, rect, cam, &b);
                     }
                 }
             }
