@@ -21,6 +21,7 @@ import typer
 
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
 from theseo_anysearch.cli.commands import garden as garden_cmd
+from theseo_anysearch.cli.commands import geometry as geometry_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
 from theseo_anysearch.cli.commands import ray_cmd
 from theseo_anysearch.cli.commands import replay as replay_cmd
@@ -1280,6 +1281,7 @@ app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(mlflow_cmd.app, name="mlflow")
 app.add_typer(ray_cmd.app, name="ray")
 app.add_typer(garden_cmd.app, name="garden")
+app.add_typer(geometry_cmd.app, name="geometry")
 
 # Deprecated groups — kept for backward compatibility
 app.add_typer(
