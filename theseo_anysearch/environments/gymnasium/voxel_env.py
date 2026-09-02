@@ -52,6 +52,20 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        if config.get("compiled_world_path") and not any(
+            (
+                config.get("waypoints_file"),
+                config.get("waypoints"),
+                config.get("waypoint_route"),
+                (config.get("waypoint_curriculum") or {}).get("enabled"),
+                config.get("scenario_provider"),
+            )
+        ):
+            raise ValueError(
+                "compiled-world navigation requires waypoints, an enabled waypoint "
+                "curriculum, or a scenario provider; the compiled pack is not "
+                "enumerated to synthesize episodes"
+            )
         self._task = TaskConfig.model_validate(config.get("task") or {})
         from theseo_anysearch.experiments.custom_rewards import load_reward_provider
 
@@ -267,9 +281,12 @@ class VoxelEnv(RustGymnasiumEnv):
         )
         compiled_world_path = config.get("compiled_world_path")
         if compiled_world_path is not None:
-            from theseo_anysearch.worlds.compiler import validate_compiled_world
+            from theseo_anysearch.worlds.residency import resolve_worker_world
 
-            compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            node_cache = config.get("compiled_world_node_cache")
+            compiled = resolve_worker_world(
+                Path(compiled_world_path), Path(node_cache) if node_cache else None
+            )
             pack_extent = compiled.manifest.extent.as_tuple()
             if pack_extent != extent:
                 raise ValueError(

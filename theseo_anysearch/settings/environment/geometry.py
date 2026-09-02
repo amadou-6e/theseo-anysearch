@@ -31,6 +31,13 @@ class GeometryConfig(BaseModel):
     compiled_world_path: Path | None = Field(
         None, description="Validated compiled-world directory loaded lazily by each worker."
     )
+    node_cache: Path | None = Field(
+        None,
+        description=(
+            "Optional worker-local directory where the immutable compiled world is "
+            "staged by identity before it is attached."
+        ),
+    )
     maximum_decoded_bytes: int = Field(
         default=256 * 1024 * 1024,
         ge=1,

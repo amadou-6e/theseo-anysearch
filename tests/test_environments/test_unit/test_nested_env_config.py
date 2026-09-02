@@ -65,6 +65,17 @@ def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
     with pytest.raises(ValidationError, match="cannot be mixed.*rewards"):
         EnvConfig(goal_reward=2.0, rewards={"goal_reward": 3.0})
 
+
+def test_compiled_world_navigation_requires_an_episode_source() -> None:
+    with pytest.raises(ValueError, match="compiled-world navigation requires"):
+        VoxelEnv(
+            {
+                "compiled_world_path": "unused",
+                "extent": (64, 48, 32),
+                "grid_size": None,
+            }
+        )
+
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):
         exposed_nested_fields: ClassVar[tuple[str, ...]] = ("geometry",)

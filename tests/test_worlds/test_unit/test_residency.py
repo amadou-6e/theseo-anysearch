@@ -4,7 +4,11 @@ import pytest
 
 from theseo_anysearch.worlds.compiler import BoxSource, compile_world
 from theseo_anysearch.worlds.manifest import WorldExtent
-from theseo_anysearch.worlds.residency import WorldResidencySettings, stage_compiled_world
+from theseo_anysearch.worlds.residency import (
+    WorldResidencySettings,
+    resolve_worker_world,
+    stage_compiled_world,
+)
 from theseo_anysearch.settings.environment.environment import EnvConfig
 
 
@@ -21,6 +25,19 @@ def test_node_staging_is_content_addressed_and_reused(tmp_path: Path) -> None:
     assert first.root == second.root
     assert first.manifest.identity_sha256 == world.manifest.identity_sha256
     assert first.root.joinpath("staging.json").is_file()
+
+
+def test_worker_world_resolution_stages_shared_pack(tmp_path: Path) -> None:
+    world = compile_world(
+        [BoxSource(minimum=(0, 0, 0), maximum_inclusive=(0, 0, 0))],
+        WorldExtent(x=4, y=4, z=4),
+        tmp_path.joinpath("shared"),
+    )
+
+    resolved = resolve_worker_world(world.root, tmp_path.joinpath("worker"))
+
+    assert resolved.root.parent == tmp_path.joinpath("worker").resolve()
+    assert resolved.manifest.identity_sha256 == world.manifest.identity_sha256
 
 
 def test_node_staging_rebuilds_a_corrupt_local_copy(tmp_path: Path) -> None:
@@ -59,6 +76,7 @@ def test_nested_environment_settings_translate_residency_fields() -> None:
         {
             "geometry": {
                 "compiled_world_path": "runtime/worlds/example",
+                "node_cache": "runtime/worlds/node-cache",
                 "maximum_decoded_bytes": 4096,
                 "prefetch_margin": 5,
             }
@@ -72,6 +90,10 @@ def test_nested_environment_settings_translate_residency_fields() -> None:
     )
     assert config["world_maximum_decoded_bytes"] == 4096
     assert config["world_prefetch_margin"] == 5
+    assert Path(config["compiled_world_node_cache"]).parts[-3:] == (
+        "worlds",
+        "node-cache",
+    )
 
 
 def test_native_environment_uses_prefetched_pack_without_hot_step_reads(

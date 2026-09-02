@@ -190,9 +190,12 @@ class MultiVoxelEnv(RustParallelEnv):
         compiled_world_path = config.get("compiled_world_path")
         if compiled_world_path is not None:
             from pathlib import Path
-            from theseo_anysearch.worlds.compiler import validate_compiled_world
+            from theseo_anysearch.worlds.residency import resolve_worker_world
 
-            compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            node_cache = config.get("compiled_world_node_cache")
+            compiled = resolve_worker_world(
+                Path(compiled_world_path), Path(node_cache) if node_cache else None
+            )
             pack_extent = compiled.manifest.extent.as_tuple()
             if pack_extent != extent:
                 raise ValueError(

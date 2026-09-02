@@ -83,3 +83,12 @@ def stage_compiled_world(
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
+
+
+def resolve_worker_world(source: Path, node_cache: Path | None = None) -> CompiledWorld:
+    """Validate a shared pack and optionally stage it into a worker-local cache."""
+
+    world = validate_compiled_world(source.resolve())
+    if node_cache is None:
+        return world
+    return stage_compiled_world(world, node_cache.resolve())
