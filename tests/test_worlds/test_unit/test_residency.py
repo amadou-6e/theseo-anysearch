@@ -91,6 +91,7 @@ def test_nested_environment_settings_translate_residency_fields() -> None:
     assert config["world_maximum_decoded_bytes"] == 4096
     assert config["world_prefetch_margin"] == 5
     assert Path(config["compiled_world_node_cache"]).parts[-3:] == (
+        "runtime",
         "worlds",
         "node-cache",
     )

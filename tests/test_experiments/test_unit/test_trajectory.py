@@ -25,6 +25,7 @@ from theseo_anysearch.experiments.trajectory import (
     VoxelMutationData,
     WorldArtifactReference,
     _build_payload,
+    _environment_voxel_count,
     _overlay_delta,
     collect_eval_episode,
 )
@@ -63,6 +64,24 @@ def _make_writer(tmp_path: Path, trajectory_every: int = 5,
     writer = TrajectoryWriter(store, trajectory_every=trajectory_every,
                               best_trajectory=best_trajectory)
     return writer, store
+
+
+def test_compiled_world_voxel_count_uses_overlay_without_full_enumeration() -> None:
+    class RustEnv:
+        def overlay_mutations(self):
+            return [
+                (10, 10, 10, True, 2, False, 0.0),
+                (11, 10, 10, True, 1, True, 1.0),
+            ]
+
+        def filled_voxels(self):
+            raise AssertionError("compiled base must not be enumerated")
+
+    class Env:
+        _config = {"compiled_world_path": "pack"}
+        _rust_env = RustEnv()
+
+    assert _environment_voxel_count(Env()) == 1
 
 
 # ---------------------------------------------------------------------------
