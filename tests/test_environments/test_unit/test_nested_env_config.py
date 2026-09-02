@@ -55,6 +55,7 @@ def test_legacy_sources_translate_to_canonical_proposal() -> None:
     assert stl.to_runtime_dict()["geometry_sources"] == [
         {"type": "stl", "path": "mesh.stl", "scale": 2.0, "padding": 3}
     ]
+    assert GeometryConfig.model_validate(stl.geometry.model_dump()) == stl.geometry
 
 
 def test_explicit_box_and_stl_sources_compose_in_order() -> None:

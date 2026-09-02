@@ -148,10 +148,41 @@ class GeometryConfig(BaseModel):
                 name for name in ("stl_path", "boxes") if data.get(name)
             ]
             if explicit_sources and legacy_sources:
-                raise ValueError(
-                    "geometry.sources cannot be combined with legacy source fields: "
-                    + ", ".join(legacy_sources)
-                )
+                translated = []
+                if data.get("stl_path"):
+                    translated.append(
+                        {
+                            "type": "stl",
+                            "path": data["stl_path"],
+                            "scale": data.get("scale", 1.0),
+                            "padding": data.get("padding", 2),
+                        }
+                    )
+                if data.get("boxes"):
+                    translated.append({"type": "boxes", "boxes": data["boxes"]})
+                normalized_explicit = [
+                    item.model_dump(mode="json")
+                    if isinstance(item, BaseModel)
+                    else (
+                        StlGeometrySource.model_validate(item).model_dump(mode="json")
+                        if item.get("type") == "stl"
+                        else BoxGeometrySource.model_validate(item).model_dump(mode="json")
+                    )
+                    for item in explicit_sources
+                ]
+                normalized_translated = [
+                    (
+                        StlGeometrySource.model_validate(item).model_dump(mode="json")
+                        if item["type"] == "stl"
+                        else BoxGeometrySource.model_validate(item).model_dump(mode="json")
+                    )
+                    for item in translated
+                ]
+                if normalized_explicit != normalized_translated:
+                    raise ValueError(
+                        "geometry.sources cannot be combined with legacy source fields: "
+                        + ", ".join(legacy_sources)
+                    )
             if len(legacy_sources) > 1:
                 raise ValueError(
                     "legacy geometry sources have ambiguous precedence: "

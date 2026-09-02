@@ -54,6 +54,21 @@ def configured_geometry_identity(env_config: dict[str, Any]) -> str:
             hashlib.sha256(path.read_bytes()).hexdigest()
             for path in Path(str(pool_dir_value)).rglob("*.npy")
         )
+    canonical_sources = []
+    for source in env_config.get("geometry_sources") or []:
+        if source.get("type") == "stl":
+            canonical_sources.append(
+                {
+                    "type": "stl",
+                    "content": _file_content_identity(source.get("path")),
+                    "scale": source.get("scale", 1.0),
+                    "padding": source.get("padding", 2),
+                }
+            )
+        else:
+            canonical_sources.append(
+                {"type": source.get("type"), "boxes": source.get("boxes", [])}
+            )
     return _identity(
         {
             "compiled_world": env_config.get("world_identity_sha256"),
@@ -68,6 +83,7 @@ def configured_geometry_identity(env_config: dict[str, Any]) -> str:
             ),
             "pool": pool_hashes,
             "boxes": env_config.get("geometry_boxes") or [],
+            "sources": canonical_sources,
         }
     )
 
