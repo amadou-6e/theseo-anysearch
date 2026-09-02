@@ -25,6 +25,7 @@ def test_node_staging_is_content_addressed_and_reused(tmp_path: Path) -> None:
     assert first.root == second.root
     assert first.manifest.identity_sha256 == world.manifest.identity_sha256
     assert first.root.joinpath("staging.json").is_file()
+    assert all(path.is_file() for path in first.root.iterdir())
 
 
 def test_worker_world_resolution_stages_shared_pack(tmp_path: Path) -> None:

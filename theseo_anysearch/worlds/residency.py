@@ -34,6 +34,20 @@ class WorldResidencySettings:
             raise ValueError("lock_timeout_seconds must be positive")
 
 
+def has_compiled_world_episode_source(config: dict) -> bool:
+    """Return whether runtime config can initialize a bounded navigation episode."""
+
+    return any(
+        (
+            config.get("waypoints_file"),
+            config.get("waypoints"),
+            config.get("waypoint_route"),
+            (config.get("waypoint_curriculum") or {}).get("enabled"),
+            config.get("scenario_provider"),
+        )
+    )
+
+
 def stage_compiled_world(
     world: CompiledWorld,
     node_cache: Path,

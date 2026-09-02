@@ -57,7 +57,7 @@ env:
   geometry:
     extent: [4096, 2048, 512]
     compiled_world_path: runtime/worlds/site-a
-    node_cache: runtime/worlds/node-cache
+    node_cache: /local-nvme/anysearch/worlds
     maximum_decoded_bytes: 268435456
     prefetch_margin: 2
 ```
@@ -70,8 +70,11 @@ through the candidate index. Runtime reset and observations then query only
 bounded resident regions around the agent.
 
 For distributed training, `compiled_world_path` must initially be readable by
-every worker. Set `node_cache` to stage the validated immutable pack into an
-identity-addressed worker-local directory before attachment. Navigation runs
+every worker, normally through shared storage. Set the absolute `node_cache`
+path to stage its flat top-level pack files into an identity-addressed local
+directory; subsequent opens avoid repeatedly reading the slower shared pack.
+Relative cache paths resolve against each worker process's current directory
+and should not be used for distributed launches. Navigation runs
 must also configure fixed waypoints, an enabled waypoint curriculum, or a
 scenario provider (normally backed by the compiled candidate index); the
 runtime deliberately does not enumerate a large pack to invent start/goal

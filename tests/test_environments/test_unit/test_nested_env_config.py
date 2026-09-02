@@ -4,7 +4,9 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+from theseo_anysearch.environments.pettingzoo.multi_voxel_env import MultiVoxelEnv
 from theseo_anysearch.models import EnvConfig, GeometryConfig, NestedFieldAccessMixin
+from theseo_anysearch.worlds.residency import has_compiled_world_episode_source
 
 
 def test_nested_blocks_resolve_to_runtime_environment() -> None:
@@ -67,14 +69,42 @@ def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
 
 
 def test_compiled_world_navigation_requires_an_episode_source() -> None:
+    runtime = EnvConfig(
+        agent_count=1,
+        geometry={"compiled_world_path": "unused", "extent": [64, 48, 32]},
+    ).to_runtime_dict()
     with pytest.raises(ValueError, match="compiled-world navigation requires"):
-        VoxelEnv(
-            {
-                "compiled_world_path": "unused",
-                "extent": (64, 48, 32),
-                "grid_size": None,
-            }
-        )
+        VoxelEnv(runtime)
+
+
+def test_compiled_world_episode_sources_survive_runtime_mapping() -> None:
+    waypoints = EnvConfig(
+        agent_count=1,
+        waypoints_file="waypoints.json",
+        geometry={"compiled_world_path": "pack", "extent": [64, 48, 32]},
+    ).to_runtime_dict()
+    curriculum = EnvConfig(
+        agent_count=1,
+        waypoint_curriculum={
+            "enabled": True,
+            "initial_start": [2, 2, 2],
+            "initial_goal": [3, 2, 2],
+        },
+        geometry={"compiled_world_path": "pack", "extent": [64, 48, 32]},
+    ).to_runtime_dict()
+
+    assert has_compiled_world_episode_source(waypoints)
+    assert has_compiled_world_episode_source(curriculum)
+
+
+def test_multi_agent_compiled_world_also_rejects_missing_episode_source() -> None:
+    runtime = EnvConfig(
+        agent_count=2,
+        geometry={"compiled_world_path": "unused", "extent": [64, 48, 32]},
+    ).to_runtime_dict()
+
+    with pytest.raises(ValueError, match="compiled-world navigation requires"):
+        MultiVoxelEnv(runtime)
 
 def test_nested_field_access_mixin_is_reusable() -> None:
     class GeometryWrapper(NestedFieldAccessMixin, BaseModel):

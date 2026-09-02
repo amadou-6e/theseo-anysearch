@@ -52,15 +52,11 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
-        if config.get("compiled_world_path") and not any(
-            (
-                config.get("waypoints_file"),
-                config.get("waypoints"),
-                config.get("waypoint_route"),
-                (config.get("waypoint_curriculum") or {}).get("enabled"),
-                config.get("scenario_provider"),
-            )
-        ):
+        from theseo_anysearch.worlds.residency import (
+            has_compiled_world_episode_source,
+        )
+
+        if config.get("compiled_world_path") and not has_compiled_world_episode_source(config):
             raise ValueError(
                 "compiled-world navigation requires waypoints, an enabled waypoint "
                 "curriculum, or a scenario provider; the compiled pack is not "

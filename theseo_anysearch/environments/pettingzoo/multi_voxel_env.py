@@ -102,6 +102,16 @@ class MultiVoxelEnv(RustParallelEnv):
     ray_env_id = "MultiVoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        from theseo_anysearch.worlds.residency import (
+            has_compiled_world_episode_source,
+        )
+
+        if config.get("compiled_world_path") and not has_compiled_world_episode_source(config):
+            raise ValueError(
+                "compiled-world navigation requires waypoints, an enabled waypoint "
+                "curriculum, or a scenario provider; the compiled pack is not "
+                "enumerated to synthesize episodes"
+            )
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
