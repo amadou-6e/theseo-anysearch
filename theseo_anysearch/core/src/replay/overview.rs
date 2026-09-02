@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 const MAGIC: &[u8; 4] = b"AOM1";
 const HEADER_BYTES: usize = 16;
 const SUPPORTED_ALGORITHM_VERSION: u32 = 1;
+const ORTHOGRAPHIC_DEPTH_LIFT: f64 = 0.05;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverviewMesh {
@@ -21,6 +22,29 @@ pub struct ProjectedVertex {
     pub x: f32,
     pub y: f32,
     pub depth: f32,
+}
+
+/// Apply the replay camera's orthographic projection to a relative point.
+///
+/// The main replay and its overview deliberately share this function so an
+/// orbit cannot introduce a sign or depth-lift mismatch between the views.
+pub fn project_orthographic(
+    point: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+) -> ProjectedVertex {
+    let (sy, cy) = f64::from(yaw).sin_cos();
+    let (sp, cp) = f64::from(pitch).sin_cos();
+    let [x, y, z] = point;
+    let xr = x * cy - z * sy;
+    let zr = x * sy + z * cy;
+    let yr = y * cp - zr * sp;
+    let depth = y * sp + zr * cp;
+    ProjectedVertex {
+        x: xr as f32,
+        y: -(yr - depth * ORTHOGRAPHIC_DEPTH_LIFT) as f32,
+        depth: depth as f32,
+    }
 }
 
 #[derive(Deserialize)]
@@ -99,27 +123,32 @@ impl OverviewMesh {
 
     /// Project after f64 centering/scaling, before conversion to f32.
     pub fn project(&self, yaw: f32, pitch: f32) -> Vec<ProjectedVertex> {
-        let center = self.extent.map(|value| f64::from(value) * 0.5);
-        let scale = f64::from(*self.extent.iter().max().unwrap_or(&1)).max(1.0);
-        let (sy, cy) = f64::from(yaw).sin_cos();
-        let (sp, cp) = f64::from(pitch).sin_cos();
         self.vertices
             .iter()
             .map(|vertex| {
-                let x = (f64::from(vertex[0]) - center[0]) / scale;
-                let y = (f64::from(vertex[1]) - center[1]) / scale;
-                let z = (f64::from(vertex[2]) - center[2]) / scale;
-                let xr = x * cy - z * sy;
-                let zr = x * sy + z * cy;
-                let yr = y * cp - zr * sp;
-                let depth = y * sp + zr * cp;
-                ProjectedVertex {
-                    x: xr as f32,
-                    y: -yr as f32,
-                    depth: depth as f32,
-                }
+                self.project_point(
+                    [
+                        f64::from(vertex[0]),
+                        f64::from(vertex[1]),
+                        f64::from(vertex[2]),
+                    ],
+                    yaw,
+                    pitch,
+                )
             })
             .collect()
+    }
+
+    /// Project one absolute storage-space point with the overview transform.
+    /// Floating-point input allows logical view bounds to extend half a voxel
+    /// beyond the storage extent.
+    pub fn project_point(&self, point: [f64; 3], yaw: f32, pitch: f32) -> ProjectedVertex {
+        let center = self.extent.map(|value| f64::from(value) * 0.5);
+        let scale = f64::from(*self.extent.iter().max().unwrap_or(&1)).max(1.0);
+        let x = (point[0] - center[0]) / scale;
+        let y = (point[1] - center[1]) / scale;
+        let z = (point[2] - center[2]) / scale;
+        project_orthographic([x, y, z], yaw, pitch)
     }
 
     pub fn bounds_vertices(&self) -> Vec<[u32; 3]> {
