@@ -118,6 +118,13 @@ class LatentTargetObjective(nn.Module):
         selected = supervision_mask.bool() & teacher.local_validity_mask
         if not selected.any():
             raise ValueError("latent-target objective has no supervised values")
+        target_weights = teacher.local_validity_mask.to(dtype=target.dtype)
+        count = target_weights.sum(dim=(0, 2, 3, 4), keepdim=True).clamp_min(1)
+        mean = (target * target_weights).sum(dim=(0, 2, 3, 4), keepdim=True) / count
+        variance = (
+            (target - mean).square() * target_weights
+        ).sum(dim=(0, 2, 3, 4), keepdim=True) / count
+        target = (target - mean) * torch.rsqrt(variance + 1e-5)
         selected_channels = selected.expand_as(prediction)
         loss = F.smooth_l1_loss(
             prediction[selected_channels], target[selected_channels]

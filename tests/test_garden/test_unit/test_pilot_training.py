@@ -122,6 +122,23 @@ def test_ema_teacher_is_frozen_and_moves_toward_online_encoder() -> None:
     assert all(not parameter.requires_grad for parameter in teacher.parameters())
 
 
+def test_latent_target_is_normalized_against_teacher_scale_drift() -> None:
+    online = _encoded()
+    teacher = _encoded()
+    shifted_teacher = EncoderOutput(
+        global_embedding=teacher.global_embedding,
+        scale_embeddings=teacher.scale_embeddings,
+        local_feature_volume=teacher.local_feature_volume * 3 + 5,
+        local_validity_mask=teacher.local_validity_mask,
+        metadata=teacher.metadata,
+    )
+    mask = torch.ones_like(teacher.local_validity_mask)
+    objective = LatentTargetObjective(4)
+    original = objective(online, teacher, supervision_mask=mask).loss
+    shifted = objective(online, shifted_teacher, supervision_mask=mask).loss
+    torch.testing.assert_close(shifted, original, atol=1e-5, rtol=1e-5)
+
+
 def test_mask_shortcut_is_relative_to_stratum_frequency_baseline() -> None:
     target = torch.tensor([0, 0, 1, 1, 1, 0])
     strata = torch.tensor([0, 0, 0, 1, 1, 1])
