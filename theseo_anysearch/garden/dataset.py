@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -9,6 +10,7 @@ from torch.utils.data import Dataset, Sampler
 
 from theseo_anysearch.garden.augment import augment, augment_pair
 from theseo_anysearch.garden.data_config import AugmentationConfig, SplitConfig
+from theseo_anysearch.garden.splits import PoolAssignment
 
 
 class GardenDataset(Dataset):
@@ -131,3 +133,105 @@ def make_multi_radius_train_val(
         train_dsets[r] = train_ds
         val_dsets[r] = val_ds
     return MultiRadiusDataset(train_dsets), MultiRadiusDataset(val_dsets)
+
+
+class PilotGeometryDataset(Dataset):
+    """Geometry-identified observations that can never be row-randomly split."""
+
+    def __init__(
+        self,
+        grids: np.ndarray,
+        geometry_ids: Sequence[str],
+        observation_ids: Sequence[str],
+        *,
+        pool: str,
+        aug_cfg: AugmentationConfig | None = None,
+        seed: int = 0,
+        targets: dict[str, np.ndarray] | None = None,
+    ) -> None:
+        if len(grids) != len(geometry_ids) or len(grids) != len(observation_ids):
+            raise ValueError("grids, geometry IDs, and observation IDs must have equal lengths")
+        if len(set(observation_ids)) != len(observation_ids):
+            raise ValueError("observation IDs must be unique")
+        if targets and any(len(values) != len(grids) for values in targets.values()):
+            raise ValueError("every target array must align with the observation rows")
+        self._grids = np.asarray(grids, dtype=np.float32)
+        self._geometry_ids = tuple(str(value) for value in geometry_ids)
+        self._observation_ids = tuple(str(value) for value in observation_ids)
+        self._pool = pool
+        self._aug_cfg = aug_cfg or AugmentationConfig()
+        self._seed = seed
+        self._epoch = 0
+        self._targets = targets or {}
+
+    def __len__(self) -> int:
+        return len(self._grids)
+
+    def set_epoch(self, epoch: int) -> None:
+        if epoch < 0:
+            raise ValueError("epoch cannot be negative")
+        self._epoch = epoch
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
+        rng = np.random.default_rng(np.random.SeedSequence((self._seed, self._epoch, idx)))
+        grid = augment(self._grids[idx].copy(), self._aug_cfg, rng)
+        item: dict[str, torch.Tensor | str] = {
+            "grid": torch.from_numpy(grid),
+            "geometry_id": self._geometry_ids[idx],
+            "observation_id": self._observation_ids[idx],
+            "pool": self._pool,
+        }
+        for name, values in self._targets.items():
+            item[name] = torch.as_tensor(values[idx])
+        return item
+
+    @property
+    def geometry_ids(self) -> frozenset[str]:
+        return frozenset(self._geometry_ids)
+
+
+def make_pilot_pool_datasets(
+    grids: np.ndarray,
+    geometry_ids: Sequence[str],
+    observation_ids: Sequence[str],
+    assignment: PoolAssignment,
+    *,
+    train_augmentation: AugmentationConfig | None = None,
+    seed: int = 0,
+    targets: dict[str, np.ndarray] | None = None,
+) -> dict[str, PilotGeometryDataset]:
+    """Materialize named datasets using only the frozen geometry assignment."""
+
+    if len(grids) != len(geometry_ids) or len(grids) != len(observation_ids):
+        raise ValueError("pilot observation arrays must have equal lengths")
+    known_ids = {geometry_id for ids in assignment.pools.values() for geometry_id in ids}
+    unknown_ids = set(geometry_ids) - known_ids
+    if unknown_ids:
+        raise ValueError(f"observations contain unassigned geometries: {sorted(unknown_ids)}")
+    if len(set(observation_ids)) != len(observation_ids):
+        raise ValueError("observation IDs must be globally unique")
+
+    geometry_array = np.asarray(geometry_ids, dtype=str)
+    datasets: dict[str, PilotGeometryDataset] = {}
+    for pool, pool_ids in assignment.pools.items():
+        indices = np.flatnonzero(np.isin(geometry_array, np.asarray(pool_ids, dtype=str)))
+        pool_targets = (
+            {name: np.asarray(values)[indices] for name, values in targets.items()}
+            if targets
+            else None
+        )
+        datasets[pool] = PilotGeometryDataset(
+            np.asarray(grids)[indices],
+            geometry_array[indices].tolist(),
+            np.asarray(observation_ids, dtype=str)[indices].tolist(),
+            pool=pool,
+            aug_cfg=train_augmentation if pool == "pilot_train" else AugmentationConfig(),
+            seed=seed,
+            targets=pool_targets,
+        )
+    geometry_sets = [dataset.geometry_ids for dataset in datasets.values()]
+    for index, left in enumerate(geometry_sets):
+        for right in geometry_sets[index + 1 :]:
+            if left & right:
+                raise ValueError("geometry leakage detected across pilot datasets")
+    return datasets
