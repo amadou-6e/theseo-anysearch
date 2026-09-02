@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from theseo_anysearch.worlds import world_contract_fingerprint
+from theseo_anysearch.environments.task_identity import contract_identity
 
 
 class CheckpointState(BaseModel):
@@ -31,6 +32,8 @@ class CheckpointState(BaseModel):
     rllib_path: str
     world_contract: dict[str, Any] | None = None
     world_fingerprint: str | None = None
+    geometry_task_contract: dict[str, Any] | None = None
+    geometry_task_fingerprint: str | None = None
 
 
 class CheckpointManager:
@@ -46,12 +49,19 @@ class CheckpointManager:
         self,
         output_dir: Path,
         expected_world_contract: dict[str, Any] | None = None,
+        expected_geometry_task_contract: dict[str, Any] | None = None,
     ) -> None:
         self._root = Path(output_dir, "checkpoints")
         self._expected_world_contract = expected_world_contract
         self._expected_world_fingerprint = (
             world_contract_fingerprint(expected_world_contract)
             if expected_world_contract is not None
+            else None
+        )
+        self._expected_geometry_task_contract = expected_geometry_task_contract
+        self._expected_geometry_task_fingerprint = (
+            contract_identity(expected_geometry_task_contract)
+            if expected_geometry_task_contract is not None
             else None
         )
 
@@ -84,6 +94,8 @@ class CheckpointManager:
                 "rllib_path": rllib_path,
                 "world_contract": self._expected_world_contract,
                 "world_fingerprint": self._expected_world_fingerprint,
+                "geometry_task_contract": self._expected_geometry_task_contract,
+                "geometry_task_fingerprint": self._expected_geometry_task_fingerprint,
             }
         )
         self._write_json(
@@ -133,6 +145,19 @@ class CheckpointManager:
                 "Checkpoint world contract mismatch: "
                 f"expected {self._expected_world_contract}, "
                 f"found {state.world_contract}"
+            )
+        if (
+            self._expected_geometry_task_contract is not None
+            and (
+                state.geometry_task_contract != self._expected_geometry_task_contract
+                or state.geometry_task_fingerprint
+                != self._expected_geometry_task_fingerprint
+            )
+        ):
+            raise ValueError(
+                "Checkpoint geometry/task contract mismatch: "
+                f"expected {self._expected_geometry_task_contract}, "
+                f"found {state.geometry_task_contract}"
             )
         algorithm.restore(state.rllib_path)
         return state

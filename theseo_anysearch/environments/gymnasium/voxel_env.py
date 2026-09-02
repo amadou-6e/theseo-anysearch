@@ -93,6 +93,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._previous_scenario: dict[str, Any] | None = None
         self._scenario_geometry: tuple[tuple[int, int, int], ...] = ()
         self._last_feasibility_diagnostics: dict[str, Any] | None = None
+        self._last_accepted_task_manifest: dict[str, Any] | None = None
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
             from theseo_anysearch.environments.geometry_pool import GeometryPool
@@ -423,6 +424,7 @@ class VoxelEnv(RustGymnasiumEnv):
         return {"start": s, "goal": g}
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
+        self._last_accepted_task_manifest = None
         if self._geo_pool is not None:
             from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
             configured_feasibility = self._validation_config
@@ -534,6 +536,9 @@ class VoxelEnv(RustGymnasiumEnv):
                     ),
                     "difficulty_band": feasibility_result.difficulty_band,
                 }
+                self._record_accepted_task_manifest(
+                    reset_seed, geometry_result, feasibility_result
+                )
             self._reset_count += 1
             return self._reset_task_state(reset_result)
 
@@ -580,7 +585,48 @@ class VoxelEnv(RustGymnasiumEnv):
                 ),
                 "difficulty_band": feasibility_result.difficulty_band,
             }
+            reset_seed = (
+                int(seed)
+                if seed is not None
+                else int(self._config.get("seed", 42)) + self._reset_count + 1
+            )
+            self._record_accepted_task_manifest(
+                reset_seed, geometry_result, feasibility_result
+            )
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _record_accepted_task_manifest(
+        self, reset_seed, geometry_result, feasibility_result
+    ) -> None:
+        """Capture portable identity and validation evidence for this reset."""
+        from theseo_anysearch.environments.task_identity import accepted_task_manifest
+
+        route = []
+        if self._active_goal is not None:
+            route.append(tuple(self._active_goal))
+        route.extend(tuple(item) for item in self._route_remaining)
+        manifest = accepted_task_manifest(
+            coordinates=self._scenario_geometry,
+            geometry_identity_sha256=self._config.get("world_identity_sha256"),
+            seed=int(reset_seed),
+            start=tuple(self._active_start or self._rust_env.cursor_pos()),
+            route=route,
+            action_mode=str(self._config.get("action_mode", "discrete_26")),
+            transformations=dict(self._augmentation_config),
+            planner_settings={
+                key: self._validation_config.get(key)
+                for key in (
+                    "maximum_search_nodes",
+                    "recovery_margin_steps",
+                    "clearance_radius",
+                    "difficulty_bands",
+                    "accepted_difficulty_bands",
+                )
+            },
+            geometry_validation=geometry_result,
+            task_feasibility=feasibility_result,
+        )
+        self._last_accepted_task_manifest = manifest.model_dump(mode="json")
 
     def _geometry_validation_result(self):
         from theseo_anysearch.environments.validation import validate_geometry
@@ -872,6 +918,11 @@ class VoxelEnv(RustGymnasiumEnv):
             info["scenario"] = dict(self._previous_scenario)
         if self._last_feasibility_diagnostics is not None:
             info["geometry_feasibility"] = dict(self._last_feasibility_diagnostics)
+        if self._last_accepted_task_manifest is not None:
+            info["accepted_task"] = dict(self._last_accepted_task_manifest)
+            info["accepted_task_identity"] = self._last_accepted_task_manifest[
+                "identity_sha256"
+            ]
         return observation, info
 
     def step(self, action):

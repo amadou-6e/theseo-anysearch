@@ -571,6 +571,14 @@ class TestOutputSanity:
         assert state["world_contract"]["extent"] == [32, 32, 32]
         assert len(state["world_fingerprint"]) == 64
 
+    def test_state_json_has_geometry_task_compatibility_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state = json.loads((ckpt / "state.json").read_text())
+        assert state["geometry_task_contract"]["action_mode"] == "discrete_26"
+        assert len(state["geometry_task_fingerprint"]) == 64
+
     def test_latest_json_written_after_checkpoint(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)
         t._algo = FakeAlgo()
@@ -645,6 +653,19 @@ class TestRestore:
 
         t2 = make_trainer(trainer_settings)
         with pytest.raises(ValueError, match="Checkpoint world contract mismatch"):
+            t2.restore(ckpt)
+
+    def test_restore_rejects_incompatible_geometry_task_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state_path = ckpt / "state.json"
+        state = json.loads(state_path.read_text())
+        state["geometry_task_contract"]["action_mode"] = "discrete_18"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        t2 = make_trainer(trainer_settings)
+        with pytest.raises(ValueError, match="Checkpoint geometry/task contract mismatch"):
             t2.restore(ckpt)
 
     def test_restore_builds_algo_if_none(self, trainer_settings: Any):
