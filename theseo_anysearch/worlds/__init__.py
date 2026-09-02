@@ -1,5 +1,14 @@
 """Versioned contracts for compiled finite voxel worlds."""
 
+from theseo_anysearch.worlds.artifacts import (
+    GeometryArtifact,
+    GeometryArtifactError,
+    GeometryArtifactManifest,
+    load_geometry_artifact,
+    migrate_compiled_world,
+    publish_eager_geometry,
+)
+
 from theseo_anysearch.worlds.candidates import (
     CandidateBudgetExceeded,
     CandidateIndexHandle,
@@ -42,6 +51,9 @@ from theseo_anysearch.worlds.residency import (
 __all__ = [
     "COORDINATE_TYPE",
     "ENVIRONMENT_COORDINATE_CONVENTION",
+    "GeometryArtifact",
+    "GeometryArtifactError",
+    "GeometryArtifactManifest",
     "STORAGE_COORDINATE_CONVENTION",
     "WORLD_SCHEMA_VERSION",
     "BoxSource",
@@ -66,6 +78,9 @@ __all__ = [
     "compile_world",
     "decode_chunk",
     "load_compiled_world",
+    "load_geometry_artifact",
+    "migrate_compiled_world",
+    "publish_eager_geometry",
     "stage_compiled_world",
     "validate_compiled_world",
     "world_contract",
