@@ -10,7 +10,6 @@ from typing import Any
 
 import numpy as np
 import gymnasium
-import networkx as nx
 from gymnasium import spaces
 
 from theseo_anysearch.environments.action_spaces import (
@@ -103,6 +102,13 @@ class VoxelEnv(RustGymnasiumEnv):
         else:
             self._geo_pool = None
             self._augmentation_config = {}
+        shared_validation = config.get("geometry_validation") or {}
+        legacy_validation = self._augmentation_config.get("feasibility") or {}
+        self._validation_config = (
+            shared_validation
+            if shared_validation.get("enabled", False)
+            else legacy_validation
+        )
         super().__init__(config)
         self._scenario_provider = self._load_scenario_provider(config)
         self._init_obs_cache(config)
@@ -418,7 +424,7 @@ class VoxelEnv(RustGymnasiumEnv):
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if self._geo_pool is not None:
             from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
-            configured_feasibility = self._augmentation_config.get("feasibility")
+            configured_feasibility = self._validation_config
             feasibility = (
                 configured_feasibility
                 if configured_feasibility
@@ -480,6 +486,12 @@ class VoxelEnv(RustGymnasiumEnv):
                 cells = GeometryPool.grid_to_cells(grid)
                 self._rust_env.set_geometry(cells)
                 self._scenario_geometry = tuple(cells)
+                if feasibility:
+                    geometry_result = self._geometry_validation_result()
+                    if not geometry_result.valid:
+                        reason = str(geometry_result.rejection_reason)
+                        rejections[reason] = rejections.get(reason, 0) + 1
+                        continue
                 log.debug("VoxelEnv reset: pool sample -> %d filled cells", len(cells))
                 if self._configured_route:
                     self._activate_route(self._configured_route)
@@ -493,20 +505,16 @@ class VoxelEnv(RustGymnasiumEnv):
                 self._apply_pending_route()
                 self._sample_curriculum_waypoints()
                 self._apply_scenario(seed)
-                endpoint_rejection = self._endpoint_feasibility_rejection()
-                if feasibility and endpoint_rejection is not None:
-                    rejections[endpoint_rejection] = (
-                        rejections.get(endpoint_rejection, 0) + 1
-                    )
-                    continue
+                if feasibility:
+                    feasibility_result = self._task_feasibility_result(feasibility)
+                    if not feasibility_result.feasible:
+                        reason = str(feasibility_result.rejection_reason)
+                        rejections[reason] = rejections.get(reason, 0) + 1
+                        continue
+                    accepted_plan_steps = feasibility_result.path_length
                 rust_observation = self._rust_env.reset(reset_seed)
                 reset_result = (self._obs_to_numpy(rust_observation), {})
-                if not feasibility:
-                    break
-                rejection, accepted_plan_steps = self._feasibility_rejection(feasibility)
-                if rejection is None:
-                    break
-                rejections[rejection] = rejections.get(rejection, 0) + 1
+                break
             else:
                 raise RuntimeError(
                     "augmented task feasibility exhausted after "
@@ -537,43 +545,57 @@ class VoxelEnv(RustGymnasiumEnv):
         self._apply_pending_route()
         self._sample_curriculum_waypoints()
         self._apply_scenario(seed)
+        if self._validation_config.get("enabled", False):
+            geometry_result = self._geometry_validation_result()
+            if not geometry_result.valid:
+                raise RuntimeError(
+                    "geometry validation failed: "
+                    f"{geometry_result.rejection_reason} at "
+                    f"{geometry_result.rejected_coordinate}"
+                )
+            feasibility_result = self._task_feasibility_result(
+                self._validation_config
+            )
+            if not feasibility_result.feasible:
+                raise RuntimeError(
+                    "task feasibility failed: "
+                    f"{feasibility_result.rejection_reason}"
+                )
+            self._last_feasibility_diagnostics = {
+                "enabled": True,
+                "attempts": 1,
+                "rejections": {},
+                "accepted_plan_steps": feasibility_result.path_length,
+            }
         return self._reset_task_state(super().reset(seed=seed, options=options))
 
-    def _feasibility_rejection(
-        self, config: dict[str, Any]
-    ) -> tuple[str | None, int | None]:
-        """Return the categorized reason that the installed task is infeasible."""
-        from theseo_anysearch.heuristic import PlannerBudgetExceeded, VoxelAStarOracle
+    def _geometry_validation_result(self):
+        from theseo_anysearch.environments.validation import validate_geometry
 
-        if self._active_start is None or self._active_goal is None:
-            return "missing_goal", None
-        try:
-            plan = VoxelAStarOracle(
-                self,
-                maximum_search_nodes=int(config["maximum_search_nodes"]),
-            ).plan()
-        except PlannerBudgetExceeded:
-            return "planner_budget_exhausted", None
-        except nx.NetworkXNoPath:
-            return "no_path", None
-        except nx.NodeNotFound:
-            return "invalid_endpoint", None
-        steps = len(plan.action_indices)
-        maximum_steps = int(self._config.get("max_steps", 200))
-        recovery_margin = int(config.get("recovery_margin_steps", 0))
-        if steps + recovery_margin > maximum_steps:
-            return "episode_budget_exceeded", steps
-        return None, steps
+        return validate_geometry(self._scenario_geometry, resolve_task_extent(self._config))
 
-    def _endpoint_feasibility_rejection(self) -> str | None:
-        """Validate selected endpoints before reset adds task marker blocks."""
-        if self._active_start is None or self._active_goal is None:
-            return "missing_goal"
-        if self._rust_env.world_occupied(self._active_start):
-            return "occupied_start"
-        if self._rust_env.world_occupied(self._active_goal):
-            return "occupied_goal"
-        return None
+    def _task_feasibility_result(self, config: dict[str, Any]):
+        from theseo_anysearch.environments.validation import (
+            BoundedWorldRead,
+            validate_task_feasibility,
+        )
+
+        action_mode = self._config.get("action_mode", "discrete_26")
+        directions = (
+            ACTION_OFFSETS_26
+            if action_mode == "vector_3"
+            else offsets_for_mode(action_mode)
+        )
+        return validate_task_feasibility(
+            BoundedWorldRead(self._rust_env.world_occupied),
+            start=self._active_start,
+            goal=self._active_goal,
+            extent=resolve_task_extent(self._config),
+            directions=directions,
+            maximum_search_nodes=int(config["maximum_search_nodes"]),
+            maximum_steps=int(self._config.get("max_steps", 200)),
+            recovery_margin_steps=int(config.get("recovery_margin_steps", 0)),
+        )
 
     def _apply_scenario(self, seed: int | None) -> None:
         """Invoke the configured reset hook and install its validated route."""

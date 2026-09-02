@@ -102,6 +102,18 @@ class MultiVoxelEnv(RustParallelEnv):
     ray_env_id = "MultiVoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        shared_validation = config.get("geometry_validation") or {}
+        pool_validation = (
+            (((config.get("geometry_pool") or {}).get("augmentation") or {}).get("feasibility"))
+            or {}
+        )
+        if shared_validation.get("enabled", False) or (
+            pool_validation and pool_validation.get("enabled", True)
+        ):
+            raise NotImplementedError(
+                "geometry task-feasibility validation currently supports only "
+                "single-agent VoxelEnv; joint multi-agent planning is not implemented"
+            )
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):

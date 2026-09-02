@@ -172,6 +172,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale_variants_per_map": self.geometry__scale_variants_per_map,
             "geometry_padding": self.geometry__padding,
             "geometry_pool": self.geometry__pool,
+            "geometry_validation": self.geometry.validation.model_dump(mode="json"),
             "compiled_world_path": (
                 str(self.geometry.compiled_world_path)
                 if self.geometry.compiled_world_path is not None
