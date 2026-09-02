@@ -47,6 +47,14 @@ from theseo_anysearch.worlds.residency import (
     WorldResidencySettings,
     stage_compiled_world,
 )
+from theseo_anysearch.worlds.transformations import (
+    SparseBox,
+    SparseBoxTransform,
+    SparseTransformedRead,
+    generate_box_transform,
+    measure_region_residency,
+    transformed_artifact_metadata,
+)
 
 __all__ = [
     "COORDINATE_TYPE",
@@ -55,6 +63,9 @@ __all__ = [
     "GeometryArtifactError",
     "GeometryArtifactManifest",
     "STORAGE_COORDINATE_CONVENTION",
+    "SparseBox",
+    "SparseBoxTransform",
+    "SparseTransformedRead",
     "WORLD_SCHEMA_VERSION",
     "BoxSource",
     "CandidateBudgetExceeded",
@@ -85,4 +96,7 @@ __all__ = [
     "validate_compiled_world",
     "world_contract",
     "world_contract_fingerprint",
+    "generate_box_transform",
+    "measure_region_residency",
+    "transformed_artifact_metadata",
 ]
