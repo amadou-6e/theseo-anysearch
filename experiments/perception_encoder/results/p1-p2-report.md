@@ -11,7 +11,7 @@ P2 records `P1_retained_no_bundles` without opening its training matrix.
 
 ## P1 result
 
-| Bundle | Mean pilot score | Effective-rank fraction | False-open rate | Rejection gates |
+| Bundle | Diagnostic mean pilot score | Effective-rank fraction | False-open rate | Rejection gates |
 |---|---:|---:|---:|---|
 | T0 occupancy | 0.4550 | 0.0188-0.0369 | 0.1536-0.2157 | rank, false-open |
 | T1 masked occupancy | 0.3714 | 0.1493-0.1876 | 0.1821-0.2386 | rank, false-open |
@@ -25,13 +25,53 @@ score but failed both safety gates, demonstrating why point score alone is not
 a valid selection criterion. T3 also failed embedding necessity and the
 three-component improvement requirement.
 
+## Protocol interpretation
+
+The P0 analytic normalization anchors are not measured baselines on this corpus,
+so the aggregate pilot scores in the table are published for audit only and are
+suppressed as selection or cross-bundle ranking evidence. The P1 `completed` status
+means that the locked execution matrix finished; it does not establish that the
+anchor-dependent comparison was well-conditioned.
+
+The eligibility result does not rely on those anchors. Every trained cell failed
+both `effective_rank_fraction >= 0.25` and `false_open_rate <= 0.05`, whose observed
+values are raw metrics. Correcting only the score anchors would therefore leave the
+recorded P1 eligibility result unchanged. A repair that changes the target, probe,
+or corpus requires a new run identity and may change the raw metrics; that choice is
+tracked in issue #322 rather than being made after seeing these results.
+
+This is a screen at the frozen 2,000-update pilot horizon, not evidence that any
+objective is incapable at the full Stage 2 budget. Short horizons can favor
+fast-starting objectives and miss delayed representation gains.
+
+## T3 training triage
+
+T3 passed the P0 micro-set overfit gate with a 99.155% loss reduction, so its P1
+result is not evidence that the objective implementation cannot optimize. All four
+P1 runs reached their lowest sampled loss at update 1,000 or 1,500 and then rebounded
+by the final checkpoint:
+
+| Learning rate | Seed | Lowest sampled loss (update) | Update-2,000 loss | Rebound |
+|---:|---:|---:|---:|---:|
+| 0.0001 | 0 | 0.014491 (1,000) | 0.064041 | 4.42x |
+| 0.0001 | 1 | 0.014189 (1,500) | 0.023604 | 1.66x |
+| 0.0003 | 0 | 0.004498 (1,500) | 0.020047 | 4.46x |
+| 0.0003 | 1 | 0.010693 (1,000) | 0.025740 | 2.41x |
+
+Combined with the poor effective rank and embedding-necessity result, this warrants
+triage of the EMA schedule, target normalization, late optimization stability, and
+shortcut or collapse behavior. It does not support rejecting latent-target
+pretraining as a general approach.
+
 ## Consequence
 
 P2 correctly emitted a blocked decision instead of selecting training mechanics
 from an ineligible bundle. Although P3 independently retained four architecture
 families on feasibility, P4 must not train them because the frozen sequence
-requires a valid P2 training bundle. P4 therefore terminates as
-`no_viable_direction`; starting it would be an unregistered protocol deviation.
+requires a valid P2 training bundle. P4 remains blocked with zero trials; starting
+it would be an unregistered protocol deviation. Issue #322 owns the deliberate
+choice between calibration repair and rerun, methodology revision, or accepting
+the null result and stopping the program.
 
 ## Reproducibility
 
