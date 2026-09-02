@@ -149,6 +149,14 @@ class MultiVoxelEnv(RustParallelEnv):
 
         if config.get("compiled_world_path") is not None:
             geometry = []
+        elif config.get("geometry_sources"):
+            from theseo_anysearch.environments.geometry_sources import (
+                resolve_geometry_sources,
+            )
+
+            geometry = resolve_geometry_sources(
+                config, grid_size=grid_size, load_stl=_load_stl_geometry
+            )
         elif config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
             padding = int(config.get("geometry_padding", 2))

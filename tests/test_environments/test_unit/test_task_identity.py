@@ -52,6 +52,23 @@ def test_geometry_identity_ignores_source_path_and_iteration_order(tmp_path: Pat
     )
 
 
+def test_composed_source_content_changes_geometry_identity(tmp_path: Path) -> None:
+    first = tmp_path.joinpath("first.stl")
+    second = tmp_path.joinpath("second.stl")
+    first.write_bytes(b"first geometry")
+    second.write_bytes(b"second geometry")
+    base = {"geometry_sources": [{"type": "stl", "path": str(first)}]}
+    changed_stl = {"geometry_sources": [{"type": "stl", "path": str(second)}]}
+    changed_box = {
+        "geometry_sources": [
+            {"type": "boxes", "boxes": [[1, 1, 1, 2, 2, 2]]}
+        ]
+    }
+
+    assert configured_geometry_identity(base) != configured_geometry_identity(changed_stl)
+    assert configured_geometry_identity(base) != configured_geometry_identity(changed_box)
+
+
 @pytest.mark.parametrize(
     "change",
     [

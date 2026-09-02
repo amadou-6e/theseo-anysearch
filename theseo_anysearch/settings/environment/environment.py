@@ -159,6 +159,9 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                     }
                 )
         return {
+            "geometry_sources": [
+                source.model_dump(mode="json") for source in self.geometry.sources
+            ],
             "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
                 [str(path) for path in self.geometry__stl_paths] if self.geometry__stl_paths else None

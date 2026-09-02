@@ -189,6 +189,14 @@ class VoxelEnv(RustGymnasiumEnv):
             # The immutable base is attached from the pack below. Never expand
             # its source boxes/STL back into Python coordinate tuples.
             geometry = []
+        elif config.get("geometry_sources"):
+            from theseo_anysearch.environments.geometry_sources import (
+                resolve_geometry_sources,
+            )
+
+            geometry = resolve_geometry_sources(
+                config, grid_size=grid_size, load_stl=_load_stl_geometry
+            )
         elif config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
             padding = int(config.get("geometry_padding", 2))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -41,6 +43,87 @@ def test_legacy_flattened_environment_remains_loadable() -> None:
     assert configured.geometry.grid_size == 8
     assert configured.observation.mode == "radial"
     assert configured.rewards.goal_reward == 2.0
+
+
+def test_legacy_sources_translate_to_canonical_proposal() -> None:
+    boxes = EnvConfig(geometry={"boxes": [[1, 1, 1, 2, 2, 2]]})
+    stl = EnvConfig(geometry={"stl_path": "mesh.stl", "scale": 2.0, "padding": 3})
+
+    assert boxes.to_runtime_dict()["geometry_sources"] == [
+        {"type": "boxes", "boxes": [[1, 1, 1, 2, 2, 2]]}
+    ]
+    assert stl.to_runtime_dict()["geometry_sources"] == [
+        {"type": "stl", "path": "mesh.stl", "scale": 2.0, "padding": 3}
+    ]
+    assert GeometryConfig.model_validate(stl.geometry.model_dump()) == stl.geometry
+
+
+def test_explicit_box_and_stl_sources_compose_in_order() -> None:
+    configured = EnvConfig(
+        geometry={
+            "sources": [
+                {"type": "stl", "path": "mesh.stl"},
+                {"type": "boxes", "boxes": [[1, 1, 1, 1, 1, 1]]},
+            ]
+        }
+    )
+
+    assert [item["type"] for item in configured.to_runtime_dict()["geometry_sources"]] == [
+        "stl",
+        "boxes",
+    ]
+
+
+def test_explicit_and_legacy_sources_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="sources cannot be combined"):
+        GeometryConfig(
+            sources=[{"type": "boxes", "boxes": [[1, 1, 1, 1, 1, 1]]}],
+            stl_path="mesh.stl",
+        )
+
+
+def test_ambiguous_legacy_source_precedence_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="ambiguous precedence"):
+        GeometryConfig(
+            stl_path="mesh.stl",
+            boxes=[[1, 1, 1, 1, 1, 1]],
+        )
+
+
+def test_compiled_world_transformations_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="compiled-world transformations are deferred"):
+        GeometryConfig(
+            compiled_world_path="world",
+            sources=[{"type": "boxes", "boxes": [[1, 1, 1, 1, 1, 1]]}],
+        )
+
+
+def test_stl_paths_remains_preprocessing_only() -> None:
+    configured = EnvConfig(geometry={"stl_paths": ["one.stl", "two.stl"]})
+
+    assert configured.to_runtime_dict()["geometry_sources"] == []
+    assert configured.to_runtime_dict()["stl_paths"] == ["one.stl", "two.stl"]
+
+
+def test_composed_sources_reach_the_live_environment() -> None:
+    configured = EnvConfig(
+        agent_count=1,
+        geometry={
+            "grid_size": 8,
+            "sources": [
+                {"type": "stl", "path": "mesh.stl"},
+                {"type": "boxes", "boxes": [[3, 3, 3, 3, 3, 3]]},
+            ],
+        },
+    )
+    with patch(
+        "theseo_anysearch.environments.pettingzoo.multi_voxel_env._load_stl_geometry",
+        return_value=[(2, 2, 2)],
+    ):
+        env = VoxelEnv(configured.to_runtime_dict())
+
+    assert {(2, 2, 2), (3, 3, 3)} <= set(env._rust_env.filled_voxels())
+    env.close()
 
 
 def test_non_cubic_extent_is_preserved_for_regional_world_pipeline() -> None:

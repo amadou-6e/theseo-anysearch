@@ -91,6 +91,34 @@ artifacts. They do not alter curriculum advancement.
 
 Legacy fields such as `env.stl_path`, `env.grid_size`, and `env.geometry_pool` remain loadable during migration. Do not combine them with `env.geometry` in the same configuration.
 
+## Composing small-world geometry
+
+New small in-memory worlds should use ordered typed sources. Sources use set-union
+semantics; duplicate occupied voxels are emitted once and subtraction is not
+supported in this first version.
+
+```yaml
+env:
+  geometry:
+    grid_size: 64
+    sources:
+      - type: stl
+        path: assets/room.stl
+        scale: 1.0
+        padding: 2
+      - type: boxes
+        boxes:
+          - [20, 20, 1, 24, 24, 12]
+```
+
+Legacy `stl_path` and `boxes` remain supported and are translated into this
+canonical proposal. Mixing legacy source fields with `sources` is rejected.
+`stl_paths` remains reserved for preprocessing/pool creation and does not become
+a runtime source. Compiled worlds cannot yet be transformed or combined with
+small-world sources; use a separately compiled artifact instead. Legacy source
+fields are deprecated in documentation now, will warn in a later release, and
+will only be removed in a separately announced breaking release.
+
 ## Large finite and non-cubic worlds
 
 Use `extent` when the world axes differ. Task coordinates stay one-based and
