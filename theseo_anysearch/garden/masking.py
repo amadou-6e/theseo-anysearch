@@ -72,7 +72,10 @@ def sample_patch_mask(
     if not torch.all(occupied.flatten(1).any(dim=1)):
         raise ValueError("every masked observation must contain an occupied target cell")
 
-    generator = torch.Generator(device=occupancy.device).manual_seed(seed)
+    # Draw scalar candidate indices on the CPU so a fixed seed selects the same
+    # patches on CPU and CUDA. The selected index is converted to a Python int
+    # before indexing the device-local candidate tensor.
+    generator = torch.Generator(device="cpu").manual_seed(seed)
     hidden = torch.zeros_like(valid)
     counts = {"boundary_frontier": 0, "ordinary_free": 0, "unknown": 0}
     schedule = ("boundary_frontier",) * 5 + ("ordinary_free",) * 3 + ("unknown",) * 2
