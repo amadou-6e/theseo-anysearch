@@ -36,6 +36,8 @@ from theseo_anysearch.worlds.manifest import (
 )
 from theseo_anysearch.worlds.residency import (
     WorldResidencySettings,
+    has_compiled_world_episode_source,
+    resolve_worker_world,
     stage_compiled_world,
 )
 
@@ -61,6 +63,8 @@ __all__ = [
     "WorldPackCorruptError",
     "WorldPackUnavailableError",
     "WorldResidencySettings",
+    "has_compiled_world_episode_source",
+    "resolve_worker_world",
     "benchmark_encodings",
     "compile_pool",
     "compile_world",
