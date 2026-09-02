@@ -1,9 +1,32 @@
 """Geometry source and voxelization settings."""
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class BoxGeometrySource(BaseModel):
+    """One or more inclusive axis-aligned boxes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["boxes"] = "boxes"
+    boxes: tuple[tuple[int, int, int, int, int, int], ...]
+
+
+class StlGeometrySource(BaseModel):
+    """An STL voxelized into a small in-memory world."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["stl"] = "stl"
+    path: Path
+    scale: float = 1.0
+    padding: int = Field(default=2, ge=0)
+
+
+GeometrySource = Annotated[
+    Union[BoxGeometrySource, StlGeometrySource], Field(discriminator="type")
+]
 
 
 class GeometryValidationConfig(BaseModel):
@@ -74,6 +97,9 @@ class GeometryConfig(BaseModel):
     """Geometry source and voxelization settings."""
 
     model_config = ConfigDict(extra="forbid")
+    sources: tuple[GeometrySource, ...] = Field(
+        default=(), description="Ordered small-world sources combined by voxel union."
+    )
     stl_path: Path | None = Field(None, description="Single STL geometry source.")
     stl_paths: list[Path] | None = Field(None, description="STL sources sampled by the environment.")
     scale: float = Field(1.0, description="Scale applied while voxelizing an STL.")
@@ -116,6 +142,49 @@ class GeometryConfig(BaseModel):
         """Reject ambiguous bounds while preserving legacy cubic settings."""
 
         if isinstance(value, dict):
+            data = dict(value)
+            explicit_sources = data.get("sources")
+            legacy_sources = [
+                name for name in ("stl_path", "boxes") if data.get(name)
+            ]
+            if explicit_sources and legacy_sources:
+                raise ValueError(
+                    "geometry.sources cannot be combined with legacy source fields: "
+                    + ", ".join(legacy_sources)
+                )
+            if len(legacy_sources) > 1:
+                raise ValueError(
+                    "legacy geometry sources have ambiguous precedence: "
+                    + ", ".join(legacy_sources)
+                    + "; use ordered geometry.sources to compose them"
+                )
+            if explicit_sources and (data.get("pool") or data.get("scale_range")):
+                raise ValueError(
+                    "geometry.sources cannot be combined with runtime pool or "
+                    "scale_range settings"
+                )
+            if data.get("compiled_world_path") is not None and (
+                explicit_sources or legacy_sources or data.get("pool")
+            ):
+                raise ValueError(
+                    "compiled worlds cannot be combined with small-world geometry sources; "
+                    "compiled-world transformations are deferred"
+                )
+            if not explicit_sources:
+                translated = []
+                if data.get("stl_path"):
+                    translated.append(
+                        {
+                            "type": "stl",
+                            "path": data["stl_path"],
+                            "scale": data.get("scale", 1.0),
+                            "padding": data.get("padding", 2),
+                        }
+                    )
+                if data.get("boxes"):
+                    translated.append({"type": "boxes", "boxes": data["boxes"]})
+                data["sources"] = translated
+            value = data
             pool = value.get("pool")
             feasibility = (
                 ((pool or {}).get("augmentation") or {}).get("feasibility")
