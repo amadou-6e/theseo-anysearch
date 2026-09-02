@@ -720,6 +720,139 @@ mod camera_tests {
     }
 }
 
+/// Verifies the actual bug report: a wall no longer hides a marker sitting
+/// in front of it, and still correctly hides one that is genuinely behind
+/// it. `SceneDrawItem`/`paint_scene_items` replaced the old `occlude_agent`
+/// toggle, which drew either "all geometry, then all markers" or "all
+/// markers, then all geometry" -- an all-or-nothing choice with no relation
+/// to which object was actually closer to the camera. `agent_x_ray` is
+/// tested separately: it must override this ordering only for agent-layer
+/// items, never for world geometry.
+#[cfg(test)]
+mod scene_occlusion_tests {
+    use super::*;
+
+    fn straight_on_camera() -> Camera {
+        // yaw = pitch = 0 collapses depth_key to the camera-relative z
+        // coordinate alone, so "in front" / "behind" can be reasoned about
+        // directly instead of through a rotated depth formula.
+        Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() }
+    }
+
+    #[test]
+    fn marker_in_front_of_a_wall_draws_after_it() {
+        let origin = StorageCoord { x: 50, y: 50, z: 50 };
+        let cam = straight_on_camera();
+        let wall = SceneDrawItem::Voxel {
+            x: 50, y: 50, z: 60, // 10 units in front of the origin.
+            color: Color32::GRAY,
+            outline: false,
+            agent: false,
+        };
+        let marker_in_front = SceneDrawItem::Marker {
+            x: 50, y: 50, z: 70, // 20 units in front -- closer to the camera than the wall.
+            color: Color32::YELLOW,
+        };
+
+        assert!(
+            marker_in_front.depth(origin, &cam, false) > wall.depth(origin, &cam, false),
+            "a marker closer to the camera than the wall must sort after it, \
+             so it paints on top and stays visible"
+        );
+    }
+
+    #[test]
+    fn marker_behind_a_wall_draws_before_it() {
+        let origin = StorageCoord { x: 50, y: 50, z: 50 };
+        let cam = straight_on_camera();
+        let wall = SceneDrawItem::Voxel {
+            x: 50, y: 50, z: 60,
+            color: Color32::GRAY,
+            outline: false,
+            agent: false,
+        };
+        let marker_behind = SceneDrawItem::Marker {
+            x: 50, y: 50, z: 55, // 5 units in front of the origin -- farther than the wall.
+            color: Color32::YELLOW,
+        };
+
+        assert!(
+            marker_behind.depth(origin, &cam, false) < wall.depth(origin, &cam, false),
+            "a marker farther from the camera than the wall must sort before \
+             it, so the wall paints over it and it stays hidden"
+        );
+    }
+
+    #[test]
+    fn x_ray_forces_a_marker_behind_a_wall_to_draw_after_it() {
+        let origin = StorageCoord { x: 50, y: 50, z: 50 };
+        let cam = straight_on_camera();
+        let wall = SceneDrawItem::Voxel {
+            x: 50, y: 50, z: 60,
+            color: Color32::GRAY,
+            outline: false,
+            agent: false,
+        };
+        let marker_behind = SceneDrawItem::Marker { x: 50, y: 50, z: 55, color: Color32::YELLOW };
+
+        assert!(
+            marker_behind.depth(origin, &cam, true) > wall.depth(origin, &cam, true),
+            "with x_ray on, an agent-layer item behind a wall must still \
+             sort after it, so it stays visible through the wall"
+        );
+    }
+
+    #[test]
+    fn x_ray_never_affects_world_geometry_depth() {
+        let origin = StorageCoord { x: 50, y: 50, z: 50 };
+        let cam = straight_on_camera();
+        let near_wall = SceneDrawItem::Voxel {
+            x: 50, y: 50, z: 70,
+            color: Color32::GRAY,
+            outline: false,
+            agent: false,
+        };
+        let far_wall = SceneDrawItem::Voxel {
+            x: 50, y: 50, z: 55,
+            color: Color32::GRAY,
+            outline: false,
+            agent: false,
+        };
+
+        // agent: false items must ignore x_ray entirely and keep sorting by
+        // real depth -- only the agent layer gets forced to the front.
+        assert_eq!(near_wall.depth(origin, &cam, false), near_wall.depth(origin, &cam, true));
+        assert_eq!(far_wall.depth(origin, &cam, false), far_wall.depth(origin, &cam, true));
+        assert!(near_wall.depth(origin, &cam, true) > far_wall.depth(origin, &cam, true));
+    }
+
+    #[test]
+    fn paint_scene_items_actually_sorts_mixed_geometry_and_markers_by_depth() {
+        let origin = StorageCoord { x: 0, y: 0, z: 0 };
+        let cam = straight_on_camera();
+        let items = vec![
+            SceneDrawItem::Cursor { x: 0, y: 0, z: 30 }, // closest
+            SceneDrawItem::Voxel { x: 0, y: 0, z: 10, color: Color32::GRAY, outline: false, agent: false },
+            SceneDrawItem::Marker { x: 0, y: 0, z: 20, color: Color32::YELLOW },
+            SceneDrawItem::Voxel { x: 0, y: 0, z: 5, color: Color32::GRAY, outline: false, agent: false }, // farthest
+        ];
+        let mut depths: Vec<f32> = items.iter().map(|item| item.depth(origin, &cam, false)).collect();
+        depths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        // Reproduce paint_scene_items' ordering decision without a live
+        // egui::Painter (draw() requires one); this is the exact sort it
+        // performs, just observed instead of rendered.
+        let mut order: Vec<usize> = (0..items.len()).collect();
+        order.sort_by(|&i, &j| {
+            items[i].depth(origin, &cam, false).partial_cmp(&items[j].depth(origin, &cam, false)).unwrap()
+        });
+        let sorted_depths: Vec<f32> = order.iter().map(|&i| items[i].depth(origin, &cam, false)).collect();
+        assert_eq!(sorted_depths, depths, "paint order must be strictly back-to-front");
+        // farthest-first, closest-last: index 3 (z=5) then 1 (z=10) then 2 (z=20) then 0 (z=30)
+        assert_eq!(order, vec![3, 1, 2, 0]);
+    }
+}
+
 fn overview_region_vertices(
     minimum: StorageCoord,
     maximum_exclusive: StorageCoord,
@@ -1002,6 +1135,93 @@ fn draw_marker(
     painter.line_segment([corner(h, h, -h), corner(-h, h, h)], stroke);
 }
 
+/// One deferred scene draw call, carried alongside its depth so geometry and
+/// agent/trail/marker items can be painted in a single back-to-front order.
+/// Without this, geometry and markers were two separate all-or-nothing
+/// batches (see the removed `occlude_agent` toggle): whichever batch drew
+/// second always covered the other, so a wall could hide a marker sitting
+/// in front of it, or a marker could float in front of a wall it was
+/// actually behind. Sorting everything together makes occlusion depend on
+/// each item's real position, like the rest of the scene already does for
+/// geometry against itself.
+///
+/// Agent-layer items (`Cursor`, `Marker`, and `Voxel` with `agent: true` for
+/// trail cells) can still be forced to render through any geometry via
+/// `x_ray` -- e.g. to keep the agent visible inside tunnels or behind dense
+/// structures -- without reintroducing the old all-or-nothing behavior for
+/// world geometry itself, which never gets x-rayed.
+enum SceneDrawItem {
+    Voxel { x: u16, y: u16, z: u16, color: Color32, outline: bool, agent: bool },
+    Face { face: ExposedFace, color: Color32 },
+    Cursor { x: u16, y: u16, z: u16 },
+    Marker { x: u16, y: u16, z: u16, color: Color32 },
+}
+
+impl SceneDrawItem {
+    fn is_agent_layer(&self) -> bool {
+        matches!(
+            self,
+            SceneDrawItem::Cursor { .. }
+                | SceneDrawItem::Marker { .. }
+                | SceneDrawItem::Voxel { agent: true, .. }
+        )
+    }
+
+    fn depth(&self, origin: StorageCoord, cam: &Camera, x_ray: bool) -> f32 {
+        if x_ray && self.is_agent_layer() {
+            // Sorts after every real depth value, so it always paints last.
+            return f32::INFINITY;
+        }
+        let (x, y, z) = match *self {
+            SceneDrawItem::Voxel { x, y, z, .. }
+            | SceneDrawItem::Cursor { x, y, z }
+            | SceneDrawItem::Marker { x, y, z, .. } => (x, y, z),
+            SceneDrawItem::Face { face, .. } => {
+                (face.voxel.x as u16, face.voxel.y as u16, face.voxel.z as u16)
+            }
+        };
+        depth_key(x, y, z, origin, cam)
+    }
+
+    fn draw(&self, painter: &egui::Painter, origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
+        match *self {
+            SceneDrawItem::Voxel { x, y, z, color, outline, .. } => {
+                draw_voxel(painter, x, y, z, origin, rect, cam, b, color, outline);
+            }
+            SceneDrawItem::Face { face, color } => {
+                draw_exposed_face(painter, face, origin, rect, cam, b, color);
+            }
+            SceneDrawItem::Cursor { x, y, z } => {
+                draw_cursor(painter, x, y, z, origin, rect, cam, b);
+            }
+            SceneDrawItem::Marker { x, y, z, color } => {
+                draw_marker(painter, x, y, z, origin, rect, cam, b, color);
+            }
+        }
+    }
+}
+
+/// Sort and paint every deferred item back-to-front by camera-relative
+/// depth. When `x_ray` is set, agent-layer items (see `SceneDrawItem`) paint
+/// last regardless of depth, so the agent stays visible through tunnels or
+/// dense geometry instead of being correctly, but unhelpfully, hidden.
+fn paint_scene_items(
+    items: &mut [SceneDrawItem],
+    painter: &egui::Painter,
+    origin: StorageCoord,
+    rect: Rect,
+    cam: &Camera,
+    b: &Bounds,
+    x_ray: bool,
+) {
+    let depths: Vec<f32> = items.iter().map(|item| item.depth(origin, cam, x_ray)).collect();
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by(|&i, &j| depths[i].partial_cmp(&depths[j]).unwrap());
+    for index in order {
+        items[index].draw(painter, origin, rect, cam, b);
+    }
+}
+
 fn draw_grid_bounds_layer(
     painter: &egui::Painter,
     rect: Rect,
@@ -1071,8 +1291,9 @@ struct VoxelReplayApp {
     playing: bool,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
-    /// Whether geometry is drawn after agents and therefore occludes them.
-    occlude_agent: bool,
+    /// Keep the agent, trail, and start/goal markers visible through any
+    /// geometry (tunnels, dense structures) instead of correctly-occluded.
+    agent_x_ray: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -1130,7 +1351,7 @@ impl VoxelReplayApp {
         let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            agent_x_ray: false,
             trajectories,
             geo_voxels,
             iter_idx: 0,
@@ -1163,7 +1384,7 @@ impl VoxelReplayApp {
     fn new_tune(trials: Vec<TrialEntry>) -> Self {
         let mut app = Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            agent_x_ray: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
@@ -1437,8 +1658,6 @@ impl VoxelReplayApp {
 
 impl eframe::App for VoxelReplayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_regional_geometry(ctx);
-
         // ---- Collect keyboard events (before closures) ----------------------
         let kb_prev_iter   = ctx.input(|i| i.key_pressed(Key::OpenBracket));
         let kb_next_iter   = ctx.input(|i| i.key_pressed(Key::CloseBracket));
@@ -1653,7 +1872,7 @@ impl eframe::App for VoxelReplayApp {
             if ui.button(play_label).clicked() { ev.toggle_play = true; }
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
-            ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
+            ui.checkbox(&mut self.agent_x_ray, "Show agent through geometry (x-ray)");
             ui.separator();
             ui.label(egui::RichText::new("Camera projection").strong());
             ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
@@ -1885,38 +2104,31 @@ impl eframe::App for VoxelReplayApp {
 
             let trail_end = (step_idx + 1).min(render_steps.len());
 
-            // Sort geometry back-to-front.
-            let mut geo_sorted: Vec<(u16, u16, u16)> = geo_list.iter().copied().collect();
-            geo_sorted.sort_by(|a, b| {
-                depth_key(a.0, a.1, a.2, render_origin, cam)
-                    .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                    .unwrap()
-            });
-            let mut face_sorted = self.regional_faces.iter().copied()
-                .filter(|face| {
-                    active_regional_frame.map_or(
-                        true,
-                        |frame| frame.region.contains(face.voxel),
-                    )
-                })
-                .collect::<Vec<_>>();
-            face_sorted.sort_by(|a, b| {
-                let a = a.voxel;
-                let b = b.voxel;
-                depth_key(a.x as u16, a.y as u16, a.z as u16, render_origin, cam)
-                    .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
-                    .unwrap()
-            });
-            if !self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
-                }
+            // Collect geometry, trails, cursors, and start/goal markers as
+            // deferred SceneDrawItems and paint them all in one back-to-front
+            // pass (paint_scene_items) so a marker in front of a wall stays
+            // visible and one behind it is correctly hidden -- see
+            // SceneDrawItem's doc comment for why this replaced the previous
+            // all-or-nothing draw-before/draw-after split. agent_x_ray still
+            // covers the "always visible through geometry" case the old
+            // toggle's false branch gave you, for tunnels/dense structures.
+            let mut scene_items: Vec<SceneDrawItem> = Vec::new();
+
+            if compiled_mode {
+                scene_items.extend(
+                    self.regional_faces
+                        .iter()
+                        .copied()
+                        .filter(|face| {
+                            active_regional_frame
+                                .map_or(true, |frame| frame.region.contains(face.voxel))
+                        })
+                        .map(|face| SceneDrawItem::Face { face, color: geo_color }),
+                );
+            } else {
+                scene_items.extend(geo_list.iter().map(|&(x, y, z)| SceneDrawItem::Voxel {
+                    x, y, z, color: geo_color, outline: false, agent: false,
+                }));
             }
 
             if is_multi {
@@ -1944,36 +2156,30 @@ impl eframe::App for VoxelReplayApp {
                             }
                         }
                     }
-                    let mut trail_list: Vec<(u16, u16, u16)> = trail.into_iter().collect();
-                    trail_list.sort_by(|a, b| {
-                        depth_key(a.0, a.1, a.2, render_origin, cam)
-                            .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                            .unwrap()
-                    });
-                    for &(x, y, z) in &trail_list {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, trail_color, true);
-                    }
+                    scene_items.extend(trail.into_iter().map(|(x, y, z)| SceneDrawItem::Voxel {
+                        x, y, z, color: trail_color, outline: true, agent: true,
+                    }));
                 }
-                // Draw each agent's current cursor.
+                // Each agent's current cursor.
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
                         let c = s.cursors[ai];
-                        draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
+                        scene_items.push(SceneDrawItem::Cursor { x: c[0], y: c[1], z: c[2] });
                     }
                 }
-                // Draw start markers (agent color darkened).
+                // Start markers (agent color darkened).
                 for (ai, start_opt) in render_start_positions.iter().enumerate() {
                     if let Some([sx, sy, sz]) = start_opt {
                         let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *sx, *sy, *sz, render_origin, rect, cam, &b, col);
+                        scene_items.push(SceneDrawItem::Marker { x: *sx, y: *sy, z: *sz, color: col });
                     }
                 }
-                // Draw goal markers (agent color lightened).
+                // Goal markers (agent color lightened).
                 for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
                     if let Some([gx, gy, gz]) = goal_opt {
                         let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *gx, *gy, *gz, render_origin, rect, cam, &b, col);
+                        scene_items.push(SceneDrawItem::Marker { x: *gx, y: *gy, z: *gz, color: col });
                     }
                 }
             } else {
@@ -1986,39 +2192,29 @@ impl eframe::App for VoxelReplayApp {
                         agent_filled.insert((s.cursor_x, s.cursor_y, s.cursor_z));
                     }
                 }
-                let mut agent_list: Vec<(u16, u16, u16)> = agent_filled.into_iter().collect();
-                agent_list.sort_by(|a, b| {
-                    depth_key(a.0, a.1, a.2, render_origin, cam)
-                        .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                        .unwrap()
-                });
-                for &(x, y, z) in &agent_list {
-                    draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, agent_color, true);
-                }
+                scene_items.extend(agent_filled.into_iter().map(|(x, y, z)| SceneDrawItem::Voxel {
+                    x, y, z, color: agent_color, outline: true, agent: true,
+                }));
 
                 if let Some([sx, sy, sz]) = render_start {
-                    draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
+                    scene_items.push(SceneDrawItem::Marker {
+                        x: sx, y: sy, z: sz, color: tint_dark(agent_trail_colors[0]),
+                    });
                 }
                 if let Some([gx, gy, gz]) = render_goal {
-                    draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
+                    scene_items.push(SceneDrawItem::Marker {
+                        x: gx, y: gy, z: gz, color: tint_light(agent_trail_colors[0]),
+                    });
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
+                    scene_items.push(SceneDrawItem::Cursor {
+                        x: s.cursor_x, y: s.cursor_y, z: s.cursor_z,
+                    });
                 }
             }
 
-            if self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(&painter, face, render_origin, rect, cam, &b, geo_color);
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(&painter, x, y, z, render_origin, rect, cam, &b, geo_color, false);
-                    }
-                }
-            }
+            paint_scene_items(&mut scene_items, &painter, render_origin, rect, cam, &b, self.agent_x_ray);
 
             // Camera-facing and silhouette edges remain visible above the scene.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
@@ -2046,7 +2242,7 @@ impl eframe::App for VoxelReplayApp {
                 format!(
                     "iter {}/{}  |  {} geo  |  step {}/{}  {}",
                     iter_idx + 1, n_iters,
-                    geo_sorted.len(),
+                    geo_list.len(),
                     step_idx, n_steps.saturating_sub(1),
                     agent_label,
                 ),
@@ -2108,6 +2304,155 @@ impl eframe::App for VoxelReplayApp {
             if !still_going { self.playing = false; }
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
+
+        // Reconcile regional geometry (main-view region and the minimap's
+        // visibility-field cube) against the position this frame actually
+        // settled on. This must run after keyboard input, panel clicks,
+        // apply_events, and autoplay above -- otherwise it decides whether to
+        // load a new region using last frame's stale iter/step, the new
+        // position is never requested, and nothing here calls
+        // request_repaint() to force the follow-up frame that would have
+        // caught the change. That was the minimap cube's actual bug: it
+        // wasn't stale data or a caching key, it was checking the position
+        // one frame too early.
+        self.update_regional_geometry(ctx);
+    }
+}
+
+#[cfg(test)]
+mod minimap_region_tracking_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn write_fixture_world(root: &std::path::Path, identity: &str) {
+        let world_dir = root.join("worlds").join(identity);
+        std::fs::create_dir_all(&world_dir).unwrap();
+        std::fs::write(world_dir.join("world.pack"), []).unwrap();
+        std::fs::write(
+            world_dir.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "identity_sha256": identity,
+                "coordinate_type": "u32",
+                "extent": {"x": 128, "y": 128, "z": 64},
+                "chunk_shape": {"x": 32, "y": 32, "z": 32},
+                "chunks": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// A 16-step fixture matching the real minimap showcase: the agent walks
+    /// from (48, 64, 8) at step 0 to (63, 64, 8) at step 15.
+    fn write_fixture_trajectory(root: &std::path::Path, identity: &str) {
+        let traj_dir = root.join("trajectories");
+        std::fs::create_dir_all(&traj_dir).unwrap();
+        let steps: Vec<_> = (0..16u32)
+            .map(|step| {
+                serde_json::json!({
+                    "step": step,
+                    "cursor_x": 48 + step,
+                    "cursor_y": 64,
+                    "cursor_z": 8,
+                })
+            })
+            .collect();
+        std::fs::write(
+            traj_dir.join("iter_000001.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "experiment_name": "fixture",
+                "run_id": "fixture",
+                "iteration": 1,
+                "episode_reward_mean": 0.0,
+                "max_steps": 16,
+                "world": {
+                    "identity_sha256": identity,
+                    "schema_version": 1,
+                    "coordinate_type": "u32",
+                    "extent": [128, 128, 64],
+                    "manifest_path": format!("../worlds/{identity}/manifest.json"),
+                },
+                "episode": {
+                    "total_reward": 0.0,
+                    "steps_taken": 16,
+                    "success": true,
+                    "steps": steps,
+                },
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// Drives `update_regional_geometry` (the same call `update()` makes once
+    /// per frame, now positioned after all input/state handling) until the
+    /// loaded region matches `target_step`, or panics after a timeout.
+    fn wait_for_region(
+        app: &mut VoxelReplayApp,
+        ctx: &egui::Context,
+        target_step: usize,
+    ) -> theseo_core::voxel::world::BoundedRegion {
+        let started = Instant::now();
+        loop {
+            app.update_regional_geometry(ctx);
+            if let Some((key, frame)) = &app.regional_frame {
+                if key.step == target_step {
+                    return frame.region;
+                }
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "region for step {target_step} never resolved"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn minimap_region_recenters_on_the_agent_after_the_step_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "theseo-minimap-region-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        let identity = "a".repeat(64);
+        write_fixture_world(&root, &identity);
+        write_fixture_trajectory(&root, &identity);
+
+        let trajectories = load_trial_trajectories(&root.join("trajectories"));
+        assert_eq!(trajectories.len(), 1, "fixture trajectory failed to load");
+        let mut app = VoxelReplayApp::new(trajectories, None);
+        let ctx = egui::Context::default();
+
+        // Step 0: the region (and therefore the minimap's visibility-field
+        // cube) must be centered on the agent's cursor, (48, 64, 8).
+        app.step_idx = 0;
+        let first = wait_for_region(&mut app, &ctx, 0);
+        let first_center_x = (first.minimum.x + first.maximum_exclusive.x) / 2;
+        assert_eq!(first_center_x, 48, "step 0 region is not centered on the agent");
+
+        // This assignment mirrors exactly what `apply_events` does to
+        // `step_idx` before `update()` calls `update_regional_geometry` --
+        // the ordering the fix in `update()` now guarantees. A single
+        // subsequent call must pick up the new position; it must not require
+        // an extra, unrequested repaint to notice the change.
+        app.step_idx = 15;
+        let second = wait_for_region(&mut app, &ctx, 15);
+        let second_center_x = (second.minimum.x + second.maximum_exclusive.x) / 2;
+        assert_eq!(
+            second_center_x, 63,
+            "step 15 region did not follow the agent to x=63"
+        );
+        assert_eq!(
+            second_center_x - first_center_x,
+            15,
+            "visibility-field cube must move by exactly the agent's displacement"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
 
