@@ -20,10 +20,14 @@ from theseo_anysearch.heuristic.models import (
 from theseo_anysearch.worlds.extent import contains_task_coordinate, resolve_extent
 
 
+class PlannerBudgetExceeded(RuntimeError):
+    """Raised when a bounded heuristic search exceeds its node budget."""
+
+
 class BaseVoxelHeuristic(ABC):
     """Provide environment translation, graph construction, and plan replay."""
 
-    def __init__(self, env: VoxelEnv) -> None:
+    def __init__(self, env: VoxelEnv, *, maximum_search_nodes: int | None = None) -> None:
         self.env = env
         self.extent = resolve_extent(env._config)
         self.grid_size = max(self.extent)
@@ -43,6 +47,7 @@ class BaseVoxelHeuristic(ABC):
         }
         self._last_search_nodes = 0
         self._last_search_edges = 0
+        self.maximum_search_nodes = maximum_search_nodes
 
     def plan(self) -> VoxelOraclePlan:
         """Build a plan from the environment's current state."""
@@ -152,6 +157,15 @@ class BaseVoxelHeuristic(ABC):
             if current in closed:
                 continue
             closed.add(current)
+            if (
+                self.maximum_search_nodes is not None
+                and len(closed) > self.maximum_search_nodes
+            ):
+                self._last_search_nodes = len(closed)
+                self._last_search_edges = edges
+                raise PlannerBudgetExceeded(
+                    f"A* exceeded its {self.maximum_search_nodes}-node search budget"
+                )
             if current == goal:
                 break
             for dx, dy, dz in self.directions:
@@ -195,4 +209,4 @@ class BaseVoxelHeuristic(ABC):
         return int(x), int(y), int(z)
 
 
-__all__ = ["BaseVoxelHeuristic"]
+__all__ = ["BaseVoxelHeuristic", "PlannerBudgetExceeded"]

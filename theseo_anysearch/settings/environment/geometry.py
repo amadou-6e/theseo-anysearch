@@ -47,6 +47,27 @@ class GeometryConfig(BaseModel):
     def resolve_extent_shorthand(cls, value: Any) -> Any:
         """Reject ambiguous bounds while preserving legacy cubic settings."""
 
+        if isinstance(value, dict):
+            pool = value.get("pool")
+            feasibility = (
+                ((pool or {}).get("augmentation") or {}).get("feasibility")
+                if isinstance(pool, dict)
+                else None
+            )
+            if feasibility is not None:
+                if not isinstance(feasibility, dict):
+                    raise ValueError("geometry.pool.augmentation.feasibility must be an object")
+                if feasibility.get("enabled", True):
+                    for key in ("maximum_attempts", "maximum_search_nodes"):
+                        if int(feasibility.get(key, 0)) < 1:
+                            raise ValueError(
+                                f"geometry.pool.augmentation.feasibility.{key} must be positive"
+                            )
+                    if int(feasibility.get("recovery_margin_steps", 0)) < 0:
+                        raise ValueError(
+                            "geometry.pool.augmentation.feasibility.recovery_margin_steps "
+                            "must be non-negative"
+                        )
         if not isinstance(value, dict) or value.get("extent") is None:
             return value
         data = dict(value)
