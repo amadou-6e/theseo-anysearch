@@ -162,6 +162,19 @@ def test_explicit_reset_seed_replays_the_same_sampling_sequence(tmp_path):
     assert second_info["geometry_feasibility"] == first_info["geometry_feasibility"]
 
 
+def test_curriculum_selected_segment_is_validated_after_selection(tmp_path):
+    grid = np.zeros((5, 5, 5), dtype=np.uint8)
+    grid[3, 2, 2] = 1
+    env = VoxelEnv(_config(_pool(tmp_path, [grid])))
+    env.set_waypoint_curriculum(
+        [((2, 3, 3), (4, 3, 3))],
+        [1.0],
+    )
+
+    with pytest.raises(RuntimeError, match="occupied_goal"):
+        env.reset(seed=11)
+
+
 def test_disabled_gate_preserves_impossible_geometry(tmp_path):
     grid = np.zeros((5, 5, 5), dtype=np.uint8)
     grid[1, 1, 1] = 1

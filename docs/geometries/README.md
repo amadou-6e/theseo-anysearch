@@ -57,6 +57,11 @@ back to an unaugmented or easier geometry. Reset info reports the attempt
 count, categorized rejection counts, and accepted shortest-path length under
 `geometry_feasibility`.
 
+Validation runs after waypoint-curriculum sampling, so the active curriculum
+segment is checked against the final augmented geometry. For multi-waypoint
+routes, this gate covers the active segment; whole-route feasibility is a
+separate concern.
+
 Legacy fields such as `env.stl_path`, `env.grid_size`, and `env.geometry_pool` remain loadable during migration. Do not combine them with `env.geometry` in the same configuration.
 
 ## Large finite and non-cubic worlds
