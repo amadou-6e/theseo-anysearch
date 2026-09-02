@@ -12,10 +12,11 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
+from theseo_anysearch.environment_rules.models import EnvironmentRuleMetadata
 from theseo_anysearch.environment_rules.registry import (
     built_in_environment_rule_registry,
 )
@@ -28,6 +29,8 @@ CAP_PREDICATE = 8
 CAP_OUTCOME = 16
 CAP_SCENARIO = 32
 METRIC_BUFFER_SIZE = 65536
+RULE_METADATA_BUFFER_SIZE = 65536
+RULE_METADATA_SCHEMA_VERSION = 1
 
 
 def _native_json_safe(value: Any) -> Any:
@@ -60,8 +63,35 @@ class NativeExtensionManifest(BaseModel):
     predicates: tuple[str, ...] = ()
     outcomes: tuple[str, ...] = ()
     scenarios: tuple[str, ...] = ()
+    rule_metadata_schema_version: Literal[1] = RULE_METADATA_SCHEMA_VERSION
+    rule_metadata: tuple[EnvironmentRuleMetadata, ...] = ()
     platform: str
     machine: str
+
+    @model_validator(mode="after")
+    def validate_rule_metadata(self) -> "NativeExtensionManifest":
+        """Keep structured metadata aligned with the manifest's exported names."""
+        if not self.rule_metadata:
+            return self
+        keys = [rule.key for rule in self.rule_metadata]
+        if len(keys) != len(set(keys)):
+            raise ValueError("native manifest contains duplicate rule metadata")
+        if any(rule.source != "native" for rule in self.rule_metadata):
+            raise ValueError("native manifest rule metadata must use source='native'")
+        expected = {
+            *(("reward", name) for name in self.rewards),
+            *(("predicate", name) for name in self.predicates),
+            *(("outcome", name) for name in self.outcomes),
+            *(("scenario", name) for name in self.scenarios),
+        }
+        for kind in ("training_metrics", "evaluation_metrics"):
+            if kind in self.capabilities:
+                expected.add((kind, kind))
+        if set(keys) != expected:
+            raise ValueError(
+                "native manifest rule metadata does not match exported rule names"
+            )
+        return self
 
 
 def _extension_sdk_dir() -> Path:
@@ -69,6 +99,17 @@ def _extension_sdk_dir() -> Path:
     if not sdk.joinpath("Cargo.toml").is_file():
         raise NativeExtensionError(f"Bundled Rust extension SDK is missing: {sdk}")
     return sdk
+
+
+def _environment_rule_contract_dir() -> Path:
+    contract = Path(__file__).resolve().parent.parent.joinpath(
+        "environment_rule_contract"
+    )
+    if not contract.joinpath("Cargo.toml").is_file():
+        raise NativeExtensionError(
+            f"Bundled environment rule contract is missing: {contract}"
+        )
+    return contract
 
 
 def _cargo_command(command: str, cargo_manifest: Path, *arguments: str) -> list[str]:
@@ -87,7 +128,11 @@ def _cargo_command(command: str, cargo_manifest: Path, *arguments: str) -> list[
 
 def _source_digest(extension_dir: Path) -> str:
     digest = hashlib.sha256()
-    roots = (("extension", extension_dir), ("sdk", _extension_sdk_dir()))
+    roots = (
+        ("extension", extension_dir),
+        ("sdk", _extension_sdk_dir()),
+        ("rule_contract", _environment_rule_contract_dir()),
+    )
     for label, root in roots:
         files = sorted(
             path for path in root.rglob("*")
@@ -305,11 +350,28 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
         raise NativeExtensionError(
             f"Missing native scenario exports: {sorted(missing_scenarios)}"
         )
+    metadata_rules = [
+        probe.rule_metadata(kind, name)
+        for kind, names in (
+            ("reward", rewards),
+            ("predicate", predicates),
+            ("outcome", outcomes),
+            ("scenario", scenarios),
+        )
+        for name in names
+    ]
+    for kind in ("training_metrics", "evaluation_metrics"):
+        if kind in capabilities:
+            metadata_rules.append(
+                EnvironmentRuleMetadata(name=kind, kind=kind, source="native")
+            )
+    rule_metadata = tuple(sorted(metadata_rules, key=lambda rule: rule.key))
     manifest = NativeExtensionManifest(
         abi_version=ABI_VERSION, source_sha256=source_sha,
         binary_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
         library=relative, capabilities=capabilities, rewards=rewards,
         predicates=predicates, outcomes=outcomes, scenarios=scenarios,
+        rule_metadata=rule_metadata,
         platform=sys.platform, machine=platform.machine(),
     )
     stable_content = manifest.model_dump_json(indent=2)
@@ -423,6 +485,43 @@ class NativeExtension:
         return hasattr(self._library, f"anysearch_scenario_{name}_v2") or hasattr(
             self._library, f"anysearch_scenario_{name}_v1"
         )
+
+    def rule_metadata(self, kind: str, name: str) -> EnvironmentRuleMetadata:
+        """Read SDK-generated metadata, falling back for pre-metadata binaries."""
+        if not kind.isidentifier() or not name.isidentifier():
+            raise NativeExtensionError(f"Invalid native rule identity {kind}:{name}")
+        symbol = f"anysearch_rule_metadata_{kind}_{name}_v1"
+        function = getattr(self._library, symbol, None)
+        if function is None:
+            return EnvironmentRuleMetadata(name=name, kind=kind, source="native")
+        function.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        function.restype = ctypes.c_int32
+        output = ctypes.create_string_buffer(RULE_METADATA_BUFFER_SIZE)
+        length = ctypes.c_size_t()
+        status = int(function(output, len(output), ctypes.byref(length)))
+        if status != 0 or length.value > len(output):
+            raise NativeExtensionError(
+                f"Native rule metadata {kind}:{name} failed with status {status}"
+            )
+        try:
+            raw = json.loads(output.raw[: length.value])
+            metadata = EnvironmentRuleMetadata.model_validate(
+                {**raw, "source": "native"}
+            )
+        except (TypeError, ValueError) as exc:
+            raise NativeExtensionError(
+                f"Native rule metadata {kind}:{name} is invalid: {exc}"
+            ) from exc
+        if metadata.key != (kind, name):
+            raise NativeExtensionError(
+                f"Native metadata symbol {symbol} describes "
+                f"{metadata.kind}:{metadata.name}"
+            )
+        return metadata
 
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":

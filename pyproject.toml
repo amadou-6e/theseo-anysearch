@@ -45,6 +45,9 @@ include = ["theseo_anysearch*"]
 
 [tool.setuptools.package-data]
 theseo_anysearch = [
+  "environment_rule_contract/Cargo.toml",
+  "environment_rule_contract/Cargo.lock",
+  "environment_rule_contract/src/*.rs",
   "extension_sdk/Cargo.toml",
   "extension_sdk/Cargo.lock",
   "extension_sdk/src/*.rs",
