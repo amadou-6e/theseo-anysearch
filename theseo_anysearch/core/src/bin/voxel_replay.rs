@@ -1060,6 +1060,13 @@ fn draw_exposed_face(
 
 fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
                origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
+    let yellow = Color32::from_rgb(255, 230, 0);
+
+    // Filled, shaded cube first -- matches draw_marker's treatment of start
+    // and goal so the agent's own position doesn't stand out *less* than
+    // the markers around it. The wireframe below adds the emphasis outline.
+    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, yellow, true);
+
     let (x, y, z) = camera_relative(
         StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
         origin,
@@ -1067,7 +1074,6 @@ fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
     let h = 0.5_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
-    let yellow = Color32::from_rgb(255, 230, 0);
     let stroke = Stroke::new(1.5, yellow);
 
     let top: Vec<Pos2> = vec![
