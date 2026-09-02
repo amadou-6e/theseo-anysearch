@@ -1678,7 +1678,9 @@ impl VoxelReplayApp {
         if !self.play_advance() {
             self.playing = false;
             self.next_play_advance_at = None;
-            return None;
+            // The controls were drawn before autoplay updated the state, so
+            // repaint once to replace the stale "Pause" label with replay.
+            return Some(Duration::ZERO);
         }
         self.next_play_advance_at = None;
         Some(Duration::ZERO)
@@ -2572,6 +2574,25 @@ mod autoplay_timing_tests {
             Some(loaded_at + PLAYBACK_STEP_INTERVAL)
         );
         assert_eq!(app.step_idx, 0);
+    }
+
+    #[test]
+    fn stopping_at_the_final_step_requests_a_controls_repaint() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.step_idx = 3;
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(
+            app.update_autoplay(started + PLAYBACK_STEP_INTERVAL, true),
+            Some(Duration::ZERO)
+        );
+        assert!(!app.playing);
+        assert_eq!(app.next_play_advance_at, None);
     }
 }
 
