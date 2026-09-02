@@ -290,7 +290,10 @@ def _make_banks(
                 )
                 embeddings.append(coordinate_output.global_embedding.cpu())
 
-                pair_observation = make_pilot_observation(descriptor, 5, radius=radius)
+                pair_observation_index = 5 + 10 * (index % 3)
+                pair_observation = make_pilot_observation(
+                    descriptor, pair_observation_index, radius=radius
+                )
                 pair_output = _encode(
                     encoder,
                     pair_observation.occupancy,
