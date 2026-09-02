@@ -545,6 +545,7 @@ def evaluate_frozen_representation(
     seed: int,
     device: torch.device,
     final: bool,
+    include_controls: bool | None = None,
 ) -> dict[str, object]:
     """Fit fixed probes and return aggregate plus bootstrap-ready geometry rows."""
 
@@ -566,7 +567,12 @@ def evaluate_frozen_representation(
         device=device,
     )
     updates = protocol.final_updates if final else protocol.intermediate_updates
-    modes = ("real", "control_target", "zero", "shuffle") if final else ("real",)
+    include_controls = final if include_controls is None else include_controls
+    modes = (
+        ("real", "control_target", "zero", "shuffle")
+        if include_controls
+        else ("real",)
+    )
     evaluations: dict[str, dict[str, object]] = {}
     for mode_index, mode in enumerate(modes):
         coordinate_train = _transform_bank(train_coordinate, mode, seed=seed + mode_index)
@@ -603,7 +609,7 @@ def evaluate_frozen_representation(
     collapse = collapse_diagnostics(dev_coordinate.embeddings.numpy())
     real_score = float(evaluations["real"]["pilot_score"])
     controls = None
-    if final:
+    if include_controls:
         control_score = float(evaluations["control_target"]["pilot_score"])
         zero_score = float(evaluations["zero"]["pilot_score"])
         shuffle_score = float(evaluations["shuffle"]["pilot_score"])
