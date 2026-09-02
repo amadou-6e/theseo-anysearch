@@ -13,6 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
@@ -36,6 +37,8 @@ use theseo_core::voxel::world::{
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const PLAYBACK_STEP_INTERVAL: Duration = Duration::from_millis(120);
+const REGIONAL_LOAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
 fn chunk_intersects_region(
     chunk: ChunkCoord,
@@ -414,6 +417,14 @@ struct PendingRegion {
     receiver: Receiver<Result<LoadedRegion, String>>,
 }
 
+fn regional_playback_ready(
+    current: Option<RegionRequestKey>,
+    loaded: Option<RegionRequestKey>,
+    load_failed: bool,
+) -> bool {
+    load_failed || current.is_none() || current == loaded
+}
+
 fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
     let mut resolved = HashMap::new();
     for replay_step in steps.iter().take(step.saturating_add(1)) {
@@ -484,12 +495,23 @@ fn render_position(
 #[cfg(test)]
 mod regional_view_alignment_tests {
     use super::{
-        agent_region, agent_view_render_origin, camera_relative, task_position_to_storage, Camera,
+        agent_region, agent_view_render_origin, camera_relative, regional_playback_ready,
+        task_position_to_storage, Camera, RegionRequestKey,
     };
     use theseo_core::replay::overview::OverviewMesh;
     use theseo_core::voxel::world::{StorageCoord, WorldExtent};
 
     const EXTENT: [u32; 3] = [128, 96, 64];
+
+    fn region_key(step: usize) -> RegionRequestKey {
+        RegionRequestKey {
+            iteration: 0,
+            step,
+            center: StorageCoord { x: 8, y: 9, z: 10 },
+            radius: 16,
+            camera_revision: 0,
+        }
+    }
 
     #[test]
     fn task_positions_drive_storage_culling_and_an_agent_centered_view() {
@@ -557,6 +579,25 @@ mod regional_view_alignment_tests {
             - (overview_voxel.y - overview_agent.y) * overview_scale)
             .abs()
             < 1e-4);
+    }
+
+    #[test]
+    fn playback_waits_for_the_current_regional_frame_after_replay_wraps() {
+        let final_frame = region_key(11);
+        let replay_start = region_key(0);
+
+        assert!(!regional_playback_ready(
+            Some(replay_start),
+            Some(final_frame),
+            false,
+        ));
+        assert!(regional_playback_ready(
+            Some(replay_start),
+            Some(replay_start),
+            false,
+        ));
+        assert!(regional_playback_ready(None, None, false));
+        assert!(regional_playback_ready(Some(replay_start), None, true));
     }
 }
 
@@ -1267,6 +1308,9 @@ struct VoxelReplayApp {
     step_idx: usize,
     /// Whether auto-play is running (advances steps, then iterations).
     playing: bool,
+    /// Earliest time autoplay may advance again. This gates incidental
+    /// repaints as well as the repaint explicitly scheduled by playback.
+    next_play_advance_at: Option<Instant>,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
     /// Whether geometry is drawn after agents and therefore occludes them.
@@ -1335,6 +1379,7 @@ impl VoxelReplayApp {
             iter_idx: 0,
             step_idx: 0,
             playing: false,
+            next_play_advance_at: None,
             tune_trials: Vec::new(),
             current_trial: 0,
             explain_ui,
@@ -1369,6 +1414,7 @@ impl VoxelReplayApp {
             iter_idx: 0,
             step_idx: 0,
             playing: false,
+            next_play_advance_at: None,
             tune_trials: trials,
             current_trial: 0,
             explain_ui: None,
@@ -1402,6 +1448,7 @@ impl VoxelReplayApp {
         self.iter_idx = 0;
         self.step_idx = 0;
         self.playing = false;
+        self.next_play_advance_at = None;
 
         let traj_dir = self.tune_trials[idx].trajectory_dir.clone();
         let trajs = load_trial_trajectories(&traj_dir);
@@ -1610,6 +1657,33 @@ impl VoxelReplayApp {
         }
     }
 
+    /// Advance playback only after the current step has been presented for
+    /// the configured interval, and return when the UI should repaint next.
+    fn update_autoplay(&mut self, now: Instant, regional_ready: bool) -> Option<Duration> {
+        if !self.playing {
+            return None;
+        }
+        if !regional_ready {
+            self.next_play_advance_at = None;
+            return Some(REGIONAL_LOAD_POLL_INTERVAL);
+        }
+        let Some(deadline) = self.next_play_advance_at else {
+            self.next_play_advance_at = Some(now + PLAYBACK_STEP_INTERVAL);
+            return Some(PLAYBACK_STEP_INTERVAL);
+        };
+        if now < deadline {
+            return Some(deadline.duration_since(now));
+        }
+
+        if !self.play_advance() {
+            self.playing = false;
+            self.next_play_advance_at = None;
+            return None;
+        }
+        self.next_play_advance_at = None;
+        Some(Duration::ZERO)
+    }
+
     fn apply_events(&mut self, ev: UiEvents) {
         // Iteration navigation (always resets step to 0)
         if ev.first_iter { self.iter_idx = 0; self.step_idx = 0; self.playing = false; }
@@ -1635,6 +1709,10 @@ impl VoxelReplayApp {
                 self.iter_idx = 0;
                 self.step_idx = 0;
             }
+            self.next_play_advance_at = None;
+        }
+        if !self.playing {
+            self.next_play_advance_at = None;
         }
     }
 }
@@ -2403,12 +2481,97 @@ impl eframe::App for VoxelReplayApp {
             self.camera = Camera::default();
         }
 
-        // ---- Auto-play: advance one step per frame --------------------------
+        // ---- Auto-play: advance one step per presentation interval ---------
         if self.playing {
-            let still_going = self.play_advance();
-            if !still_going { self.playing = false; }
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+            let current_region = self.current_region_key();
+            let loaded_region = self.regional_frame.as_ref().map(|(key, _)| *key);
+            let ready = regional_playback_ready(
+                current_region,
+                loaded_region,
+                self.regional_error.is_some(),
+            );
+            // request_repaint_after schedules a future frame but does not
+            // throttle frames caused by input, regional loading, or the OS.
+            // The explicit deadline prevents those repaints from skipping
+            // over steps and starts only once the regional view is ready.
+            if let Some(delay) = self.update_autoplay(Instant::now(), ready) {
+                ctx.request_repaint_after(delay);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod autoplay_timing_tests {
+    use super::*;
+
+    fn trajectory_with_steps(count: usize) -> TrajectoryData {
+        serde_json::from_value(serde_json::json!({
+            "experiment_name": "autoplay-fixture",
+            "run_id": "fixture",
+            "iteration": 0,
+            "episode_reward_mean": 0.0,
+            "max_steps": count,
+            "episode": {
+                "total_reward": 0.0,
+                "steps_taken": count,
+                "success": false,
+                "steps": (0..count)
+                    .map(|step| serde_json::json!({"step": step}))
+                    .collect::<Vec<_>>()
+            }
+        }))
+        .expect("fixture trajectory should deserialize")
+    }
+
+    #[test]
+    fn incidental_repaints_do_not_advance_before_the_step_deadline() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(app.step_idx, 0);
+
+        let early = started + Duration::from_millis(40);
+        assert_eq!(
+            app.update_autoplay(early, true),
+            Some(Duration::from_millis(80))
+        );
+        assert_eq!(app.step_idx, 0, "an early repaint must hold the current step");
+
+        assert_eq!(
+            app.update_autoplay(started + PLAYBACK_STEP_INTERVAL, true),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(app.step_idx, 1);
+    }
+
+    #[test]
+    fn playback_interval_starts_after_the_regional_view_is_ready() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, false),
+            Some(REGIONAL_LOAD_POLL_INTERVAL)
+        );
+        assert_eq!(app.next_play_advance_at, None);
+
+        let loaded_at = started + Duration::from_secs(2);
+        assert_eq!(
+            app.update_autoplay(loaded_at, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(
+            app.next_play_advance_at,
+            Some(loaded_at + PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(app.step_idx, 0);
     }
 }
 
