@@ -14,8 +14,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -31,6 +32,106 @@ from theseo_anysearch.garden.data_config import (
 )
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PilotObservationArtifact:
+    """Geometry-identified observation rows stored as one immutable artifact."""
+
+    grids: np.ndarray
+    geometry_ids: tuple[str, ...]
+    observation_ids: tuple[str, ...]
+    identity_sha256: str
+
+
+def pilot_observation_sha256(
+    grids: np.ndarray, geometry_ids: Sequence[str], observation_ids: Sequence[str]
+) -> str:
+    """Hash observation bytes together with their geometry and row identities."""
+
+    array = np.ascontiguousarray(grids)
+    if array.ndim != 4 or len(set(array.shape[1:])) != 1:
+        raise ValueError("pilot observations must have shape (N, D, H, W) with cubic rows")
+    if len(array) != len(geometry_ids) or len(array) != len(observation_ids):
+        raise ValueError("observation rows and identities must have equal lengths")
+    if len(set(observation_ids)) != len(observation_ids):
+        raise ValueError("pilot observation IDs must be unique")
+    header = {
+        "shape": list(array.shape),
+        "dtype": array.dtype.str,
+        "geometry_ids": list(geometry_ids),
+        "observation_ids": list(observation_ids),
+    }
+    digest = hashlib.sha256(
+        json.dumps(header, sort_keys=True, separators=(",", ":")).encode("ascii")
+    )
+    digest.update(array.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def save_pilot_observations(
+    path: Path,
+    grids: np.ndarray,
+    geometry_ids: Sequence[str],
+    observation_ids: Sequence[str],
+) -> str:
+    """Write one content-addressed pilot observation artifact without replacement."""
+
+    path = Path(path)
+    if path.suffix.lower() != ".npz":
+        raise ValueError("pilot observation artifacts must use .npz")
+    identity = pilot_observation_sha256(grids, geometry_ids, observation_ids)
+    if path.exists():
+        existing = load_pilot_observations(path)
+        if existing.identity_sha256 != identity:
+            raise FileExistsError(f"refusing to replace frozen pilot observations: {path}")
+        return identity
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".npz.tmp")
+    with temporary.open("wb") as stream:
+        np.savez_compressed(
+            stream,
+            observations=np.asarray(grids),
+            geometry_ids=np.asarray(geometry_ids, dtype=str),
+            observation_ids=np.asarray(observation_ids, dtype=str),
+        )
+    temporary.replace(path)
+    manifest = {
+        "schema_version": 1,
+        "identity_sha256": identity,
+        "rows": len(grids),
+        "shape": list(np.asarray(grids).shape),
+        "dtype": np.asarray(grids).dtype.str,
+    }
+    path.with_suffix(".json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return identity
+
+
+def load_pilot_observations(path: Path) -> PilotObservationArtifact:
+    """Load an immutable observation artifact and verify its content identity."""
+
+    path = Path(path)
+    manifest_path = path.with_suffix(".json")
+    if not path.exists() or not manifest_path.exists():
+        raise FileNotFoundError(f"pilot observation artifact is incomplete: {path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if set(manifest) != {"schema_version", "identity_sha256", "rows", "shape", "dtype"}:
+        raise ValueError("invalid pilot observation manifest")
+    with np.load(path, allow_pickle=False) as stored:
+        grids = stored["observations"]
+        geometry_ids = tuple(str(value) for value in stored["geometry_ids"].tolist())
+        observation_ids = tuple(str(value) for value in stored["observation_ids"].tolist())
+    identity = pilot_observation_sha256(grids, geometry_ids, observation_ids)
+    if manifest["schema_version"] != 1 or manifest["identity_sha256"] != identity:
+        raise ValueError("pilot observation artifact failed identity verification")
+    if manifest["rows"] != len(grids) or manifest["shape"] != list(grids.shape):
+        raise ValueError("pilot observation manifest shape does not match stored rows")
+    if manifest["dtype"] != grids.dtype.str:
+        raise ValueError("pilot observation manifest dtype does not match stored rows")
+    return PilotObservationArtifact(grids, geometry_ids, observation_ids, identity)
 
 
 # ---------------------------------------------------------------------------
