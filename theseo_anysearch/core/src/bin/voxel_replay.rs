@@ -1294,6 +1294,13 @@ struct VoxelReplayApp {
     /// Keep the agent, trail, and start/goal markers visible through any
     /// geometry (tunnels, dense structures) instead of correctly-occluded.
     agent_x_ray: bool,
+    /// Render compiled-world geometry as cached flat exposed-surface quads
+    /// instead of individual per-voxel cubes. Off by default: adjacent
+    /// occupied voxels sharing a face otherwise appear as one seamless flat
+    /// tile with no cube depth. Opt-in for performance-sensitive scenes with
+    /// large contiguous surfaces, where the per-voxel cost is worth trading
+    /// away.
+    surface_mesh: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -1352,6 +1359,7 @@ impl VoxelReplayApp {
         Self {
             camera: Camera::default(),
             agent_x_ray: false,
+            surface_mesh: false,
             trajectories,
             geo_voxels,
             iter_idx: 0,
@@ -1385,6 +1393,7 @@ impl VoxelReplayApp {
         let mut app = Self {
             camera: Camera::default(),
             agent_x_ray: false,
+            surface_mesh: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
@@ -1873,6 +1882,9 @@ impl eframe::App for VoxelReplayApp {
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
             ui.checkbox(&mut self.agent_x_ray, "Show agent through geometry (x-ray)");
+            if self.trajectories[iter_idx].world.is_some() {
+                ui.checkbox(&mut self.surface_mesh, "Use flat surface mesh (compiled worlds)");
+            }
             ui.separator();
             ui.label(egui::RichText::new("Camera projection").strong());
             ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
@@ -2114,7 +2126,7 @@ impl eframe::App for VoxelReplayApp {
             // toggle's false branch gave you, for tunnels/dense structures.
             let mut scene_items: Vec<SceneDrawItem> = Vec::new();
 
-            if compiled_mode {
+            if compiled_mode && self.surface_mesh {
                 scene_items.extend(
                     self.regional_faces
                         .iter()
@@ -2126,6 +2138,11 @@ impl eframe::App for VoxelReplayApp {
                         .map(|face| SceneDrawItem::Face { face, color: geo_color }),
                 );
             } else {
+                // geo_list already holds the resolved occupied voxels for
+                // both compiled and legacy trajectories (see its
+                // definition above) -- per-voxel cubes are the default so
+                // adjacent occupied voxels keep their cube depth instead of
+                // merging into one flat tile, matching #258/#259.
                 scene_items.extend(geo_list.iter().map(|&(x, y, z)| SceneDrawItem::Voxel {
                     x, y, z, color: geo_color, outline: false, agent: false,
                 }));
