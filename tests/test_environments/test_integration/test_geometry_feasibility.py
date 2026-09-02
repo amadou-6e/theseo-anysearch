@@ -140,12 +140,10 @@ def test_bounded_resampling_is_deterministic_and_reports_rejections(tmp_path):
     first = run_once()
     second = run_once()
     assert first == second
-    assert first[0] == {
-        "enabled": True,
-        "attempts": 2,
-        "rejections": {"occupied_start": 1},
-        "accepted_plan_steps": 2,
-    }
+    assert first[0]["enabled"] is True
+    assert first[0]["attempts"] == 2
+    assert first[0]["rejections"] == {"occupied_start": 1}
+    assert first[0]["accepted_plan_steps"] == 2
 
 
 def test_explicit_reset_seed_replays_the_same_sampling_sequence(tmp_path):

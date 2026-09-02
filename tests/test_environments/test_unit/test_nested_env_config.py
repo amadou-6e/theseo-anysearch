@@ -97,6 +97,9 @@ def test_shared_geometry_validation_is_translated_to_runtime() -> None:
         "maximum_attempts": 7,
         "maximum_search_nodes": 1234,
         "recovery_margin_steps": 5,
+        "clearance_radius": None,
+        "difficulty_bands": [],
+        "accepted_difficulty_bands": [],
     }
 
 def test_nested_field_access_mixin_is_reusable() -> None:

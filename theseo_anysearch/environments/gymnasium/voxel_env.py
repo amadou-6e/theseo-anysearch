@@ -526,6 +526,12 @@ class VoxelEnv(RustGymnasiumEnv):
                     "attempts": attempt,
                     "rejections": rejections,
                     "accepted_plan_steps": accepted_plan_steps,
+                    "routing_difficulty": (
+                        feasibility_result.difficulty.model_dump(mode="json")
+                        if feasibility_result.difficulty is not None
+                        else None
+                    ),
+                    "difficulty_band": feasibility_result.difficulty_band,
                 }
             self._reset_count += 1
             return self._reset_task_state(reset_result)
@@ -566,6 +572,12 @@ class VoxelEnv(RustGymnasiumEnv):
                 "attempts": 1,
                 "rejections": {},
                 "accepted_plan_steps": feasibility_result.path_length,
+                "routing_difficulty": (
+                    feasibility_result.difficulty.model_dump(mode="json")
+                    if feasibility_result.difficulty is not None
+                    else None
+                ),
+                "difficulty_band": feasibility_result.difficulty_band,
             }
         return self._reset_task_state(super().reset(seed=seed, options=options))
 
@@ -579,6 +591,7 @@ class VoxelEnv(RustGymnasiumEnv):
             BoundedWorldRead,
             validate_task_feasibility,
         )
+        from theseo_anysearch.settings.environment.geometry import RoutingDifficultyBand
 
         action_mode = self._config.get("action_mode", "discrete_26")
         directions = (
@@ -592,9 +605,18 @@ class VoxelEnv(RustGymnasiumEnv):
             goal=self._active_goal,
             extent=resolve_task_extent(self._config),
             directions=directions,
+            action_mode=action_mode,
             maximum_search_nodes=int(config["maximum_search_nodes"]),
             maximum_steps=int(self._config.get("max_steps", 200)),
             recovery_margin_steps=int(config.get("recovery_margin_steps", 0)),
+            clearance_radius=config.get("clearance_radius"),
+            difficulty_bands=tuple(
+                RoutingDifficultyBand.model_validate(item)
+                for item in config.get("difficulty_bands", ())
+            ),
+            accepted_difficulty_bands=tuple(
+                config.get("accepted_difficulty_bands", ())
+            ),
         )
 
     def _apply_scenario(self, seed: int | None) -> None:
