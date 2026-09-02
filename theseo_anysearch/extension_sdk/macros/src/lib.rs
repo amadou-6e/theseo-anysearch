@@ -144,3 +144,33 @@ pub fn anysearch_scenario_v2(arguments: TokenStream, item: TokenStream) -> Token
         }
     }.into()
 }
+
+#[proc_macro_attribute]
+pub fn anysearch_geometry_v1(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    if !arguments.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "anysearch_geometry_v1 does not accept arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let function = parse_macro_input!(item as ItemFn);
+    let function_name = &function.sig.ident;
+    let export_name = format_ident!("anysearch_geometry_{}_v1", function_name);
+    quote! {
+        #function
+        #[doc(hidden)]
+        #[no_mangle]
+        pub unsafe extern "C" fn #export_name(
+            context: *const ::anysearch_extension::GeometryContextV1Raw,
+            output: *mut u8,
+            output_capacity: usize,
+            required_length: *mut usize,
+        ) -> ::anysearch_extension::GeometryStatusV1 {
+            ::anysearch_extension::export_geometry_v1(
+                context, output, output_capacity, required_length, #function_name
+            )
+        }
+    }.into()
+}

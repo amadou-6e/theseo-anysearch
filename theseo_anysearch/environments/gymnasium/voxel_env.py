@@ -151,7 +151,25 @@ class VoxelEnv(RustGymnasiumEnv):
         name = config.get("geometry_provider")
         if not name:
             return None
-        from theseo_anysearch.experiments.custom_geometry import load_geometry_provider
+        from theseo_anysearch.experiments.custom_geometry import (
+            load_geometry_provider,
+            load_native_geometry_provider,
+        )
+
+        native_manifest_path = config.get("native_extension_manifest")
+        if native_manifest_path:
+            from theseo_anysearch.experiments.native_extensions import NativeExtensionManifest
+
+            manifest_path = Path(native_manifest_path)
+            manifest = NativeExtensionManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            library_path = manifest_path.parent.joinpath(manifest.library).resolve()
+            import ctypes
+
+            library = ctypes.CDLL(str(library_path))
+            if hasattr(library, f"anysearch_geometry_{name}_v1"):
+                return load_native_geometry_provider(library_path, name)
 
         source = config.get("geometry_module_path")
         provider = load_geometry_provider(Path(source) if source else None, name)
@@ -654,7 +672,20 @@ class VoxelEnv(RustGymnasiumEnv):
             parameters=dict(self._config.get("geometry_provider_parameters") or {}),
             world=RuntimeGeometryWorld(self._rust_env, self._extent),
         )
-        proposal = self._geometry_provider.generate(context)
+        if self._geometry_provider.native_abi == 1:
+            generated = self._rust_env.generate_native_geometry_v1(
+                str(self._geometry_provider.source_path),
+                self._geometry_provider.name,
+                reset_seed,
+                1,
+                json.dumps(context.parameters, sort_keys=True),
+                context.task.model_dump_json(),
+            )
+            from theseo_anysearch.experiments.custom_geometry import GeometryProposal
+
+            proposal = GeometryProposal.model_validate_json(generated)
+        else:
+            proposal = self._geometry_provider.generate(context)
         source_config = {
             "geometry_sources": [item.model_dump(mode="json") for item in proposal.sources]
         }
