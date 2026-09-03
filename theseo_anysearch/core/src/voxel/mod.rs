@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod common;
 pub mod environment;
+pub mod geometries;
 pub mod metrics;
 pub mod outcomes;
 pub mod predicates;

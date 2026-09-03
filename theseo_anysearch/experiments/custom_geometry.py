@@ -73,6 +73,7 @@ class GeometryProvider(BaseModel):
     source_path: Path
     source_sha256: str
     generate: GeometryFunction = Field(exclude=True)
+    native_abi: int | None = None
 
 
 class RuntimeGeometryWorld:
@@ -169,6 +170,23 @@ def load_geometry_provider(
     )
 
 
+def load_native_geometry_provider(
+    library_path: Path, provider_name: str
+) -> GeometryProvider:
+    """Describe a native provider; invocation stays in Rust to scope callbacks."""
+    if not provider_name.isidentifier():
+        raise CustomGeometryError(f"invalid native geometry provider name {provider_name!r}")
+    return GeometryProvider(
+        name=provider_name,
+        source_path=library_path,
+        source_sha256=hashlib.sha256(library_path.read_bytes()).hexdigest(),
+        generate=lambda context: (_ for _ in ()).throw(
+            CustomGeometryError("native geometry providers must be invoked by the environment")
+        ),
+        native_abi=1,
+    )
+
+
 def proposal_identity(provider: GeometryProvider, context: GeometryContext, proposal: GeometryProposal) -> str:
     payload = {
         "provider": provider.name,
@@ -199,8 +217,25 @@ def preflight_geometry_provider(geometry: Any, env: Any, config_path: Path | Non
         return None
     source = discover_geometry_source(config_path, selector.name)
     if source is None:
+        from theseo_anysearch.experiments.native_extensions import (
+            NativeExtensionManifest,
+            discover_native_manifest,
+        )
+
+        manifest_path = discover_native_manifest(config_path)
+        if manifest_path is not None:
+            manifest = NativeExtensionManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            if selector.name in manifest.geometries:
+                return load_native_geometry_provider(
+                    manifest_path.parent.joinpath(manifest.library).resolve(),
+                    selector.name,
+                )
         expected = config_path.with_name("geometry.py") if config_path else Path("geometry.py")
-        raise CustomGeometryError(f"geometry provider {selector.name!r} requires {expected}")
+        raise CustomGeometryError(
+            f"geometry provider {selector.name!r} requires {expected} or a compiled native export"
+        )
     provider = load_geometry_provider(source, selector.name)
     assert provider is not None
     extent = tuple(geometry.extent or (geometry.grid_size,) * 3)
