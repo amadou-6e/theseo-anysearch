@@ -1,0 +1,6 @@
+run_id: voxel-encoder-pilot-v2r1-p0d-1
+issue: 335
+integration_base_sha: 74e3d4dc74ff8ea3d24ec959338e3be29570e211
+spec_commit: 0c9e3c633799f5d42b7a603e0845cac0bd494cda
+p0c_report_path: experiments/perception_encoder/results/v2r1_p0c/p0c-report.json
+p0c_report_payload_sha256: 2564db175a1880cf81da40bd5a32e472f9b3db81bce111283fe48c74d409697b
