@@ -293,8 +293,8 @@ def _write_trial_extension_sources(
     metric_source_contents: dict[str, str] | None,
     reward_source_content: str | None,
     scenario_source_content: str | None,
-    geometry_source_content: str | None,
-    generation_source_content: str | None,
+    geometry_source_content: str | None = None,
+    generation_source_content: str | None = None,
 ) -> None:
     """Materialize Python extension sources before env runners are created."""
     for filename, source in (metric_source_contents or {}).items():
