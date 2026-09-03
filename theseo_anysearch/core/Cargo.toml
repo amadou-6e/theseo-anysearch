@@ -1,0 +1,54 @@
+[package]
+name = "theseo-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "theseo_core"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "theseo-viewer"
+path = "src/main.rs"
+
+[[bin]]
+name = "voxel-replay"
+path = "src/bin/voxel_replay.rs"
+
+[[bin]]
+name = "garden-show-data"
+path = "src/bin/garden_show_data.rs"
+
+[[bin]]
+name = "pool-explorer"
+path = "src/bin/pool_explorer.rs"
+
+[[bin]]
+name = "world-bench"
+path = "src/bin/world_bench.rs"
+
+[[bin]]
+name = "render-cache-bench"
+path = "src/bin/render_cache_bench.rs"
+
+[[bin]]
+name = "lod-replay-bench"
+path = "src/bin/lod_replay_bench.rs"
+
+[[bin]]
+name = "regional-replay-bench"
+path = "src/bin/regional_replay_bench.rs"
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+glam = "0.29"
+pyo3 = { version = "0.28", features = ["extension-module"] }
+rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+flate2 = "1.0"
+sha2 = "0.10"
+image = "0.25"
+libloading = "0.8"
+rfd = "0.15"

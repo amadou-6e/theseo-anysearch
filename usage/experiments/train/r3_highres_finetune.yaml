@@ -1,0 +1,76 @@
+description: >
+  Fine-tunes a pretrained radius-3 box encoder with PPO on high-resolution stepped terrain. It evaluates whether learned spatial features transfer to finer voxelization and augmented observations.
+
+# r3 pretrained encoder — high-resolution fine-tuning
+#
+# Loads the r3:v1 encoder (box_radius=3, 7×7×7 obs, 128-dim latent)
+# and fine-tunes it end-to-end via RL on high-resolution geometry.
+#
+# Scale 100–500 voxelises the STL at much finer detail than the default
+# (~40). The agent's 7×7×7 local view now covers a smaller fraction of
+# the map, forcing the policy to rely on the encoder's spatial features
+# rather than counting filled voxels.
+#
+# obs_cutout_count / obs_noise_prob: light observation augmentation to
+# prevent the encoder from memorising exact voxel patterns.
+# NOTE: these keys are accepted by EnvConfig but env-side wiring is pending
+# (see spec/python/rl-training-diversity.md §3). They are recorded here
+# so the config is ready when the wrapper lands.
+#
+# Run:
+#   anysearch run usage/experiments/train/r3_highres_finetune.yaml --tag v1
+
+experiment:
+  name: r3-highres-finetune
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 4
+  max_steps: 192                # sum of the three 64-voxel side lengths
+  trail_mode: true
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 300.0                  # high-res: fine voxel detail
+    scale_range: [100.0, 500.0]   # per-episode scale sampling (pending wiring)
+    grid_size: 64                 # large grid for high-res geometry (scale 100–500)
+
+  observation:
+    mode: box
+    box_radius: 3                 # must match r3 encoder
+
+  rewards:
+    step_cost: -0.005             # softer step cost — high-res maps are harder to navigate
+    goal_reward: 1.0
+    distance_shaping: 0.15
+    collision_cost: 0.0
+
+training:
+  algorithm: multi_agent_voxel_ppo
+  runner: local
+  iterations: 300
+  checkpoint_interval: 50
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 100
+  require_gpu: true
+  num_env_runners: 12
+
+algorithm_config:
+  lr: 5.0e-5                    # low LR — encoder weights are already meaningful
+  train_batch_size: 2048
+  clip_param: 0.15              # tighter clip — fine-tuning, not tabula rasa
+  num_sgd_iter: 10
+  lambda_: 0.95
+  kl_coeff: 0.2
+  gamma: 0.99
+
+model_config:
+  custom_model: voxel_box_3d_cnn_pretrained
+  custom_model_config:
+    pretrained_encoder: r3:v1
+    freeze_encoder: false       # fine-tune: encoder weights update with RL gradients
+    fc_hiddens: [256, 256]
+
+mlflow: {}

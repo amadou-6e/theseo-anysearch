@@ -1,0 +1,47 @@
+description: >
+  Trains the standard PPO baseline on stepped terrain with four agents and positional encoding. It is the general reference configuration for longer single-policy PPO experiments.
+
+experiment:
+  name: ppo-baseline
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 4
+  max_steps: 96
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 500
+  checkpoint_interval: 50
+  trajectory_every: 10
+  video_every: 100
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 4096
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+  kl_coeff: 0.2
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 3
+
+renders:
+  camera_positions:
+    - name: front
+      yaw: 245.0
+      pitch: 20.0
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+# tracking_uri omitted → defaults to sqlite:///runtime/experiments/mlflow.db
+mlflow: {}

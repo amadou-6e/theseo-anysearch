@@ -1,0 +1,76 @@
+description: >
+  Trains a small radial-encoder PPO policy on a fixed 32-cubed waypoint task. It is a diagnostic overfit test: a healthy training and evaluation pipeline should learn this intentionally tiny scenario.
+
+experiment:
+  name: ppo-tiny-overfit
+  output_dir: runtime/tiny_overfit
+  seed: 42
+
+env:
+  waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
+  max_steps: 96
+  seed: 42
+  agent_count: 1
+  trail_mode: false
+
+  geometry:
+    grid_size: 32
+
+  observation:
+    mode: radial
+    ray_max_len: 10
+
+  action:
+    mode: discrete_26
+
+  rewards:
+    step_cost: -0.5
+    collision_cost: -0.02
+    goal_reward: 2.0
+    distance_shaping: 0.25
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  model: radial_grouped_encoder
+  runner: local
+  iterations: 50
+  checkpoint_interval: 50
+  require_gpu: false
+  num_env_runners: 8
+  early_stop:
+    enabled: true
+    mode: goal_finishes
+    min_goal_finishes: 20
+    min_iterations: 1
+    min_consecutive_evaluation: 1
+  trajectory_every: 1
+  best_trajectory: true
+  video_every: 0
+
+evaluation:
+  episodes: 20
+  seed: 42
+  min_success_rate: 0.5
+  num_env_runners: 4
+
+algorithm_config:
+  lr: 0.001
+  gamma: 0.95
+  train_batch_size: 512
+  minibatch_size: 128
+  num_sgd_iter: 4
+  clip_param: 0.2
+  lambda_: 0.95
+  kl_coeff: 0.1
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu
+
+tune_config:
+  scheduler: random
+  num_samples: 1
+  metric: evaluation_success_rate
+  mode: max
+  max_concurrent: 1

@@ -1,0 +1,71 @@
+{
+  "name": "r2",
+  "tag": "v1",
+  "approach": "autoencoder",
+  "architecture": "voxel_box_3dcnn",
+  "latent_dim": 64,
+  "box_radius": 2,
+  "box_radii": null,
+  "conv_channels": [
+    32,
+    64,
+    64
+  ],
+  "epochs_trained": 60,
+  "final_val_loss": 2.21922626093203e-06,
+  "created_at": "2026-03-21T19:04:26.554292+00:00",
+  "augmentation": {
+    "rotate90": true,
+    "flip": true,
+    "cutout": {
+      "count": 2,
+      "min_size": 1,
+      "max_size": 2
+    },
+    "noise_prob": 0.05,
+    "translation_jitter": 1,
+    "morph_prob": 0.2
+  },
+  "data_sources": {
+    "sources": [
+      {
+        "type": "position_sample",
+        "geometry": {
+          "env": null,
+          "sampler": {
+            "type": "random_boxes",
+            "seed": 42,
+            "num_geometries": 150,
+            "num_boxes": [
+              1,
+              8
+            ],
+            "box_min_size": [
+              2,
+              2,
+              2
+            ],
+            "box_max_size": [
+              14,
+              14,
+              14
+            ],
+            "grid_size": 32,
+            "total_samples": 50000
+          }
+        },
+        "num_samples": null
+      }
+    ],
+    "cache": {
+      "path": "runtime\\garden\\cache",
+      "force_refresh": false
+    },
+    "split": {
+      "val_fraction": 0.1,
+      "seed": 42
+    },
+    "min_fill_pct": 2.0,
+    "empty_sample_ratio": 0.05
+  }
+}

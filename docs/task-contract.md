@@ -1,0 +1,58 @@
+# Task, goal, reward, and termination contract
+
+Voxel tasks use a versioned `env.task` block. Existing experiment YAML files
+that omit it retain exact point-goal navigation.
+
+```yaml
+env:
+  max_steps: 200
+  waypoints_file: usage/experiments/train/tiny_overfit_waypoints.json
+  rewards:
+    step_cost: -0.01
+    distance_shaping: 0.2
+    goal_reward: 1.0
+    collision_cost: -0.1
+    invalid_action_cost: -0.1
+    construction_residual_weight: 0.0
+    construction_overshoot_weight: 0.0
+  task:
+    version: 1
+    max_consecutive_collisions: 10
+    goal:
+      type: point
+      position: [6, 7, 1]
+      tolerance: 0.0
+    termination:
+      terminate_on_success: true
+```
+
+For a region-like goal, use `type: target_voxel_set` and provide `voxels`.
+The first voxel supplies goal-directed observations, while entering any member
+satisfies the task predicate. An explicit task goal requires a waypoint file so
+the start position is unambiguous.
+
+Every step returns these `info` fields:
+
+- `goal_reached` and `termination_reason` (`in_progress`, `success`,
+  `step_limit`, or `consecutive_collisions`);
+- `reward_breakdown`, with step, distance, success, invalid-action, collision,
+  construction-residual, and construction-overshoot components;
+- `unshaped_reward`, which excludes distance shaping;
+- initial, final, and minimum goal distance.
+
+The collision counter and its termination decision are maintained in the Rust core.
+It resets after any non-collision action. Omit `max_consecutive_collisions` to disable
+this termination condition.
+
+Episode trajectories retain the same breakdown and distances. Evaluation
+metrics expose component means as `evaluation_reward_<component>_mean`, so Tune,
+TensorBoard, MLflow, and CLI reporters receive the same attribution.
+
+Distance-progress shaping is potential based:
+
+```text
+distance_shaping * (previous Euclidean distance - current Euclidean distance)
+```
+
+Set `distance_shaping: 0.0` to disable it. Construction weights are non-negative;
+their reward terms are the negative weighted residual and overshoot voxel counts.

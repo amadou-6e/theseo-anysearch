@@ -1,0 +1,51 @@
+# Garden preset: r16 — radius 16, 33×33×33 local patch (~80M params)
+#
+# Maximum range. The agent sees a 33-cell cube — suited for macro-level
+# spatial reasoning, open environments, and long-horizon navigation.
+# Requires a high-VRAM GPU. Expect multi-hour training.
+#
+# Train: anysearch garden train r16 --tag v1
+# Use:   pretrained_encoder: r16:v1
+name: r16
+approach: autoencoder
+architecture: voxel_box_3dcnn
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 400
+          num_boxes: [3, 20]
+          box_min_size: [3, 3, 3]
+          box_max_size: [50, 50, 50]
+          grid_size: 96
+          total_samples: 30000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 1.0
+
+encoder:
+  box_radius: 16
+  conv_channels: [32, 64, 128, 256, 512]
+  latent_dim: 512
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.05
+  translation_jitter: 3
+  morph_prob: 0.2
+  cutout:
+    count: 4
+    min_size: 2
+    max_size: 6
+
+training:
+  epochs: 120
+  batch_size: 4
+  lr: 5.0e-5
+  lr_scheduler: cosine
+  early_stop_patience: 25
+  focal_gamma: 2.0

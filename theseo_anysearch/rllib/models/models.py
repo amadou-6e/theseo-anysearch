@@ -1,0 +1,53 @@
+"""Model configuration types and lookup helpers for RLlib training."""
+
+from __future__ import annotations
+
+from pydantic import ConfigDict
+
+from theseo_anysearch.settings import ModelConfig
+
+
+class VoxelEncoderConfig(ModelConfig):
+    """Config for the voxel encoder neural network."""
+    model_config = ConfigDict(extra="forbid")
+
+    # TODO: use_position_encoding is not yet wired into any model.
+    # When implemented: reshape flat obs to (2r+1)³ grid, append (dx,dy,dz)
+    # relative coordinates per cell, re-flatten, pass to FC layers.
+    # Not needed for CNN models (VoxelBox2DCNN/3DCNN) — spatial structure is
+    # preserved by convolution kernels. Only relevant for scalar obs + FC backbone.
+    use_position_encoding: bool = True
+    encoder_depth: int = 3
+
+
+MODEL_CONFIGS: dict[str, type[ModelConfig]] = {
+    "voxel_encoder": VoxelEncoderConfig,
+}
+
+
+# TODO! Dependencies should import MODEL_CONFIGS directly no wrapping function needed
+def get_model_config_class(name: str) -> type[ModelConfig]:
+    """Return the concrete model config class for a registered model name.
+
+    Parameters
+    ----------
+    name : str
+        Registered model family name.
+
+    Returns
+    -------
+    type[ModelConfig]
+        Matching config class.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a registered model.
+    """
+    try:
+        return MODEL_CONFIGS[name.lower()]
+    except KeyError:
+        valid = sorted(MODEL_CONFIGS)
+        raise ValueError(
+            f"Unknown model: {name!r}. Valid models: {valid}"
+        ) from None

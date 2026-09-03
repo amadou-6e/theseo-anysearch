@@ -1,0 +1,58 @@
+description: >
+  Demonstrates PPO in trail mode, where visited cells become filled geometry and the policy must reach a target fill count. It showcases geometry-aware box observations and replay visualization.
+
+experiment:
+  name: trail-geometry-demo
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+  seed: 42
+
+  # Trail mode: every cell the cursor moves into is automatically filled.
+  # The agent must navigate the grid to fill `target_fill` cells.
+  trail_mode: true
+  target_fill: 80
+
+  # Geometry: a solid wall (3 voxels thick) at x=14..16, spanning y=1..10, z=1..32.
+  # Appears gray in the replay viewer. Collisions give negative reward.
+
+  geometry:
+    stl_path: usage/geometries/cube.stl   # required field; not used by VoxelEnv
+    scale: 40.0
+    boxes:
+      - [14, 1, 1, 16, 10, 32]
+
+    # Navigation reward (computed in Rust, configured here).
+
+  observation:
+    mode: box
+    box_radius: 2
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
+
+    # Box observations so the agent can see nearby cells.
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 20
+  checkpoint_interval: 20
+  trajectory_every: 5
+  best_trajectory: true
+  video_every: 999
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 500
+  num_sgd_iter: 2
+
+model_config:
+  hidden_sizes: [128, 128]
+
+mlflow: {}

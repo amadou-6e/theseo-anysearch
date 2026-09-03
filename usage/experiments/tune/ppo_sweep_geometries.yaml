@@ -1,0 +1,66 @@
+description: >
+  Runs one fixed PPO configuration across several non-trivial geometries. It compares geometry difficulty before spending resources on a larger hyperparameter search.
+
+# Sweep: same PPO config evaluated on all four non-trivial geometries.
+# Useful to understand which geometry is hardest before committing to a full tune.
+
+sweep:
+  base:
+    experiment:
+      output_dir: ../../../runtime/experiments/geometry-sweep
+    training:
+      algorithm: ppo
+      runner: local
+      iterations: 200
+      checkpoint_interval: 50
+      trajectory_every: 10
+      video_every: 100
+    algorithm_config:
+      lr: 3.0e-4
+      train_batch_size: 4096
+      clip_param: 0.2
+      num_sgd_iter: 10
+      lambda_: 0.95
+      kl_coeff: 0.2
+    model_config:
+      use_position_encoding: true
+      encoder_depth: 3
+    env:
+      agent_count: 4
+      max_steps: 96
+
+      geometry:
+        scale: 40.0
+
+    renders:
+      camera_positions:
+        - name: top
+          yaw: 0.0
+          pitch: 90.0
+    mlflow:
+      tracking_uri: http://localhost:5000
+
+  experiments:
+    - name: ppo-stepped-terrain
+      env:
+        geometry:
+          stl_path: usage/geometries/stepped_terrain.stl
+
+    - name: ppo-corridor-l
+      env:
+        agent_count: 2
+        geometry:
+          stl_path: usage/geometries/corridor_l.stl
+          scale: 30.0
+
+    - name: ppo-pipe-junction
+      env:
+        geometry:
+          stl_path: usage/geometries/pipe_junction.stl
+
+    - name: ppo-ramp-spiral
+      env:
+        max_steps: 96
+        geometry:
+          stl_path: usage/geometries/ramp_spiral.stl
+          scale: 25.0
