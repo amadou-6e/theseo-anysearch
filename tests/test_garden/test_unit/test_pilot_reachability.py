@@ -65,6 +65,15 @@ def test_stratified_sampler_covers_distance_bins_and_labels_are_exact() -> None:
     assert len(positive_bins) >= 2
     # obstacle-perturbation hard negatives exist
     assert "boundary_negative" in set(plan.kind)
+    for coordinate, occupied, kind in zip(
+        plan.perturbation_coordinates, plan.perturbation_occupied, plan.kind
+    ):
+        if kind == "boundary_negative":
+            assert occupied == 1 and np.all(coordinate >= 0)
+        elif kind == "boundary_positive":
+            assert occupied == 0 and np.all(coordinate >= 0)
+        else:
+            assert occupied == -1 and np.all(coordinate == -1)
 
 
 def test_two_room_grid_yields_margin_separated_component_negatives() -> None:

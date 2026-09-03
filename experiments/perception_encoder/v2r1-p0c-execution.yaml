@@ -1,0 +1,7 @@
+run_id: voxel-encoder-pilot-v2r1-p0c-1
+issue: 333
+integration_base_sha: d9f16bf999996e1df30ea76137dffc13de4aa416
+spec_commit: 0c9e3c633799f5d42b7a603e0845cac0bd494cda
+protocol_path: experiments/perception_encoder/results/v2r1_foundation/v2r1-protocol-preregistration.yaml
+query_plan_path: experiments/perception_encoder/results/v2r1_foundation/v2r1-query-plan.json
+execution_seed: 3330
