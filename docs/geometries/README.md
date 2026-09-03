@@ -1,5 +1,48 @@
 # Geometry configuration
 
+## Validate and inspect without training
+
+The geometry commands resolve experiments without starting Ray:
+
+```console
+anysearch geometry inspect experiments/train/example/experiment.yaml
+anysearch geometry validate experiments/train/example/experiment.yaml --json
+anysearch geometry sample experiments/train/example/experiment.yaml --count 20 --seed 42 --output geometry-samples.json
+```
+
+Reports distinguish geometry validity, task feasibility, training suitability,
+and evaluation suitability. Fixed boxes use `geometry.sources` with `type:
+boxes`; geometry pools are sampled deterministically from the command seed; and
+compiled worlds are inspected through their manifest and chunk counts without
+expanding occupied voxels into a Python list.
+
+```yaml
+# Fixed boxes
+env:
+  geometry:
+    grid_size: 32
+    sources:
+      - type: boxes
+        boxes: [[12, 1, 1, 13, 20, 20]]
+```
+
+```yaml
+# Pool augmentation
+env:
+  geometry:
+    grid_size: 32
+    pool:
+      pool_dir: runtime/geometry-pool
+```
+
+```yaml
+# Bounded-memory compiled-world inspection
+env:
+  geometry:
+    extent: [60000, 40000, 20000]
+    compiled_world_path: runtime/worlds/example
+```
+
 Geometry sources and voxelization settings belong under `env.geometry`.
 
 ```yaml
