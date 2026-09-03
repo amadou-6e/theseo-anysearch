@@ -17,9 +17,10 @@ from theseo_anysearch.garden.evaluation.metrics import (
     normalized_mae,
 )
 from theseo_anysearch.garden.evaluation.probes import encoder_state_sha256
+from theseo_anysearch.garden.evaluation.statistics import interquartile_mean, performance_profile
 from theseo_anysearch.garden.masking import DenseMaskAwareEncoder
 from theseo_anysearch.garden.models.outputs import EncoderOutput, VoxelLevel
-from theseo_anysearch.garden.pilots.contracts import ScoreAnchor
+from theseo_anysearch.garden.pilots.contracts import RevisedScoreAnchor, ScoreAnchor
 from theseo_anysearch.garden.pilots.corpus import V1_PROGRAM, make_pilot_observation
 from theseo_anysearch.garden.splits import GeometryDescriptor
 from theseo_anysearch.garden.targets import (
@@ -35,6 +36,11 @@ COMPONENTS = (
     "reachability_auprc",
     "geodesic_nmae",
 )
+REVISED_PROFILE_THRESHOLDS = (-0.5, 0.0, 0.25, 0.5, 0.75, 1.0)
+CALIBRATION_TEMPLATE_BARS = {
+    "boundary_f1": {"minimum_absolute_headroom": 0.10},
+    "clearance_nmae": {"minimum_relative_error_reduction": 0.20},
+}
 
 
 @dataclass(frozen=True)
@@ -542,6 +548,93 @@ def _pilot_score(metrics: dict[str, float], anchors: dict[str, ScoreAnchor]) -> 
         else:
             normalized.append((anchor.floor - value) / (anchor.floor - anchor.ceiling))
     return float(np.mean(normalized))
+
+
+def revised_metric_report(
+    per_geometry_rows: Sequence[dict[str, object]],
+    anchors: dict[str, RevisedScoreAnchor],
+) -> dict[str, dict[str, object]]:
+    """Report each revised metric independently without a composite score."""
+
+    if not per_geometry_rows:
+        raise ValueError("revised metric reporting requires per-geometry rows")
+    report: dict[str, dict[str, object]] = {}
+    for name in COMPONENTS:
+        anchor = anchors[name]
+        raw = np.asarray(
+            [float(row["components"][name]) for row in per_geometry_rows],
+            dtype=np.float64,
+        )
+        entry: dict[str, object] = {
+            "status": anchor.status,
+            "raw_mean": float(raw.mean()),
+            "raw_iqm": interquartile_mean(raw),
+            "per_geometry": raw.tolist(),
+        }
+        if anchor.status == "deferred":
+            entry["deferral_reason"] = anchor.deferral_reason
+            report[name] = entry
+            continue
+        denominator = (
+            anchor.ceiling - anchor.floor
+            if anchor.higher_is_better
+            else anchor.floor - anchor.ceiling
+        )
+        normalized = (
+            (raw - anchor.floor) / denominator
+            if anchor.higher_is_better
+            else (anchor.floor - raw) / denominator
+        )
+        entry.update(
+            {
+                "normalized_iqm": interquartile_mean(normalized),
+                "profile_thresholds": list(REVISED_PROFILE_THRESHOLDS),
+                "performance_profile": performance_profile(
+                    normalized, REVISED_PROFILE_THRESHOLDS
+                ).tolist(),
+            }
+        )
+        report[name] = entry
+    return report
+
+
+def pareto_retained_candidates(
+    candidate_metric_iqms: dict[str, dict[str, float]],
+    *,
+    maximum: int = 2,
+) -> tuple[str, ...]:
+    """Retain nondominated candidates without averaging away weak metrics."""
+
+    if not candidate_metric_iqms or maximum < 1:
+        raise ValueError("Pareto retention requires candidates and a positive maximum")
+    metric_sets = {frozenset(values) for values in candidate_metric_iqms.values()}
+    if len(metric_sets) != 1 or not next(iter(metric_sets)):
+        raise ValueError("candidate metric IQMs must share one nonempty metric set")
+    candidates = sorted(candidate_metric_iqms)
+    nondominated: list[str] = []
+    for candidate in candidates:
+        values = candidate_metric_iqms[candidate]
+        dominated = any(
+            other != candidate
+            and all(
+                candidate_metric_iqms[other][metric] >= value
+                for metric, value in values.items()
+            )
+            and any(
+                candidate_metric_iqms[other][metric] > value
+                for metric, value in values.items()
+            )
+            for other in candidates
+        )
+        if not dominated:
+            nondominated.append(candidate)
+    if len(nondominated) <= maximum:
+        return tuple(nondominated)
+    minimums = {
+        candidate: min(candidate_metric_iqms[candidate].values())
+        for candidate in nondominated
+    }
+    return tuple(sorted(nondominated, key=lambda item: (-minimums[item], item))[:maximum])
 
 
 def evaluate_frozen_representation(
