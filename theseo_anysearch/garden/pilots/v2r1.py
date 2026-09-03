@@ -99,9 +99,13 @@ def assign_v2r1_pools(
     ):
         selected: list[GeometryDescriptor] = []
         while len(selected) < V2_POOL_SIZES[pool]:
+            progressed = False
             for key in sorted(groups):
                 if groups[key] and len(selected) < V2_POOL_SIZES[pool]:
                     selected.append(groups[key].pop(0))
+                    progressed = True
+            if not progressed:
+                raise ValueError(f"not enough v2r1 geometries for {pool}")
         pools[pool] = tuple(record.geometry_id for record in selected)
 
     confirmation: list[GeometryDescriptor] = []
