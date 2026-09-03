@@ -365,21 +365,30 @@ MODEL_FREE_CEILING_METHODS = frozenset(
 NullInput = Literal["zeros", "coordinates_only"]
 AnchorStatus = Literal["active", "deferred"]
 CALIBRATION_TEMPLATE_COMPONENTS = ("boundary_f1", "clearance_nmae")
-# v2r2 termination rule (frozen): at least one topology component must be active
-# and pass its gates. If both reachability and geodesic are deferred or invalid,
-# the study terminates with decision ``no_topology_identifiable`` and the
-# direction-finding pilot does not begin. Local geometry alone cannot advance
-# the P1-P8 chain.
-TOPOLOGY_COMPONENTS = frozenset({"reachability_auprc", "geodesic_nmae"})
+# v2r2 termination rule (frozen): at least one topology-family component must be
+# active and pass its gates. If both the reachability and geodesic families are
+# deferred or invalid, the study terminates with decision
+# ``no_topology_identifiable`` and the direction-finding pilot does not begin.
+# Local geometry alone cannot advance the P1-P8 chain. Family membership is by
+# name prefix so ``reachability``, ``reachability_auprc``,
+# ``reachability_logloss_gain`` and ``geodesic_nmae`` all count.
+TOPOLOGY_COMPONENT_FAMILIES = frozenset({"reachability", "geodesic"})
+
+
+def _topology_family(component: str) -> str:
+    return component.split("_", 1)[0]
 
 
 def _require_active_topology_component(active_gate_components: set[str]) -> None:
-    if not (active_gate_components & TOPOLOGY_COMPONENTS):
+    if not any(
+        _topology_family(name) in TOPOLOGY_COMPONENT_FAMILIES
+        for name in active_gate_components
+    ):
         raise ValueError(
-            "v2r2 termination rule: at least one topology component "
-            "(reachability_auprc or geodesic_nmae) must be active; a "
-            "preregistration with both topology targets deferred cannot be "
-            "frozen (decision no_topology_identifiable)"
+            "v2r2 termination rule: at least one topology-family component "
+            "(reachability* or geodesic*) must be active; a preregistration with "
+            "both topology families deferred cannot be frozen "
+            "(decision no_topology_identifiable)"
         )
 
 

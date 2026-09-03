@@ -342,3 +342,24 @@ def test_v2r1_termination_rule_blocks_freezing_without_a_topology_component() ->
             revised_anchors=anchors,
             active_gate_components=("occupied_iou", "boundary_f1", "clearance_nmae"),
         )
+
+
+def test_topology_family_membership_is_by_name_prefix() -> None:
+    """reachability*, geodesic* satisfy the rule; a local-only set does not."""
+
+    from theseo_anysearch.garden.pilots.contracts import (
+        _require_active_topology_component,
+    )
+
+    for ok in (
+        {"occupied_iou", "reachability"},
+        {"occupied_iou", "reachability_auprc"},
+        {"occupied_iou", "reachability_logloss_gain"},
+        {"occupied_iou", "geodesic_nmae"},
+    ):
+        _require_active_topology_component(ok)  # no raise
+
+    with pytest.raises(ValueError, match="topology-family component"):
+        _require_active_topology_component(
+            {"occupied_iou", "boundary_f1", "clearance_nmae"}
+        )
