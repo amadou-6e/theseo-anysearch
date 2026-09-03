@@ -102,14 +102,22 @@ def test_screen_runs_reports_every_variant_and_is_deterministic() -> None:
     for v in first["variants"].values():
         assert {"floor", "ceiling", "gap", "opens_gate"} <= set(v)
         assert v["gap"] == pytest.approx(v["ceiling"] - v["floor"], abs=1e-9)
-    assert first["recommendation"].startswith(("adopt:", "defer:reachability"))
+    # The screen is non-evidential and cannot recommend adoption.
+    assert first["non_evidential"] is True
+    assert first["disposition"] == "retain"
+    assert first["recommendation"].startswith("non_evidential:")
+    assert "adopt:" not in first["recommendation"]
 
 
-def test_screen_recommends_a_redesign_that_opens_the_gate_on_the_fixture_corpus() -> None:
+def test_screen_only_records_whether_occlusion_produced_any_headroom() -> None:
     from experiments.perception_encoder.reachability_redesign_screen import run_screen
 
     report = run_screen(n=48, seed=20260903)
-    # On an occlusion-rich corpus at least one genuine redesign must open >= 0.10.
+    # Proof-of-mechanism: on an occlusion-rich corpus, occlusion should at least
+    # produce *some* headroom in a genuine redesign - but this is not evidence
+    # any variant opens the gate on the real corpus.
     genuine = {"A_occlusion_hard_strata", "B2_pvi_gain", "C_component_structure"}
     assert any(report["variants"][name]["opens_gate"] for name in genuine)
-    assert report["recommendation"].startswith("adopt:")
+    assert report["recommendation"] == (
+        "non_evidential:occlusion_creates_headroom:defer_to_v2r2_R0"
+    )

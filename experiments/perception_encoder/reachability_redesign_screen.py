@@ -1,4 +1,12 @@
-"""CPU comparison screen for the reachability denominator redesign (R5, #339).
+"""CPU proof-of-mechanism screen for the reachability denominator (#339).
+
+NON-EVIDENTIAL. The floor here is a *linear* ridge probe on raw occupancy;
+connectivity is nonlinear, so that floor is too weak and every reported gap is
+optimistic. This screen establishes only that occlusion *can* create headroom in
+principle. Do not adopt any variant on these numbers. The real comparison needs
+the v2r2 R0 feasibility audit and the R2 control ladder (identical probe over
+raw, capacity-matched nonlinear raw, over-capacity reference) on the real corpus.
+See docs/perception-encoder-calibration-revision-work-plan.md.
 
 Measures, on a deterministic graded-occlusion fixture corpus, the floor/ceiling
 gap each redesign option would give the ``reachability`` pilot-score component:
@@ -11,8 +19,9 @@ gap each redesign option would give the ``reachability`` pilot-score component:
       predicted free-space component labeling
 
 Emits ``reachability-redesign-screen.json`` with a per-variant table and a
-``recommendation`` of ``adopt:<variant>`` or ``defer:reachability``. The frozen
-CUDA P0C re-run with the winning variant is a separate follow-on.
+``recommendation`` of ``non_evidential:<mechanism>:defer_to_v2r2_R0`` - it cannot
+recommend adoption. Disposition is ``retain`` (infrastructure kept, result not a
+finding).
 """
 from __future__ import annotations
 
@@ -159,7 +168,6 @@ def run_screen(*, n: int = 48, seed: int = 20260903) -> dict:
 
     hard = spans >= 1
     hard_or_neg = hard | ~evaluation["y"]
-    hard_train = train["y"].astype(bool)  # train ridge on all; evaluate on hard slice
     raw_scores = _ridge_scores(train["raw"], train["y"], evaluation["raw"][hard_or_neg])
     a_floor = binary_ranking_metrics(raw_scores, evaluation["y"][hard_or_neg]).auprc
     a_ceiling = classification_metric_ceiling(
@@ -230,23 +238,21 @@ def run_screen(*, n: int = 48, seed: int = 20260903) -> dict:
         if variants[name]["opens_gate"]
     }
     hard_fraction = float(np.mean(spans >= 1))
-    if not candidates:
-        recommendation = "defer:reachability"
-    elif hard_fraction < 0.10:
-        # A and B2 both depend on the corpus actually containing occluded pairs.
-        recommendation = "defer:reachability"
-    else:
-        primary = max(candidates, key=candidates.get)
-        fallback = (
-            "A_occlusion_hard_strata"
-            if primary != "A_occlusion_hard_strata"
-            and variants["A_occlusion_hard_strata"]["opens_gate"]
-            else None
-        )
-        recommendation = f"adopt:{primary}" + (f" fallback:{fallback}" if fallback else "")
+    # This screen is non-evidential: it cannot recommend adoption. It only
+    # records whether the occlusion mechanism produced any headroom at all.
+    mechanism = "occlusion_creates_headroom" if candidates else "no_headroom_observed"
+    recommendation = f"non_evidential:{mechanism}:defer_to_v2r2_R0"
 
     report = {
         "issue": 339,
+        "non_evidential": True,
+        "non_evidential_reason": (
+            "floor is a linear ridge probe on raw occupancy; connectivity is "
+            "nonlinear so the floor is too weak and every gap is optimistic. "
+            "Proof-of-mechanism only. Real comparison requires the v2r2 R0 audit "
+            "and the R2 control ladder on the real corpus."
+        ),
+        "disposition": "retain",
         "code_sha": _git_sha(),
         "gate": GATE,
         "corpus": {"geometries": n, "seed": seed, "train": split, "evaluation": n - split},

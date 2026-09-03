@@ -138,54 +138,140 @@ smoke on the current development line.
 
 ---
 
-# Reachability denominator redesign (R1-R5)
+# Reachability denominator: v2r2 successor study (#339 exploratory; v2r2 to follow)
 
-Tracking issue: #339. Integration base `exp/perception-encoder` @ `f26b9cb`.
+**Status of v2r1:** terminal. P1 was recorded `not_started` (blocked P0D, blocked
+amended P0C on `reachability_auprc`). That line does not reopen. A config change
+cannot revive it.
 
-## Why
+**What this section is:** the amended P0C is blocked on one denominator,
+`reachability_auprc` (`floor ~= ceiling ~= 0.93`), because connectivity over a
+bounded, fully-visible window is near-linearly decodable from raw occupancy. The
+right response is a **new partially-observed-topology task** with its own
+preregistration and its own dataset / query / run identities (`v2r2`), not a
+metric tweak on `v2r1`.
 
-The amended P0C (#334) narrowed the block from three failing denominator gates
-to one: `reachability_auprc`. Even with the F4 stratified pair sampler and the
-F1 model-free kNN ceiling, `measure_revised_component` produces
-`floor ~= ceiling ~= 0.93` for reachability, so `RevisedScoreAnchor` fails
-"active higher-is-better ceiling must exceed floor by at least 0.10".
+## #339 disposition (exploratory infrastructure only)
 
-Root cause: connectivity over a bounded, fully-visible observation window is
-near-linearly decodable from raw occupancy, so PCA / random-projection
-baselines are already near-optimal and AUPRC (capped at 1.0, floored at the
-positive base rate) has no room above them.
+`exp/339` carries reusable scaffolding, not a finding:
 
-## Options
+- `pilots/reachability_fixtures.py` - graded-occlusion fixture generator;
+- `evaluation/reachability_variants.py` - occlusion-span pair sampler, raw /
+  rich / null feature builders, per-cell component maps;
+- `experiments/perception_encoder/reachability_redesign_screen.py` - screening
+  harness.
 
-| ID | Idea | Lever |
-|---|---|---|
-| **A** | Occlusion-aware reachability: sample pairs whose ground-truth connecting path crosses `unknown` cells; label from the completed geometry; stratify by occlusion span (`0`, `1-2`, `3-5`, `6+`); gate on the occluded strata. | Baselines cannot bridge an occluded gap; a representation that learned occupancy completion can. Drops the floor on hard strata. |
-| **B1** | Excess AUPRC over an explicit raw-occupancy linear baseline, restricted to the hard strata: component `= (ceiling - raw_linear) / (ceiling - raw_linear)` on span `>= 1`. | Measures what the representation adds, not the absolute; the 0.10 gate applies to the gain denominator. |
-| **B2** | Make the gated quantity the PVI gain (F2 `assess_triviality`, embedding vs coordinates-only null) for the reachability label; AUPRC becomes a reported diagnostic. | PVI gain has a natural zero and no 1.0 cap, so a 0.10-bit gate is meaningful even when raw AUPRC range is narrow. |
-| **C** | Replace pairwise AUPRC with a connectivity-structure metric: probe decodes a per-cell free-space component label; metric `= 1 - normalized Variation of Information` (also report adapted-Rand and Betti-0). | Structure metrics have real dynamic range: a raw-occupancy decoder merges/splits at chokepoints and across occlusions where a good encoder does not. A merged component is a structural false-open. |
-| **D** | Defer `reachability_auprc` (`RevisedScoreAnchor.status="deferred"`) with a recorded reason; gate on the remaining active set. | Honest fallback if A-C do not open >= 0.10; the pilot Validity Limits already anticipate limited context. |
+**The screen's reported gaps are NON-EVIDENTIAL.** They used a *linear* ridge
+probe on raw occupancy as the floor; connectivity is nonlinear, so that floor is
+too weak and every gap (A `+0.314`, B2 `+0.606`, ...) is optimistic. **Do not
+adopt B2 or any variant on those numbers.** The screen established only that
+occlusion *can* create headroom in principle.
 
-## Work items
+Disposition: `retain` (keep the infrastructure; the result JSON stays as a
+recorded non-evidential exploratory artifact). Not `promote`.
 
-| ID | Item | Touches |
-|---|---|---|
-| R1 | Occlusion-aware pair sampler and a graded-occlusion fixture corpus generator. | `evaluation/reachability.py`, new fixture module |
-| R2 | Explicit raw-occupancy linear baseline as a first-class floor control. | `pilots/calibration_revision.py`, `pilots/v2r1_data.py` |
-| R3 | Per-cell component-label probe target + VI / adapted-Rand / Betti-0 metric. | `evaluation/probes.py`, `evaluation/metrics.py` |
-| R4 | Gate change: `reachability` gated component `= max`-over-hard-strata `(encoder - raw)` normalized, or PVI gain; AUPRC / VI as diagnostics. | `pilots/calibration_revision.py`, `pilots/contracts.py` |
-| R5 | CPU comparison screen: measure every variant's floor/ceiling gap on the fixture corpus; emit a machine-readable ranking and `adopt:<variant>` / `defer:reachability`. Frozen CUDA P0C re-run with the winner is a follow-on. | new screen script |
+## v2r2 study design
 
-## Method for "which works best"
+### R0 - feasibility audit (gates everything)
 
-`experiments/perception_encoder/reachability_redesign_screen.py` builds a fixed
-fixture corpus of procedural 3D geometries with controlled occlusion, derives a
-rich-context feature (Bayes-ceiling input), a raw-occupancy feature (baseline
-input), and a coordinates-only null, then reports for each of V0 (current), A,
-B1, B2, C:
+Exact identical-visible-input observations are rare, so **generate controlled
+counterfactual pairs**: fix the visible voxels, vary the hidden completion, and
+estimate the conditional uncertainty of the completed-reachability label given
+the visible input.
 
-- `floor`, `ceiling` (or value), `gap`, `opens_gate` (`gap >= 0.10`);
-- per-stratum breakdown for A / B1;
-- a `recommendation`: `adopt:<variant with the largest reliable gap that opens the gate>` or `defer:reachability`.
+- unknown-channel prevalence and per-stratum class balance;
+- conditional label entropy `H(reachable | visible input)` per occlusion span
+  stratum. Effectively random hidden geometry -> no encoder can solve it ->
+  defer. Deterministic hidden geometry -> check for generator-cue leakage
+  (predict hidden structure from visible context across a held-out generator
+  config);
+- per-stratum floor/ceiling estimates using the R2 control ladder, not a linear
+  probe.
 
-Acceptance: the screen runs deterministically on CPU, its report carries
-artifact hashes, and the recommendation is reproducible across two clean runs.
+Exit: R0 states, from calibration data only, whether a preregistered denominator
+with `>= 0.10` headroom is achievable. If not, stop at the D branch below.
+
+### R1 - occlusion-aware sampler
+
+Completed-geometry reachability labels. Occlusion strata (`1-2`, `3-5`, `6+`)
+**frozen before results**. Stratum weights **frozen before results** and
+**balanced or task-motivated**, never set to observed prevalence (easy cases
+would dominate again). No `max-over-strata`.
+
+### R2 - control ladder (probe capacity frozen first)
+
+Freeze the candidate probe capacity, optimization budget, and checkpoint-
+selection procedure **before** building any control. Then compare against three
+distinct controls:
+
+1. identical probe over raw input;
+2. capacity-matched **nonlinear** raw-input model;
+3. over-capacity / model-free reference ceiling.
+
+The gated `reachability` denominator is `reference - nonlinear_raw` (or, per R4,
+its normalized-log-loss form), never `reference - linear_raw`.
+
+### R3 - structural evaluation (anchor-based)
+
+Per-cell component IDs are permutation- and count-dependent. Use **dense
+reachability fields from preregistered anchor cells** (K fixed anchors per
+observation by a frozen rule; target = "reachable from anchor k"). Evaluate with
+VI / Adapted Rand / Betti-0 plus explicit **false-merge** and **false-split**
+rates.
+
+If `reachability` stays in the gate, the **false-merge rate is a veto**
+(a false merge is a false-open). Calibrate that veto threshold from the control /
+reference behaviour on calibration data - not an arbitrary absolute value.
+
+### R4 - preregistration amendment (choose one primary metric)
+
+From calibration data only, before P1 opens, freeze exactly one primary
+`reachability` metric and its aggregation:
+
+- normalized conditional log-loss gain
+  `(null_log_loss - candidate_log_loss) / (null_log_loss - reference_log_loss)`,
+  bounded and structurally uniform with the other anchors; or
+- occlusion-stratified AUPRC with the frozen weighted aggregate.
+
+AUPRC and PVI / selectivity are retained as **diagnostics only**.
+
+The amendment must also **explicitly define the minimum active gate set** (see
+open decision below).
+
+### R5 - fresh run
+
+New `v2r2` dataset, query, preregistration, and run identities. **No reuse of any
+`v2r1` identity.** New spec commit.
+
+### Stop rule
+
+If R0, or R2's ladder, shows the preregistered `reachability` denominator stays
+below `0.10` headroom, defer `reachability` - do **not** pick whichever
+diagnostic happened to pass.
+
+## Open decision (spec owner)
+
+`geodesic_nmae` is already deferred. If `reachability` also defers, the active
+gate is `{occupied_iou, boundary_f1, clearance_nmae}` - two of which are the
+pinned calibration templates - and the pilot has **no topology-perception
+coverage**.
+
+A three-component pilot without either topology target **must not run as the
+original direction-finding pilot**. The choices are:
+
+1. **Terminate** the perception-encoder direction-finding pilot; topology
+   perception is unvalidated at pilot scale.
+2. Run a deliberately narrower **"local geometry only"** study under a separate,
+   explicit claim (it validates local geometry representation, not topology
+   perception) with its own acceptance criteria.
+
+This is not a runtime `proceed on N-of-5`. It is a spec decision that must be
+recorded before v2r2 executes.
+
+## Tracking
+
+- `#339` (this branch): exploratory infrastructure, `retain`.
+- new **specs** issue: v2r2 partially-observed-topology preregistration
+  (R0-R4 design, minimum active set, spec commit).
+- new **implementation** issue: v2r2 execution (R0 audit -> R5 run) against the
+  frozen v2r2 spec.
