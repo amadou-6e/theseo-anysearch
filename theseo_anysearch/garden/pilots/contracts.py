@@ -339,6 +339,246 @@ class V2FrozenPreregistration(FrozenModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Calibration revision (F0): amendment schema and superseded-verdict record
+# ---------------------------------------------------------------------------
+
+V2R1_DATASET_ID = "voxel-encoder-pilot-v2r1-dataset-1"
+V2R1_PREREGISTRATION_ID = "voxel-encoder-pilot-v2r1-preregistration-1"
+V2R1_CALIBRATION_RUN_ID = "voxel-encoder-pilot-v2r1-p0c-1"
+V2R1_DATA_SENSITIVITY_RUN_ID = "voxel-encoder-pilot-v2r1-p0d-1"
+V2R1_P1_RUN_ID = "voxel-encoder-pilot-v2r1-p1-1"
+
+CeilingMethod = Literal[
+    "bayes_error_knn",
+    "bayes_error_mst",
+    "bayes_error_direct",
+    "knn_residual",
+    "multitask_reference",
+    "regularized_reference",
+]
+MODEL_FREE_CEILING_METHODS = frozenset(
+    {"bayes_error_knn", "bayes_error_mst", "bayes_error_direct", "knn_residual"}
+)
+NullInput = Literal["zeros", "coordinates_only"]
+AnchorStatus = Literal["active", "deferred"]
+CALIBRATION_TEMPLATE_COMPONENTS = ("boundary_f1", "clearance_nmae")
+
+
+class TrivialityCheck(FrozenModel):
+    """Usable-information gap between the real embedding and a null input.
+
+    F2 populates the measured quantities. Any component that stays in the
+    gate must clear ``pvi_gain >= min_pvi_gain``; a task the null input
+    already solves carries no encoder-discriminative signal.
+    """
+
+    null_input: NullInput
+    pvi_embedding: float
+    pvi_null: float
+    pvi_gain: float
+    mdl_embedding_bits: float = Field(gt=0)
+    mdl_null_bits: float = Field(gt=0)
+    min_pvi_gain: float = Field(gt=0)
+    passes: bool
+
+    @model_validator(mode="after")
+    def require_consistent_gain(self) -> "TrivialityCheck":
+        if abs(self.pvi_gain - (self.pvi_embedding - self.pvi_null)) > 1e-9:
+            raise ValueError("pvi_gain must equal pvi_embedding minus pvi_null")
+        if self.passes != (self.pvi_gain >= self.min_pvi_gain):
+            raise ValueError("passes must reflect pvi_gain against min_pvi_gain")
+        return self
+
+
+class RevisedScoreAnchor(FrozenModel):
+    """Denominator anchor for the amended P0C calibration.
+
+    Extends the v1 anchor with ceiling provenance, a non-collapse check for
+    reference-derived ceilings, a triviality gate, and an explicit deferral
+    state so a component with no usable headroom is recorded out of the gate
+    set instead of silently clamping a degenerate denominator.
+    """
+
+    higher_is_better: bool
+    floor: float
+    ceiling: float
+    floor_source: NonEmpty
+    ceiling_source: NonEmpty
+    ceiling_method: CeilingMethod
+    ceiling_non_collapse_verified: bool
+    ceiling_effective_rank_fraction: float | None = None
+    triviality: TrivialityCheck
+    status: AnchorStatus
+    deferral_reason: str | None = None
+
+    @model_validator(mode="after")
+    def require_valid_revised_anchor(self) -> "RevisedScoreAnchor":
+        if self.ceiling_method in MODEL_FREE_CEILING_METHODS:
+            if self.ceiling_effective_rank_fraction is not None:
+                raise ValueError("model-free ceilings have no embedding rank to report")
+            if not self.ceiling_non_collapse_verified:
+                raise ValueError(
+                    "model-free ceilings are collapse-free by construction and must "
+                    "record ceiling_non_collapse_verified=true"
+                )
+        else:
+            fraction = self.ceiling_effective_rank_fraction
+            if fraction is None or not 0.0 <= fraction <= 1.0:
+                raise ValueError(
+                    "reference ceilings must report ceiling_effective_rank_fraction in [0, 1]"
+                )
+            if self.ceiling_non_collapse_verified != (fraction > 0.30):
+                raise ValueError(
+                    "ceiling_non_collapse_verified must reflect an effective-rank "
+                    "fraction above 0.30"
+                )
+        if self.status == "deferred":
+            if not self.deferral_reason:
+                raise ValueError("a deferred anchor requires a recorded reason")
+            return self
+        if self.deferral_reason is not None:
+            raise ValueError("an active anchor cannot carry a deferral reason")
+        if not self.ceiling_non_collapse_verified:
+            raise ValueError("an active anchor requires a collapse-free ceiling")
+        if not self.triviality.passes:
+            raise ValueError(
+                "an active anchor requires usable information above the null input"
+            )
+        if self.higher_is_better:
+            if self.ceiling - self.floor < 0.10:
+                raise ValueError(
+                    "active higher-is-better ceiling must exceed floor by at least 0.10"
+                )
+        elif self.floor <= 0 or (self.floor - self.ceiling) / self.floor < 0.20:
+            raise ValueError(
+                "active error ceiling must improve on floor by at least 20 percent"
+            )
+        return self
+
+
+class SupersededVerdict(FrozenModel):
+    """Machine-readable retirement of a prior completed pilot decision.
+
+    Records that a verdict is void because a gate it relied on was later
+    shown defective, with the evidence run and its report payload hash.
+    """
+
+    superseded_program: NonEmpty
+    superseded_run_id: NonEmpty
+    superseded_pilot: PilotName
+    superseded_decision: Decision
+    fired_veto: NonEmpty
+    void_reason: NonEmpty
+    evidence_run_id: NonEmpty
+    evidence_report_sha256: Sha256
+    replacement_run_id: NonEmpty
+    recorded_at: datetime
+
+    @model_validator(mode="after")
+    def require_distinct_replacement(self) -> "SupersededVerdict":
+        if self.superseded_run_id == self.replacement_run_id:
+            raise ValueError("a superseded verdict requires a new replacement run identity")
+        return self
+
+
+class V2R1FrozenPreregistration(FrozenModel):
+    """Amended calibration contract frozen before the revised P0C is opened.
+
+    Reuses the v2 pool, seed, and veto structure; replaces the score anchors
+    with revised anchors that carry a ceiling method, non-collapse evidence,
+    and a triviality gate; and carries the superseded-verdict record for the
+    v1 P1 null result.
+    """
+
+    schema_version: Literal[3] = 3
+    program: Literal["voxel-encoder-pilot-v2r1"] = "voxel-encoder-pilot-v2r1"
+    dataset_id: Literal["voxel-encoder-pilot-v2r1-dataset-1"]
+    preregistration_id: Literal["voxel-encoder-pilot-v2r1-preregistration-1"]
+    calibration_run_id: Literal["voxel-encoder-pilot-v2r1-p0c-1"]
+    data_sensitivity_run_id: Literal["voxel-encoder-pilot-v2r1-p0d-1"]
+    replacement_p1_run_id: Literal["voxel-encoder-pilot-v2r1-p1-1"]
+    amends_program: Literal["voxel-encoder-pilot-v2"] = "voxel-encoder-pilot-v2"
+    superseded_calibration_run_id: Literal["voxel-encoder-pilot-v2-p0-calibration-1"]
+    superseded_specs_sha: GitSha
+    frozen_at: datetime
+    specs: SpecsReference
+    generator_version: NonEmpty
+    generator_seed: int = Field(ge=0)
+    calibration_cap_hours: float = Field(gt=0)
+    data_sensitivity_cap_hours: float = Field(gt=0)
+    p1_cap_hours: float = Field(gt=0)
+    seeds: SeedAssignments
+    vetoes: VetoThresholds
+    revised_anchors: dict[str, RevisedScoreAnchor]
+    active_gate_components: tuple[NonEmpty, ...] = Field(min_length=1)
+    superseded_verdicts: tuple[SupersededVerdict, ...] = Field(min_length=1)
+    pools: dict[str, PoolIdentity]
+    fresh_draws: dict[Literal["P4", "P6", "P7"], FreshDrawIdentity]
+    calibration_artifacts: tuple[ArtifactReference, ...] = Field(min_length=1)
+    anchor_selection_without_calibration: Literal[True] = True
+    calibration_used_for_candidate_ranking: Literal[False] = False
+
+    @model_validator(mode="after")
+    def require_complete_amendment(self) -> "V2R1FrozenPreregistration":
+        if set(self.revised_anchors) != REQUIRED_SCORE_COMPONENTS:
+            raise ValueError("all five components require a revised anchor, active or deferred")
+        active = {
+            name for name, anchor in self.revised_anchors.items() if anchor.status == "active"
+        }
+        if set(self.active_gate_components) != active:
+            raise ValueError(
+                "active_gate_components must list exactly the active revised anchors"
+            )
+        if not active:
+            raise ValueError("the amended calibration must keep at least one component in the gate")
+        for template in CALIBRATION_TEMPLATE_COMPONENTS:
+            if self.revised_anchors[template].status != "active":
+                raise ValueError(
+                    f"{template} is a calibration template and must stay active"
+                )
+        if set(self.pools) != set(V2_REQUIRED_POOLS):
+            raise ValueError("all seven v2 pilot pools are required")
+        for name, expected_count in V2_REQUIRED_POOLS.items():
+            pool = self.pools[name]
+            if len(pool.geometry_ids) != expected_count:
+                raise ValueError(f"{name} must contain {expected_count} geometry IDs")
+            if pool.observations != V2_REQUIRED_OBSERVATIONS[name]:
+                raise ValueError(
+                    f"{name} must contain {V2_REQUIRED_OBSERVATIONS[name]} observations"
+                )
+        all_ids = [gid for pool in self.pools.values() for gid in pool.geometry_ids]
+        if len(all_ids) != len(set(all_ids)):
+            raise ValueError("geometry IDs must be disjoint across v2 pilot pools")
+        expected_draws = {
+            "P4": "pilot_dev_arch",
+            "P6": "pilot_dev_interaction",
+            "P7": "pilot_confirm",
+        }
+        if set(self.fresh_draws) != set(expected_draws):
+            raise ValueError("fresh draw identities are required for P4, P6, and P7")
+        for pilot, pool_name in expected_draws.items():
+            draw = self.fresh_draws[pilot]
+            pool = self.pools[pool_name]
+            if draw.pool != pool_name:
+                raise ValueError(f"{pilot} must open {pool_name}")
+            if (
+                draw.assignment_sha256 != pool.assignment_sha256
+                or draw.query_sha256 != pool.query_sha256
+            ):
+                raise ValueError(f"{pilot} fresh draw hashes must match {pool_name}")
+        roles = [artifact.role for artifact in self.calibration_artifacts]
+        if len(roles) != len(set(roles)):
+            raise ValueError("calibration artifact roles must be unique")
+        if not any(
+            verdict.superseded_program == "voxel-encoder-pilot-v1"
+            and verdict.superseded_pilot == "P1"
+            for verdict in self.superseded_verdicts
+        ):
+            raise ValueError("the amendment must record the superseded v1 P1 verdict")
+        return self
+
+
 class ResolvedPilotConfig(FrozenModel):
     """Fully resolved inputs for one candidate trial."""
 
