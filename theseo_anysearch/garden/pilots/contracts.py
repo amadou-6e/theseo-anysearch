@@ -414,6 +414,12 @@ class RevisedScoreAnchor(FrozenModel):
 
     @model_validator(mode="after")
     def require_valid_revised_anchor(self) -> "RevisedScoreAnchor":
+        if self.status == "deferred":
+            if not self.deferral_reason:
+                raise ValueError("a deferred anchor requires a recorded reason")
+            return self
+        if self.deferral_reason is not None:
+            raise ValueError("an active anchor cannot carry a deferral reason")
         if self.ceiling_method in MODEL_FREE_CEILING_METHODS:
             if self.ceiling_effective_rank_fraction is not None:
                 raise ValueError("model-free ceilings have no embedding rank to report")
@@ -433,12 +439,6 @@ class RevisedScoreAnchor(FrozenModel):
                     "ceiling_non_collapse_verified must reflect an effective-rank "
                     "fraction above 0.30"
                 )
-        if self.status == "deferred":
-            if not self.deferral_reason:
-                raise ValueError("a deferred anchor requires a recorded reason")
-            return self
-        if self.deferral_reason is not None:
-            raise ValueError("an active anchor cannot carry a deferral reason")
         if not self.ceiling_non_collapse_verified:
             raise ValueError("an active anchor requires a collapse-free ceiling")
         if not self.triviality.passes:
@@ -482,14 +482,133 @@ class SupersededVerdict(FrozenModel):
         return self
 
 
-class V2R1FrozenPreregistration(FrozenModel):
-    """Amended calibration contract frozen before the revised P0C is opened.
+class V2R1MetricPlan(FrozenModel):
+    """A probe definition frozen before any v2r1 calibration geometry is opened."""
 
-    Reuses the v2 pool, seed, and veto structure; replaces the score anchors
-    with revised anchors that carry a ceiling method, non-collapse evidence,
-    and a triviality gate; and carries the superseded-verdict record for the
-    v1 P1 null result.
-    """
+    higher_is_better: bool
+    status: AnchorStatus = "active"
+    floor_methods: tuple[NonEmpty, ...] = Field(min_length=1)
+    ceiling_method: CeilingMethod
+    null_input: NullInput
+    min_pvi_gain: float = Field(gt=0)
+    minimum_absolute_headroom: float | None = Field(default=None, gt=0)
+    minimum_relative_error_reduction: float | None = Field(default=None, gt=0, lt=1)
+    deferral_reason: str | None = None
+
+    @model_validator(mode="after")
+    def require_directional_gate(self) -> "V2R1MetricPlan":
+        if self.status == "deferred":
+            if not self.deferral_reason:
+                raise ValueError("a deferred metric plan requires a reason")
+            return self
+        if self.deferral_reason is not None:
+            raise ValueError("an active metric plan cannot carry a deferral reason")
+        if self.higher_is_better and self.minimum_absolute_headroom is None:
+            raise ValueError("higher-is-better plans require absolute headroom")
+        if not self.higher_is_better and self.minimum_relative_error_reduction is None:
+            raise ValueError("error plans require a relative error reduction")
+        return self
+
+
+class V2R1VetoThresholds(FrozenModel):
+    """V2r1 vetoes with the reachability threshold measured by E1."""
+
+    effective_rank_fraction_min: Literal[0.25] = 0.25
+    near_dead_dimensions_fraction_max: Literal[0.05] = 0.05
+    control_selectivity_min: Literal[0.05] = 0.05
+    embedding_necessity_margin_min: Literal[0.05] = 0.05
+    false_open_rate_max: float = Field(ge=0, le=1)
+    false_open_baseline: float = Field(ge=0, le=1)
+    false_open_baseline_name: NonEmpty
+    false_open_margin: Literal[0.02] = 0.02
+    false_open_regression_max: Literal[0.02] = 0.02
+    bootstrap_resamples: Literal[10_000] = 10_000
+
+    @model_validator(mode="after")
+    def require_empirical_threshold(self) -> "V2R1VetoThresholds":
+        expected = max(0.0, self.false_open_baseline - self.false_open_margin)
+        if abs(self.false_open_rate_max - expected) > 1e-9:
+            raise ValueError("false_open_rate_max must equal best baseline minus 0.02")
+        return self
+
+
+class V2R1ProtocolPreregistration(FrozenModel):
+    """Immutable v2r1 methods and identities frozen before revised P0C."""
+
+    schema_version: Literal[3] = 3
+    program: Literal["voxel-encoder-pilot-v2r1"] = "voxel-encoder-pilot-v2r1"
+    dataset_id: Literal["voxel-encoder-pilot-v2r1-dataset-1"]
+    preregistration_id: Literal["voxel-encoder-pilot-v2r1-preregistration-1"]
+    calibration_run_id: Literal["voxel-encoder-pilot-v2r1-p0c-1"]
+    data_sensitivity_run_id: Literal["voxel-encoder-pilot-v2r1-p0d-1"]
+    replacement_p1_run_id: Literal["voxel-encoder-pilot-v2r1-p1-1"]
+    frozen_at: datetime
+    specs: SpecsReference
+    generator_version: NonEmpty
+    generator_seed: int = Field(ge=0)
+    calibration_cap_hours: float = Field(gt=0)
+    data_sensitivity_cap_hours: float = Field(gt=0)
+    p1_cap_hours: float = Field(gt=0)
+    metric_plans: dict[str, V2R1MetricPlan]
+    active_gate_components: tuple[NonEmpty, ...] = Field(min_length=1)
+    superseded_verdicts: tuple[SupersededVerdict, ...] = Field(min_length=1)
+    pools: dict[str, PoolIdentity]
+    fresh_draws: dict[Literal["P4", "P6", "P7"], FreshDrawIdentity]
+    query_artifacts: tuple[ArtifactReference, ...] = Field(min_length=1)
+    reachability_false_open_margin: Literal[0.02] = 0.02
+    p0d_observation_density_multiplier: Literal[4] = 4
+
+    @model_validator(mode="after")
+    def require_frozen_protocol(self) -> "V2R1ProtocolPreregistration":
+        if set(self.metric_plans) != REQUIRED_SCORE_COMPONENTS:
+            raise ValueError("all five components require a frozen metric plan")
+        active = {name for name, plan in self.metric_plans.items() if plan.status == "active"}
+        if set(self.active_gate_components) != active:
+            raise ValueError("active_gate_components must match active metric plans")
+        for template in CALIBRATION_TEMPLATE_COMPONENTS:
+            if self.metric_plans[template].status != "active":
+                raise ValueError(f"{template} is a calibration template and must stay active")
+        _validate_v2r1_pools(self.pools, self.fresh_draws)
+        if len({artifact.role for artifact in self.query_artifacts}) != len(self.query_artifacts):
+            raise ValueError("query artifact roles must be unique")
+        if not any(
+            verdict.superseded_program == "voxel-encoder-pilot-v1"
+            and verdict.superseded_pilot == "P1"
+            for verdict in self.superseded_verdicts
+        ):
+            raise ValueError("the protocol must record the superseded v1 P1 verdict")
+        return self
+
+
+def _validate_v2r1_pools(
+    pools: dict[str, PoolIdentity],
+    fresh_draws: dict[str, FreshDrawIdentity],
+) -> None:
+    if set(pools) != set(V2_REQUIRED_POOLS):
+        raise ValueError("all seven v2r1 pilot pools are required")
+    for name, expected_count in V2_REQUIRED_POOLS.items():
+        pool = pools[name]
+        if len(pool.geometry_ids) != expected_count:
+            raise ValueError(f"{name} must contain {expected_count} geometry IDs")
+        if pool.observations != V2_REQUIRED_OBSERVATIONS[name]:
+            raise ValueError(f"{name} must contain {V2_REQUIRED_OBSERVATIONS[name]} observations")
+    all_ids = [geometry_id for pool in pools.values() for geometry_id in pool.geometry_ids]
+    if len(all_ids) != len(set(all_ids)):
+        raise ValueError("geometry IDs must be disjoint across v2r1 pilot pools")
+    if any(not geometry_id.startswith("pilot-v2r1-") for geometry_id in all_ids):
+        raise ValueError("v2r1 pools must be fresh and use pilot-v2r1 geometry IDs")
+    expected_draws = {"P4": "pilot_dev_arch", "P6": "pilot_dev_interaction", "P7": "pilot_confirm"}
+    if set(fresh_draws) != set(expected_draws):
+        raise ValueError("fresh draw identities are required for P4, P6, and P7")
+    for pilot, pool_name in expected_draws.items():
+        draw = fresh_draws[pilot]
+        pool = pools[pool_name]
+        if draw.pool != pool_name or draw.assignment_sha256 != pool.assignment_sha256 or draw.query_sha256 != pool.query_sha256:
+            raise ValueError(f"{pilot} fresh draw hashes must match {pool_name}")
+
+
+class V2R1FrozenPreregistration(FrozenModel):
+    """Measured anchors frozen after P0C and before P0D/P1 are opened."""
 
     schema_version: Literal[3] = 3
     program: Literal["voxel-encoder-pilot-v2r1"] = "voxel-encoder-pilot-v2r1"
@@ -509,7 +628,7 @@ class V2R1FrozenPreregistration(FrozenModel):
     data_sensitivity_cap_hours: float = Field(gt=0)
     p1_cap_hours: float = Field(gt=0)
     seeds: SeedAssignments
-    vetoes: VetoThresholds
+    vetoes: V2R1VetoThresholds
     revised_anchors: dict[str, RevisedScoreAnchor]
     active_gate_components: tuple[NonEmpty, ...] = Field(min_length=1)
     superseded_verdicts: tuple[SupersededVerdict, ...] = Field(min_length=1)
@@ -518,6 +637,7 @@ class V2R1FrozenPreregistration(FrozenModel):
     calibration_artifacts: tuple[ArtifactReference, ...] = Field(min_length=1)
     anchor_selection_without_calibration: Literal[True] = True
     calibration_used_for_candidate_ranking: Literal[False] = False
+    protocol_sha256: Sha256
 
     @model_validator(mode="after")
     def require_complete_amendment(self) -> "V2R1FrozenPreregistration":
@@ -537,36 +657,7 @@ class V2R1FrozenPreregistration(FrozenModel):
                 raise ValueError(
                     f"{template} is a calibration template and must stay active"
                 )
-        if set(self.pools) != set(V2_REQUIRED_POOLS):
-            raise ValueError("all seven v2 pilot pools are required")
-        for name, expected_count in V2_REQUIRED_POOLS.items():
-            pool = self.pools[name]
-            if len(pool.geometry_ids) != expected_count:
-                raise ValueError(f"{name} must contain {expected_count} geometry IDs")
-            if pool.observations != V2_REQUIRED_OBSERVATIONS[name]:
-                raise ValueError(
-                    f"{name} must contain {V2_REQUIRED_OBSERVATIONS[name]} observations"
-                )
-        all_ids = [gid for pool in self.pools.values() for gid in pool.geometry_ids]
-        if len(all_ids) != len(set(all_ids)):
-            raise ValueError("geometry IDs must be disjoint across v2 pilot pools")
-        expected_draws = {
-            "P4": "pilot_dev_arch",
-            "P6": "pilot_dev_interaction",
-            "P7": "pilot_confirm",
-        }
-        if set(self.fresh_draws) != set(expected_draws):
-            raise ValueError("fresh draw identities are required for P4, P6, and P7")
-        for pilot, pool_name in expected_draws.items():
-            draw = self.fresh_draws[pilot]
-            pool = self.pools[pool_name]
-            if draw.pool != pool_name:
-                raise ValueError(f"{pilot} must open {pool_name}")
-            if (
-                draw.assignment_sha256 != pool.assignment_sha256
-                or draw.query_sha256 != pool.query_sha256
-            ):
-                raise ValueError(f"{pilot} fresh draw hashes must match {pool_name}")
+        _validate_v2r1_pools(self.pools, self.fresh_draws)
         roles = [artifact.role for artifact in self.calibration_artifacts]
         if len(roles) != len(set(roles)):
             raise ValueError("calibration artifact roles must be unique")

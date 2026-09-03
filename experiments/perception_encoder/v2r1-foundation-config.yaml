@@ -1,0 +1,20 @@
+program: voxel-encoder-pilot-v2r1
+dataset_id: voxel-encoder-pilot-v2r1-dataset-1
+preregistration_id: voxel-encoder-pilot-v2r1-preregistration-1
+calibration_run_id: voxel-encoder-pilot-v2r1-p0c-1
+data_sensitivity_run_id: voxel-encoder-pilot-v2r1-p0d-1
+replacement_p1_run_id: voxel-encoder-pilot-v2r1-p1-1
+spec_commit: 0c9e3c633799f5d42b7a603e0845cac0bd494cda
+frozen_at: "2026-09-03T14:15:00Z"
+generator_version: procedural-voxel-generator-v2
+generator_seed: 3290
+reference_accelerator: NVIDIA GeForce RTX 3060 Ti 8GB
+calibration_cap_hours: 2.0
+data_sensitivity_cap_hours: 2.0
+p1_cap_hours: 4.0
+p0d_observation_density_multiplier: 4
+reachability_false_open_margin: 0.02
+triviality_min_pvi_gain: 0.05
+ceiling_knn_k: 15
+geodesic_noise_floor_nmae: 0.15
+cpu_smoke_seed: 3290

@@ -64,6 +64,8 @@ def _features_and_labels(
         raise ValueError(f"model-free ceilings need at least {DEFAULT_K + 1} samples")
     if not np.isfinite(x).all():
         raise ValueError("features must be finite")
+    scale = x.std(axis=0, keepdims=True)
+    x = (x - x.mean(axis=0, keepdims=True)) / np.maximum(scale, 1e-9)
     return x, y
 
 
@@ -153,6 +155,11 @@ def classification_metric_ceiling(
     target = np.asarray(labels, dtype=bool)
     if metric == "occupied_iou":
         value = binary_iou(posteriors >= 0.5, target)
+    elif metric == "boundary_f1":
+        prediction = posteriors >= 0.5
+        true_positive = np.count_nonzero(prediction & target)
+        denominator = np.count_nonzero(prediction) + np.count_nonzero(target)
+        value = 1.0 if denominator == 0 else 2.0 * true_positive / denominator
     else:
         value = binary_ranking_metrics(posteriors, target).auprc
     return CeilingEstimate(

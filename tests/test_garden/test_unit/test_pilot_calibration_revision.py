@@ -14,12 +14,13 @@ from theseo_anysearch.garden.pilots.contracts import (
     SupersededVerdict,
     TrivialityCheck,
     V2R1FrozenPreregistration,
+    V2R1VetoThresholds,
     VetoThresholds,
 )
-from theseo_anysearch.garden.pilots.v2 import build_v2_pool_identities
+from theseo_anysearch.garden.pilots.v2r1 import build_v2r1_pool_identities
 
 SPEC_SHA = "f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d"
-SPEC_V2R1 = "01eefc529016da48c4a1dd17b85391720542af14"
+SPEC_V2R1 = "0c9e3c633799f5d42b7a603e0845cac0bd494cda"
 P0C_REPORT_SHA = "a7a149f9235b38f9ff1f1a230ce791367cf528fc6705e0f987674f1a48d4ea43"
 
 
@@ -78,7 +79,7 @@ def _v1_p1_supersede(**overrides) -> SupersededVerdict:
 
 
 def _v2r1_preregistration(**overrides) -> V2R1FrozenPreregistration:
-    _, pools, draws = build_v2_pool_identities(seed=290210)
+    _, pools, draws = build_v2r1_pool_identities(seed=290210)
     artifact = ArtifactReference(
         role="calibration_predictions",
         uri="runtime/perception_encoder/v2r1/p0c-evaluations.json",
@@ -129,7 +130,11 @@ def _v2r1_preregistration(**overrides) -> V2R1FrozenPreregistration:
         data_sensitivity_cap_hours=2.0,
         p1_cap_hours=4.0,
         seeds=SeedAssignments(),
-        vetoes=VetoThresholds(),
+        vetoes=V2R1VetoThresholds(
+            false_open_rate_max=0.13,
+            false_open_baseline=0.15,
+            false_open_baseline_name="fixed_random_projection",
+        ),
         revised_anchors=anchors,
         active_gate_components=(
             "occupied_iou",
@@ -141,6 +146,7 @@ def _v2r1_preregistration(**overrides) -> V2R1FrozenPreregistration:
         pools=pools,
         fresh_draws=draws,
         calibration_artifacts=(artifact,),
+        protocol_sha256="e" * 64,
     )
     values.update(overrides)
     return V2R1FrozenPreregistration(**values)

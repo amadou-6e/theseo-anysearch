@@ -1,12 +1,12 @@
 # Perception Encoder Calibration Revision Work Plan
 
-Status: proposed
+Status: foundation implemented; execution pending review
 Integration branch: `exp/perception-encoder`
 Trigger: P0C returned `blocked` — three of five denominator gates failed
 (`occupied_iou`, `reachability_auprc`, `geodesic_nmae`). Root causes in
 [`p0c-calibration-revision-research.md`](perception-encoder-calibration-revision-research.md).
 Specifications: pilot spec at
-`amadou-6e/specs@01eefc529016da48c4a1dd17b85391720542af14` (to be amended by F0/F8).
+`amadou-6e/specs@0c9e3c633799f5d42b7a603e0845cac0bd494cda`.
 
 ## Objective
 
