@@ -1,0 +1,34 @@
+{
+  "accelerator_hours": 0.0,
+  "code_sha": "d2ef7c8dad2331003294d84bf7e80c8846106ff3",
+  "dataset_id": "voxel-encoder-pilot-v2r1-dataset-1",
+  "decision": {
+    "decision": "blocked",
+    "detail": "E1 did not freeze a valid active denominator set",
+    "next": null,
+    "reason": "no_retained_bundle"
+  },
+  "disposition": "reject",
+  "integration_base_sha": "74e3d4dc74ff8ea3d24ec959338e3be29570e211",
+  "issue": 335,
+  "observation_density_multiplier": 4,
+  "observations_opened": false,
+  "prerequisite": {
+    "denominator_failures": [
+      "reachability_auprc"
+    ],
+    "report_payload_sha256": "2564db175a1880cf81da40bd5a32e472f9b3db81bce111283fe48c74d409697b",
+    "run_id": "voxel-encoder-pilot-v2r1-p0c-1",
+    "status": "blocked"
+  },
+  "replacement_p1": {
+    "blocked_by": "voxel-encoder-pilot-v2r1-p0d-1",
+    "run_id": "voxel-encoder-pilot-v2r1-p1-1",
+    "status": "not_started"
+  },
+  "report_payload_sha256": "4af619e2e3c2256c0e8f6655f65534580fbcabc4178257a4b100348699461775",
+  "run_id": "voxel-encoder-pilot-v2r1-p0d-1",
+  "spec_commit": "0c9e3c633799f5d42b7a603e0845cac0bd494cda",
+  "status": "blocked",
+  "trials_started": 0
+}
