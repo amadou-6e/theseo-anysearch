@@ -235,8 +235,9 @@ for the neutral `reachability` gate family and its aggregation:
 - occlusion-stratified AUPRC with the frozen weighted aggregate, normalized
   between the R2 nonlinear-raw floor and the reference ceiling.
 
-The null-input log loss is a triviality diagnostic only, not a floor. AUPRC and
-PVI / selectivity are retained as **diagnostics only**.
+Exactly one of the two is selected in the comparative preregistration and becomes
+the `reachability` gate; the unselected form, the null-input log loss, PVI, and
+selectivity are then **diagnostics only**.
 
 The amendment must also **explicitly define the minimum active gate set** (see
 open decision below).
