@@ -24,6 +24,7 @@ from theseo_anysearch.garden.models.objectives import (
 from theseo_anysearch.garden.models.outputs import EncoderOutput, VoxelLevel
 from theseo_anysearch.garden.pilots.corpus import (
     PilotObservation,
+    V1_PROGRAM,
     make_pilot_observation,
     proper_cube_rotation,
 )
@@ -49,6 +50,7 @@ class ComparativeTrialConfig:
     esdf_radius_fraction: float = 0.25
     cube_rotations: bool = False
     density_multiplier: int = 1
+    corpus_program: str = V1_PROGRAM
     checkpoint_fractions: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 1.0)
 
     def __post_init__(self) -> None:
@@ -60,6 +62,8 @@ class ComparativeTrialConfig:
             raise ValueError("mask ratio and EMA decay must be in (0, 1)")
         if self.esdf_radius_fraction <= 0 or self.density_multiplier not in {1, 4}:
             raise ValueError("invalid ESDF scale or observation-density multiplier")
+        if self.corpus_program not in {"voxel-encoder-pilot-v1", "voxel-encoder-pilot-v2"}:
+            raise ValueError("unsupported corpus program")
         if self.checkpoint_fractions != tuple(sorted(set(self.checkpoint_fractions))):
             raise ValueError("checkpoint fractions must be unique and increasing")
         if not self.checkpoint_fractions or self.checkpoint_fractions[-1] != 1.0:
@@ -113,6 +117,7 @@ def ordered_trial_batch(
             observation_index,
             radius=radius,
             density_multiplier=config.density_multiplier,
+            program=config.corpus_program,
         )
         occupancy = observation.occupancy
         unknown = observation.unknown_mask

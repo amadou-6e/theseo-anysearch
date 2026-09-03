@@ -20,7 +20,7 @@ from theseo_anysearch.garden.evaluation.probes import encoder_state_sha256
 from theseo_anysearch.garden.masking import DenseMaskAwareEncoder
 from theseo_anysearch.garden.models.outputs import EncoderOutput, VoxelLevel
 from theseo_anysearch.garden.pilots.contracts import ScoreAnchor
-from theseo_anysearch.garden.pilots.corpus import make_pilot_observation
+from theseo_anysearch.garden.pilots.corpus import V1_PROGRAM, make_pilot_observation
 from theseo_anysearch.garden.splits import GeometryDescriptor
 from theseo_anysearch.garden.targets import (
     compute_geometry_targets,
@@ -245,6 +245,7 @@ def _make_banks(
     pair_queries: int,
     seed: int,
     device: torch.device,
+    corpus_program: str,
 ) -> tuple[_ProbeBank, _ProbeBank]:
     encoder_was_training = encoder.training
     encoder.eval()
@@ -262,7 +263,7 @@ def _make_banks(
             for index, descriptor in enumerate(descriptors):
                 radius = 8 if index % 2 == 0 else 16
                 coordinate_observation = make_pilot_observation(
-                    descriptor, 1, radius=radius
+                    descriptor, 1, radius=radius, program=corpus_program
                 )
                 coordinate_output = _encode(
                     encoder,
@@ -292,7 +293,10 @@ def _make_banks(
 
                 pair_observation_index = 5 + 10 * (index % 3)
                 pair_observation = make_pilot_observation(
-                    descriptor, pair_observation_index, radius=radius
+                    descriptor,
+                    pair_observation_index,
+                    radius=radius,
+                    program=corpus_program,
                 )
                 pair_output = _encode(
                     encoder,
@@ -319,7 +323,9 @@ def _make_banks(
                 )
                 embeddings.append(pair_output.global_embedding.cpu())
 
-                rank_observation = make_pilot_observation(descriptor, 2, radius=radius)
+                rank_observation = make_pilot_observation(
+                    descriptor, 2, radius=radius, program=corpus_program
+                )
                 rank_output = _encode(
                     encoder,
                     rank_observation.occupancy,
@@ -549,6 +555,7 @@ def evaluate_frozen_representation(
     device: torch.device,
     final: bool,
     include_controls: bool | None = None,
+    corpus_program: str = V1_PROGRAM,
 ) -> dict[str, object]:
     """Fit fixed probes and return aggregate plus bootstrap-ready geometry rows."""
 
@@ -560,6 +567,7 @@ def evaluate_frozen_representation(
         pair_queries=protocol.pair_train_queries,
         seed=seed,
         device=device,
+        corpus_program=corpus_program,
     )
     dev_coordinate, dev_pair = _make_banks(
         encoder,
@@ -568,6 +576,7 @@ def evaluate_frozen_representation(
         pair_queries=protocol.pair_dev_queries,
         seed=seed + 1,
         device=device,
+        corpus_program=corpus_program,
     )
     updates = protocol.final_updates if final else protocol.intermediate_updates
     include_controls = final if include_controls is None else include_controls

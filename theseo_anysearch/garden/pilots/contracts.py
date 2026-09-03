@@ -28,6 +28,16 @@ REQUIRED_OBSERVATIONS = {
     "pilot_dev_interaction": 6_000,
     "pilot_confirm": 12_000,
 }
+V2_REQUIRED_POOLS = {
+    **REQUIRED_POOLS,
+    "pilot_calibration": 24,
+    "pilot_diagnostic": 24,
+}
+V2_REQUIRED_OBSERVATIONS = {
+    **REQUIRED_OBSERVATIONS,
+    "pilot_calibration": 6_000,
+    "pilot_diagnostic": 6_000,
+}
 REQUIRED_SCORE_COMPONENTS = {
     "occupied_iou",
     "boundary_f1",
@@ -229,6 +239,103 @@ class FrozenPreregistration(FrozenModel):
                 or draw.query_sha256 != self.pools[pool].query_sha256
             ):
                 raise ValueError(f"{pilot} fresh draw hashes must match {pool}")
+        return self
+
+
+class T3HealthGate(FrozenModel):
+    """Frozen outcome of the two-cell T3 mechanism-health replay."""
+
+    run_id: Literal["voxel-encoder-pilot-v2-t3-diagnostic-1"]
+    learning_rates: tuple[Literal[0.0001, 0.0003], Literal[0.0001, 0.0003]] = (
+        0.0001,
+        0.0003,
+    )
+    seed: Literal[5] = 5
+    updates: Literal[2000] = 2000
+    implementation_failure: bool
+    mechanism_health_failure: bool
+    labels_by_learning_rate: dict[str, tuple[str, ...]]
+    shared_labels: tuple[str, ...]
+    report: ArtifactReference
+
+    @model_validator(mode="after")
+    def require_exact_replay(self) -> "T3HealthGate":
+        if self.learning_rates != (0.0001, 0.0003):
+            raise ValueError("T3 health replay requires both frozen P1 learning rates")
+        if set(self.labels_by_learning_rate) != {"0.0001", "0.0003"}:
+            raise ValueError("T3 health labels are required for both learning rates")
+        return self
+
+
+class V2FrozenPreregistration(FrozenModel):
+    """Calibration-repair contract frozen before replacement P1 is opened."""
+
+    schema_version: Literal[2] = 2
+    program: Literal["voxel-encoder-pilot-v2"] = "voxel-encoder-pilot-v2"
+    dataset_id: Literal["voxel-encoder-pilot-v2-dataset-1"]
+    preregistration_id: Literal["voxel-encoder-pilot-v2-preregistration-1"]
+    calibration_run_id: Literal["voxel-encoder-pilot-v2-p0-calibration-1"]
+    diagnostic_run_id: Literal["voxel-encoder-pilot-v2-t3-diagnostic-1"]
+    replacement_p1_run_id: Literal["voxel-encoder-pilot-v2-p1-1"]
+    superseded_program: Literal["voxel-encoder-pilot-v1"] = "voxel-encoder-pilot-v1"
+    superseded_specs_sha: GitSha
+    frozen_at: datetime
+    specs: SpecsReference
+    generator_version: NonEmpty
+    generator_seed: int = Field(ge=0)
+    calibration_cap_hours: float = Field(gt=0)
+    diagnostic_cap_hours: float = Field(gt=0)
+    p1_cap_hours: float = Field(gt=0)
+    seeds: SeedAssignments
+    vetoes: VetoThresholds
+    score_anchors: dict[str, ScoreAnchor]
+    pools: dict[str, PoolIdentity]
+    fresh_draws: dict[Literal["P4", "P6", "P7"], FreshDrawIdentity]
+    calibration_artifacts: tuple[ArtifactReference, ...] = Field(min_length=1)
+    anchor_selection_without_calibration: Literal[True] = True
+    calibration_used_for_candidate_ranking: Literal[False] = False
+    t3_health: T3HealthGate
+
+    @model_validator(mode="after")
+    def require_complete_v2_preregistration(self) -> "V2FrozenPreregistration":
+        if set(self.score_anchors) != REQUIRED_SCORE_COMPONENTS:
+            raise ValueError("all five measured v2 score anchors are required")
+        if set(self.pools) != set(V2_REQUIRED_POOLS):
+            raise ValueError("all seven v2 pilot pools are required")
+        for name, expected_count in V2_REQUIRED_POOLS.items():
+            pool = self.pools[name]
+            if len(pool.geometry_ids) != expected_count:
+                raise ValueError(f"{name} must contain {expected_count} geometry IDs")
+            if pool.observations != V2_REQUIRED_OBSERVATIONS[name]:
+                raise ValueError(
+                    f"{name} must contain {V2_REQUIRED_OBSERVATIONS[name]} observations"
+                )
+        all_ids = [geometry_id for pool in self.pools.values() for geometry_id in pool.geometry_ids]
+        if len(all_ids) != len(set(all_ids)):
+            raise ValueError("geometry IDs must be disjoint across v2 pilot pools")
+        if any(geometry_id.startswith("pilot-v1-") for geometry_id in all_ids):
+            raise ValueError("v2 pools must be disjoint from opened v1 geometry IDs")
+        expected_draws = {
+            "P4": "pilot_dev_arch",
+            "P6": "pilot_dev_interaction",
+            "P7": "pilot_confirm",
+        }
+        if set(self.fresh_draws) != set(expected_draws):
+            raise ValueError("fresh draw identities are required for P4, P6, and P7")
+        for pilot, pool_name in expected_draws.items():
+            draw = self.fresh_draws[pilot]
+            pool = self.pools[pool_name]
+            if draw.pool != pool_name:
+                raise ValueError(f"{pilot} must open {pool_name}")
+            if draw.assignment_sha256 != pool.assignment_sha256:
+                raise ValueError(f"{pilot} assignment hash must match {pool_name}")
+            if draw.query_sha256 != pool.query_sha256:
+                raise ValueError(f"{pilot} query hash must match {pool_name}")
+        roles = [artifact.role for artifact in self.calibration_artifacts]
+        if len(roles) != len(set(roles)):
+            raise ValueError("v2 calibration artifact roles must be unique")
+        if self.t3_health.implementation_failure or self.t3_health.mechanism_health_failure:
+            raise ValueError("replacement P1 cannot be preregistered after a failed T3 health gate")
         return self
 
 

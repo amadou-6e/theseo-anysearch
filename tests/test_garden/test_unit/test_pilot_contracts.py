@@ -20,8 +20,11 @@ from theseo_anysearch.garden.pilots.contracts import (
     ScoreAnchor,
     SeedAssignments,
     SpecsReference,
+    T3HealthGate,
+    V2FrozenPreregistration,
     VetoThresholds,
 )
+from theseo_anysearch.garden.pilots.v2 import build_v2_pool_identities
 from theseo_anysearch.garden.pilots.io import (
     ContractIntegrityError,
     FrozenArtifactError,
@@ -280,3 +283,64 @@ def test_run_manifest_requires_matching_resolved_pilot() -> None:
                 ),
             ),
         )
+
+
+def _v2_preregistration(**overrides) -> V2FrozenPreregistration:
+    _, pools, draws = build_v2_pool_identities(seed=290210)
+    artifact = ArtifactReference(
+        role="calibration_predictions",
+        uri="runtime/calibration.json",
+        sha256="d" * 64,
+        size_bytes=123,
+        media_type="application/json",
+    )
+    values = {
+        "dataset_id": "voxel-encoder-pilot-v2-dataset-1",
+        "preregistration_id": "voxel-encoder-pilot-v2-preregistration-1",
+        "calibration_run_id": "voxel-encoder-pilot-v2-p0-calibration-1",
+        "diagnostic_run_id": "voxel-encoder-pilot-v2-t3-diagnostic-1",
+        "replacement_p1_run_id": "voxel-encoder-pilot-v2-p1-1",
+        "superseded_specs_sha": SPEC_SHA,
+        "frozen_at": datetime(2026, 9, 3, tzinfo=timezone.utc),
+        "specs": SpecsReference(
+            repository="https://github.com/amadou-6e/specs",
+            commit_sha="01eefc529016da48c4a1dd17b85391720542af14",
+            files=("projects/theseo-anysearch/python/perception-encoder-pilots.md",),
+        ),
+        "generator_version": "procedural-voxel-generator-v2",
+        "generator_seed": 290210,
+        "calibration_cap_hours": 2.0,
+        "diagnostic_cap_hours": 6.0,
+        "p1_cap_hours": 4.0,
+        "seeds": SeedAssignments(),
+        "vetoes": VetoThresholds(),
+        "score_anchors": _preregistration().score_anchors,
+        "pools": pools,
+        "fresh_draws": draws,
+        "calibration_artifacts": (artifact,),
+        "t3_health": T3HealthGate(
+            run_id="voxel-encoder-pilot-v2-t3-diagnostic-1",
+            implementation_failure=False,
+            mechanism_health_failure=False,
+            labels_by_learning_rate={"0.0001": (), "0.0003": ()},
+            shared_labels=(),
+            report=artifact.model_copy(update={"role": "t3_diagnostic_report"}),
+        ),
+    }
+    values.update(overrides)
+    return V2FrozenPreregistration(**values)
+
+
+def test_v2_preregistration_freezes_calibration_and_health_evidence() -> None:
+    preregistration = _v2_preregistration()
+    assert len(preregistration.pools) == 7
+    assert preregistration.anchor_selection_without_calibration
+    assert not preregistration.calibration_used_for_candidate_ranking
+    assert preregistration.replacement_p1_run_id == "voxel-encoder-pilot-v2-p1-1"
+
+
+def test_v2_preregistration_rejects_failed_health_gate() -> None:
+    healthy = _v2_preregistration()
+    failed = healthy.t3_health.model_copy(update={"mechanism_health_failure": True})
+    with pytest.raises(ValidationError, match="failed T3 health gate"):
+        _v2_preregistration(t3_health=failed)
