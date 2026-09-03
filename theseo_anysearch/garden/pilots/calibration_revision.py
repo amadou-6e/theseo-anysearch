@@ -41,6 +41,8 @@ class CalibrationDataset:
     evaluation_null: np.ndarray
     evaluation_targets: np.ndarray
     evaluation_geometry_ids: tuple[str, ...]
+    train_controls: dict[str, np.ndarray]
+    evaluation_controls: dict[str, np.ndarray]
     normalizer: float = 1.0
 
     def validate(self) -> "CalibrationDataset":
@@ -56,14 +58,23 @@ class CalibrationDataset:
             or len(self.evaluation_geometry_ids) != evaluation_rows
         ):
             raise ValueError("evaluation features, targets, and geometry IDs must align")
+        if not self.train_controls or set(self.train_controls) != set(self.evaluation_controls):
+            raise ValueError("matching non-empty train/evaluation controls are required")
+        for name in self.train_controls:
+            if len(self.train_controls[name]) != train_rows:
+                raise ValueError(f"training control {name} is not aligned")
+            if len(self.evaluation_controls[name]) != evaluation_rows:
+                raise ValueError(f"evaluation control {name} is not aligned")
         if any(not value for value in self.evaluation_geometry_ids) or self.normalizer <= 0:
             raise ValueError("geometry IDs must be non-empty and normalizer positive")
         return self
 
 
-def _ridge_predict(dataset: CalibrationDataset, *, classification: bool) -> np.ndarray:
-    train = np.asarray(dataset.train_null, dtype=np.float64)
-    evaluation = np.asarray(dataset.evaluation_null, dtype=np.float64)
+def _ridge_predict(
+    dataset: CalibrationDataset, control: str, *, classification: bool
+) -> np.ndarray:
+    train = np.asarray(dataset.train_controls[control], dtype=np.float64)
+    evaluation = np.asarray(dataset.evaluation_controls[control], dtype=np.float64)
     targets = np.asarray(dataset.train_targets, dtype=np.float64)
     train = np.column_stack((np.ones(len(train)), train))
     evaluation = np.column_stack((np.ones(len(evaluation)), evaluation))
@@ -84,10 +95,7 @@ def _binary_f1(prediction: np.ndarray, target: np.ndarray) -> float:
     return 1.0 if denominator == 0 else float(2.0 * true_positive / denominator)
 
 
-def _floor_value(component: str, dataset: CalibrationDataset) -> float:
-    classification = component != "clearance_nmae"
-    prediction = _ridge_predict(dataset, classification=classification)
-    target = np.asarray(dataset.evaluation_targets)
+def _metric_value(component: str, prediction: np.ndarray, target: np.ndarray, normalizer: float) -> float:
     if component == "occupied_iou":
         return binary_iou(prediction >= 0.5, target)
     if component == "boundary_f1":
@@ -95,8 +103,22 @@ def _floor_value(component: str, dataset: CalibrationDataset) -> float:
     if component == "reachability_auprc":
         return binary_ranking_metrics(prediction, target).auprc
     if component == "clearance_nmae":
-        return normalized_mae(prediction, target, normalizer=dataset.normalizer)
+        return normalized_mae(prediction, target, normalizer=normalizer)
     raise ValueError(f"unsupported active component {component!r}")
+
+
+def _floor_values(component: str, dataset: CalibrationDataset) -> dict[str, float]:
+    classification = component != "clearance_nmae"
+    target = np.asarray(dataset.evaluation_targets)
+    return {
+        name: _metric_value(
+            component,
+            _ridge_predict(dataset, name, classification=classification),
+            target,
+            dataset.normalizer,
+        )
+        for name in sorted(dataset.train_controls)
+    }
 
 
 def _triviality(component: str, dataset: CalibrationDataset, *, seed: int) -> TrivialityCheck:
@@ -132,7 +154,7 @@ def calibrate_revised_anchors(
     diagnostics: dict[str, object] = {}
     for index, component in enumerate(ACTIVE_COMPONENTS):
         dataset = datasets[component].validate()
-        floor = _floor_value(component, dataset)
+        floors = _floor_values(component, dataset)
         if component == "clearance_nmae":
             estimate = regression_metric_ceiling(
                 dataset.evaluation_context,
@@ -140,6 +162,7 @@ def calibrate_revised_anchors(
                 normalizer=dataset.normalizer,
             )
             higher_is_better = False
+            floor_source = min(floors, key=floors.get)
         else:
             estimate = classification_metric_ceiling(
                 dataset.evaluation_context,
@@ -147,12 +170,14 @@ def calibrate_revised_anchors(
                 metric=component,
             )
             higher_is_better = True
+            floor_source = max(floors, key=floors.get)
+        floor = floors[floor_source]
         triviality = _triviality(component, dataset, seed=seed + index)
         anchors[component] = RevisedScoreAnchor(
             higher_is_better=higher_is_better,
             floor=float(floor),
             ceiling=estimate.value,
-            floor_source="measured:coordinates_only_ridge:pilot_calibration",
+            floor_source=f"measured:{floor_source}:pilot_calibration",
             ceiling_source=f"measured:{estimate.method}:pilot_calibration",
             ceiling_method=estimate.method,
             ceiling_non_collapse_verified=True,
@@ -161,6 +186,8 @@ def calibrate_revised_anchors(
         )
         diagnostics[component] = {
             "floor": float(floor),
+            "floors": floors,
+            "selected_floor": floor_source,
             "ceiling": estimate.value,
             "ceiling_samples": estimate.sample_count,
             "triviality": triviality.model_dump(mode="json"),
@@ -214,6 +241,18 @@ def deterministic_smoke_datasets(*, seed: int = 3290) -> dict[str, CalibrationDa
             ).astype(float)
             normalizer = 1.0
         geometry_ids = tuple(f"fixture-{index % 24:02d}" for index in range(192))
+        train_controls = {
+            "frequency": np.ones((192, 1)),
+            "coordinates_only": train_null,
+            "pca": rng.normal(size=(192, 4)),
+            "fixed_random_projection": rng.normal(size=(192, 4)),
+        }
+        evaluation_controls = {
+            "frequency": np.ones((192, 1)),
+            "coordinates_only": evaluation_null,
+            "pca": rng.normal(size=(192, 4)),
+            "fixed_random_projection": rng.normal(size=(192, 4)),
+        }
         return CalibrationDataset(
             train_context,
             train_null,
@@ -222,6 +261,8 @@ def deterministic_smoke_datasets(*, seed: int = 3290) -> dict[str, CalibrationDa
             evaluation_null,
             evaluation_targets,
             geometry_ids,
+            train_controls,
+            evaluation_controls,
             normalizer,
         )
 

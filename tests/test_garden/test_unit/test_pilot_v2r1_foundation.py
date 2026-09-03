@@ -72,6 +72,16 @@ def test_full_revised_anchor_path_passes_deterministic_cpu_fixture() -> None:
     }
     assert anchors["geodesic_nmae"].status == "deferred"
     assert all(anchors[name].status == "active" for name in diagnostics if name != "geodesic_nmae")
+    for name in ("occupied_iou", "boundary_f1", "clearance_nmae", "reachability_auprc"):
+        assert set(diagnostics[name]["floors"]) == {
+            "frequency",
+            "coordinates_only",
+            "pca",
+            "fixed_random_projection",
+        }
+        assert anchors[name].floor_source.endswith(
+            f"{diagnostics[name]['selected_floor']}:pilot_calibration"
+        )
 
 
 def test_cpu_smoke_content_addresses_report(tmp_path: Path) -> None:
