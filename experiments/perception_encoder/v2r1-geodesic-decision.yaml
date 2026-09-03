@@ -1,0 +1,16 @@
+decision_id: voxel-encoder-pilot-v2r1-geodesic-deferral-1
+source_run_id: voxel-encoder-pilot-v2-p0-calibration-1
+source_report_payload_sha256: a7a149f9235b38f9ff1f1a230ce791367cf528fc6705e0f987674f1a48d4ea43
+metric: geodesic_nmae
+disposition: deferred
+active_in_p0c: false
+frequency_nmae: 0.022515243950901476
+supervised_nmae: 0.04816410017751241
+minimum_frequency_nmae: 0.15
+pilot_radii: [8, 16]
+revisit_stage: Stage 2 wide-context evaluation
+reason: >-
+  Radius-8/16 geodesic targets have insufficient discriminative headroom. The
+  frequency baseline is already below the registered noise floor and the
+  supervised reference does not improve on it. Re-evaluate with longer-distance,
+  multi-horizon targets at Stage 2 scale.

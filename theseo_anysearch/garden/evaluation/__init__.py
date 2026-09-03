@@ -27,6 +27,7 @@ from .reachability import (
     sample_reachability_pairs,
     two_way_agreement,
 )
+from .geodesic import GeodesicPilotDecision, decide_geodesic_pilot_metric
 from .occupancy import HeldoutOccupancyPlan, heldout_occupancy_queries, local_context_features
 from .triviality import TrivialityResult, assess_triviality
 from .probes import (
@@ -50,6 +51,7 @@ __all__ = [
     "PairPlan",
     "TrivialityResult",
     "GlobalLinearProbe",
+    "GeodesicPilotDecision",
     "HeldoutOccupancyPlan",
     "PairTopologyProbe",
     "TopologyDecoder",
@@ -63,6 +65,7 @@ __all__ = [
     "assess_triviality",
     "encoder_state_sha256",
     "derive_false_open_veto",
+    "decide_geodesic_pilot_metric",
     "false_open_false_closed",
     "metric_ceiling_method",
     "heldout_occupancy_queries",
