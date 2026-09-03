@@ -1,8 +1,12 @@
+import pytest
+
+from theseo_anysearch.worlds.artifacts import publish_eager_geometry
 from theseo_anysearch.worlds.manifest import WorldExtent
 from theseo_anysearch.worlds.transformations import (
     SparseTransformedRead,
     generate_box_transform,
     measure_region_residency,
+    transformed_artifact_metadata,
 )
 
 
@@ -48,3 +52,64 @@ def test_cold_and_hot_region_reads_are_measured() -> None:
     metrics = measure_region_residency(reader, (1, 1, 1), (9, 9, 9))
     assert metrics["occupied_voxels"] > 0
     assert reader.region_queries == 2
+
+
+def test_transformed_metadata_invalidates_base_derivatives(tmp_path) -> None:
+    base = publish_eager_geometry(
+        ((1, 1, 1),),
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+        transformations=({"type": "existing"},),
+        validation={"valid": True},
+        difficulty={"detour_ratio": 1.5},
+    ).manifest
+    transform = generate_box_transform(
+        base.identity_sha256,
+        base.extent,
+        seed=5,
+        count=1,
+    )
+
+    metadata = transformed_artifact_metadata(base, transform)
+
+    assert metadata["derivatives_invalidated"] is True
+    assert metadata["candidates"] is None
+    assert metadata["validation"] == {}
+    assert metadata["difficulty"] == {}
+    assert metadata["overview"] is None
+    assert metadata["transformations"][0] == {"type": "existing"}
+    assert metadata["transformations"][1]["identity_sha256"] == transform.identity_sha256
+
+
+def test_transformed_metadata_rejects_the_wrong_base(tmp_path) -> None:
+    base = publish_eager_geometry(
+        ((1, 1, 1),), WorldExtent(x=8, y=8, z=8), tmp_path
+    ).manifest
+    transform = generate_box_transform(
+        "f" * 64, base.extent, seed=5, count=1
+    )
+
+    with pytest.raises(ValueError, match="base identity does not match"):
+        transformed_artifact_metadata(base, transform)
+
+
+@pytest.mark.parametrize(
+    ("minimum_size", "maximum_size", "message"),
+    [
+        ((0, 1, 1), (2, 2, 2), "positive"),
+        ((3, 1, 1), (2, 2, 2), "minimum box size"),
+        ((9, 1, 1), (10, 2, 2), "world extent"),
+    ],
+)
+def test_invalid_box_size_ranges_fail_actionably(
+    minimum_size, maximum_size, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        generate_box_transform(
+            "a" * 64,
+            WorldExtent(x=8, y=8, z=8),
+            seed=1,
+            count=1,
+            minimum_size=minimum_size,
+            maximum_size=maximum_size,
+        )
