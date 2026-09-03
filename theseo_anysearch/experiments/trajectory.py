@@ -1033,6 +1033,12 @@ def _environment_voxel_count(env: Any, initial_filled_count: int = 0) -> int:
     """Return the current filled-cell count without exposing it to the policy."""
     if hasattr(env, "filled_voxel_count"):
         return int(env.filled_voxel_count())
+    config = getattr(env, "_config", {})
+    if config.get("compiled_world_path") is not None:
+        return sum(
+            mutation.occupied and mutation.active and mutation.reward_weight > 0.0
+            for mutation in _overlay_snapshot(env).values()
+        )
     rust_env = getattr(env, "_rust_env", None)
     if rust_env is None or not hasattr(rust_env, "filled_voxels"):
         return 0

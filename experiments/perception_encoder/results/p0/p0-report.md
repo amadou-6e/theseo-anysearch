@@ -39,3 +39,10 @@ geometry identity is a labeled synthetic mesh-import fixture, not external
 out-of-family evidence. P1 must fit normalization floors and supervised ceilings on
 the frozen corpus rather than treating P0's analytic calibration fixtures as measured
 corpus baselines.
+
+The analytic values therefore verify denominator mechanics only. They do not satisfy
+the measured corpus-calibration requirement and must not support comparative
+`pilot_score` ranking. The historical v1 P0 result remains an implementation smoke,
+not authorization for a new comparative run. Recovery decision #322 and specs commit
+`01eefc529016da48c4a1dd17b85391720542af14` require fresh v2 calibration and run
+identities before another P1 execution.

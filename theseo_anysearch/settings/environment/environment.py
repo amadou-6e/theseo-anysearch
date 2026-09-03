@@ -177,6 +177,11 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 if self.geometry.compiled_world_path is not None
                 else None
             ),
+            "compiled_world_node_cache": (
+                str(self.geometry.node_cache)
+                if self.geometry.node_cache is not None
+                else None
+            ),
             "world_maximum_decoded_bytes": self.geometry.maximum_decoded_bytes,
             "world_prefetch_margin": self.geometry.prefetch_margin,
             "obs_mode": self.observation__mode,
