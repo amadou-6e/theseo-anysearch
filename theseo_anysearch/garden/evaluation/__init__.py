@@ -27,6 +27,7 @@ from .reachability import (
     sample_reachability_pairs,
     two_way_agreement,
 )
+from .occupancy import HeldoutOccupancyPlan, heldout_occupancy_queries, local_context_features
 from .triviality import TrivialityResult, assess_triviality
 from .probes import (
     CoordinateProbe,
@@ -49,6 +50,7 @@ __all__ = [
     "PairPlan",
     "TrivialityResult",
     "GlobalLinearProbe",
+    "HeldoutOccupancyPlan",
     "PairTopologyProbe",
     "TopologyDecoder",
     "bayes_error_direct",
@@ -63,6 +65,8 @@ __all__ = [
     "derive_false_open_veto",
     "false_open_false_closed",
     "metric_ceiling_method",
+    "heldout_occupancy_queries",
+    "local_context_features",
     "per_bin_auprc",
     "sample_reachability_pairs",
     "two_way_agreement",
