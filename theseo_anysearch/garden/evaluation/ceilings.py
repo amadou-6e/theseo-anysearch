@@ -37,7 +37,7 @@ NON_COLLAPSE_MIN_FRACTION = 0.30
 DEFAULT_K = 15
 
 MODEL_FREE_METHODS = ("bayes_error_knn", "bayes_error_direct", "bayes_error_mst", "knn_residual")
-_CLASSIFICATION_METRICS = ("occupied_iou", "reachability_auprc")
+_CLASSIFICATION_METRICS = ("occupied_iou", "boundary_f1", "reachability_auprc")
 _REGRESSION_METRICS = ("clearance_nmae", "geodesic_nmae")
 
 
@@ -206,3 +206,13 @@ def metric_ceiling_method(metric: str) -> str:
     if metric in _REGRESSION_METRICS:
         return "knn_residual"
     raise ValueError(f"unknown pilot-score component {metric!r}")
+
+
+def requires_trained_reference(methods: list[str] | tuple[str, ...]) -> bool:
+    """Return whether any active ceiling method requires a trained reference."""
+
+    known = set(MODEL_FREE_METHODS) | {"multitask_reference", "regularized_reference"}
+    unknown = set(methods) - known
+    if unknown:
+        raise ValueError(f"unknown ceiling methods: {sorted(unknown)}")
+    return any(method not in MODEL_FREE_METHODS for method in methods)

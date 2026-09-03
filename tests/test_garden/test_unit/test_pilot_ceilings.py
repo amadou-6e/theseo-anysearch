@@ -14,6 +14,7 @@ from theseo_anysearch.garden.evaluation.ceilings import (
     knn_loo_posteriors,
     metric_ceiling_method,
     regression_metric_ceiling,
+    requires_trained_reference,
 )
 from theseo_anysearch.garden.evaluation.ceilings import _loo_neighbour_indices
 
@@ -117,6 +118,21 @@ def test_knn_posteriors_require_both_classes() -> None:
 
 def test_metric_ceiling_method_routing() -> None:
     assert metric_ceiling_method("occupied_iou") == "bayes_error_knn"
+    assert metric_ceiling_method("boundary_f1") == "bayes_error_knn"
     assert metric_ceiling_method("geodesic_nmae") == "knn_residual"
     with pytest.raises(ValueError):
         metric_ceiling_method("not_a_component")
+
+
+def test_all_revised_active_metrics_use_model_free_ceilings() -> None:
+    methods = [
+        metric_ceiling_method(metric)
+        for metric in (
+            "occupied_iou",
+            "boundary_f1",
+            "clearance_nmae",
+            "reachability_auprc",
+        )
+    ]
+    assert not requires_trained_reference(methods)
+    assert requires_trained_reference([*methods, "multitask_reference"])

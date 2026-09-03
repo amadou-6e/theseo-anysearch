@@ -9,6 +9,7 @@ from .ceilings import (
     classification_metric_ceiling,
     metric_ceiling_method,
     regression_metric_ceiling,
+    requires_trained_reference,
 )
 from .controls import (
     ControlEvaluation,
@@ -74,6 +75,7 @@ __all__ = [
     "sample_reachability_pairs",
     "two_way_agreement",
     "regression_metric_ceiling",
+    "requires_trained_reference",
     "evaluate_controls",
     "extract_frozen",
     "make_cross_fit_folds",
