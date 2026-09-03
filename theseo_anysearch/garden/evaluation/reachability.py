@@ -43,6 +43,8 @@ class PairPlan:
     reachable: np.ndarray  # (N,) bool
     distance_bin: np.ndarray  # (N,) int, -1 for unreachable
     kind: np.ndarray  # (N,) str
+    perturbation_coordinates: np.ndarray  # (N, 3), -1 when unmodified
+    perturbation_occupied: np.ndarray  # (N,), -1 unmodified, 0 open, 1 plug
 
     def __len__(self) -> int:
         return int(self.starts.shape[0])
@@ -154,6 +156,30 @@ def sample_reachability_pairs(
     reachable: list[bool] = []
     distance_bin: list[int] = []
     kind: list[str] = []
+    perturbation_coordinates: list[np.ndarray] = []
+    perturbation_occupied: list[int] = []
+
+    def append(
+        start: np.ndarray | tuple[int, int, int],
+        goal: np.ndarray | tuple[int, int, int],
+        is_reachable: bool,
+        bin_index: int,
+        pair_kind: str,
+        perturbation: np.ndarray | None = None,
+        occupied_value: int = -1,
+    ) -> None:
+        starts.append(np.asarray(start, dtype=np.int64))
+        goals.append(np.asarray(goal, dtype=np.int64))
+        reachable.append(is_reachable)
+        distance_bin.append(bin_index)
+        kind.append(pair_kind)
+        coordinate = (
+            np.full(3, -1, dtype=np.int64)
+            if perturbation is None
+            else np.argwhere(perturbation)[0].astype(np.int64)
+        )
+        perturbation_coordinates.append(coordinate)
+        perturbation_occupied.append(occupied_value)
 
     n_boundary = int(round(count * boundary_fraction))
     n_component_neg = (count - n_boundary) // 3
@@ -187,11 +213,7 @@ def sample_reachability_pairs(
         if b < 0 or bin_targets.get(b, 0) <= 0:
             continue
         bin_targets[b] -= 1
-        starts.append(np.array(start))
-        goals.append(np.array(goal))
-        reachable.append(True)
-        distance_bin.append(b)
-        kind.append("stratified_positive")
+        append(start, goal, True, b, "stratified_positive")
 
     # --- component negatives with a separation margin ------------------------
     if len(components) >= 2:
@@ -206,11 +228,7 @@ def sample_reachability_pairs(
             goal = b_cells[int(rng.integers(0, len(b_cells)))]
             if np.linalg.norm(start - goal) < component_margin:
                 continue
-            starts.append(start)
-            goals.append(goal)
-            reachable.append(False)
-            distance_bin.append(-1)
-            kind.append("component_negative")
+            append(start, goal, False, -1, "component_negative")
             made += 1
 
     # --- obstacle-perturbation hard negatives and positives ------------------
@@ -225,11 +243,7 @@ def sample_reachability_pairs(
         plug = _severs_pair(free, start, goal)
         if plug is None:
             continue
-        starts.append(np.array(start))
-        goals.append(np.array(goal))
-        reachable.append(False)
-        distance_bin.append(-1)
-        kind.append("boundary_negative")
+        append(start, goal, False, -1, "boundary_negative", plug, 1)
         made += 1
 
     if len(components) >= 2:
@@ -244,13 +258,10 @@ def sample_reachability_pairs(
             goal = tuple(int(v) for v in b_cells[int(rng.integers(0, len(b_cells)))])
             if np.linalg.norm(np.array(start) - np.array(goal)) > component_margin:
                 continue
-            if _joins_pair(free, start, goal) is None:
+            opening_mask = _joins_pair(free, start, goal)
+            if opening_mask is None:
                 continue
-            starts.append(np.array(start))
-            goals.append(np.array(goal))
-            reachable.append(True)
-            distance_bin.append(0)
-            kind.append("boundary_positive")
+            append(start, goal, True, 0, "boundary_positive", opening_mask, 0)
             made += 1
 
     if not starts:
@@ -261,6 +272,8 @@ def sample_reachability_pairs(
         reachable=np.asarray(reachable, dtype=bool),
         distance_bin=np.asarray(distance_bin, dtype=np.int64),
         kind=np.asarray(kind, dtype=object),
+        perturbation_coordinates=np.stack(perturbation_coordinates).astype(np.int64),
+        perturbation_occupied=np.asarray(perturbation_occupied, dtype=np.int8),
     )
 
 

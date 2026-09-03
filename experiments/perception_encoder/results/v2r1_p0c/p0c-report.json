@@ -1,0 +1,358 @@
+{
+  "accelerator_hour_cap": 2.0,
+  "accelerator_hours": 0.0,
+  "cap_passed": true,
+  "code_sha": "3ce8f034bd993b665c883685f4776630362cd8e2",
+  "dataset_artifact": {
+    "media_type": "application/x-npz",
+    "role": "v2r1_p0c_datasets",
+    "sha256": "2da9428518b2ff5ee179fda060fc57fd19235b0769710e087c9426c44c872446",
+    "size_bytes": 28038179,
+    "uri": "runtime/perception_encoder/v2r1_p0c/v2r1-p0c-datasets.npz"
+  },
+  "dataset_id": "voxel-encoder-pilot-v2r1-dataset-1",
+  "decision": {
+    "decision": "blocked",
+    "next": null,
+    "reason": "one or more revised denominator, triviality, or cap gates failed"
+  },
+  "denominator_failures": {
+    "reachability_auprc": "1 validation error for RevisedScoreAnchor\n  Value error, active higher-is-better ceiling must exceed floor by at least 0.10 [type=value_error, input_value={'higher_is_better': True...ue), 'status': 'active'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+  },
+  "disposition": "reject",
+  "hardware": {
+    "cpu": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+    "cuda_available": true,
+    "cuda_device": "NVIDIA GeForce RTX 3060 Ti",
+    "python": "3.12.10",
+    "torch": "2.13.0+cu126"
+  },
+  "integration_base_sha": "d9f16bf999996e1df30ea76137dffc13de4aa416",
+  "issue": 333,
+  "measurements": {
+    "boundary_f1": {
+      "anchor": {
+        "ceiling": 0.9863568823449953,
+        "ceiling_method": "bayes_error_knn",
+        "ceiling_non_collapse_verified": true,
+        "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+        "floor": 0.5913210876714526,
+        "floor_source": "measured:pca:pilot_calibration",
+        "higher_is_better": true,
+        "status": "active",
+        "triviality": {
+          "mdl_embedding_bits": 9695.119893374567,
+          "mdl_null_bits": 18986.96936244945,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.5587777828687878,
+          "pvi_gain": 0.557547624707342,
+          "pvi_null": 0.001230158161445767
+        }
+      },
+      "diagnostics": {
+        "ceiling": 0.9863568823449953,
+        "ceiling_samples": 20000,
+        "floor": 0.5913210876714526,
+        "floors": {
+          "coordinates_only": 0.5391329754209123,
+          "fixed_random_projection": 0.5672341570270166,
+          "frequency": 0.5391329754209123,
+          "pca": 0.5913210876714526
+        },
+        "selected_floor": "pca",
+        "triviality": {
+          "mdl_embedding_bits": 9695.119893374567,
+          "mdl_null_bits": 18986.96936244945,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.5587777828687878,
+          "pvi_gain": 0.557547624707342,
+          "pvi_null": 0.001230158161445767
+        }
+      }
+    },
+    "clearance_nmae": {
+      "anchor": {
+        "ceiling": 0.09126173105627297,
+        "ceiling_method": "knn_residual",
+        "ceiling_non_collapse_verified": true,
+        "ceiling_source": "measured:knn_residual:pilot_calibration",
+        "floor": 0.2231167833141687,
+        "floor_source": "measured:pca:pilot_calibration",
+        "higher_is_better": false,
+        "status": "active",
+        "triviality": {
+          "mdl_embedding_bits": 3733.25163482572,
+          "mdl_null_bits": 29483.526753193386,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 1.4538921967922003,
+          "pvi_gain": 1.453458427480679,
+          "pvi_null": 0.000433769311521246
+        }
+      },
+      "diagnostics": {
+        "ceiling": 0.09126173105627297,
+        "ceiling_samples": 20000,
+        "floor": 0.2231167833141687,
+        "floors": {
+          "coordinates_only": 0.6221720537989499,
+          "fixed_random_projection": 0.24380998000968798,
+          "frequency": 0.6227430652139259,
+          "pca": 0.2231167833141687
+        },
+        "selected_floor": "pca",
+        "triviality": {
+          "mdl_embedding_bits": 3733.25163482572,
+          "mdl_null_bits": 29483.526753193386,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 1.4538921967922003,
+          "pvi_gain": 1.453458427480679,
+          "pvi_null": 0.000433769311521246
+        }
+      }
+    },
+    "geodesic_nmae": {
+      "anchor": {
+        "ceiling": 0.04816410017751241,
+        "ceiling_effective_rank_fraction": 0.010898,
+        "ceiling_method": "regularized_reference",
+        "ceiling_non_collapse_verified": false,
+        "ceiling_source": "measured:supervised_reference:voxel-encoder-pilot-v2-p0-calibration-1",
+        "deferral_reason": "frequency NMAE 0.022515 is below the 0.15 pilot noise floor and the supervised reference did not improve it; deferred to Stage 2 wide context",
+        "floor": 0.022515243950901476,
+        "floor_source": "measured:frequency:voxel-encoder-pilot-v2-p0-calibration-1",
+        "higher_is_better": false,
+        "status": "deferred",
+        "triviality": {
+          "mdl_embedding_bits": 1.0,
+          "mdl_null_bits": 1.0,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": false,
+          "pvi_embedding": 0.0,
+          "pvi_gain": 0.0,
+          "pvi_null": 0.0
+        }
+      },
+      "diagnostics": {
+        "reason": "frequency NMAE 0.022515 is below the 0.15 pilot noise floor and the supervised reference did not improve it; deferred to Stage 2 wide context",
+        "status": "deferred"
+      }
+    },
+    "occupied_iou": {
+      "anchor": {
+        "ceiling": 0.9551319648093841,
+        "ceiling_method": "bayes_error_knn",
+        "ceiling_non_collapse_verified": true,
+        "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+        "floor": 0.5973575656124828,
+        "floor_source": "measured:pca:pilot_calibration",
+        "higher_is_better": true,
+        "status": "active",
+        "triviality": {
+          "mdl_embedding_bits": 3843.0106338744677,
+          "mdl_null_bits": 19996.325110559686,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.9191572920861995,
+          "pvi_gain": 0.9191731985677244,
+          "pvi_null": -1.590648152493183e-05
+        }
+      },
+      "diagnostics": {
+        "ceiling": 0.9551319648093841,
+        "ceiling_samples": 20000,
+        "floor": 0.5973575656124828,
+        "floors": {
+          "coordinates_only": 0.4996,
+          "fixed_random_projection": 0.5655309483248154,
+          "frequency": 0.4996,
+          "pca": 0.5973575656124828
+        },
+        "selected_floor": "pca",
+        "triviality": {
+          "mdl_embedding_bits": 3843.0106338744677,
+          "mdl_null_bits": 19996.325110559686,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.9191572920861995,
+          "pvi_gain": 0.9191731985677244,
+          "pvi_null": -1.590648152493183e-05
+        }
+      }
+    },
+    "reachability_auprc": {
+      "anchor": {
+        "ceiling": 0.9971262630548252,
+        "ceiling_method": "bayes_error_knn",
+        "ceiling_non_collapse_verified": true,
+        "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+        "floor": 0.9309221452244862,
+        "floor_source": "measured:coordinates_only:pilot_calibration",
+        "higher_is_better": true,
+        "status": "active",
+        "triviality": {
+          "mdl_embedding_bits": 2850.8610993720167,
+          "mdl_null_bits": 4547.518858283897,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.7375104214343658,
+          "pvi_gain": 0.2147545328163769,
+          "pvi_null": 0.5227558886179889
+        }
+      },
+      "diagnostics": {
+        "ceiling": 0.9971262630548252,
+        "ceiling_samples": 10000,
+        "floor": 0.9309221452244862,
+        "floors": {
+          "coordinates_only": 0.9309221452244862,
+          "fixed_random_projection": 0.8821961527455865,
+          "frequency": 0.6669,
+          "pca": 0.7852913492712053
+        },
+        "selected_floor": "coordinates_only",
+        "triviality": {
+          "mdl_embedding_bits": 2850.8610993720167,
+          "mdl_null_bits": 4547.518858283897,
+          "min_pvi_gain": 0.05,
+          "null_input": "coordinates_only",
+          "passes": true,
+          "pvi_embedding": 0.7375104214343658,
+          "pvi_gain": 0.2147545328163769,
+          "pvi_null": 0.5227558886179889
+        }
+      }
+    }
+  },
+  "protocol_sha256": "1e847a26a386ade6e85c6c41692b3086388041f13aa8e90f067a3fafefd09bec",
+  "query_artifact": {
+    "media_type": "application/json",
+    "role": "v2r1_query_plan",
+    "sha256": "63639cd0980cd6bcf386a64997652fdd0edfe8a6d8c81be6be908a3d085d7992",
+    "size_bytes": 4840,
+    "uri": "experiments/perception_encoder/results/v2r1_foundation/v2r1-query-plan.json"
+  },
+  "query_counts": {
+    "coordinate_calibration": 20000,
+    "coordinate_train": 100000,
+    "pair_calibration": 10000,
+    "pair_train": 50000
+  },
+  "reachability": {
+    "baselines": {
+      "coordinates_only": {
+        "false_closed": 0.027860106698280974,
+        "false_open": 0.31038721573448064,
+        "per_bin_auprc": {
+          "bin_0": 0.8859485607107422,
+          "bin_1": 0.7246529472500418,
+          "bin_2": 0.739319224851223,
+          "bin_3": 0.7158787848880865,
+          "bin_4": 0.6323873135558579,
+          "overall": 0.9396191860910276
+        },
+        "threshold": 0.6303299925730105,
+        "two_way_agreement_fraction": 1.0
+      },
+      "fixed_random_projection": {
+        "false_closed": 0.1908713692946058,
+        "false_open": 0.31038721573448064,
+        "per_bin_auprc": {
+          "bin_0": 0.8323910472746167,
+          "bin_1": 0.6749505213935932,
+          "bin_2": 0.6126157780176433,
+          "bin_3": 0.5318088367185725,
+          "bin_4": 0.532358475622266,
+          "overall": 0.9009287433567926
+        },
+        "threshold": 0.6428225114724646,
+        "two_way_agreement_fraction": 1.0
+      },
+      "frequency": {
+        "false_closed": 0.0,
+        "false_open": 1.0,
+        "per_bin_auprc": {
+          "bin_0": 0.3917757009345794,
+          "bin_1": 0.2671171171171171,
+          "bin_2": 0.25673823663773415,
+          "bin_3": 0.2671171171171171,
+          "bin_4": 0.2621315192743764,
+          "overall": 0.6746650669866027
+        },
+        "threshold": 0.6591121130263402,
+        "two_way_agreement_fraction": 1.0
+      },
+      "pca": {
+        "false_closed": 0.555127445168939,
+        "false_open": 0.34726490473263677,
+        "per_bin_auprc": {
+          "bin_0": 0.7875949235554336,
+          "bin_1": 0.4989445956150156,
+          "bin_2": 0.29207532416107407,
+          "bin_3": 0.24360937224216106,
+          "bin_4": 0.21378563067765866,
+          "overall": 0.7932992309538442
+        },
+        "threshold": 0.6638909500961248,
+        "two_way_agreement_fraction": 1.0
+      }
+    },
+    "pair_kind_counts": {
+      "boundary_negative": 117,
+      "boundary_positive": 812,
+      "component_negative": 3214,
+      "stratified_positive": 5857
+    },
+    "report_geometry_ids": [
+      "pilot-v2r1-005",
+      "pilot-v2r1-028",
+      "pilot-v2r1-039",
+      "pilot-v2r1-057",
+      "pilot-v2r1-068",
+      "pilot-v2r1-101",
+      "pilot-v2r1-109",
+      "pilot-v2r1-129",
+      "pilot-v2r1-170",
+      "pilot-v2r1-190",
+      "pilot-v2r1-198",
+      "pilot-v2r1-207"
+    ],
+    "selection_geometry_ids": [
+      "pilot-v2r1-000",
+      "pilot-v2r1-025",
+      "pilot-v2r1-030",
+      "pilot-v2r1-044",
+      "pilot-v2r1-067",
+      "pilot-v2r1-096",
+      "pilot-v2r1-106",
+      "pilot-v2r1-119",
+      "pilot-v2r1-148",
+      "pilot-v2r1-182",
+      "pilot-v2r1-191",
+      "pilot-v2r1-199"
+    ],
+    "veto": {
+      "best_baseline": "coordinates_only",
+      "best_baseline_false_open": 0.31038721573448064,
+      "margin": 0.02,
+      "method": "best_baseline_minus_margin",
+      "threshold": 0.2903872157344806
+    }
+  },
+  "report_payload_sha256": "2564db175a1880cf81da40bd5a32e472f9b3db81bce111283fe48c74d409697b",
+  "run_id": "voxel-encoder-pilot-v2r1-p0c-1",
+  "spec_commit": "0c9e3c633799f5d42b7a603e0845cac0bd494cda",
+  "status": "blocked",
+  "wall_hours": 0.1038955039444449
+}

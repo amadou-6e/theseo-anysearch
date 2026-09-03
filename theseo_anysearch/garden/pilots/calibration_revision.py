@@ -87,6 +87,17 @@ def _ridge_predict(
     return prediction
 
 
+def control_predictions(
+    dataset: CalibrationDataset, control: str, *, classification: bool
+) -> np.ndarray:
+    """Fit a frozen linear control on pilot_train and predict calibration rows."""
+
+    dataset.validate()
+    if control not in dataset.train_controls:
+        raise ValueError(f"unknown calibration control {control!r}")
+    return _ridge_predict(dataset, control, classification=classification)
+
+
 def _binary_f1(prediction: np.ndarray, target: np.ndarray) -> float:
     prediction = np.asarray(prediction, dtype=bool)
     target = np.asarray(target, dtype=bool)
@@ -143,55 +154,57 @@ def _triviality(component: str, dataset: CalibrationDataset, *, seed: int) -> Tr
     )
 
 
-def calibrate_revised_anchors(
-    datasets: dict[str, CalibrationDataset], *, seed: int = 3290
-) -> tuple[dict[str, RevisedScoreAnchor], dict[str, object]]:
-    """Measure all active denominators once and record geodesic deferral."""
+def measure_revised_component(
+    component: str, dataset: CalibrationDataset, *, seed: int
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Return a complete anchor payload before applying pass/fail validation."""
 
-    if set(datasets) != set(ACTIVE_COMPONENTS):
-        raise ValueError("the revised path requires exactly four active component datasets")
-    anchors: dict[str, RevisedScoreAnchor] = {}
-    diagnostics: dict[str, object] = {}
-    for index, component in enumerate(ACTIVE_COMPONENTS):
-        dataset = datasets[component].validate()
-        floors = _floor_values(component, dataset)
-        if component == "clearance_nmae":
-            estimate = regression_metric_ceiling(
-                dataset.evaluation_context,
-                dataset.evaluation_targets,
-                normalizer=dataset.normalizer,
-            )
-            higher_is_better = False
-            floor_source = min(floors, key=floors.get)
-        else:
-            estimate = classification_metric_ceiling(
-                dataset.evaluation_context,
-                dataset.evaluation_targets,
-                metric=component,
-            )
-            higher_is_better = True
-            floor_source = max(floors, key=floors.get)
-        floor = floors[floor_source]
-        triviality = _triviality(component, dataset, seed=seed + index)
-        anchors[component] = RevisedScoreAnchor(
-            higher_is_better=higher_is_better,
-            floor=float(floor),
-            ceiling=estimate.value,
-            floor_source=f"measured:{floor_source}:pilot_calibration",
-            ceiling_source=f"measured:{estimate.method}:pilot_calibration",
-            ceiling_method=estimate.method,
-            ceiling_non_collapse_verified=True,
-            triviality=triviality,
-            status="active",
+    if component not in ACTIVE_COMPONENTS:
+        raise ValueError(f"unsupported active component {component!r}")
+    dataset.validate()
+    floors = _floor_values(component, dataset)
+    if component == "clearance_nmae":
+        estimate = regression_metric_ceiling(
+            dataset.evaluation_context,
+            dataset.evaluation_targets,
+            normalizer=dataset.normalizer,
         )
-        diagnostics[component] = {
-            "floor": float(floor),
-            "floors": floors,
-            "selected_floor": floor_source,
-            "ceiling": estimate.value,
-            "ceiling_samples": estimate.sample_count,
-            "triviality": triviality.model_dump(mode="json"),
-        }
+        higher_is_better = False
+        floor_source = min(floors, key=floors.get)
+    else:
+        estimate = classification_metric_ceiling(
+            dataset.evaluation_context,
+            dataset.evaluation_targets,
+            metric=component,
+        )
+        higher_is_better = True
+        floor_source = max(floors, key=floors.get)
+    floor = floors[floor_source]
+    triviality = _triviality(component, dataset, seed=seed)
+    payload: dict[str, object] = {
+        "higher_is_better": higher_is_better,
+        "floor": float(floor),
+        "ceiling": estimate.value,
+        "floor_source": f"measured:{floor_source}:pilot_calibration",
+        "ceiling_source": f"measured:{estimate.method}:pilot_calibration",
+        "ceiling_method": estimate.method,
+        "ceiling_non_collapse_verified": True,
+        "triviality": triviality,
+        "status": "active",
+    }
+    diagnostics: dict[str, object] = {
+        "floor": float(floor),
+        "floors": floors,
+        "selected_floor": floor_source,
+        "ceiling": estimate.value,
+        "ceiling_samples": estimate.sample_count,
+        "triviality": triviality.model_dump(mode="json"),
+    }
+    return payload, diagnostics
+
+
+def deferred_geodesic_anchor() -> RevisedScoreAnchor:
+    """Preserve the measured v2 evidence behind the frozen Stage-2 deferral."""
 
     deferred_triviality = TrivialityCheck(
         null_input="coordinates_only",
@@ -203,7 +216,7 @@ def calibrate_revised_anchors(
         min_pvi_gain=0.05,
         passes=False,
     )
-    anchors["geodesic_nmae"] = RevisedScoreAnchor(
+    return RevisedScoreAnchor(
         higher_is_better=False,
         floor=0.022515243950901476,
         ceiling=0.04816410017751241,
@@ -216,6 +229,24 @@ def calibrate_revised_anchors(
         status="deferred",
         deferral_reason=GEODESIC_DEFERRAL,
     )
+
+
+def calibrate_revised_anchors(
+    datasets: dict[str, CalibrationDataset], *, seed: int = 3290
+) -> tuple[dict[str, RevisedScoreAnchor], dict[str, object]]:
+    """Measure all active denominators once and record geodesic deferral."""
+
+    if set(datasets) != set(ACTIVE_COMPONENTS):
+        raise ValueError("the revised path requires exactly four active component datasets")
+    anchors: dict[str, RevisedScoreAnchor] = {}
+    diagnostics: dict[str, object] = {}
+    for index, component in enumerate(ACTIVE_COMPONENTS):
+        payload, diagnostics[component] = measure_revised_component(
+            component, datasets[component], seed=seed + index
+        )
+        anchors[component] = RevisedScoreAnchor(**payload)
+
+    anchors["geodesic_nmae"] = deferred_geodesic_anchor()
     diagnostics["geodesic_nmae"] = {"status": "deferred", "reason": GEODESIC_DEFERRAL}
     return anchors, diagnostics
 
@@ -273,5 +304,8 @@ __all__ = [
     "ACTIVE_COMPONENTS",
     "CalibrationDataset",
     "calibrate_revised_anchors",
+    "control_predictions",
+    "deferred_geodesic_anchor",
     "deterministic_smoke_datasets",
+    "measure_revised_component",
 ]
