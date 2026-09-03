@@ -86,8 +86,14 @@ def generate_box_transform(
     """Generate boxes without reading or materializing base occupancy."""
     if count < 0:
         raise ValueError("box count must be non-negative")
-    rng = random.Random(seed)
     limits = extent.as_tuple()
+    if any(size < 1 for size in (*minimum_size, *maximum_size)):
+        raise ValueError("box sizes must be positive on every axis")
+    if any(minimum_size[axis] > maximum_size[axis] for axis in range(3)):
+        raise ValueError("minimum box size cannot exceed maximum box size")
+    if any(minimum_size[axis] > limits[axis] for axis in range(3)):
+        raise ValueError("minimum box size cannot exceed the world extent")
+    rng = random.Random(seed)
     boxes: list[SparseBox] = []
     for _ in range(count):
         size = tuple(rng.randint(minimum_size[a], min(maximum_size[a], limits[a])) for a in range(3))
@@ -129,7 +135,10 @@ def transformed_artifact_metadata(base: GeometryArtifactManifest, transform: Spa
     return {
         "base_artifact_identity": base.identity_sha256,
         "transformed_identity": transform.identity_sha256,
-        "transformations": [transform.model_dump(mode="json")],
+        "transformations": [
+            *base.transformations,
+            transform.model_dump(mode="json"),
+        ],
         "candidates": None,
         "validation": {},
         "difficulty": {},
