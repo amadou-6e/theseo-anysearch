@@ -135,3 +135,185 @@ accepted direction needs plus compact reports. If E1 or E3 returns
 `no_viable_direction`, the promotion inventory is foundation commits only. The
 promotion PR to `develop` reruns all garden unit tests and the deterministic P0C
 smoke on the current development line.
+
+---
+
+# Reachability denominator: v2r2 successor study (#339 exploratory; v2r2 to follow)
+
+**Status of v2r1:** terminal. P1 was recorded `not_started` (blocked P0D, blocked
+amended P0C on `reachability_auprc`). That line does not reopen. A config change
+cannot revive it.
+
+**What this section is:** the amended P0C is blocked on one denominator,
+`reachability_auprc` (`floor ~= ceiling ~= 0.93`), because connectivity over a
+bounded, fully-visible window is near-linearly decodable from raw occupancy. The
+right response is a **new partially-observed-topology task** with its own
+preregistration and its own dataset / query / run identities (`v2r2`), not a
+metric tweak on `v2r1`.
+
+## #339 disposition (exploratory infrastructure only)
+
+`exp/339` carries reusable scaffolding, not a finding:
+
+- `pilots/reachability_fixtures.py` - graded-occlusion fixture generator;
+- `evaluation/reachability_variants.py` - occlusion-span pair sampler, raw /
+  rich / null feature builders, per-cell component maps;
+- `experiments/perception_encoder/reachability_redesign_screen.py` - screening
+  harness.
+
+**The screen's reported gaps are NON-EVIDENTIAL.** They used a *linear* ridge
+probe on raw occupancy as the floor; connectivity is nonlinear, so that floor is
+too weak and every gap (A `+0.314`, B2 `+0.606`, ...) is optimistic. **Do not
+adopt B2 or any variant on those numbers.** The screen established only that
+occlusion *can* create headroom in principle.
+
+Disposition: `retain` (keep the infrastructure; the result JSON stays as a
+recorded non-evidential exploratory artifact). Not `promote`.
+
+## v2r2 study design
+
+### R0 - feasibility audit (gates everything)
+
+Exact identical-visible-input observations are rare, so **generate controlled
+counterfactual pairs**: fix the visible voxels, vary the hidden completion, and
+estimate the conditional uncertainty of the completed-reachability label given
+the visible input.
+
+- unknown-channel prevalence and per-stratum class balance;
+- conditional label entropy `H(reachable | visible input)` per occlusion span
+  stratum. Effectively random hidden geometry -> no encoder can solve it ->
+  defer. Deterministic hidden geometry -> check for generator-cue leakage
+  (predict hidden structure from visible context across a held-out generator
+  config);
+- per-stratum floor/ceiling estimates using the R2 control ladder, not a linear
+  probe.
+
+Exit: R0 states, from calibration data only, whether a preregistered denominator
+with `>= 0.10` headroom is achievable. If not, stop at the D branch below.
+
+### R1 - occlusion-aware sampler
+
+Completed-geometry reachability labels. Occlusion strata (`1-2`, `3-5`, `6+`)
+**frozen before results**. Stratum weights **frozen before results** and
+**balanced or task-motivated**, never set to observed prevalence (easy cases
+would dominate again). No `max-over-strata`.
+
+### R2 - control ladder (probe capacity frozen first)
+
+Freeze the candidate probe capacity, optimization budget, and checkpoint-
+selection procedure **before** building any control. Then compare against three
+distinct controls:
+
+1. identical probe over raw input;
+2. capacity-matched **nonlinear** raw-input model;
+3. over-capacity / model-free reference ceiling.
+
+The gated `reachability` denominator is `reference - nonlinear_raw` (or, per R4,
+its normalized-log-loss form), never `reference - linear_raw`.
+
+### R3 - structural evaluation (anchor-based)
+
+Per-cell component IDs are permutation- and count-dependent. Use **dense
+reachability fields from preregistered anchor cells** (K fixed anchors per
+observation by a frozen rule; target = "reachable from anchor k"). Evaluate with
+VI / Adapted Rand / Betti-0 plus explicit **false-merge** and **false-split**
+rates.
+
+If `reachability` stays in the gate, the **false-merge rate is a veto**
+(a false merge is a false-open). Calibrate that veto threshold from the control /
+reference behaviour on calibration data - not an arbitrary absolute value.
+
+### R4 - preregistration amendment (choose one primary metric)
+
+From calibration data only, before P1 opens, freeze exactly one primary metric
+for the neutral `reachability` gate family and its aggregation:
+
+- normalized conditional log-loss gain against the R2 nonlinear-raw floor,
+  `(nonlinear_raw_log_loss - candidate_log_loss) / (nonlinear_raw_log_loss - reference_log_loss)`,
+  not clipped (the pilot never clips normalized scores), structurally uniform
+  with the other revised anchors; or
+- occlusion-stratified AUPRC with the frozen weighted aggregate, normalized
+  between the R2 nonlinear-raw floor and the reference ceiling.
+
+The null-input log loss is a triviality diagnostic only, not a floor. AUPRC and
+PVI / selectivity are retained as **diagnostics only**.
+
+The amendment must also **explicitly define the minimum active gate set** (see
+open decision below).
+
+### R5 - fresh run
+
+New `v2r2` dataset, query, preregistration, and run identities. **No reuse of any
+`v2r1` identity.** New spec commit.
+
+### Stop rule
+
+If R0, or R2's ladder, shows the preregistered `reachability` denominator stays
+below `0.10` headroom, defer `reachability` - do **not** pick whichever
+diagnostic happened to pass.
+
+## Open decision (spec owner)
+
+`geodesic_nmae` is already deferred. If `reachability` also defers, the active
+gate is `{occupied_iou, boundary_f1, clearance_nmae}` - two of which are the
+pinned calibration templates - and the pilot has **no topology-perception
+coverage**.
+
+A three-component pilot without either topology target **must not run as the
+original direction-finding pilot**. The choices are:
+
+1. **Terminate** the perception-encoder direction-finding pilot; topology
+   perception is unvalidated at pilot scale.
+2. Run a deliberately narrower **"local geometry only"** study under a separate,
+   explicit claim (it validates local geometry representation, not topology
+   perception) with its own acceptance criteria.
+
+This is not a runtime `proceed on N-of-5`. It is a spec decision that must be
+recorded before v2r2 executes.
+
+## Tracking
+
+- `#339` (this branch): exploratory infrastructure, `retain`.
+- `amadou-6e/specs#23`: v2r2 partially-observed-topology preregistration
+  (R0-R4 design, minimum active set, spec commit).
+- `#340`: v2r2 execution (R0 audit -> R5 run) against the frozen v2r2 spec.
+- local-geometry carve-out: `#341` (separate program, outside this decision chain).
+
+## Decision (spec owner, frozen): both topology targets deferring terminates the pilot
+
+If both the `reachability` and `geodesic` gate families are deferred or invalid,
+the direction-finding pilot **does not begin**. Continuing P1-P8 on
+`{occupied_iou, boundary_f1, clearance_nmae}` alone would silently measure local
+geometry reconstruction while preserving an unjustified topology-perception
+claim. Reachability / geodesic performance is essential to the claim that the
+encoder supports pathfinding and benefits from wider context.
+
+### Frozen v2r2 rule
+
+> At least one topology component must be active and pass its denominator,
+> identifiability, triviality, and control-ladder gates. If both reachability
+> and geodesic are deferred or invalid, v2r2 terminates with
+> `no_topology_identifiable`. The direction-finding pilot does not begin. A
+> separately preregistered local-geometry study may be proposed, but is outside
+> this pilot's decision chain.
+
+Enforcement: `contracts.TOPOLOGY_COMPONENT_FAMILIES = {reachability, geodesic}`
+and `_require_active_topology_component` (family membership by name prefix). The
+completed v1/v2/v2r1 contracts are not amended with this rule; it is applied by
+the v2r2 audit-protocol and comparative-preregistration contracts introduced in
+#340. Because P1-P8 can only begin from a frozen comparative preregistration, a
+run that defers both topology families stops at P0C with
+`decision: no_topology_identifiable` and writes no preregistration.
+
+### Local-geometry carve-out (separate program)
+
+A narrower study may proceed only as its own program, not as part of this chain:
+
+- new corpus `voxel-encoder-local-geometry-v1`;
+- new dataset, queries, preregistration, runs, score, and reports;
+- claims limited to occupancy, boundary, clearance, and clearance recovery;
+- **no** claims about connectivity / pathfinding, topology, wide-context value,
+  or architecture selection for planning;
+- results cannot advance the direction-finding P1-P8 sequence chain;
+- a later topology-capable study must independently qualify before combining its
+  conclusions with local-geometry results.

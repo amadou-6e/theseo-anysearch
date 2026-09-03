@@ -11,7 +11,9 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 GitSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 NonEmpty = Annotated[str, Field(min_length=1)]
 PilotName = Literal["P0", "P1", "P2", "P3", "P4", "P4D", "P5", "P6", "P7", "P8"]
-Decision = Literal["winner", "tie", "no_viable_direction", "blocked"]
+Decision = Literal[
+    "winner", "tie", "no_viable_direction", "blocked", "no_topology_identifiable"
+]
 Disposition = Literal["promote", "retain", "reject"]
 
 REQUIRED_POOLS = {
@@ -363,6 +365,35 @@ MODEL_FREE_CEILING_METHODS = frozenset(
 NullInput = Literal["zeros", "coordinates_only"]
 AnchorStatus = Literal["active", "deferred"]
 CALIBRATION_TEMPLATE_COMPONENTS = ("boundary_f1", "clearance_nmae")
+# v2r2 termination rule (frozen): at least one topology-family component must be
+# active and pass its gates. If both the reachability and geodesic families are
+# deferred or invalid, the study terminates with decision
+# ``no_topology_identifiable`` and the direction-finding pilot does not begin.
+# Local geometry alone cannot advance the P1-P8 chain. Family membership is by
+# name prefix so ``reachability``, ``reachability_auprc``,
+# ``reachability_logloss_gain`` and ``geodesic_nmae`` all count.
+#
+# The completed v1/v2/v2r1 contracts are NOT amended with this rule; it is
+# applied by the v2r2 audit-protocol and comparative preregistration contracts
+# introduced in the v2r2 execution work (issue #340).
+TOPOLOGY_COMPONENT_FAMILIES = frozenset({"reachability", "geodesic"})
+
+
+def _topology_family(component: str) -> str:
+    return component.split("_", 1)[0]
+
+
+def _require_active_topology_component(active_gate_components: set[str]) -> None:
+    if not any(
+        _topology_family(name) in TOPOLOGY_COMPONENT_FAMILIES
+        for name in active_gate_components
+    ):
+        raise ValueError(
+            "v2r2 termination rule: at least one topology-family component "
+            "(reachability* or geodesic*) must be active; a preregistration with "
+            "both topology families deferred cannot be frozen "
+            "(decision no_topology_identifiable)"
+        )
 
 
 class TrivialityCheck(FrozenModel):

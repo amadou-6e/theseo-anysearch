@@ -323,3 +323,29 @@ def test_v2r1_preregistration_is_frozen() -> None:
     amendment = _v2r1_preregistration()
     with pytest.raises(ValidationError):
         amendment.program = "changed"
+
+
+def test_topology_family_membership_is_by_name_prefix() -> None:
+    """reachability*, geodesic* satisfy the rule; a local-only set does not.
+
+    The completed v1/v2/v2r1 contracts are not amended with this rule; it is
+    applied by the v2r2 contracts in issue #340. Only the helper is exercised
+    here.
+    """
+
+    from theseo_anysearch.garden.pilots.contracts import (
+        _require_active_topology_component,
+    )
+
+    for ok in (
+        {"occupied_iou", "reachability"},
+        {"occupied_iou", "reachability_auprc"},
+        {"occupied_iou", "reachability_logloss_gain"},
+        {"occupied_iou", "geodesic_nmae"},
+    ):
+        _require_active_topology_component(ok)  # no raise
+
+    with pytest.raises(ValueError, match="topology-family component"):
+        _require_active_topology_component(
+            {"occupied_iou", "boundary_f1", "clearance_nmae"}
+        )
