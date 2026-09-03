@@ -135,3 +135,57 @@ accepted direction needs plus compact reports. If E1 or E3 returns
 `no_viable_direction`, the promotion inventory is foundation commits only. The
 promotion PR to `develop` reruns all garden unit tests and the deterministic P0C
 smoke on the current development line.
+
+---
+
+# Reachability denominator redesign (R1-R5)
+
+Tracking issue: #339. Integration base `exp/perception-encoder` @ `f26b9cb`.
+
+## Why
+
+The amended P0C (#334) narrowed the block from three failing denominator gates
+to one: `reachability_auprc`. Even with the F4 stratified pair sampler and the
+F1 model-free kNN ceiling, `measure_revised_component` produces
+`floor ~= ceiling ~= 0.93` for reachability, so `RevisedScoreAnchor` fails
+"active higher-is-better ceiling must exceed floor by at least 0.10".
+
+Root cause: connectivity over a bounded, fully-visible observation window is
+near-linearly decodable from raw occupancy, so PCA / random-projection
+baselines are already near-optimal and AUPRC (capped at 1.0, floored at the
+positive base rate) has no room above them.
+
+## Options
+
+| ID | Idea | Lever |
+|---|---|---|
+| **A** | Occlusion-aware reachability: sample pairs whose ground-truth connecting path crosses `unknown` cells; label from the completed geometry; stratify by occlusion span (`0`, `1-2`, `3-5`, `6+`); gate on the occluded strata. | Baselines cannot bridge an occluded gap; a representation that learned occupancy completion can. Drops the floor on hard strata. |
+| **B1** | Excess AUPRC over an explicit raw-occupancy linear baseline, restricted to the hard strata: component `= (ceiling - raw_linear) / (ceiling - raw_linear)` on span `>= 1`. | Measures what the representation adds, not the absolute; the 0.10 gate applies to the gain denominator. |
+| **B2** | Make the gated quantity the PVI gain (F2 `assess_triviality`, embedding vs coordinates-only null) for the reachability label; AUPRC becomes a reported diagnostic. | PVI gain has a natural zero and no 1.0 cap, so a 0.10-bit gate is meaningful even when raw AUPRC range is narrow. |
+| **C** | Replace pairwise AUPRC with a connectivity-structure metric: probe decodes a per-cell free-space component label; metric `= 1 - normalized Variation of Information` (also report adapted-Rand and Betti-0). | Structure metrics have real dynamic range: a raw-occupancy decoder merges/splits at chokepoints and across occlusions where a good encoder does not. A merged component is a structural false-open. |
+| **D** | Defer `reachability_auprc` (`RevisedScoreAnchor.status="deferred"`) with a recorded reason; gate on the remaining active set. | Honest fallback if A-C do not open >= 0.10; the pilot Validity Limits already anticipate limited context. |
+
+## Work items
+
+| ID | Item | Touches |
+|---|---|---|
+| R1 | Occlusion-aware pair sampler and a graded-occlusion fixture corpus generator. | `evaluation/reachability.py`, new fixture module |
+| R2 | Explicit raw-occupancy linear baseline as a first-class floor control. | `pilots/calibration_revision.py`, `pilots/v2r1_data.py` |
+| R3 | Per-cell component-label probe target + VI / adapted-Rand / Betti-0 metric. | `evaluation/probes.py`, `evaluation/metrics.py` |
+| R4 | Gate change: `reachability` gated component `= max`-over-hard-strata `(encoder - raw)` normalized, or PVI gain; AUPRC / VI as diagnostics. | `pilots/calibration_revision.py`, `pilots/contracts.py` |
+| R5 | CPU comparison screen: measure every variant's floor/ceiling gap on the fixture corpus; emit a machine-readable ranking and `adopt:<variant>` / `defer:reachability`. Frozen CUDA P0C re-run with the winner is a follow-on. | new screen script |
+
+## Method for "which works best"
+
+`experiments/perception_encoder/reachability_redesign_screen.py` builds a fixed
+fixture corpus of procedural 3D geometries with controlled occlusion, derives a
+rich-context feature (Bayes-ceiling input), a raw-occupancy feature (baseline
+input), and a coordinates-only null, then reports for each of V0 (current), A,
+B1, B2, C:
+
+- `floor`, `ceiling` (or value), `gap`, `opens_gate` (`gap >= 0.10`);
+- per-stratum breakdown for A / B1;
+- a `recommendation`: `adopt:<variant with the largest reliable gap that opens the gate>` or `defer:reachability`.
+
+Acceptance: the screen runs deterministically on CPU, its report carries
+artifact hashes, and the recommendation is reproducible across two clean runs.
