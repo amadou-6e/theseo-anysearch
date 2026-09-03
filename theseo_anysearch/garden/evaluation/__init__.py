@@ -17,6 +17,16 @@ from .controls import (
     shuffled_embedding_output,
     zero_embedding_output,
 )
+from .reachability import (
+    FalseOpenVeto,
+    PairPlan,
+    calibrate_decision_threshold,
+    derive_false_open_veto,
+    false_open_false_closed,
+    per_bin_auprc,
+    sample_reachability_pairs,
+    two_way_agreement,
+)
 from .triviality import TrivialityResult, assess_triviality
 from .probes import (
     CoordinateProbe,
@@ -35,6 +45,8 @@ __all__ = [
     "ControlEvaluation",
     "CoordinateProbe",
     "CrossFitFold",
+    "FalseOpenVeto",
+    "PairPlan",
     "TrivialityResult",
     "GlobalLinearProbe",
     "PairTopologyProbe",
@@ -43,11 +55,17 @@ __all__ = [
     "bayes_error_knn",
     "bayes_error_mst",
     "ceiling_effective_rank_fraction",
+    "calibrate_decision_threshold",
     "classification_metric_ceiling",
     "control_target_assignment",
     "assess_triviality",
     "encoder_state_sha256",
+    "derive_false_open_veto",
+    "false_open_false_closed",
     "metric_ceiling_method",
+    "per_bin_auprc",
+    "sample_reachability_pairs",
+    "two_way_agreement",
     "regression_metric_ceiling",
     "evaluate_controls",
     "extract_frozen",
