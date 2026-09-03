@@ -88,6 +88,7 @@ class VoxelEnv(RustGymnasiumEnv):
         self._curriculum_stages: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
         self._curriculum_stage_probabilities: list[float] = []
         self._scenario_provider = None
+        self._geometry_provider = None
         self._scenario_parameters = dict(config.get("scenario_parameters") or {})
         self._scenario_scope = str(config.get("scenario_scope", "training"))
         self._previous_scenario: dict[str, Any] | None = None
@@ -112,6 +113,7 @@ class VoxelEnv(RustGymnasiumEnv):
             else legacy_validation
         )
         super().__init__(config)
+        self._geometry_provider = self._load_geometry_provider(config)
         self._scenario_provider = self._load_scenario_provider(config)
         self._init_obs_cache(config)
 
@@ -142,6 +144,20 @@ class VoxelEnv(RustGymnasiumEnv):
         if provider is None:
             raise ValueError(
                 f"scenario provider {name!r} has no compiled Rust export or scenarios.py source"
+            )
+        return provider
+
+    def _load_geometry_provider(self, config: dict):
+        name = config.get("geometry_provider")
+        if not name:
+            return None
+        from theseo_anysearch.experiments.custom_geometry import load_geometry_provider
+
+        source = config.get("geometry_module_path")
+        provider = load_geometry_provider(Path(source) if source else None, name)
+        if provider is None:
+            raise ValueError(
+                f"geometry provider {name!r} has no archived geometry.py source"
             )
         return provider
 
@@ -433,6 +449,8 @@ class VoxelEnv(RustGymnasiumEnv):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         self._last_accepted_task_manifest = None
+        if self._geometry_provider is not None:
+            self._install_generated_geometry(seed)
         if self._geo_pool is not None:
             from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
             configured_feasibility = self._validation_config
@@ -602,6 +620,56 @@ class VoxelEnv(RustGymnasiumEnv):
                 reset_seed, geometry_result, feasibility_result
             )
         return self._reset_task_state(super().reset(seed=seed, options=options))
+
+    def _install_generated_geometry(self, seed: int | None) -> None:
+        """Generate, validate, and only then install an inert proposal."""
+        from theseo_anysearch.environments.geometry_sources import resolve_geometry_sources
+        from theseo_anysearch.environments.pettingzoo.multi_voxel_env import _load_stl_geometry
+        from theseo_anysearch.environments.validation import validate_geometry
+        from theseo_anysearch.experiments.custom_geometry import (
+            GeometryContext,
+            GeometryTaskRequirements,
+            RuntimeGeometryWorld,
+        )
+
+        reset_seed = (
+            int(seed)
+            if seed is not None
+            else int(self._config.get("seed", 42)) + self._reset_count + 1
+        )
+        waypoints = self._config.get("waypoints") or {}
+        goals = ()
+        if waypoints.get("goal") is not None:
+            goals = (tuple(waypoints["goal"]),)
+        context = GeometryContext(
+            seed=reset_seed,
+            attempt=1,
+            extent=self._extent,
+            task=GeometryTaskRequirements(
+                start=tuple(waypoints["start"]) if waypoints.get("start") else None,
+                goals=goals,
+                max_steps=int(self._config.get("max_steps", 256)),
+                action_mode=str(self._config.get("action_mode", "discrete_26")),
+            ),
+            parameters=dict(self._config.get("geometry_provider_parameters") or {}),
+            world=RuntimeGeometryWorld(self._rust_env, self._extent),
+        )
+        proposal = self._geometry_provider.generate(context)
+        source_config = {
+            "geometry_sources": [item.model_dump(mode="json") for item in proposal.sources]
+        }
+        cells = resolve_geometry_sources(
+            source_config, grid_size=max(self._extent), load_stl=_load_stl_geometry
+        )
+        result = validate_geometry(cells, self._extent)
+        if not result.valid:
+            raise RuntimeError(
+                f"geometry provider {self._geometry_provider.name!r} proposal "
+                f"{proposal.proposal_id!r} failed validation: "
+                f"{result.rejection_reason} at {result.rejected_coordinate}"
+            )
+        self._rust_env.set_geometry(cells)
+        self._scenario_geometry = tuple(cells)
 
     def _record_accepted_task_manifest(
         self, reset_seed, geometry_result, feasibility_result

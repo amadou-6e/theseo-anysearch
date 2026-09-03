@@ -29,6 +29,14 @@ GeometrySource = Annotated[
 ]
 
 
+class GeometryProviderSelector(BaseModel):
+    """Convention-discovered Python geometry generator."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    name: str = Field(min_length=1, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
 class GeometryValidationConfig(BaseModel):
     """Opt-in structural and task-feasibility validation budgets."""
 
@@ -100,6 +108,10 @@ class GeometryConfig(BaseModel):
     sources: tuple[GeometrySource, ...] = Field(
         default=(), description="Ordered small-world sources combined by voxel union."
     )
+    provider: GeometryProviderSelector | None = Field(
+        default=None,
+        description="Optional named Python or native geometry provider invoked at reset.",
+    )
     stl_path: Path | None = Field(None, description="Single STL geometry source.")
     stl_paths: list[Path] | None = Field(None, description="STL sources sampled by the environment.")
     scale: float = Field(1.0, description="Scale applied while voxelizing an STL.")
@@ -144,6 +156,7 @@ class GeometryConfig(BaseModel):
         if isinstance(value, dict):
             data = dict(value)
             explicit_sources = data.get("sources")
+            provider = data.get("provider")
             legacy_sources = [
                 name for name in ("stl_path", "boxes") if data.get(name)
             ]
@@ -193,6 +206,17 @@ class GeometryConfig(BaseModel):
                 raise ValueError(
                     "geometry.sources cannot be combined with runtime pool or "
                     "scale_range settings"
+                )
+            if provider and (
+                explicit_sources
+                or legacy_sources
+                or data.get("pool")
+                or data.get("scale_range")
+                or data.get("compiled_world_path") is not None
+            ):
+                raise ValueError(
+                    "geometry.provider cannot be combined with fixed, pooled, scaled, "
+                    "or compiled-world geometry"
                 )
             if data.get("compiled_world_path") is not None and (
                 explicit_sources or legacy_sources or data.get("pool")

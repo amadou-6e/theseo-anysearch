@@ -159,6 +159,12 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                     }
                 )
         return {
+            "geometry_provider": (
+                self.geometry.provider.name if self.geometry.provider else None
+            ),
+            "geometry_provider_parameters": (
+                self.geometry.provider.parameters if self.geometry.provider else {}
+            ),
             "geometry_sources": [
                 source.model_dump(mode="json") for source in self.geometry.sources
             ],

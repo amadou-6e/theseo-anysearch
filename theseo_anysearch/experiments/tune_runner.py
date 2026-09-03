@@ -293,7 +293,8 @@ def _write_trial_extension_sources(
     metric_source_contents: dict[str, str] | None,
     reward_source_content: str | None,
     scenario_source_content: str | None,
-    generation_source_content: str | None,
+    geometry_source_content: str | None = None,
+    generation_source_content: str | None = None,
 ) -> None:
     """Materialize Python extension sources before env runners are created."""
     for filename, source in (metric_source_contents or {}).items():
@@ -306,6 +307,11 @@ def _write_trial_extension_sources(
     if scenario_source_content is not None:
         trial_dir.joinpath("scenarios.py").write_text(
             scenario_source_content,
+            encoding="utf-8",
+        )
+    if geometry_source_content is not None:
+        trial_dir.joinpath("geometry.py").write_text(
+            geometry_source_content,
             encoding="utf-8",
         )
     if generation_source_content is not None:
@@ -332,6 +338,7 @@ def _experiment_trainable(
     metric_source_contents: dict[str, str] | None = None,
     reward_source_content: str | None = None,
     scenario_source_content: str | None = None,
+    geometry_source_content: str | None = None,
     generation_source_content: str | None = None,
     native_extension_bundle: dict[str, Any] | None = None,
 ) -> None:
@@ -429,6 +436,7 @@ def _experiment_trainable(
         metric_source_contents=metric_source_contents,
         reward_source_content=reward_source_content,
         scenario_source_content=scenario_source_content,
+        geometry_source_content=geometry_source_content,
         generation_source_content=generation_source_content,
     )
     if native_extension_bundle is not None:
@@ -1016,8 +1024,10 @@ class TuneRunner:
 
         preflight_environment_rules(config, config_path)
         from theseo_anysearch.imitation.preflight import preflight_imitation_providers
+        from theseo_anysearch.experiments.custom_geometry import preflight_geometry_provider
 
         preflight_imitation_providers(config.imitation, config_path)
+        preflight_geometry_provider(config.env.geometry, config.env, config_path)
         self._config = config
         self._config_path = config_path
         self._tag = tag
@@ -1146,6 +1156,18 @@ class TuneRunner:
         scenario_source_content = (
             scenario_source.read_text(encoding="utf-8")
             if scenario_source is not None
+            else None
+        )
+        from theseo_anysearch.experiments.custom_geometry import discover_geometry_source
+
+        geometry_provider = self._config.env.geometry.provider
+        geometry_source = discover_geometry_source(
+            self._config_path,
+            geometry_provider.name if geometry_provider is not None else None,
+        )
+        geometry_source_content = (
+            geometry_source.read_text(encoding="utf-8")
+            if geometry_source is not None
             else None
         )
         from theseo_anysearch.experiments.custom_imitation import (
@@ -1369,6 +1391,7 @@ class TuneRunner:
             metric_source_contents=metric_source_contents,
             reward_source_content=reward_source_content,
             scenario_source_content=scenario_source_content,
+            geometry_source_content=geometry_source_content,
             generation_source_content=generation_source_content,
             native_extension_bundle=native_extension_bundle,
         )
