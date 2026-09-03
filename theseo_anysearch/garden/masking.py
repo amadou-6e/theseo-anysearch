@@ -19,7 +19,7 @@ class MaskSample:
     center_strata: dict[str, int]
 
 
-def _candidate_centers(
+def _candidate_center_masks(
     occupancy: torch.Tensor, valid: torch.Tensor, unknown: torch.Tensor
 ) -> dict[str, torch.Tensor]:
     occupied = occupancy & valid & ~unknown
@@ -32,11 +32,32 @@ def _candidate_centers(
         unknown & F.conv3d(free.float(), kernel, padding=1).bool()
     )
     return {
-        "boundary_frontier": torch.nonzero(boundary | frontier, as_tuple=False),
-        "ordinary_free": torch.nonzero(free, as_tuple=False),
-        "unknown": torch.nonzero(unknown & valid, as_tuple=False),
-        "occupied": torch.nonzero(occupied, as_tuple=False),
+        "boundary_frontier": boundary | frontier,
+        "ordinary_free": free,
+        "unknown": unknown & valid,
+        "occupied": occupied,
     }
+
+
+def _patch_values(values: torch.Tensor, patch_side: int) -> torch.Tensor:
+    """Return flattened per-patch sums for one (1, D, H, W) boolean tensor."""
+
+    spatial = values.shape[1:]
+    padded = tuple(math.ceil(side / patch_side) * patch_side for side in spatial)
+    padding = (0, padded[2] - spatial[2], 0, padded[1] - spatial[1], 0, padded[0] - spatial[0])
+    array = F.pad(values.float(), padding)
+    return (
+        array.reshape(
+            padded[0] // patch_side,
+            patch_side,
+            padded[1] // patch_side,
+            patch_side,
+            padded[2] // patch_side,
+            patch_side,
+        )
+        .sum(dim=(1, 3, 5))
+        .flatten()
+    )
 
 
 def sample_patch_mask(
@@ -81,44 +102,66 @@ def sample_patch_mask(
     schedule = ("boundary_frontier",) * 5 + ("ordinary_free",) * 3 + ("unknown",) * 2
     spatial_shape = occupancy.shape[2:]
     for batch_index in range(len(occupancy)):
-        candidates = _candidate_centers(
+        candidates = _candidate_center_masks(
             occupancy[batch_index : batch_index + 1] > 0.5,
             valid[batch_index : batch_index + 1],
             unknown[batch_index : batch_index + 1],
         )
         target_count = max(1, math.ceil(ratio * int(valid[batch_index].sum())))
-        forced = candidates["occupied"]
-        forced_center = forced[
-            torch.randint(len(forced), (1,), generator=generator).item()
-        ]
-        step = -1
-        while int(hidden[batch_index].sum()) < target_count:
-            if step == -1:
-                stratum = "boundary_frontier"
-                center = forced_center
-            else:
-                stratum = schedule[step % len(schedule)]
-                available = candidates[stratum]
-                if len(available) == 0:
-                    available = candidates["occupied"]
-                    stratum = "boundary_frontier"
-                center = available[
-                    torch.randint(len(available), (1,), generator=generator).item()
-                ]
-            _, _, x, y, z = (int(value) for value in center)
-            half = patch_side // 2
-            slices = (
-                batch_index,
-                0,
-                slice(max(0, x - half), min(spatial_shape[0], x - half + patch_side)),
-                slice(max(0, y - half), min(spatial_shape[1], y - half + patch_side)),
-                slice(max(0, z - half), min(spatial_shape[2], z - half + patch_side)),
-            )
-            hidden[slices] = valid[slices]
-            counts[stratum] += 1
+        grid_shape = tuple(math.ceil(side / patch_side) for side in spatial_shape)
+        patch_labels = torch.full((math.prod(grid_shape),), 3, dtype=torch.long)
+        priorities = ("ordinary_free", "unknown", "boundary_frontier")
+        for label, stratum in enumerate(priorities):
+            selected_patches = _patch_values(
+                candidates[stratum][0], patch_side
+            ).cpu() > 0
+            patch_labels[selected_patches] = label
+        queues: dict[str, list[int]] = {}
+        for label, stratum in enumerate(priorities):
+            available = torch.nonzero(patch_labels == label).flatten()
+            order = torch.randperm(len(available), generator=generator)
+            queues[stratum] = available[order].tolist()
+        fallback = torch.nonzero(patch_labels == 3).flatten()
+        fallback_order = torch.randperm(len(fallback), generator=generator)
+        queues["boundary_frontier"].extend(fallback[fallback_order].tolist())
+
+        valid_counts = _patch_values(valid[batch_index], patch_side).cpu()
+        occupied_patches = _patch_values(occupied[batch_index], patch_side).cpu() > 0
+        selected_indices: list[int] = []
+        selected_set: set[int] = set()
+        covered = 0
+        step = 0
+        while covered < target_count:
+            requested = schedule[step % len(schedule)]
+            available = queues[requested]
+            if not available:
+                requested = next((name for name, queue in queues.items() if queue), "")
+                if not requested:
+                    raise RuntimeError("could not reach requested mask ratio")
+                available = queues[requested]
+            patch_index = available.pop()
+            if patch_index not in selected_set:
+                selected_indices.append(patch_index)
+                selected_set.add(patch_index)
+                covered += int(valid_counts[patch_index])
+                counts[requested] += 1
             step += 1
-            if step > valid[batch_index].numel() * 2:
-                raise RuntimeError("could not reach requested mask ratio")
+        if not any(bool(occupied_patches[index]) for index in selected_indices):
+            forced = torch.nonzero(occupied_patches).flatten().tolist()
+            if not forced:
+                raise RuntimeError("mask sampler found no occupied patch")
+            selected_indices.append(forced[0])
+            counts["boundary_frontier"] += 1
+
+        patch_grid = torch.zeros(grid_shape, dtype=torch.bool)
+        patch_grid.flatten()[selected_indices] = True
+        expanded = patch_grid.repeat_interleave(patch_side, 0)
+        expanded = expanded.repeat_interleave(patch_side, 1)
+        expanded = expanded.repeat_interleave(patch_side, 2)
+        expanded = expanded[
+            : spatial_shape[0], : spatial_shape[1], : spatial_shape[2]
+        ].to(device=occupancy.device)
+        hidden[batch_index, 0] = expanded & valid[batch_index, 0]
         if not torch.any(hidden[batch_index] & occupied[batch_index]):
             raise RuntimeError("mask sampler failed to hide a nonempty patch")
     actual = float(hidden.sum() / valid.sum())
