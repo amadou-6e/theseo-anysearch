@@ -1,6 +1,9 @@
 """Tests for real-data materialization used by amended P0C E1."""
 from __future__ import annotations
 
+import hashlib
+
+from experiments.perception_encoder.v2r1_p0c import _artifact
 from theseo_anysearch.garden.pilots.v2r1 import v2r1_geometry_records
 from theseo_anysearch.garden.pilots.v2r1_data import (
     materialize_v2r1_calibration_datasets,
@@ -44,3 +47,12 @@ def test_small_real_data_bank_is_aligned_and_train_calibration_disjoint() -> Non
             assert set(dataset.evaluation_targets) == {0.0, 1.0}
     assert len(reachability.geometry_ids) == 20
     assert len(reachability.distance_bins) == 20
+
+
+def test_json_artifact_identity_is_independent_of_checkout_line_endings(tmp_path) -> None:
+    path = tmp_path / "query.json"
+    path.write_bytes(b'{\r\n  "value": 1\r\n}\r\n')
+    artifact = _artifact(path, "query", "application/json")
+    normalized = b'{\n  "value": 1\n}\n'
+    assert artifact.sha256 == hashlib.sha256(normalized).hexdigest()
+    assert artifact.size_bytes == len(normalized)

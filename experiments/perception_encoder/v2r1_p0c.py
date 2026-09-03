@@ -70,11 +70,14 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _artifact(path: Path, role: str, media_type: str) -> ArtifactReference:
+    payload = path.read_bytes()
+    if media_type in {"application/json", "application/yaml", "text/plain"}:
+        payload = payload.replace(b"\r\n", b"\n")
     return ArtifactReference(
         role=role,
         uri=path.as_posix(),
-        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-        size_bytes=path.stat().st_size,
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload),
         media_type=media_type,
     )
 
