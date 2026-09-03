@@ -106,4 +106,52 @@ impl NativeGeometryV1 {
         String::from_utf8(output)
             .map_err(|_| format!("native geometry {:?} returned non-UTF-8 JSON", self.name))
     }
+
+    /// Invoke the provider twice for the same immutable context and reject
+    /// output that cannot be reproduced. Both invocations share the already
+    /// loaded library handle, so determinism enforcement does not reload the
+    /// extension between calls.
+    pub fn invoke_deterministic(
+        &self,
+        world: &dyn WorldRead,
+        input: &GeometryInvocationV1<'_>,
+    ) -> Result<String, String> {
+        let first = self.invoke(world, input)?;
+        let second = self.invoke(world, input)?;
+        verify_deterministic_output(&self.name, first, second)
+    }
+}
+
+fn verify_deterministic_output(
+    name: &str,
+    first: String,
+    second: String,
+) -> Result<String, String> {
+    if first != second {
+        return Err(format!(
+            "native geometry {name:?} is nondeterministic for a fixed context"
+        ));
+    }
+    Ok(first)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_deterministic_output;
+
+    #[test]
+    fn fixed_output_is_accepted() {
+        assert_eq!(
+            verify_deterministic_output("wall", "proposal".into(), "proposal".into()),
+            Ok("proposal".into())
+        );
+    }
+
+    #[test]
+    fn changed_output_is_rejected_with_provider_name() {
+        let error = verify_deterministic_output("wall", "first".into(), "second".into())
+            .expect_err("changed output must fail");
+        assert!(error.contains("wall"));
+        assert!(error.contains("nondeterministic"));
+    }
 }
