@@ -15,6 +15,7 @@ WORLD_SIDE = 65
 _DENSITY_TARGETS = {"low": 0.04, "medium": 0.12, "high": 0.24}
 V1_PROGRAM = "voxel-encoder-pilot-v1"
 V2_PROGRAM = "voxel-encoder-pilot-v2"
+V2R1_PROGRAM = "voxel-encoder-pilot-v2r1"
 GENERATOR_VERSION = "procedural-voxel-generator-v2"
 
 
@@ -135,7 +136,7 @@ def make_pilot_observation(
         raise ValueError("observation index must be nonnegative and radius supported")
     if density_multiplier not in {1, 4}:
         raise ValueError("density multiplier must be one or four")
-    if program not in {V1_PROGRAM, V2_PROGRAM}:
+    if program not in {V1_PROGRAM, V2_PROGRAM, V2R1_PROGRAM}:
         raise ValueError(f"unsupported pilot corpus program: {program}")
     world = _canonical_world(
         program, descriptor.geometry_id, descriptor.family, descriptor.occupancy_band

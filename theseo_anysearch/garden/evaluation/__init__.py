@@ -1,5 +1,16 @@
 """Encoder-only evaluation tools for perception pilot experiments."""
 
+from .ceilings import (
+    CeilingEstimate,
+    bayes_error_direct,
+    bayes_error_knn,
+    bayes_error_mst,
+    ceiling_effective_rank_fraction,
+    classification_metric_ceiling,
+    metric_ceiling_method,
+    regression_metric_ceiling,
+    requires_trained_reference,
+)
 from .controls import (
     ControlEvaluation,
     control_target_assignment,
@@ -7,6 +18,19 @@ from .controls import (
     shuffled_embedding_output,
     zero_embedding_output,
 )
+from .reachability import (
+    FalseOpenVeto,
+    PairPlan,
+    calibrate_decision_threshold,
+    derive_false_open_veto,
+    false_open_false_closed,
+    per_bin_auprc,
+    sample_reachability_pairs,
+    two_way_agreement,
+)
+from .geodesic import GeodesicPilotDecision, decide_geodesic_pilot_metric
+from .occupancy import HeldoutOccupancyPlan, heldout_occupancy_queries, local_context_features
+from .triviality import TrivialityResult, assess_triviality
 from .probes import (
     CoordinateProbe,
     CrossFitFold,
@@ -20,14 +44,38 @@ from .probes import (
 )
 
 __all__ = [
+    "CeilingEstimate",
     "ControlEvaluation",
     "CoordinateProbe",
     "CrossFitFold",
+    "FalseOpenVeto",
+    "PairPlan",
+    "TrivialityResult",
     "GlobalLinearProbe",
+    "GeodesicPilotDecision",
+    "HeldoutOccupancyPlan",
     "PairTopologyProbe",
     "TopologyDecoder",
+    "bayes_error_direct",
+    "bayes_error_knn",
+    "bayes_error_mst",
+    "ceiling_effective_rank_fraction",
+    "calibrate_decision_threshold",
+    "classification_metric_ceiling",
     "control_target_assignment",
+    "assess_triviality",
     "encoder_state_sha256",
+    "derive_false_open_veto",
+    "decide_geodesic_pilot_metric",
+    "false_open_false_closed",
+    "metric_ceiling_method",
+    "heldout_occupancy_queries",
+    "local_context_features",
+    "per_bin_auprc",
+    "sample_reachability_pairs",
+    "two_way_agreement",
+    "regression_metric_ceiling",
+    "requires_trained_reference",
     "evaluate_controls",
     "extract_frozen",
     "make_cross_fit_folds",
