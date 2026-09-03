@@ -331,7 +331,7 @@ impl PyVoxelEnv {
         let extension = NativeGeometryV1::load(Path::new(&library_path), &provider_name)
             .map_err(PyValueError::new_err)?;
         extension
-            .invoke(
+            .invoke_deterministic(
                 self.inner.world(),
                 &GeometryInvocationV1 {
                     seed,

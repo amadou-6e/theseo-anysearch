@@ -144,6 +144,30 @@ def test_mixed_legacy_and_nested_geometry_is_rejected() -> None:
         EnvConfig(grid_size=8, geometry={"grid_size": 16})
 
 
+@pytest.mark.parametrize(
+    "conflicting_geometry",
+    [
+        {"sources": [{"type": "boxes", "boxes": [[1, 1, 1, 2, 2, 2]]}]},
+        {"stl_path": "world.stl"},
+        {"boxes": [[1, 1, 1, 2, 2, 2]]},
+        {"pool": {"pool_dir": "runtime/geometry-pool"}},
+        {"scale_range": [0.5, 1.5]},
+        {"compiled_world_path": "runtime/worlds/site-a"},
+    ],
+    ids=("sources", "stl", "boxes", "pool", "scale-range", "compiled-world"),
+)
+def test_geometry_provider_rejects_other_source_mechanisms(
+    conflicting_geometry: dict[str, object],
+) -> None:
+    geometry = {"provider": {"name": "procedural_wall"}, **conflicting_geometry}
+
+    with pytest.raises(
+        ValidationError,
+        match="geometry.provider cannot be combined with fixed, pooled, scaled, or compiled-world geometry",
+    ):
+        EnvConfig(geometry=geometry)
+
+
 def test_mixed_legacy_and_nested_rewards_are_rejected() -> None:
     with pytest.raises(ValidationError, match="cannot be mixed.*rewards"):
         EnvConfig(goal_reward=2.0, rewards={"goal_reward": 3.0})
