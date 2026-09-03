@@ -225,15 +225,18 @@ reference behaviour on calibration data - not an arbitrary absolute value.
 
 ### R4 - preregistration amendment (choose one primary metric)
 
-From calibration data only, before P1 opens, freeze exactly one primary
-`reachability` metric and its aggregation:
+From calibration data only, before P1 opens, freeze exactly one primary metric
+for the neutral `reachability` gate family and its aggregation:
 
-- normalized conditional log-loss gain
-  `(null_log_loss - candidate_log_loss) / (null_log_loss - reference_log_loss)`,
-  bounded and structurally uniform with the other anchors; or
-- occlusion-stratified AUPRC with the frozen weighted aggregate.
+- normalized conditional log-loss gain against the R2 nonlinear-raw floor,
+  `(nonlinear_raw_log_loss - candidate_log_loss) / (nonlinear_raw_log_loss - reference_log_loss)`,
+  not clipped (the pilot never clips normalized scores), structurally uniform
+  with the other revised anchors; or
+- occlusion-stratified AUPRC with the frozen weighted aggregate, normalized
+  between the R2 nonlinear-raw floor and the reference ceiling.
 
-AUPRC and PVI / selectivity are retained as **diagnostics only**.
+The null-input log loss is a triviality diagnostic only, not a floor. AUPRC and
+PVI / selectivity are retained as **diagnostics only**.
 
 The amendment must also **explicitly define the minimum active gate set** (see
 open decision below).
@@ -278,8 +281,8 @@ recorded before v2r2 executes.
 
 ## Decision (spec owner, frozen): both topology targets deferring terminates the pilot
 
-If both `reachability_auprc` and `geodesic_nmae` are deferred or invalid, the
-direction-finding pilot **does not begin**. Continuing P1-P8 on
+If both the `reachability` and `geodesic` gate families are deferred or invalid,
+the direction-finding pilot **does not begin**. Continuing P1-P8 on
 `{occupied_iou, boundary_f1, clearance_nmae}` alone would silently measure local
 geometry reconstruction while preserving an unjustified topology-perception
 claim. Reachability / geodesic performance is essential to the claim that the
@@ -294,12 +297,13 @@ encoder supports pathfinding and benefits from wider context.
 > separately preregistered local-geometry study may be proposed, but is outside
 > this pilot's decision chain.
 
-Enforcement: `contracts.TOPOLOGY_COMPONENTS` and
-`_require_active_topology_component` reject any `V2R1ProtocolPreregistration` /
-`V2R1FrozenPreregistration` whose `active_gate_components` contains no topology
-component - a preregistration cannot be frozen, so P1+ cannot start. The v2r2
-P0C runner emits `decision: no_topology_identifiable` and writes no frozen
-preregistration when calibration defers both.
+Enforcement: `contracts.TOPOLOGY_COMPONENT_FAMILIES = {reachability, geodesic}`
+and `_require_active_topology_component` (family membership by name prefix). The
+completed v1/v2/v2r1 contracts are not amended with this rule; it is applied by
+the v2r2 audit-protocol and comparative-preregistration contracts introduced in
+#340. Because P1-P8 can only begin from a frozen comparative preregistration, a
+run that defers both topology families stops at P0C with
+`decision: no_topology_identifiable` and writes no preregistration.
 
 ### Local-geometry carve-out (separate program)
 

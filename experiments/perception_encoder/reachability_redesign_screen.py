@@ -49,7 +49,7 @@ from theseo_anysearch.garden.evaluation.reachability_variants import (
     pair_matrix,
     raw_observed_feature,
     rich_completed_feature,
-    sample_occlusion_stratified_pairs,
+    sample_span_annotated_pairs,
 )
 from theseo_anysearch.garden.evaluation.triviality import assess_triviality
 from theseo_anysearch.garden.pilots.reachability_fixtures import occlusion_corpus
@@ -97,7 +97,8 @@ def _stratum(span: int) -> str:
 def _collect(corpus, feature_fn, *, seed):
     mats, labels, spans, gids = [], [], [], []
     for geometry in corpus:
-        sample = sample_occlusion_stratified_pairs(geometry, count=32, seed=seed)
+        # uniform draw; the screen stratifies in analysis, not in sampling
+        sample = sample_span_annotated_pairs(geometry, count=32, seed=seed)
         mats.append(pair_matrix(feature_fn, geometry, sample))
         labels.append(sample.reachable)
         spans.append(sample.occlusion_span)

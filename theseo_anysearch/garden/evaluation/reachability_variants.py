@@ -3,8 +3,11 @@
 Given an :class:`OccludedGeometry`, produce the pair sets and feature matrices
 the comparison screen needs:
 
-- ``sample_occlusion_stratified_pairs`` - reachable label from the *completed*
-  free-space graph, plus the occlusion span along the path;
+- ``sample_span_annotated_pairs`` - a uniform pair draw over free cells,
+  annotated with the completed-graph reachable label and the occlusion span
+  along the path. It does NOT enforce per-stratum quotas; the v2r2 R1 sampler
+  with real stratification is issue #340 work. The screen stratifies in
+  analysis (slicing by span), not in sampling;
 - ``raw_observed_feature`` - local occupancy the observer sees (unknown as a
   channel); the baseline / floor input;
 - ``rich_completed_feature`` - local *completed* occupancy plus geodesic scalars;
@@ -42,9 +45,14 @@ def _free_cells(geometry: OccludedGeometry) -> np.ndarray:
     return np.argwhere(geometry.completed_free)
 
 
-def sample_occlusion_stratified_pairs(
+def sample_span_annotated_pairs(
     geometry: OccludedGeometry, *, count: int, seed: int
 ) -> PairSample:
+    """Uniform pair draw over free cells, annotated with reachability and span.
+
+    Not stratified: occlusion-span balance is not enforced here. The v2r2 R1
+    sampler with per-stratum quotas is issue #340 work."""
+
     rng = np.random.default_rng(seed)
     cells = _free_cells(geometry)
     if len(cells) < 4:

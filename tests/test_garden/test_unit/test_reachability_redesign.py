@@ -9,7 +9,7 @@ from theseo_anysearch.garden.evaluation.reachability_variants import (
     pair_matrix,
     raw_observed_feature,
     rich_completed_feature,
-    sample_occlusion_stratified_pairs,
+    sample_span_annotated_pairs,
 )
 from theseo_anysearch.garden.pilots.reachability_fixtures import (
     generate_occluded_geometry,
@@ -42,7 +42,7 @@ def test_occlusion_span_is_negative_across_components_and_positive_on_hidden_pat
     corpus = occlusion_corpus(20, seed=20260903)
     saw_unreachable = saw_occluded_reachable = False
     for g in corpus:
-        sample = sample_occlusion_stratified_pairs(g, count=32, seed=1)
+        sample = sample_span_annotated_pairs(g, count=32, seed=1)
         for reach, span in zip(sample.reachable, sample.occlusion_span):
             if not reach:
                 assert span == -1
@@ -77,7 +77,7 @@ def test_features_are_finite_fixed_length_and_raw_differs_from_rich() -> None:
 
 def test_pair_matrix_shape() -> None:
     g = generate_occluded_geometry(4)
-    sample = sample_occlusion_stratified_pairs(g, count=24, seed=2)
+    sample = sample_span_annotated_pairs(g, count=24, seed=2)
     matrix = pair_matrix(raw_observed_feature, g, sample)
     assert matrix.shape[0] == len(sample.starts)
     assert matrix.shape[1] == 3 * len(raw_observed_feature(g, sample.starts[0]))

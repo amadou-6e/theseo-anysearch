@@ -5,7 +5,7 @@
     "A and B2 both require the real corpus to contain a material fraction of occluded-path pairs (hard_pair_fraction >= 0.10); otherwise defer.",
     "C is inconclusive on this corpus (VI range too small), not rejected."
   ],
-  "code_sha": "72eb8fc91df74acf750306ecb653438cec4fec85",
+  "code_sha": "340d9e8b236e562d181ceaf0ef714660e7f424ad",
   "corpus": {
     "evaluation": 17,
     "geometries": 48,
@@ -24,7 +24,7 @@
   "non_evidential_reason": "floor is a linear ridge probe on raw occupancy; connectivity is nonlinear so the floor is too weak and every gap is optimistic. Proof-of-mechanism only. Real comparison requires the v2r2 R0 audit and the R2 control ladder on the real corpus.",
   "reachable_fraction": 0.7077205882352942,
   "recommendation": "non_evidential:occlusion_creates_headroom:defer_to_v2r2_R0",
-  "report_payload_sha256": "eebe07cede75a22d20b08211508b816ef11c9175cb34683c7667c6d56771786c",
+  "report_payload_sha256": "601dc3388536e1a93eb13988cd3452421edc13aec7c6efcfb5b07b16b6832800",
   "variants": {
     "A_occlusion_hard_strata": {
       "ceiling": 0.930008562524741,

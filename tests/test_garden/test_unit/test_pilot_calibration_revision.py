@@ -325,27 +325,13 @@ def test_v2r1_preregistration_is_frozen() -> None:
         amendment.program = "changed"
 
 
-def test_v2r1_termination_rule_blocks_freezing_without_a_topology_component() -> None:
-    """Both topology targets deferred -> no_topology_identifiable; cannot freeze."""
-
-    anchors = dict(_v2r1_preregistration().revised_anchors)
-    # geodesic_nmae is already deferred in the fixture; also defer reachability.
-    anchors["reachability_auprc"] = _revised_anchor(
-        floor=0.90,
-        ceiling=0.92,
-        status="deferred",
-        deferral_reason="no denominator headroom over the nonlinear raw control",
-        triviality=_triviality(passes=False),
-    )
-    with pytest.raises(ValidationError, match="no_topology_identifiable"):
-        _v2r1_preregistration(
-            revised_anchors=anchors,
-            active_gate_components=("occupied_iou", "boundary_f1", "clearance_nmae"),
-        )
-
-
 def test_topology_family_membership_is_by_name_prefix() -> None:
-    """reachability*, geodesic* satisfy the rule; a local-only set does not."""
+    """reachability*, geodesic* satisfy the rule; a local-only set does not.
+
+    The completed v1/v2/v2r1 contracts are not amended with this rule; it is
+    applied by the v2r2 contracts in issue #340. Only the helper is exercised
+    here.
+    """
 
     from theseo_anysearch.garden.pilots.contracts import (
         _require_active_topology_component,

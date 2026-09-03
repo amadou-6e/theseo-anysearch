@@ -372,6 +372,10 @@ CALIBRATION_TEMPLATE_COMPONENTS = ("boundary_f1", "clearance_nmae")
 # Local geometry alone cannot advance the P1-P8 chain. Family membership is by
 # name prefix so ``reachability``, ``reachability_auprc``,
 # ``reachability_logloss_gain`` and ``geodesic_nmae`` all count.
+#
+# The completed v1/v2/v2r1 contracts are NOT amended with this rule; it is
+# applied by the v2r2 audit-protocol and comparative preregistration contracts
+# introduced in the v2r2 execution work (issue #340).
 TOPOLOGY_COMPONENT_FAMILIES = frozenset({"reachability", "geodesic"})
 
 
@@ -592,7 +596,6 @@ class V2R1ProtocolPreregistration(FrozenModel):
         active = {name for name, plan in self.metric_plans.items() if plan.status == "active"}
         if set(self.active_gate_components) != active:
             raise ValueError("active_gate_components must match active metric plans")
-        _require_active_topology_component(active)
         for template in CALIBRATION_TEMPLATE_COMPONENTS:
             if self.metric_plans[template].status != "active":
                 raise ValueError(f"{template} is a calibration template and must stay active")
@@ -680,7 +683,6 @@ class V2R1FrozenPreregistration(FrozenModel):
             )
         if not active:
             raise ValueError("the amended calibration must keep at least one component in the gate")
-        _require_active_topology_component(active)
         for template in CALIBRATION_TEMPLATE_COMPONENTS:
             if self.revised_anchors[template].status != "active":
                 raise ValueError(
