@@ -1,0 +1,208 @@
+{
+  "accelerator_hour_cap": 2.0,
+  "accelerator_hours": 0.11606358641666677,
+  "anchor_selection_without_calibration": true,
+  "anchors": {
+    "boundary_f1": {
+      "ceiling": 0.8878594249601753,
+      "ceiling_source": "measured:supervised_reference:pilot_calibration",
+      "floor": 0.6941971369795561,
+      "floor_source": "measured:fixed_random_projection:pilot_calibration",
+      "higher_is_better": true
+    },
+    "clearance_nmae": {
+      "ceiling": 0.09038227617250462,
+      "ceiling_source": "measured:supervised_reference:pilot_calibration",
+      "floor": 0.2015523547006289,
+      "floor_source": "measured:pca:pilot_calibration",
+      "higher_is_better": false
+    }
+  },
+  "artifacts": [
+    {
+      "media_type": "application/json",
+      "role": "v2_queries",
+      "sha256": "87b8e7cf90f2c95f5b89cc19a30373ac6bfe5655a60a3020494efdf8fd3e16e7",
+      "size_bytes": 8354,
+      "uri": "runtime/perception_encoder/v2_foundation/v2-queries.json"
+    },
+    {
+      "media_type": "application/x-pytorch",
+      "role": "frequency_model",
+      "sha256": "e9b7d405627fdf95dbcf7c373cb17f5b11577f1afa6e956e702124082985cdd9",
+      "size_bytes": 200169,
+      "uri": "runtime/perception_encoder/v2_foundation/frequency-state.pt"
+    },
+    {
+      "media_type": "application/x-pytorch",
+      "role": "pca_model",
+      "sha256": "2a453860145390c0555f66cd4e8e52255538ca285b4ffccd5d9cfd2b7ed8096b",
+      "size_bytes": 200115,
+      "uri": "runtime/perception_encoder/v2_foundation/pca-state.pt"
+    },
+    {
+      "media_type": "application/x-pytorch",
+      "role": "fixed_random_projection_model",
+      "sha256": "42b147b48eead8e96fa9cfbda911e173b803131818bfc9c378e0cfd8aed24562",
+      "size_bytes": 200359,
+      "uri": "runtime/perception_encoder/v2_foundation/fixed_random_projection-state.pt"
+    },
+    {
+      "media_type": "application/x-pytorch",
+      "role": "supervised_reference_model",
+      "sha256": "e841ee18e165bef7a5845da6afb894885cae919ceba47f3d4435f952ad27578b",
+      "size_bytes": 33613141,
+      "uri": "runtime/perception_encoder/v2_foundation/supervised-reference-state.pt"
+    },
+    {
+      "media_type": "application/json",
+      "role": "calibration_predictions",
+      "sha256": "444aa4347cf8b7644a4996c36cf3ce6ba3328c554b7cbeb5bf50fa0ce7d44bb4",
+      "size_bytes": 53385,
+      "uri": "runtime/perception_encoder/v2_foundation/p0c-evaluations.json"
+    }
+  ],
+  "calibration_used_for_candidate_ranking": false,
+  "cap_passed": true,
+  "code_sha": "880e19b56b5e27d02d8d1132b3f076125a75668a",
+  "dataset_id": "voxel-encoder-pilot-v2-dataset-1",
+  "dataset_sha256": "0109834ee02f61016fb7065be2f9d75074cf7c7d16494abb6967a604bfe68dac",
+  "decision": {
+    "decision": "blocked",
+    "next": null,
+    "reason": "one or more measured floor/ceiling denominator gates failed"
+  },
+  "denominator_failures": {
+    "geodesic_nmae": {
+      "ceiling": 0.04816410017751241,
+      "floor": 0.022515243950901476,
+      "floor_source": "frequency",
+      "reason": "1 validation error for ScoreAnchor\n  Value error, error ceiling must improve on floor by at least 20 percent [type=value_error, input_value={'higher_is_better': Fals...ence:pilot_calibration'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    "occupied_iou": {
+      "ceiling": 0.9931374505100727,
+      "floor": 1.0,
+      "floor_source": "pca",
+      "reason": "1 validation error for ScoreAnchor\n  Value error, higher-is-better ceiling must exceed floor by at least 0.10 [type=value_error, input_value={'higher_is_better': True...ence:pilot_calibration'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    "reachability_auprc": {
+      "ceiling": 0.910853966767732,
+      "floor": 0.9335141154143947,
+      "floor_source": "pca",
+      "reason": "1 validation error for ScoreAnchor\n  Value error, higher-is-better ceiling must exceed floor by at least 0.10 [type=value_error, input_value={'higher_is_better': True...ence:pilot_calibration'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    }
+  },
+  "denominator_gates": {
+    "boundary_f1": true,
+    "clearance_nmae": true,
+    "geodesic_nmae": false,
+    "occupied_iou": false,
+    "reachability_auprc": false
+  },
+  "hardware": {
+    "cuda_runtime": "12.6",
+    "device": "NVIDIA GeForce RTX 3060 Ti",
+    "torch": "2.13.0+cu126"
+  },
+  "issue": 327,
+  "measured_components": {
+    "fixed_random_projection": {
+      "boundary_f1": 0.6941971369795561,
+      "clearance_nmae": 0.22004268834388682,
+      "geodesic_nmae": 0.025127137608167118,
+      "occupied_iou": 1.0,
+      "reachability_auprc": 0.9260751293448007
+    },
+    "frequency": {
+      "boundary_f1": 0.30590354344190707,
+      "clearance_nmae": 0.6429242571258214,
+      "geodesic_nmae": 0.022515243950901476,
+      "occupied_iou": 0.18784585304846757,
+      "reachability_auprc": 0.8295821945564956
+    },
+    "pca": {
+      "boundary_f1": 0.6669771459041433,
+      "clearance_nmae": 0.2015523547006289,
+      "geodesic_nmae": 0.02956708694553838,
+      "occupied_iou": 1.0,
+      "reachability_auprc": 0.9335141154143947
+    },
+    "supervised_reference": {
+      "boundary_f1": 0.8878594249601753,
+      "clearance_nmae": 0.09038227617250462,
+      "geodesic_nmae": 0.04816410017751241,
+      "occupied_iou": 0.9931374505100727,
+      "reachability_auprc": 0.910853966767732
+    }
+  },
+  "pool_hashes": {
+    "pilot_calibration": {
+      "assignment_sha256": "d177977e2c82caca6cd2eff65fa24b0ae4955a1125192a206d86ace0377d22a0",
+      "query_sha256": "e61790275fe4b2670b106146a9dfc864514f739115edfa85bc502d896f53d1ef"
+    },
+    "pilot_confirm": {
+      "assignment_sha256": "ce88852154d8f68e52c23e2168a4bc2843655606e4fad2edf14470370fe84133",
+      "query_sha256": "137827e2a2ad2970792821886c5d867c6f392b1e607dbd1262894cab8de7dc1e"
+    },
+    "pilot_dev_arch": {
+      "assignment_sha256": "0f1723f14171aefe30238f30dd4caa1fabce819c8d6b3b3e1176845e20c5b40f",
+      "query_sha256": "0adc0a71b4183b5d45066710238f9ff6b29aa7b80635b787a710dcf628ace99e"
+    },
+    "pilot_dev_early": {
+      "assignment_sha256": "4bfd890e10290fe2d3fa468a348d58972456c377f456a04aa2e2ca6e65f06008",
+      "query_sha256": "dc2e023edd3ab7530fe3dcefa85613e16d47fa73ee09c9c84043a31429aa3ca5"
+    },
+    "pilot_dev_interaction": {
+      "assignment_sha256": "cec242cb57cd6835f91a10c85c2cbecaf91dbba387501e0e255071dc9f909d32",
+      "query_sha256": "d15ec1da6545990b95e46aca13bbaa709bdc79c6994b0bf5a6cf854081609269"
+    },
+    "pilot_diagnostic": {
+      "assignment_sha256": "cfcf3c739cf66b847e6b7f24aa1d211c8bcc0e0dce136d39d06197a7456e6a7f",
+      "query_sha256": "94a1d1c96a96918a095e19d59e9394dfeff73c88555abb9ec055616ad98344e2"
+    },
+    "pilot_train": {
+      "assignment_sha256": "abbfcb0687b57aa4c8cf22f6eb0f470fa5ef50a6df993c0423d05797f487cc59",
+      "query_sha256": "4b48d2cd045df08d9394e4e2d523c33e45162ce0aa7dcc7bf617431a7512e2d2"
+    }
+  },
+  "report_payload_sha256": "a7a149f9235b38f9ff1f1a230ce791367cf528fc6705e0f987674f1a48d4ea43",
+  "run_id": "voxel-encoder-pilot-v2-p0-calibration-1",
+  "spec_commit": "01eefc529016da48c4a1dd17b85391720542af14",
+  "status": "blocked",
+  "supervised_reference": {
+    "capacity_ratio": 9.061167204820942,
+    "curve": [
+      {
+        "selection_error": 0.5805113799870014,
+        "training_error": 0.47730278968811035,
+        "update": 100
+      },
+      {
+        "selection_error": 0.182401854544878,
+        "training_error": 0.3606882393360138,
+        "update": 200
+      },
+      {
+        "selection_error": 0.13879737071692944,
+        "training_error": 0.25832682847976685,
+        "update": 300
+      },
+      {
+        "selection_error": 1.5344080477952957,
+        "training_error": 0.12160782516002655,
+        "update": 400
+      },
+      {
+        "selection_error": 0.14388760458678007,
+        "training_error": 0.15567763149738312,
+        "update": 500
+      }
+    ],
+    "residual_training_error": 0.15567763149738312,
+    "selected_update": 300,
+    "selection_error": 0.13879737071692944,
+    "selection_pool": "geometry-disjoint fold within pilot_train",
+    "tiny_parameters": 926624,
+    "trainable_parameters": 8396295
+  }
+}
