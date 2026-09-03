@@ -13,6 +13,9 @@ from theseo_anysearch.garden.splits import GeometryDescriptor
 
 WORLD_SIDE = 65
 _DENSITY_TARGETS = {"low": 0.04, "medium": 0.12, "high": 0.24}
+V1_PROGRAM = "voxel-encoder-pilot-v1"
+V2_PROGRAM = "voxel-encoder-pilot-v2"
+GENERATOR_VERSION = "procedural-voxel-generator-v2"
 
 
 def _seed(*parts: object) -> int:
@@ -72,13 +75,19 @@ def _add_ellipsoid(volume: np.ndarray, rng: np.random.Generator) -> None:
 
 @lru_cache(maxsize=256)
 def _canonical_world(
+    program: str,
     geometry_id: str,
     family: str,
     occupancy_band: str,
 ) -> np.ndarray:
     """Create one immutable canonical world for a frozen geometry identity."""
 
-    rng = np.random.default_rng(_seed("voxel-encoder-pilot-v1", geometry_id))
+    seed_parts = (
+        (V1_PROGRAM, geometry_id)
+        if program == V1_PROGRAM
+        else (GENERATOR_VERSION, program, geometry_id)
+    )
+    rng = np.random.default_rng(_seed(*seed_parts))
     volume = np.zeros((WORLD_SIDE,) * 3, dtype=bool)
     target = _DENSITY_TARGETS[occupancy_band]
     attempts = 0
@@ -118,6 +127,7 @@ def make_pilot_observation(
     *,
     radius: int,
     density_multiplier: int = 1,
+    program: str = V1_PROGRAM,
 ) -> PilotObservation:
     """Materialize a reproducible crop without mutating the cached source world."""
 
@@ -125,13 +135,25 @@ def make_pilot_observation(
         raise ValueError("observation index must be nonnegative and radius supported")
     if density_multiplier not in {1, 4}:
         raise ValueError("density multiplier must be one or four")
+    if program not in {V1_PROGRAM, V2_PROGRAM}:
+        raise ValueError(f"unsupported pilot corpus program: {program}")
     world = _canonical_world(
-        descriptor.geometry_id, descriptor.family, descriptor.occupancy_band
+        program, descriptor.geometry_id, descriptor.family, descriptor.occupancy_band
     )
     side = 2 * radius + 1
     maximum_start = WORLD_SIDE - side
-    rng = np.random.default_rng(
-        _seed(
+    observation_seed = (
+        (
+            "observation",
+            descriptor.geometry_id,
+            observation_index,
+            radius,
+            density_multiplier,
+        )
+        if program == V1_PROGRAM
+        else (
+            GENERATOR_VERSION,
+            program,
             "observation",
             descriptor.geometry_id,
             observation_index,
@@ -139,6 +161,7 @@ def make_pilot_observation(
             density_multiplier,
         )
     )
+    rng = np.random.default_rng(_seed(*observation_seed))
     starts = (0, 0, 0)
     occupancy = np.zeros((side,) * 3, dtype=bool)
     for _ in range(64):
