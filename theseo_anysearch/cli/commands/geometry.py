@@ -83,6 +83,12 @@ def geometry_report(config_path: Path, seed: int = 42, sample_index: int = 0) ->
         if runtime.get("compiled_world_path")
         else None
     )
+    maximum_search_nodes = int(
+        (runtime.get("geometry_validation") or {}).get(
+            "maximum_search_nodes", 100_000
+        )
+    )
+    world_read = None
     if compiled_path is not None:
         from theseo_anysearch.worlds.artifacts import load_geometry_artifact
         artifact = load_geometry_artifact(compiled_path)
@@ -90,6 +96,12 @@ def geometry_report(config_path: Path, seed: int = 42, sample_index: int = 0) ->
         geometry_valid = True
         geometry_reason = None
         identity = artifact.manifest.identity_sha256
+        direction_count = len(
+            offsets_for_mode(runtime.get("action_mode", "discrete_26"))
+        )
+        world_read = artifact.bounded_reader(
+            maximum_queries=maximum_search_nodes * direction_count + 2
+        )
     else:
         result = validate_geometry(coordinates, extent)
         occupancy = len(coordinates)
@@ -100,24 +112,29 @@ def geometry_report(config_path: Path, seed: int = 42, sample_index: int = 0) ->
     start = tuple(waypoints["start"]) if waypoints.get("start") else None
     goal = tuple(waypoints["goal"]) if waypoints.get("goal") else None
     feasibility: dict[str, Any] | None = None
-    if compiled_path is None and start is not None and goal is not None and geometry_valid:
-        occupied = set(coordinates)
+    if start is not None and goal is not None and geometry_valid:
+        if world_read is None:
+            occupied = set(coordinates)
+            world_read = BoundedWorldRead(lambda coordinate: coordinate in occupied)
         planned = validate_task_feasibility(
-            BoundedWorldRead(lambda coordinate: coordinate in occupied),
+            world_read,
             start=start, goal=goal, extent=extent,
             directions=offsets_for_mode(runtime.get("action_mode", "discrete_26")),
             action_mode=runtime.get("action_mode", "discrete_26"),
-            maximum_search_nodes=int((runtime.get("geometry_validation") or {}).get("maximum_search_nodes", 100_000)),
+            maximum_search_nodes=maximum_search_nodes,
             maximum_steps=int(runtime.get("max_steps", 256)),
         )
         feasibility = planned.model_dump(mode="json")
     feasible = feasibility is None or bool(feasibility["feasible"])
+    suitability_reason = geometry_reason
+    if suitability_reason is None and feasibility is not None and not feasible:
+        suitability_reason = feasibility.get("rejection_reason") or "infeasible"
     return {
         "seed": seed + sample_index, "extent": list(extent), "occupancy_count": occupancy,
         "geometry_identity": identity,
         "geometry_validity": {"valid": geometry_valid, "rejection_reason": geometry_reason},
         "task_feasibility": feasibility,
-        "training_suitability": {"suitable": geometry_valid and feasible, "reason": None if geometry_valid and feasible else geometry_reason or "infeasible"},
+        "training_suitability": {"suitable": geometry_valid and feasible, "reason": None if geometry_valid and feasible else suitability_reason},
         "evaluation_suitability": {"suitable": geometry_valid and feasible and identity is not None, "stable_identity": identity},
         "proposal": runtime.get("geometry_proposal"),
         "bounded_large_world_read": compiled_path is not None,
