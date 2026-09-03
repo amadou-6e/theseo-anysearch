@@ -1,0 +1,87 @@
+{
+  "caveats": [
+    "Fixture corpus is occlusion-rich by construction; V0 opening here does not mean V0 opens on the real v2r1 corpus.",
+    "rich_completed_feature is an oracle for completion, so ceilings are an upper bound on what a real encoder achieves (appropriate for a model-free ceiling, optimistic for a candidate).",
+    "A and B2 both require the real corpus to contain a material fraction of occluded-path pairs (hard_pair_fraction >= 0.10); otherwise defer.",
+    "C is inconclusive on this corpus (VI range too small), not rejected."
+  ],
+  "code_sha": "ecd5ecc74f66b462099aad2982a45b70ef68173c",
+  "corpus": {
+    "evaluation": 17,
+    "geometries": 48,
+    "seed": 20260903,
+    "train": 31
+  },
+  "evaluation_pairs": 544,
+  "gate": 0.1,
+  "hard_pair_fraction": 0.35294117647058826,
+  "hardware": {
+    "python": "3.12.10"
+  },
+  "issue": 339,
+  "reachable_fraction": 0.7077205882352942,
+  "recommendation": "adopt:B2_pvi_gain fallback:A_occlusion_hard_strata",
+  "report_payload_sha256": "b5b0f51253961b933d63e3c33c78b7164978736981eac0a32a645ff645ea4696",
+  "variants": {
+    "A_occlusion_hard_strata": {
+      "ceiling": 0.930008562524741,
+      "floor": 0.616417755525155,
+      "gap": 0.31359080699958597,
+      "metric": "pairwise AUPRC (occlusion span >= 1 + negatives)",
+      "opens_gate": true,
+      "per_stratum": {
+        "occluded_1_2": {
+          "ceiling": 0.2793794844973277,
+          "floor": 0.27568630143114325,
+          "gap": 0.0036931830661844356
+        },
+        "occluded_3_5": {
+          "ceiling": 0.30437545282345807,
+          "floor": 0.17522734294241016,
+          "gap": 0.1291481098810479
+        },
+        "occluded_6plus": {
+          "ceiling": 0.8712053605004082,
+          "floor": 0.5362079650899477,
+          "gap": 0.3349973954104605
+        },
+        "visible": {
+          "ceiling": 0.9637189525879895,
+          "floor": 0.6513694280942364,
+          "gap": 0.3123495244937531
+        }
+      }
+    },
+    "B1_excess_over_raw": {
+      "ceiling": 0.930008562524741,
+      "floor": 0.616417755525155,
+      "gap": 0.31359080699958597,
+      "metric": "denominator = ceiling - raw on the hard strata (gate == A)",
+      "note": "opens iff A opens; frames the component as gain-over-raw",
+      "opens_gate": true
+    },
+    "B2_pvi_gain": {
+      "ceiling": 0.837438635827936,
+      "floor": 0.23179920588039332,
+      "gap": 0.6056394299475427,
+      "mdl_embedding_bits": 770.791986014772,
+      "mdl_null_bits": 391.7636825269428,
+      "metric": "PVI gain (bits/sample), rich vs coordinates-only null",
+      "opens_gate": true
+    },
+    "C_component_structure": {
+      "ceiling": 1.0,
+      "floor": 0.9418423253445842,
+      "gap": 0.05815767465541577,
+      "metric": "1 - normalized Variation of Information of the component labeling",
+      "opens_gate": false
+    },
+    "V0_pairwise_auprc": {
+      "ceiling": 0.9903935502438534,
+      "floor": 0.7728725549759404,
+      "gap": 0.21752099526791302,
+      "metric": "pairwise AUPRC (all pairs)",
+      "opens_gate": true
+    }
+  }
+}
