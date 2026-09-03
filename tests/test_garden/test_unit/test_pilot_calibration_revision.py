@@ -323,3 +323,22 @@ def test_v2r1_preregistration_is_frozen() -> None:
     amendment = _v2r1_preregistration()
     with pytest.raises(ValidationError):
         amendment.program = "changed"
+
+
+def test_v2r1_termination_rule_blocks_freezing_without_a_topology_component() -> None:
+    """Both topology targets deferred -> no_topology_identifiable; cannot freeze."""
+
+    anchors = dict(_v2r1_preregistration().revised_anchors)
+    # geodesic_nmae is already deferred in the fixture; also defer reachability.
+    anchors["reachability_auprc"] = _revised_anchor(
+        floor=0.90,
+        ceiling=0.92,
+        status="deferred",
+        deferral_reason="no denominator headroom over the nonlinear raw control",
+        triviality=_triviality(passes=False),
+    )
+    with pytest.raises(ValidationError, match="no_topology_identifiable"):
+        _v2r1_preregistration(
+            revised_anchors=anchors,
+            active_gate_components=("occupied_iou", "boundary_f1", "clearance_nmae"),
+        )

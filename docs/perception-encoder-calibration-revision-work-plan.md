@@ -271,7 +271,45 @@ recorded before v2r2 executes.
 ## Tracking
 
 - `#339` (this branch): exploratory infrastructure, `retain`.
-- new **specs** issue: v2r2 partially-observed-topology preregistration
+- `amadou-6e/specs#23`: v2r2 partially-observed-topology preregistration
   (R0-R4 design, minimum active set, spec commit).
-- new **implementation** issue: v2r2 execution (R0 audit -> R5 run) against the
-  frozen v2r2 spec.
+- `#340`: v2r2 execution (R0 audit -> R5 run) against the frozen v2r2 spec.
+- local-geometry carve-out: `#341` (separate program, outside this decision chain).
+
+## Decision (spec owner, frozen): both topology targets deferring terminates the pilot
+
+If both `reachability_auprc` and `geodesic_nmae` are deferred or invalid, the
+direction-finding pilot **does not begin**. Continuing P1-P8 on
+`{occupied_iou, boundary_f1, clearance_nmae}` alone would silently measure local
+geometry reconstruction while preserving an unjustified topology-perception
+claim. Reachability / geodesic performance is essential to the claim that the
+encoder supports pathfinding and benefits from wider context.
+
+### Frozen v2r2 rule
+
+> At least one topology component must be active and pass its denominator,
+> identifiability, triviality, and control-ladder gates. If both reachability
+> and geodesic are deferred or invalid, v2r2 terminates with
+> `no_topology_identifiable`. The direction-finding pilot does not begin. A
+> separately preregistered local-geometry study may be proposed, but is outside
+> this pilot's decision chain.
+
+Enforcement: `contracts.TOPOLOGY_COMPONENTS` and
+`_require_active_topology_component` reject any `V2R1ProtocolPreregistration` /
+`V2R1FrozenPreregistration` whose `active_gate_components` contains no topology
+component - a preregistration cannot be frozen, so P1+ cannot start. The v2r2
+P0C runner emits `decision: no_topology_identifiable` and writes no frozen
+preregistration when calibration defers both.
+
+### Local-geometry carve-out (separate program)
+
+A narrower study may proceed only as its own program, not as part of this chain:
+
+- new corpus `voxel-encoder-local-geometry-v1`;
+- new dataset, queries, preregistration, runs, score, and reports;
+- claims limited to occupancy, boundary, clearance, and clearance recovery;
+- **no** claims about connectivity / pathfinding, topology, wide-context value,
+  or architecture selection for planning;
+- results cannot advance the direction-finding P1-P8 sequence chain;
+- a later topology-capable study must independently qualify before combining its
+  conclusions with local-geometry results.

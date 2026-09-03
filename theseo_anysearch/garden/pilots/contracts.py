@@ -11,7 +11,9 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 GitSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 NonEmpty = Annotated[str, Field(min_length=1)]
 PilotName = Literal["P0", "P1", "P2", "P3", "P4", "P4D", "P5", "P6", "P7", "P8"]
-Decision = Literal["winner", "tie", "no_viable_direction", "blocked"]
+Decision = Literal[
+    "winner", "tie", "no_viable_direction", "blocked", "no_topology_identifiable"
+]
 Disposition = Literal["promote", "retain", "reject"]
 
 REQUIRED_POOLS = {
@@ -363,6 +365,22 @@ MODEL_FREE_CEILING_METHODS = frozenset(
 NullInput = Literal["zeros", "coordinates_only"]
 AnchorStatus = Literal["active", "deferred"]
 CALIBRATION_TEMPLATE_COMPONENTS = ("boundary_f1", "clearance_nmae")
+# v2r2 termination rule (frozen): at least one topology component must be active
+# and pass its gates. If both reachability and geodesic are deferred or invalid,
+# the study terminates with decision ``no_topology_identifiable`` and the
+# direction-finding pilot does not begin. Local geometry alone cannot advance
+# the P1-P8 chain.
+TOPOLOGY_COMPONENTS = frozenset({"reachability_auprc", "geodesic_nmae"})
+
+
+def _require_active_topology_component(active_gate_components: set[str]) -> None:
+    if not (active_gate_components & TOPOLOGY_COMPONENTS):
+        raise ValueError(
+            "v2r2 termination rule: at least one topology component "
+            "(reachability_auprc or geodesic_nmae) must be active; a "
+            "preregistration with both topology targets deferred cannot be "
+            "frozen (decision no_topology_identifiable)"
+        )
 
 
 class TrivialityCheck(FrozenModel):
@@ -565,6 +583,7 @@ class V2R1ProtocolPreregistration(FrozenModel):
         active = {name for name, plan in self.metric_plans.items() if plan.status == "active"}
         if set(self.active_gate_components) != active:
             raise ValueError("active_gate_components must match active metric plans")
+        _require_active_topology_component(active)
         for template in CALIBRATION_TEMPLATE_COMPONENTS:
             if self.metric_plans[template].status != "active":
                 raise ValueError(f"{template} is a calibration template and must stay active")
@@ -652,6 +671,7 @@ class V2R1FrozenPreregistration(FrozenModel):
             )
         if not active:
             raise ValueError("the amended calibration must keep at least one component in the gate")
+        _require_active_topology_component(active)
         for template in CALIBRATION_TEMPLATE_COMPONENTS:
             if self.revised_anchors[template].status != "active":
                 raise ValueError(
