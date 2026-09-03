@@ -52,3 +52,33 @@ def test_manifest_tampering_fails_explicitly(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(GeometryArtifactError, match="manifest is invalid"):
         load_geometry_artifact(artifact.root)
+
+
+def test_eager_and_compiled_artifacts_have_equivalent_bounded_reads(
+    tmp_path: Path,
+) -> None:
+    extent = WorldExtent(x=8, y=8, z=8)
+    eager = publish_eager_geometry(((2, 2, 2),), extent, tmp_path.joinpath("eager"))
+    compiled = load_geometry_artifact(
+        compile_world(
+            [BoxSource((1, 1, 1), (1, 1, 1))],
+            extent,
+            tmp_path.joinpath("compiled"),
+        ).root
+    )
+    eager_read = eager.bounded_reader()
+    compiled_read = compiled.bounded_reader(maximum_resident_chunks=1)
+
+    for coordinate in ((1, 1, 1), (2, 2, 2), (3, 3, 3), (9, 1, 1)):
+        assert eager_read.occupied(coordinate) == compiled_read.occupied(coordinate)
+    assert compiled_read.resident_chunk_count <= 1
+
+
+def test_bounded_artifact_reader_enforces_query_budget(tmp_path: Path) -> None:
+    artifact = publish_eager_geometry(
+        ((1, 1, 1),), WorldExtent(x=4, y=4, z=4), tmp_path
+    )
+    reader = artifact.bounded_reader(maximum_queries=1)
+    assert reader.occupied((1, 1, 1))
+    with pytest.raises(GeometryArtifactError, match="query budget exceeded"):
+        reader.occupied((2, 2, 2))

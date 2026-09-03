@@ -7,13 +7,18 @@ import json
 import os
 import shutil
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from theseo_anysearch.cache_lock import cache_key_lock
-from theseo_anysearch.worlds.compiler import CompiledWorld, validate_compiled_world
+from theseo_anysearch.worlds.compiler import (
+    CompiledWorld,
+    decode_chunk,
+    validate_compiled_world,
+)
 from theseo_anysearch.worlds.manifest import WorldExtent
 
 ARTIFACT_SCHEMA_VERSION = 1
@@ -70,6 +75,100 @@ class GeometryArtifact(BaseModel):
         if self.manifest.occupancy != "eager_json":
             raise GeometryArtifactError("compiled artifacts require regional world access")
         return tuple(tuple(item) for item in json.loads(_checked_read(self.root, self.manifest.occupancy_reference)))
+
+    def bounded_reader(
+        self,
+        *,
+        maximum_resident_chunks: int = 64,
+        maximum_queries: int = 1_000_000,
+    ) -> "GeometryArtifactRead":
+        """Return a one-based occupancy reader with bounded compiled residency."""
+        return GeometryArtifactRead(
+            self,
+            maximum_resident_chunks=maximum_resident_chunks,
+            maximum_queries=maximum_queries,
+        )
+
+
+class GeometryArtifactRead:
+    """Bounded point access shared by eager and compiled artifacts."""
+
+    def __init__(
+        self,
+        artifact: GeometryArtifact,
+        *,
+        maximum_resident_chunks: int,
+        maximum_queries: int,
+    ) -> None:
+        if maximum_resident_chunks < 1:
+            raise ValueError("maximum_resident_chunks must be positive")
+        if maximum_queries < 1:
+            raise ValueError("maximum_queries must be positive")
+        self._artifact = artifact
+        self._maximum_resident_chunks = maximum_resident_chunks
+        self._maximum_queries = maximum_queries
+        self._queries = 0
+        self._eager = (
+            set(artifact.eager_coordinates())
+            if artifact.manifest.occupancy == "eager_json"
+            else None
+        )
+        self._resident: OrderedDict[tuple[int, int, int], Any] = OrderedDict()
+        compiled = artifact.compiled_world
+        self._chunks = (
+            {
+                (
+                    chunk.coordinate.x,
+                    chunk.coordinate.y,
+                    chunk.coordinate.z,
+                ): chunk
+                for chunk in compiled.manifest.chunks
+            }
+            if compiled is not None
+            else {}
+        )
+
+    @property
+    def resident_chunk_count(self) -> int:
+        return len(self._resident)
+
+    def occupied(self, coordinate: tuple[int, int, int]) -> bool:
+        self._queries += 1
+        if self._queries > self._maximum_queries:
+            raise GeometryArtifactError(
+                f"artifact occupancy query budget exceeded ({self._maximum_queries})"
+            )
+        extent = self._artifact.manifest.extent.as_tuple()
+        if any(coordinate[axis] < 1 or coordinate[axis] > extent[axis] for axis in range(3)):
+            return False
+        if self._eager is not None:
+            return coordinate in self._eager
+        compiled = self._artifact.compiled_world
+        if compiled is None:
+            raise GeometryArtifactError("compiled artifact has no validated world handle")
+        storage = tuple(value - 1 for value in coordinate)
+        shape = compiled.manifest.chunk_shape.as_tuple()
+        key = tuple(storage[axis] // shape[axis] for axis in range(3))
+        chunk = self._chunks.get(key)
+        if chunk is None:
+            return False
+        decoded = self._resident.pop(key, None)
+        if decoded is None:
+            with compiled.pack_path.open("rb") as stream:
+                stream.seek(chunk.pack_offset)
+                payload = stream.read(chunk.byte_length)
+            if len(payload) != chunk.byte_length or _sha(payload) != chunk.sha256:
+                raise GeometryArtifactError(f"compiled chunk {key} failed integrity validation")
+            decoded_shape = tuple(
+                min(shape[axis], extent[axis] - key[axis] * shape[axis])
+                for axis in range(3)
+            )
+            decoded = decode_chunk(payload, decoded_shape)
+        self._resident[key] = decoded
+        while len(self._resident) > self._maximum_resident_chunks:
+            self._resident.popitem(last=False)
+        local = tuple(storage[axis] - key[axis] * shape[axis] for axis in range(3))
+        return bool(decoded[local])
 
 
 def _canonical(value: Any) -> bytes:
