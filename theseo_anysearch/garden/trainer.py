@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import math
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +17,128 @@ from theseo_anysearch.garden.data_config import GardenConfig, GardenTrainingConf
 from theseo_anysearch.garden.dataset import GardenDataset, MultiRadiusDataset, RadiusBatchSampler
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class UpdateTrainingConfig:
+    """Optimizer contract counted in updates rather than dataset epochs."""
+
+    total_updates: int
+    peak_learning_rate: float
+    weight_decay: float = 0.05
+    warmup_fraction: float = 0.05
+    gradient_clip_norm: float = 1.0
+    accumulation_steps: int = 1
+
+    def __post_init__(self) -> None:
+        if self.total_updates < 1 or self.peak_learning_rate <= 0:
+            raise ValueError("update count and peak learning rate must be positive")
+        if self.weight_decay < 0 or not 0 <= self.warmup_fraction < 1:
+            raise ValueError("invalid weight decay or warmup fraction")
+        if self.gradient_clip_norm <= 0 or self.accumulation_steps < 1:
+            raise ValueError("gradient clipping and accumulation must be positive")
+
+
+@dataclass(frozen=True)
+class TrainingResourceReport:
+    updates: int
+    observations: int
+    encoded_views: int
+    valid_voxels: int
+    wall_seconds: float
+    trainable_parameters: int
+    checkpoint_bytes: int
+    dense_masked_voxels_skipped: int = 0
+
+
+class UpdateTrainer:
+    """AdamW warmup/cosine runtime with honest observation and voxel accounting."""
+
+    def __init__(self, module: nn.Module, config: UpdateTrainingConfig) -> None:
+        self.module = module
+        self.config = config
+        parameters = [
+            parameter for parameter in module.parameters() if parameter.requires_grad
+        ]
+        self.optimizer = torch.optim.AdamW(
+            parameters,
+            lr=config.peak_learning_rate,
+            weight_decay=config.weight_decay,
+        )
+        warmup = max(1, round(config.total_updates * config.warmup_fraction))
+
+        def multiplier(step: int) -> float:
+            if step < warmup:
+                return (step + 1) / warmup
+            progress = (step - warmup) / max(1, config.total_updates - warmup)
+            return 0.5 * (1 + math.cos(math.pi * min(progress, 1.0)))
+
+        self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer, multiplier
+        )
+        self._micro_steps = 0
+        self._updates = 0
+        self._observations = 0
+        self._views = 0
+        self._valid_voxels = 0
+        self._started = time.perf_counter()
+        self.optimizer.zero_grad(set_to_none=True)
+
+    @property
+    def updates(self) -> int:
+        return self._updates
+
+    def step(
+        self,
+        loss: torch.Tensor,
+        *,
+        observations: int,
+        encoded_views: int,
+        valid_voxels: int,
+    ) -> bool:
+        """Accumulate one micro-batch and report whether an optimizer update occurred."""
+
+        if self._updates >= self.config.total_updates:
+            raise RuntimeError("preregistered update budget is exhausted")
+        if not torch.isfinite(loss):
+            raise FloatingPointError("training loss is non-finite")
+        if min(observations, encoded_views, valid_voxels) < 0:
+            raise ValueError("resource counts cannot be negative")
+        (loss / self.config.accumulation_steps).backward()
+        self._micro_steps += 1
+        self._observations += observations
+        self._views += encoded_views
+        self._valid_voxels += valid_voxels
+        if self._micro_steps % self.config.accumulation_steps:
+            return False
+        torch.nn.utils.clip_grad_norm_(
+            self.module.parameters(), self.config.gradient_clip_norm
+        )
+        self.optimizer.step()
+        self.optimizer.zero_grad(set_to_none=True)
+        self.scheduler.step()
+        self._updates += 1
+        return True
+
+    def report(self) -> TrainingResourceReport:
+        state = self.module.state_dict()
+        checkpoint_bytes = sum(
+            tensor.numel() * tensor.element_size() for tensor in state.values()
+        )
+        return TrainingResourceReport(
+            updates=self._updates,
+            observations=self._observations,
+            encoded_views=self._views,
+            valid_voxels=self._valid_voxels,
+            wall_seconds=time.perf_counter() - self._started,
+            trainable_parameters=sum(
+                parameter.numel()
+                for parameter in self.module.parameters()
+                if parameter.requires_grad
+            ),
+            checkpoint_bytes=checkpoint_bytes,
+            dense_masked_voxels_skipped=0,
+        )
 
 
 class TrainResult(BaseModel):
