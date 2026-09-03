@@ -17,6 +17,7 @@ from .controls import (
     shuffled_embedding_output,
     zero_embedding_output,
 )
+from .triviality import TrivialityResult, assess_triviality
 from .probes import (
     CoordinateProbe,
     CrossFitFold,
@@ -34,6 +35,7 @@ __all__ = [
     "ControlEvaluation",
     "CoordinateProbe",
     "CrossFitFold",
+    "TrivialityResult",
     "GlobalLinearProbe",
     "PairTopologyProbe",
     "TopologyDecoder",
@@ -43,6 +45,7 @@ __all__ = [
     "ceiling_effective_rank_fraction",
     "classification_metric_ceiling",
     "control_target_assignment",
+    "assess_triviality",
     "encoder_state_sha256",
     "metric_ceiling_method",
     "regression_metric_ceiling",
