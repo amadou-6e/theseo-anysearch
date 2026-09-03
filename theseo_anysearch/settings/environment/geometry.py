@@ -108,7 +108,10 @@ class GeometryConfig(BaseModel):
     sources: tuple[GeometrySource, ...] = Field(
         default=(), description="Ordered small-world sources combined by voxel union."
     )
-    provider: GeometryProviderSelector | None = None
+    provider: GeometryProviderSelector | None = Field(
+        default=None,
+        description="Optional named Python or native geometry provider invoked at reset.",
+    )
     stl_path: Path | None = Field(None, description="Single STL geometry source.")
     stl_paths: list[Path] | None = Field(None, description="STL sources sampled by the environment.")
     scale: float = Field(1.0, description="Scale applied while voxelizing an STL.")
