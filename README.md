@@ -59,10 +59,12 @@ repository; no map download is needed. The example uses local tracking
 (`mlflow: {}`), so a separate MLflow server is not required. Run artifacts are
 written beneath `runtime/experiments/dijkstra/`.
 
-Use the run identifier printed by the command to replay the result:
+To replay the result, build the viewer and replace `<run-id>` below with the
+run identifier printed by the command:
 
 ```powershell
-anysearch replay dijkstra:<run-id>
+cargo build --release --manifest-path theseo_anysearch/core/Cargo.toml --bin voxel-replay
+anysearch replay file runtime/experiments/dijkstra/<run-id>/trajectories/heuristic_dijkstra.json
 ```
 
 Replay opens a native graphical interface and requires a desktop session.
