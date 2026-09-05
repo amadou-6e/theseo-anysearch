@@ -46,12 +46,20 @@ The workflow validates and builds before running five test groups in parallel:
 
 1. `Validate test contract` compiles Python and checks marker registration.
 2. `Build Rust bindings` checks all Rust targets and uploads one wheel artifact.
-3. Core/CLI, environment/heuristic, experiment/benchmarking, RLlib, and garden
+3. Core/CLI, environment/heuristic, experiment/benchmarking, RLlib/imitation, and garden
    jobs download that same wheel and run their local tests independently.
 4. `Local Test Suite` provides one aggregate result suitable for branch
    protection.
 
 The parallel groups are path-disjoint, so each selected test runs once.
+
+The RLlib/imitation job includes `tests/test_imitation` with the same
+`not ray and not integration` marker filter. Its result is required by the
+aggregate `Local Test Suite` gate. To run just these imitation tests locally:
+
+```powershell
+python -m pytest tests/test_imitation -m "not ray and not integration" -q
+```
 
 ## Ray suite timing
 

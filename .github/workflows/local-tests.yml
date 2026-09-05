@@ -127,7 +127,7 @@ jobs:
           -m "not ray and not integration" -q
 
   rllib-tests:
-    name: RLlib unit tests
+    name: RLlib and imitation unit tests
     needs: build-rust
     runs-on: windows-latest
     timeout-minutes: 20
@@ -135,7 +135,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-local-tests
       - run: >-
-          python -m pytest tests/test_rllib/test_unit
+          python -m pytest
+          tests/test_rllib/test_unit
+          tests/test_imitation
           -m "not ray and not integration" -q
 
   garden-tests:
