@@ -1,0 +1,12 @@
+{
+  "run_id": "voxel-encoder-pilot-v2r2-r0-1",
+  "report_payload_sha256": "f14bacb88d29c1da009fb3ed02a6fa63648675706fef488661eb1c44dff9e71c",
+  "acceptance_status": "pending_review",
+  "deviation_id": "v2r2-r0-review-ordering-1",
+  "deviation": "The earlier state-review snapshot requested review before data opening. The registration was published pre-data, but external review was still pending at execution; that ordering expectation was missed before launch.",
+  "changes_to_frozen_settings": false,
+  "implementation_pr": "https://github.com/amadou-6e/theseo-anysearch/pull/352",
+  "specification_pr": "https://github.com/amadou-6e/specs/pull/28",
+  "merged": false,
+  "candidate_training_started": false
+}
