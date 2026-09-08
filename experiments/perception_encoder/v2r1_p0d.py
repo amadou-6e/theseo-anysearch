@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
@@ -14,16 +13,13 @@ import yaml
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from theseo_anysearch.garden.pilots.io import payload_sha256 as _canonical_sha
+
 
 def _git(*arguments: str) -> str:
     return subprocess.run(
         ["git", *arguments], check=True, capture_output=True, text=True
     ).stdout.strip()
-
-
-def _canonical_sha(value: object) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 def blocked_p0d_report(config: dict[str, Any], p0c: dict[str, Any]) -> dict[str, Any]:
@@ -37,6 +33,9 @@ def blocked_p0d_report(config: dict[str, Any], p0c: dict[str, Any]) -> dict[str,
         raise ValueError("P0C payload differs from the frozen E2 prerequisite")
     if p0c["status"] != "blocked":
         raise ValueError("this transition only records a P0C-blocked P0D outcome")
+    payload = {key: value for key, value in p0c.items() if key != "report_payload_sha256"}
+    if _canonical_sha(payload) != p0c["report_payload_sha256"]:
+        raise ValueError("P0C payload content does not match its recorded hash")
     report: dict[str, Any] = {
         "issue": 335,
         "run_id": config["run_id"],

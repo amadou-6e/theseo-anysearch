@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from experiments.perception_encoder.v2r1_p1_terminal import blocked_p1_report
+from experiments.perception_encoder.v2r1_p1_terminal import blocked_p1_report, _canonical_sha
 
 
 SHA = "a" * 64
@@ -14,7 +14,7 @@ def _config() -> dict[str, object]:
         "run_id": "voxel-encoder-pilot-v2r1-p1-1",
         "integration_base_sha": "b" * 40,
         "spec_commit": "c" * 40,
-        "p0d_report_payload_sha256": SHA,
+        "p0d_report_payload_sha256": _p0d()["report_payload_sha256"],
         "v1_p0c_report_payload_sha256": "d" * 64,
     }
 
@@ -31,6 +31,9 @@ def _p0d(**overrides) -> dict[str, object]:
             "next": None,
         },
     }
+    value["report_payload_sha256"] = _canonical_sha(
+        {key: item for key, item in value.items() if key != "report_payload_sha256"}
+    )
     value.update(overrides)
     return value
 
@@ -60,3 +63,8 @@ def test_terminal_report_requires_no_retained_bundle_decision() -> None:
     changed["reason"] = "other"
     with pytest.raises(ValueError, match="no-retained-bundle"):
         blocked_p1_report(_config(), _p0d(decision=changed))
+
+
+def test_p1_rejects_tampering_that_preserves_hash() -> None:
+    with pytest.raises(ValueError, match="payload content"):
+        blocked_p1_report(_config(), _p0d(trials_started=1))

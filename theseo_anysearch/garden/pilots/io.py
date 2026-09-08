@@ -39,6 +39,16 @@ def contract_sha256(contract: BaseModel) -> str:
     return hashlib.sha256(_canonical_json(model_payload(contract))).hexdigest()
 
 
+def payload_sha256(payload: Any) -> str:
+    """Hash a JSON payload using the same canonical encoding as pilot contracts.
+
+    Report callers exclude their top-level report_payload_sha256 field before
+    computing or verifying the digest; all other content is included.
+    """
+
+    return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+
 def _envelope(contract: BaseModel) -> dict[str, Any]:
     payload = model_payload(contract)
     return {

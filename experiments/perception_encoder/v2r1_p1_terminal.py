@@ -2,24 +2,24 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from theseo_anysearch.garden.pilots.io import payload_sha256 as _canonical_sha
 
 
 def _git(*arguments: str) -> str:
     return subprocess.run(
         ["git", *arguments], check=True, capture_output=True, text=True
     ).stdout.strip()
-
-
-def _canonical_sha(value: object) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 def blocked_p1_report(config: dict[str, Any], p0d: dict[str, Any]) -> dict[str, Any]:
@@ -39,6 +39,9 @@ def blocked_p1_report(config: dict[str, Any], p0d: dict[str, Any]) -> dict[str, 
     }
     if p0d["status"] != "blocked" or p0d["decision"] != expected_decision:
         raise ValueError("replacement P1 requires the recorded no-retained-bundle block")
+    payload = {key: value for key, value in p0d.items() if key != "report_payload_sha256"}
+    if _canonical_sha(payload) != p0d["report_payload_sha256"]:
+        raise ValueError("P0D payload content does not match its recorded hash")
     report: dict[str, Any] = {
         "issue": 337,
         "run_id": config["run_id"],
