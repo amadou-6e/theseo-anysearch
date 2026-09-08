@@ -41,13 +41,55 @@ future producer must verify that fitted artifacts actually match those manifests
 All numerical settings in unit tests are synthetic test inputs, not proposed or
 frozen acceptance thresholds. Their `feasible` cases are not research evidence.
 
+## Increment 2: control fitting and CUDA development check
+
+`garden/pilots/v2r2_controls.py` now produces held-out assessment records from
+validated 3D counterfactual volumes. Completed volumes supply six-connected
+reachability labels only. The visible model receives flattened observed occupancy,
+the unknown mask and endpoint coordinates; forbidden metadata has a separate
+ablation input. Observation identity is checked independently of query identity,
+so changing endpoints cannot move the same observation into another fold.
+
+The current explicit recipe fits a linear geometric-summary prior, a linear
+coordinate control, a visible-input MLP and a forbidden-feature MLP. It uses
+training-only, geometry-weighted standardization and full-batch AdamW with a
+fixed final checkpoint. The soft-label loss equals the completion-averaged BCE,
+without duplicating voxel inputs for each completion. Neither evaluation labels
+nor evaluation features affect fitting, preprocessing or checkpoint selection.
+These recipes are implemented options, not yet frozen scientific choices or
+the calibrated R2 control ladder.
+
+Fitting returns geometry/configuration manifests, training-input hashes, model
+and preprocessing hashes, parameter counts and resource accounting. CUDA requests
+fail explicitly when unavailable; there is no silent CPU fallback. Unit tests
+cover input isolation, held-out preprocessing, sibling leakage, RNG restoration,
+numerical input validation, explicit device failure and wall-budget enforcement.
+
+Development-only CUDA report:
+`experiments/perception_encoder/results/v2r2_development/control-smoke-cuda-2.json`.
+
+- Executable source: `d6d4500bbf7913a3ca92fe176b35e4fc5ec0249e`, clean at execution.
+- Payload SHA-256: `9e3f9a3e2235a66810eac15dda22c165b849c06595d0d41799749f2b4ed00707`.
+- Toy `17 x 17 x 17` inputs, 32 training geometries, 12 evaluation geometries
+  per domain, 16 completions per context.
+- Four controls, 128 updates each, in each of two domains: 1,024 control updates.
+- RTX 3060 Ti; fitting wall times 1.844 s and 0.405 s, including device/fitting
+  overhead. These small-fixture timings are not an R0 throughput prediction.
+- `non_evidential: true`, `r0_executed: false`, zero candidate-training updates.
+  The toy completion rule and nominal configuration labels test execution, not
+  conditional identifiability or generator-transfer quality.
+
+Validation after the observation-level grouping repair: 335 Garden tests passed
+(28 v2r2 assessment/control tests); compilation and whitespace checks passed.
+
 ## Remaining before an evidential R0 run
 
 1. Implement and validate the full-3D conditional-completion generator and its
    query sampler. Preserve observed voxels and group all sibling completions.
    Do not substitute the retained `(1, 15, 15)` exploratory fixture.
-2. Implement the control-fitting producer, geometry-disjoint preprocessing,
-   artifact provenance and held-out-generator execution. Keep forbidden
+2. Wire the implemented control-fitting producer to that generator and the
+   complete frozen fitting recipes. Validate real generator folds, query/bin
+   assignment and fitting-artifact provenance end to end. Keep forbidden
    metadata out of visible-context inputs; oracle labels are not features.
 3. Complete both v2r2 contract schemas. Freeze the audit/calibration protocol
    first, including fresh identity manifests, generator definitions, numerical
@@ -63,7 +105,8 @@ frozen acceptance thresholds. Their `feasible` cases are not research evidence.
 ## Execution state
 
 CUDA checked on 2026-09-08: PyTorch `2.13.0+cu126`, NVIDIA GeForce RTX 3060 Ti.
-No v2r2 audit observations have been generated or opened by this increment.
+Only explicitly development-prefixed toy observations have been opened; no
+v2r2 audit observations have been generated or opened by these increments.
 No audit protocol or comparative preregistration has been frozen, no R0 result
 has been emitted, and no P1 training has started. v2r1 remains terminal.
 
