@@ -1,0 +1,30 @@
+{
+  "development_only": true,
+  "fixtures": {
+    "constant": {
+      "correlation_rank_fraction": 0.0,
+      "effective_rank_fraction": 0.0,
+      "heldout_linear_mse": 7.369042320701269,
+      "near_dead_fraction": 1.0
+    },
+    "independent": {
+      "correlation_rank_fraction": 0.9985588468681337,
+      "effective_rank_fraction": 0.9983020920229195,
+      "heldout_linear_mse": 8.676142119012441e-30,
+      "near_dead_fraction": 0.0
+    },
+    "invertibly_scaled": {
+      "correlation_rank_fraction": 0.9985588468681337,
+      "effective_rank_fraction": 0.1258803598280157,
+      "heldout_linear_mse": 4.103086165274019e-30,
+      "near_dead_fraction": 0.0
+    },
+    "useful_rank_one": {
+      "correlation_rank_fraction": 0.12500000000000014,
+      "effective_rank_fraction": 0.12500000000000072,
+      "heldout_linear_mse": 1.3101902231954636e-30,
+      "near_dead_fraction": 0.0
+    }
+  },
+  "identity": "lg2-rank-fixtures-1"
+}
