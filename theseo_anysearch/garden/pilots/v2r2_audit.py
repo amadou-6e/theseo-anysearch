@@ -73,6 +73,7 @@ class CounterfactualContext(FrozenModel):
     generator_configuration: NonEmpty
     bootstrap_stratum: NonEmpty
     stratum: Literal["1-2", "3-5", "6+"]
+    observation_sha256: Sha256
     visible_input_sha256: Sha256
     labels: tuple[Literal[0, 1], ...] = Field(min_length=2)
     geometric_prior: float = Field(ge=0, le=1, allow_inf_nan=False)
@@ -158,6 +159,7 @@ def assess_r0(
     configuration: dict[str, str] = {}
     bootstrap_strata: dict[str, str] = {}
     visible_ownership: dict[str, str] = {}
+    observation_ownership: dict[str, str] = {}
     for fold in folds:
         for geometry in fold.evaluation_geometry_ids:
             if geometry in ownership:
@@ -175,6 +177,9 @@ def assess_r0(
         old_group = visible_ownership.setdefault(row.visible_input_sha256, row.geometry_id)
         if old_group != row.geometry_id:
             raise ValueError("identical visible observations cross geometry groups")
+        old_observation = observation_ownership.setdefault(row.observation_sha256, row.geometry_id)
+        if old_observation != row.geometry_id:
+            raise ValueError("identical observations with different queries cross geometry groups")
         fold = by_fold[row.fold_id]
         seen = row.generator_configuration in fold.training_generator_configurations
         if seen != (fold.domain == "in_domain"):

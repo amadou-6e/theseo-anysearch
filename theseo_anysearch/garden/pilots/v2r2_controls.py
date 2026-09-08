@@ -95,9 +95,15 @@ class R0ControlExample:
             object.__setattr__(self, name, snapshot)
 
     @property
-    def visible_input_sha256(self) -> str:
+    def observation_sha256(self) -> str:
         return payload_sha256({
             "occupancy": _array_sha(self.observed_occupancy), "unknown": _array_sha(self.unknown),
+        })
+
+    @property
+    def visible_input_sha256(self) -> str:
+        return payload_sha256({
+            "observation": self.observation_sha256,
             "start": [int(x) for x in self.start], "goal": [int(x) for x in self.goal],
         })
 
@@ -199,7 +205,7 @@ def fit_r0_controls(
     owners: dict[str, str] = {}
     geometry_metadata: dict[str, tuple[str, str]] = {}
     for row in all_rows:
-        if owners.setdefault(row.visible_input_sha256, row.geometry_id) != row.geometry_id:
+        if owners.setdefault(row.observation_sha256, row.geometry_id) != row.geometry_id:
             raise ValueError("identical visible contexts cross geometry groups")
         metadata = (row.generator_configuration, row.bootstrap_stratum)
         if geometry_metadata.setdefault(row.geometry_id, metadata) != metadata:
@@ -280,6 +286,7 @@ def fit_r0_controls(
         context_id=row.context_id, geometry_id=row.geometry_id, fold_id=fold_id,
         generator_configuration=row.generator_configuration, bootstrap_stratum=row.bootstrap_stratum,
         stratum=row.stratum, visible_input_sha256=row.visible_input_sha256, labels=row.labels,
+        observation_sha256=row.observation_sha256,
         unknown_fraction=float(row.unknown.mean()),
         **{name: float(predictions[name][index]) for name in CONTROLS},
     ) for index, row in enumerate(evaluation))

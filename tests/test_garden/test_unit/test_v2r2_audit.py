@@ -51,6 +51,7 @@ def records():
                     generator_configuration="A" if domain == "in_domain" else "B",
                     bootstrap_stratum="topology:medium",
                     stratum=stratum, visible_input_sha256=payload_sha256(name),
+                    observation_sha256=payload_sha256("observation:" + name),
                     labels=(label,) * 1024,
                     geometric_prior=0.5, coordinates_only=0.5,
                     visible_context=0.95 if label else 0.05, forbidden=0.5,
@@ -154,6 +155,8 @@ def test_sibling_group_and_generator_fold_guards():
     rows, folds = records()
     with pytest.raises(ValueError, match="cross geometry groups"):
         assess_r0(settings(), (change(rows[0], visible_input_sha256=rows[1].visible_input_sha256), *rows[1:]), folds)
+    with pytest.raises(ValueError, match="different queries cross geometry"):
+        assess_r0(settings(), (change(rows[0], observation_sha256=rows[1].observation_sha256), *rows[1:]), folds)
     with pytest.raises(ValueError, match="generator domain"):
         assess_r0(settings(), (change(rows[0], generator_configuration="B"), *rows[1:]), folds)
     with pytest.raises(ValueError, match="completion count"):

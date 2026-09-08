@@ -104,6 +104,15 @@ def test_heldout_generator_validation():
         fit(evaluation=(example(5),))
 
 
+def test_same_observation_with_different_query_cannot_cross_folds():
+    leaked = replace(example(0, config="B"), context_id="other-query",
+        geometry_id="other-geometry", goal=(6, 6, 5))
+    assert leaked.visible_input_sha256 != example(0).visible_input_sha256
+    assert leaked.observation_sha256 == example(0).observation_sha256
+    with pytest.raises(ValueError, match="cross geometry"):
+        fit(evaluation=(leaked,))
+
+
 def test_invalid_endpoint_and_masks_rejected():
     with pytest.raises(ValueError, match="integral"):
         replace(example(0), start=(-1, 0, 0))
