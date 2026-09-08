@@ -121,10 +121,9 @@ def occlusion_span_along_path(
     """
 
     free = geometry.completed_free
-    forward = shortest_path(free, start)
-    if forward[goal] < 0:
-        return -1
     backward = shortest_path(free, goal)
+    if backward[start] < 0:
+        return -1
     current = start
     count = int(geometry.unknown[current])
     while current != goal:

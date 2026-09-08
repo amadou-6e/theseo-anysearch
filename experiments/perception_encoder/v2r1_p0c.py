@@ -42,6 +42,7 @@ from theseo_anysearch.garden.pilots.contracts import (
     V2R1VetoThresholds,
 )
 from theseo_anysearch.garden.pilots.io import contract_sha256, read_contract, write_contract
+from theseo_anysearch.garden.pilots.io import payload_sha256 as _canonical_sha
 from theseo_anysearch.garden.pilots.v2r1 import build_v2r1_pool_identities
 from theseo_anysearch.garden.pilots.v2r1_data import (
     ReachabilityMetadata,
@@ -53,11 +54,6 @@ def _git(*arguments: str) -> str:
     return subprocess.run(
         ["git", *arguments], check=True, capture_output=True, text=True
     ).stdout.strip()
-
-
-def _canonical_sha(value: object) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 def _write_json(path: Path, value: object) -> None:

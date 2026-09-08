@@ -21,6 +21,7 @@ diverge:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Integral
 
 import numpy as np
 from scipy.sparse.csgraph import minimum_spanning_tree
@@ -58,8 +59,9 @@ def geometry_held_out_posteriors(
         raise ValueError("features, labels, and geometry IDs must be row-aligned")
     if not np.isfinite(x).all() or not np.isin(y, [0, 1]).all():
         raise ValueError("features must be finite and labels binary")
-    if not isinstance(k, int) or k < 1:
+    if isinstance(k, (bool, np.bool_)) or not isinstance(k, Integral) or k < 1:
         raise ValueError("k must be a positive integer")
+    k = int(k)
     unique_groups = np.unique(groups)
     if len(unique_groups) < 2:
         raise ValueError("reference evaluation requires at least two geometry groups")

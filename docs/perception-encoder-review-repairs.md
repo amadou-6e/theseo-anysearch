@@ -23,6 +23,10 @@ evidence. #340 must implement the v2r2 contracts and audit runner, pin the merge
 spec amendment and actual execution code, and freeze numeric audit parameters
 before opening audit data. No P1 training is authorized by these helper fixes.
 
-Validation: 292 Garden tests passed. Archived P0C and P0D payloads also passed
+Follow-up review: accept NumPy integral neighbour counts (reject booleans and
+floats), use one backward BFS per span, and share canonical hashing through
+`pilots.io.payload_sha256` across the P0C/P0D/P1 evidence chain.
+
+Validation: 307 Garden tests passed. Archived P0C, P0D, and P1 payloads passed
 the strengthened transition checks. Specification validation passed with one
 unrelated existing large Draw.io file warning.
