@@ -82,7 +82,20 @@ Development-only CUDA report:
 Validation after the observation-level grouping repair: 335 Garden tests passed
 (28 v2r2 assessment/control tests); compilation and whitespace checks passed.
 
-## Remaining before an evidential R0 run
+## Completed R0
+
+R0 was executed and assessed on 2026-09-08 after source, specification registration
+and the resolved protocol were committed and pushed. It returned `defer`, with
+recorded stop `no_topology_identifiable`. See the
+[full assessment and review-ordering deviation](perception-encoder-r0-assessment.md).
+
+All 216 training and 144 audit geometry quotas were filled. Two held-out bins had
+zero negative labels; the `6+` bin failed all four conservative interval checks.
+No threshold was adjusted, no comparative contract was frozen, and no P0C/P0D/P1
+was started. The assessment reproduces exactly from the saved predictions.
+
+The following was the implementation sequence; its conditional later stages are
+now stopped by R0, not a pending queue of authorized experiments:
 
 1. Implement and validate the full-3D conditional-completion generator and its
    query sampler. Preserve observed voxels and group all sibling completions.
@@ -104,11 +117,12 @@ Validation after the observation-level grouping repair: 335 Garden tests passed
 
 ## Execution state
 
-CUDA checked on 2026-09-08: PyTorch `2.13.0+cu126`, NVIDIA GeForce RTX 3060 Ti.
-Only explicitly development-prefixed toy observations have been opened; no
-v2r2 audit observations have been generated or opened by these increments.
-No audit protocol or comparative preregistration has been frozen, no R0 result
-has been emitted, and no P1 training has started. v2r1 remains terminal.
+CUDA execution on 2026-09-08: PyTorch `2.13.0+cu126`, NVIDIA GeForce RTX 3060 Ti.
+The registered R0 completed in 33.905 wall seconds, with 8,192 control updates
+and zero candidate updates. Its audit protocol is frozen; its result is stored
+under `experiments/perception_encoder/results/v2r2_r0/`. v2r1 remains terminal.
 
-Disposition: `retain` (infrastructure). Keep #340 open and the PR in draft until
-the execution items above are complete. Nothing is merged without review.
+Disposition: `retain` (infrastructure and negative audit evidence, pending review).
+Keep #340 open until its integration result is reviewed and accepted. External
+protocol review was pending at execution; the deviation is explicit in the
+assessment. Nothing is merged without review.
