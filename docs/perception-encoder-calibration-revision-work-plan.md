@@ -146,7 +146,7 @@ cannot revive it.
 
 **What this section is:** the amended P0C is blocked on one denominator,
 `reachability_auprc`: coordinates-only floor `0.9309221452`, kNN reference
-`0.9971262631`, gap `0.0662041178 < 0.10`. This does not establish linear
+`0.9971262631`, gap approximately `0.066204 < 0.10`. This does not establish linear
 decodability from raw occupancy; coordinate and sampling shortcuts need auditing. The
 right response is a **new partially-observed-topology task** with its own
 preregistration and its own dataset / query / run identities (`v2r2`), not a
@@ -240,8 +240,8 @@ Exactly one of the two is selected in the comparative preregistration and become
 the `reachability` gate; the unselected form, the null-input log loss, PVI, and
 selectivity are then **diagnostics only**.
 
-The amendment must also **explicitly define the minimum active gate set** (see
-open decision below).
+The amendment must also **explicitly define the minimum active gate set** under
+the frozen topology rule below.
 
 ### R5 - fresh run
 

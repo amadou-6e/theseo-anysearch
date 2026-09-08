@@ -2,7 +2,7 @@
 
 Governing predecessor spec: `d9b260a5c677277d47776c7677fe07c2a7ff4f34`.
 Companion methodology amendment and visual state map: specs#25.
-Reviewed amendment snapshot: `cbcd34a8991a2eb8cae88f100d2f081992dfd437`
+Reviewed amendment snapshot: `d31fd6f03ab32f13b51863eb38e94adbcd971c77`
 in `amadou-6e/specs` (pending review; not a frozen execution protocol).
 The diagram is maintained in the specs repository at
 `projects/theseo-anysearch/python/perception-encoder-state-review.md`.
