@@ -114,13 +114,29 @@ def shortest_path(free: np.ndarray, start: tuple[int, int, int]) -> np.ndarray:
 def occlusion_span_along_path(
     geometry: OccludedGeometry, start: tuple[int, int, int], goal: tuple[int, int, int]
 ) -> int:
-    """Count unknown cells on one completed-graph shortest path, or -1 if unreachable."""
+    """Count unknown cells on a deterministic shortest path, including endpoints.
+
+    Equal-length paths use the lexicographically first next cell (D, H, W).
+    This is not the union of all shortest paths or the minimum-occlusion path.
+    """
 
     free = geometry.completed_free
     forward = shortest_path(free, start)
     if forward[goal] < 0:
         return -1
     backward = shortest_path(free, goal)
-    total = forward[goal]
-    on_path = (forward >= 0) & (backward >= 0) & (forward + backward == total)
-    return int(np.count_nonzero(on_path & geometry.unknown))
+    current = start
+    count = int(geometry.unknown[current])
+    while current != goal:
+        candidates = []
+        for axis in range(3):
+            for delta in (-1, 1):
+                cell = list(current)
+                cell[axis] += delta
+                cell = tuple(cell)
+                if all(0 <= c < free.shape[i] for i, c in enumerate(cell)):
+                    if backward[cell] == backward[current] - 1:
+                        candidates.append(cell)
+        current = min(candidates)
+        count += int(geometry.unknown[current])
+    return count

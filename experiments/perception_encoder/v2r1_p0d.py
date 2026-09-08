@@ -37,6 +37,9 @@ def blocked_p0d_report(config: dict[str, Any], p0c: dict[str, Any]) -> dict[str,
         raise ValueError("P0C payload differs from the frozen E2 prerequisite")
     if p0c["status"] != "blocked":
         raise ValueError("this transition only records a P0C-blocked P0D outcome")
+    payload = {key: value for key, value in p0c.items() if key != "report_payload_sha256"}
+    if _canonical_sha(payload) != p0c["report_payload_sha256"]:
+        raise ValueError("P0C payload content does not match its recorded hash")
     report: dict[str, Any] = {
         "issue": 335,
         "run_id": config["run_id"],

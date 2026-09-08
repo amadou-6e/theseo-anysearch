@@ -145,8 +145,9 @@ amended P0C on `reachability_auprc`). That line does not reopen. A config change
 cannot revive it.
 
 **What this section is:** the amended P0C is blocked on one denominator,
-`reachability_auprc` (`floor ~= ceiling ~= 0.93`), because connectivity over a
-bounded, fully-visible window is near-linearly decodable from raw occupancy. The
+`reachability_auprc`: coordinates-only floor `0.9309221452`, kNN reference
+`0.9971262631`, gap `0.0662041178 < 0.10`. This does not establish linear
+decodability from raw occupancy; coordinate and sampling shortcuts need auditing. The
 right response is a **new partially-observed-topology task** with its own
 preregistration and its own dataset / query / run identities (`v2r2`), not a
 metric tweak on `v2r1`.
@@ -253,7 +254,7 @@ If R0, or R2's ladder, shows the preregistered `reachability` denominator stays
 below `0.10` headroom, defer `reachability` - do **not** pick whichever
 diagnostic happened to pass.
 
-## Open decision (spec owner)
+## Historical decision context (resolved by the frozen rule below)
 
 `geodesic_nmae` is already deferred. If `reachability` also defers, the active
 gate is `{occupied_iou, boundary_f1, clearance_nmae}` - two of which are the

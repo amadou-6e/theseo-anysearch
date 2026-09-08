@@ -8,6 +8,10 @@ the v2r2 R0 feasibility audit and the R2 control ladder (identical probe over
 raw, capacity-matched nonlinear raw, over-capacity reference) on the real corpus.
 See docs/perception-encoder-calibration-revision-work-plan.md.
 
+Issue #350 corrected span annotations to follow one deterministic shortest path.
+The archived #339 report used a union of shortest paths. Its numbers are not
+expected to reproduce under the corrected sampler and remain non-evidential.
+
 Measures, on a deterministic graded-occlusion fixture corpus, the floor/ceiling
 gap each redesign option would give the ``reachability`` pilot-score component:
 

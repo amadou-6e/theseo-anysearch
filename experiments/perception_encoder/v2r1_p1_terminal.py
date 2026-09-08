@@ -39,6 +39,9 @@ def blocked_p1_report(config: dict[str, Any], p0d: dict[str, Any]) -> dict[str, 
     }
     if p0d["status"] != "blocked" or p0d["decision"] != expected_decision:
         raise ValueError("replacement P1 requires the recorded no-retained-bundle block")
+    payload = {key: value for key, value in p0d.items() if key != "report_payload_sha256"}
+    if _canonical_sha(payload) != p0d["report_payload_sha256"]:
+        raise ValueError("P0D payload content does not match its recorded hash")
     report: dict[str, Any] = {
         "issue": 337,
         "run_id": config["run_id"],

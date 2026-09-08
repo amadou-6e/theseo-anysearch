@@ -36,6 +36,47 @@ from theseo_anysearch.garden.evaluation.metrics import (
 NON_COLLAPSE_MIN_FRACTION = 0.30
 DEFAULT_K = 15
 
+
+def geometry_held_out_posteriors(
+    features: np.ndarray,
+    labels: np.ndarray,
+    geometry_ids: np.ndarray,
+    *,
+    k: int = DEFAULT_K,
+) -> np.ndarray:
+    """Empirical binary reference predictions, excluding the entire query geometry.
+
+    Standardization is fitted on each fold's training geometries only. This
+    reference is not a certified Bayes ceiling. Counterfactual completions of
+    one visible observation must share a group ID to keep them in one fold.
+    """
+
+    x = np.asarray(features, dtype=np.float64)
+    y = np.asarray(labels)
+    groups = np.asarray(geometry_ids)
+    if x.ndim != 2 or y.shape != (len(x),) or groups.shape != (len(x),):
+        raise ValueError("features, labels, and geometry IDs must be row-aligned")
+    if not np.isfinite(x).all() or not np.isin(y, [0, 1]).all():
+        raise ValueError("features must be finite and labels binary")
+    if not isinstance(k, int) or k < 1:
+        raise ValueError("k must be a positive integer")
+    unique_groups = np.unique(groups)
+    if len(unique_groups) < 2:
+        raise ValueError("reference evaluation requires at least two geometry groups")
+    predictions = np.empty(len(x), dtype=np.float64)
+    for group in unique_groups:
+        test = groups == group
+        train = ~test
+        if train.sum() < k:
+            raise ValueError("each held-out fold needs at least k training rows")
+        mean = x[train].mean(axis=0)
+        scale = np.maximum(x[train].std(axis=0), 1e-9)
+        tree = cKDTree((x[train] - mean) / scale)
+        _, neighbours = tree.query((x[test] - mean) / scale, k=k)
+        neighbours = np.asarray(neighbours).reshape(test.sum(), k)
+        predictions[test] = y[train][neighbours].mean(axis=1)
+    return predictions
+
 MODEL_FREE_METHODS = ("bayes_error_knn", "bayes_error_direct", "bayes_error_mst", "knn_residual")
 _CLASSIFICATION_METRICS = ("occupied_iou", "boundary_f1", "reachability_auprc")
 _REGRESSION_METRICS = ("clearance_nmae", "geodesic_nmae")
