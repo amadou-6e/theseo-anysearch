@@ -139,7 +139,7 @@ def select(rows: list) -> str:
     return min(rows,key=lambda r:r["selection_loss"])["recipe"]
 
 
-def probe(data: dict, seed: int, artifacts: Path, states: dict, output: Path, deadline: float):
+def probe(data: dict, seed: int, artifacts: Path, states: dict, output: Path, deadline: float, training_count: int = 48):
     encoder = d.base.make_encoder(seed,torch.device("cuda"))
     encoder.load_state_dict(torch.load(artifacts/f"joint-{seed}-encoder.pt",map_location="cuda",weights_only=True))
     encoder.eval().requires_grad_(False)
@@ -147,8 +147,7 @@ def probe(data: dict, seed: int, artifacts: Path, states: dict, output: Path, de
     if before != states[str(seed)]["final_state_sha256"]:
         raise ValueError("encoder state mismatch")
     features = {}
-    # Probe fitting remains on 48 geometries, matching its registered prior budget.
-    small = {s:{k:v[:48] if isinstance(v,torch.Tensor) else v for k,v in rows.items()} for s,rows in data.items()}
+    small = {s:{k:v[:training_count if s == "train" else 48] if isinstance(v,torch.Tensor) else v for k,v in rows.items()} for s,rows in data.items()}
     with torch.no_grad():
         for split, rows in small.items():
             values=[]
