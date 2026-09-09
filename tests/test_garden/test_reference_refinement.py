@@ -1,4 +1,6 @@
 import numpy as np
+import json
+from pathlib import Path
 import pytest
 import torch
 from theseo_anysearch.garden.pilots import reference_refinement as r
@@ -29,3 +31,19 @@ def test_fixed_sweep_and_budget():
     assert r.PLAN["checkpoints"][0]==16
     assert r.RECIPES[0]["count"]==48
     assert r.RECIPES[2]["count"]==192
+
+
+def test_report_replay():
+    root=Path(__file__).resolve().parents[2]/"docs/perception-encoder-local-geometry"
+    report=json.loads((root/"refinement-report.json").read_text())
+    sha=report.pop("report_payload_sha256")
+    assert r.d.base.payload_sha256(report)==sha
+    env=json.loads((root/"refinement-preregistration.json").read_text())
+    assert report["registration"]==env
+    assert r.d.base.payload_sha256(env["payload"])==env["identity_sha256"]
+    assert r.select(report["screen"])==report["chosen_recipe"]
+    comparison=[{"seed":t["seed"],"best":t["chosen"]["assessment"],"final":t["baseline"]["assessment"],"probe":t["probe"]["assessment"]} for t in report["trials"]]
+    assert r.c.assess(comparison)==report["assessment"]
+    for t in report["trials"]:
+        for label in ("baseline","chosen"):
+            assert t[label]["best_step"]==min(t[label]["curve"],key=lambda x:x["selection_loss"])["step"]
