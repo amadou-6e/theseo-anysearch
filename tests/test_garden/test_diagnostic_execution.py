@@ -1,4 +1,6 @@
 import time
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -49,3 +51,21 @@ def test_incomplete_seeds_and_deadline():
 
 def test_reference_dimensions():
     assert d.Reference()(torch.zeros(1, 3, 17, 17, 17)).shape == (1, 1, 17, 17, 17)
+
+
+def test_committed_report_identity_and_assessment_replay():
+    folder = Path(__file__).resolve().parents[2] / "docs/perception-encoder-local-geometry"
+    report = json.loads((folder / "diagnostics-report.json").read_text())
+    digest = report.pop("report_payload_sha256")
+    assert d.base.payload_sha256(report) == digest
+    envelope = json.loads((folder / "diagnostics-preregistration.json").read_text())
+    assert d.base.payload_sha256(envelope["payload"]) == envelope["identity_sha256"]
+    assert report["registration"] == envelope
+    null_rows = np.asarray(report["null"]["geometry_log_loss"])
+    for stage in ("D1", "D2"):
+        assert d.classify(report[stage], null_rows) == report[stage + "_assessment"]
+    for trial in report["D2"]:
+        selected = min(trial["capacities"], key=lambda r: r["selection"]["log_loss"])
+        assert selected["width"] == trial["selected_width"]
+        assert selected["assessment"] == trial["assessment"]
+        assert trial["initial_state_sha256"] == trial["final_state_sha256"]
