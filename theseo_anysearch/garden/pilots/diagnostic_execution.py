@@ -43,12 +43,13 @@ def digest_tensor(t: torch.Tensor) -> str:
     return hashlib.sha256(t.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
 
 
-def corpus() -> dict:
+def corpus(plan: dict | None = None) -> dict:
+    plan = PLAN if plan is None else plan
     result, seen = {}, set()
-    for split, count in PLAN["splits"].items():
+    for split, count in plan["splits"].items():
         ids, occ, boundary, hashes = [], [], [], []
         for i in range(count):
-            gid = f"{PLAN['dataset_id']}-{split}-{i:03d}"
+            gid = f"{plan['dataset_id']}-{split}-{i:03d}"
             grid = lg3.generate(gid, lg3.FAMILIES[(i % 12)//3], [.08, .16, .28][i % 3])
             sha = hashlib.sha256(grid.tobytes()).hexdigest()
             if sha in seen:
@@ -60,14 +61,14 @@ def corpus() -> dict:
             boundary.append(base.compute_geometry_targets(grid, truncation=8.).boundary)
         occupancy = torch.tensor(np.stack(occ), dtype=torch.float32)
         truth = torch.tensor(np.stack(boundary), dtype=torch.float32)
-        rng = torch.Generator().manual_seed(PLAN["streams"][split])
-        hidden = torch.rand(occupancy.shape, generator=rng) < PLAN["mask_probability"]
+        rng = torch.Generator().manual_seed(plan["streams"][split])
+        hidden = torch.rand(occupancy.shape, generator=rng) < plan["mask_probability"]
         indices = []
         for mask in hidden:
             eligible = torch.where(mask.flatten())[0]
-            if len(eligible) < PLAN["queries"]:
+            if len(eligible) < plan["queries"]:
                 raise ValueError("insufficient hidden query support")
-            indices.append(eligible[torch.randperm(len(eligible), generator=rng)[:PLAN["queries"]]])
+            indices.append(eligible[torch.randperm(len(eligible), generator=rng)[:plan["queries"]]])
         indices = torch.stack(indices)
         labels = truth.flatten(1).gather(1, indices)
         for family in range(4):
