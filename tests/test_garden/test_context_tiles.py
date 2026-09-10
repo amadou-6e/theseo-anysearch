@@ -1,4 +1,6 @@
 import torch
+import json
+from pathlib import Path
 
 from theseo_anysearch.garden.pilots import context_tiles as s
 
@@ -26,3 +28,21 @@ def test_fixed_no_fit_contract():
     assert s.PLAN["arms"] == ["tiled33_head33", "dense65_head33", "dense65_head65"]
     assert s.PLAN["tile_batch"] == 4
     assert len(s.STARTS) == 27
+
+
+def test_completed_report_replay_and_fresh_parents():
+    root = Path(__file__).resolve().parents[2] / "docs/perception-encoder-local-geometry"
+    report = json.loads((root / "tiles-report.json").read_text())
+    sha = report.pop("report_payload_sha256")
+    assert s.d.base.payload_sha256(report) == sha
+    env = json.loads((root / "tiles-preregistration.json").read_text())
+    assert report["registration"] == env
+    assert s.d.base.payload_sha256(env["payload"]) == env["identity_sha256"]
+    assert env["payload"]["plan"] == s.PLAN
+    assert report["status"] == "completed"
+    for name, comparison in report["comparisons"].items():
+        a, b = name.split("_vs_")
+        assert s.previous.prior.compare(report["trials"], a, b) == comparison
+    old = json.loads((root / "context65-preregistration.json").read_text())["payload"]["identity"]
+    old_hashes = {h for split in old.values() for h in split["hashes"]}
+    assert not old_hashes.intersection(env["payload"]["identity"]["assessment"]["hashes"])
