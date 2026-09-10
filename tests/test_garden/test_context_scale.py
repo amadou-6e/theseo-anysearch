@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import pytest
+import json
+from pathlib import Path
 from theseo_anysearch.garden.pilots import context_scale as s
 
 
@@ -27,3 +29,15 @@ def test_paired_noninferiority():
     result=s.compare(trials,"a","b")
     assert all(x["noninferior"] for x in result.values())
     assert all(x["gain_ci95"]==[0.,0.] for x in result.values())
+
+
+def test_report_replay():
+    root=Path(__file__).resolve().parents[2]/"docs/perception-encoder-local-geometry"
+    report=json.loads((root/"scale-report.json").read_text()); sha=report.pop("report_payload_sha256")
+    assert s.d.base.payload_sha256(report)==sha
+    env=json.loads((root/"scale-preregistration.json").read_text())
+    assert env==report["registration"]
+    assert s.d.base.payload_sha256(env["payload"])==env["identity_sha256"]
+    for name,result in report["comparisons"].items():
+        a,b=name.split("_vs_")
+        assert s.compare(report["trials"],a,b)==result
