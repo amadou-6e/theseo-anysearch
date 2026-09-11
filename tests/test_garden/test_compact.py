@@ -93,3 +93,20 @@ def test_cuda_deterministic_joint_backward(mode, monkeypatch):
         assert torch.isfinite(x.grad).all() and x.grad.abs().sum() > 0
     finally:
         torch.use_deterministic_algorithms(previous)
+
+
+def test_engineering_report_integrity():
+    import json
+    from pathlib import Path
+    from theseo_anysearch.garden.pilots import compact_smoke as s
+    root = Path(__file__).resolve().parents[2] / "docs/perception-encoder-local-geometry"
+    report = json.loads((root / "compact-smoke-v2-report.json").read_text())
+    sha = report.pop("report_payload_sha256")
+    assert s.d.base.payload_sha256(report) == sha
+    env = json.loads((root / "compact-smoke-v2-preregistration.json").read_text())
+    assert report["registration"] == env
+    assert s.d.base.payload_sha256(env["payload"]) == env["identity_sha256"]
+    assert env["payload"]["plan"] == s.PLAN
+    assert len(report["profiles"]) == 18 and len(report["trials"]) == 6
+    assert not report["promotion_eligible"]
+    assert report["status"] == "engineering_smoke_completed"
