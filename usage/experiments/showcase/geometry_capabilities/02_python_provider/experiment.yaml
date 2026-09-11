@@ -1,0 +1,71 @@
+description: >
+  A sibling geometry.py generates seeded procedural walls-with-a-gap via
+  env.geometry.provider. Sample 20 deterministic layouts without starting Ray:
+
+    anysearch geometry sample usage/experiments/showcase/geometry_capabilities/02_python_provider/experiment.yaml --count 20 --seed 42 --output samples.json
+
+  Re-running with the same --seed reproduces byte-identical JSON.
+
+experiment:
+  name: geometry-capabilities-python-provider
+  output_dir: runtime/geometry_capabilities/02_python_provider
+  seed: 42
+
+env:
+  max_steps: 256
+  seed: 42
+  agent_count: 1
+  trail_mode: false
+  waypoints_file: waypoints.json
+  geometry:
+    grid_size: 32
+    provider:
+      name: procedural_walls
+      parameters:
+        wall_count: 2
+    validation:
+      enabled: true
+      maximum_attempts: 1
+      maximum_search_nodes: 100000
+      recovery_margin_steps: 8
+  observation:
+    mode: box
+    box_radius: 1
+  action:
+    mode: discrete_6
+    behavior: cursor_navigation
+    predicates:
+      - valid_action
+      - bounds
+      - unoccupied
+    outcomes:
+      - cursor_movement
+    history_length: 8
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.05
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  require_gpu: false
+  num_env_runners: 1
+  trajectory_every: 1
+
+evaluation:
+  episodes: 2
+  seed: 42
+  num_env_runners: 1
+
+algorithm_config:
+  lr: 0.001
+  train_batch_size: 512
+  minibatch_size: 128
+  num_sgd_iter: 4
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu
