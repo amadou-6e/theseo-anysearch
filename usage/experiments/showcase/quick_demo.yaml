@@ -1,0 +1,41 @@
+description: >
+  Runs a minimal five-iteration PPO experiment on the cube geometry. It is the fastest general smoke test for the local training, checkpoint, trajectory, and MLflow pipeline.
+
+experiment:
+  name: quick-demo
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+
+  rewards:
+    provider:
+      name: quick_demo
+      parameters:
+        diagonal_penalty_per_extra_axis: -0.005
+
+  geometry:
+    stl_path: usage/geometries/cube.stl
+    scale: 40.0
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  checkpoint_interval: 5
+  trajectory_every: 1
+  best_trajectory: true
+  video_every: 999
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 200
+  num_sgd_iter: 1
+
+model_config:
+  hidden_sizes: [64, 64]
+
+# tracking_uri omitted → defaults to sqlite:///runtime/experiments/mlflow.db
+mlflow: {}

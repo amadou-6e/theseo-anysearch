@@ -1,0 +1,93 @@
+description: >
+  Runs the strongest historical radius-1 stepped-terrain PPO policy as a
+  standalone fixed-parameter experiment after A-star behavior-cloning
+  pretraining. It removes hyperparameter sampling so time-to-first-success can
+  be compared directly with the unpretrained baseline policy.
+
+experiment:
+  name: ppo-box-r1-fixed-imitation
+  output_dir: runtime/train/box_r1_fixed_imitation
+  seed: 42
+
+env:
+  max_steps: 200
+  seed: 42
+  agent_count: 1
+  trail_mode: true
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    grid_size: 32
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_26
+
+  rewards:
+    step_cost: -0.01
+    collision_cost: 0.0
+    goal_reward: 1.0
+    distance_shaping: 0.2
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  model: voxel_encoder
+  runner: local
+  iterations: 40
+  checkpoint_interval: 40
+  require_gpu: true
+  num_env_runners: 0
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 40
+
+evaluation:
+  episodes: 1
+
+imitation:
+  enabled: true
+  strategy: pretrain_then_rl
+  generation:
+    provider: astar
+    episodes: 64
+    max_attempts: 128
+    require_success: true
+  sampling:
+    provider: uniform_transition
+  collection:
+    seed_start: 1000
+    validation_fraction: 0.1
+    reuse_dataset: true
+    dataset_dir: runtime/tune/datasets/box_r1_astar_64
+  pretraining:
+    epochs: 20
+    batch_size: 128
+    learning_rate: 0.0003
+    label_smoothing: 0.0
+    early_stopping_patience: 3
+  handoff:
+    initialize_encoder: true
+    initialize_policy: true
+    initialize_value_head: false
+
+algorithm_config:
+  lr: 0.000476138
+  train_batch_size: 1024
+  gamma: 0.978436
+  clip_param: 0.142509
+  kl_coeff: 0.182791
+  num_sgd_iter: 20
+  minibatch_size: 128
+  lambda_: 0.942369
+
+model_config:
+  hidden_sizes: [128, 128, 128, 128]
+  activation: relu
+
+mlflow:
+  tracking_uri: sqlite:///runtime/experiments/mlflow.db

@@ -1,0 +1,52 @@
+# Garden preset: r4 — radius 4, 9×9×9 local patch (~8M params)
+#
+# Maximum granularity. Encodes a 9-cell cube — the agent sees the full
+# local environment up to 4 cells in every direction. Suited for complex
+# geometric reasoning; requires a GPU and longer training. ~4× more
+# parameters than r3.
+#
+# Train: anysearch garden train r4 --tag v1
+# Use:   pretrained_encoder: r4:v1
+name: r4
+approach: autoencoder
+architecture: voxel_box_3dcnn
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 250
+          num_boxes: [1, 12]
+          box_min_size: [2, 2, 2]
+          box_max_size: [22, 22, 22]
+          grid_size: 48
+          total_samples: 80000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 2.0
+
+encoder:
+  box_radius: 4
+  conv_channels: [64, 128, 256]
+  latent_dim: 256
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.05
+  translation_jitter: 1
+  morph_prob: 0.2
+  cutout:
+    count: 3
+    min_size: 1
+    max_size: 3
+
+training:
+  epochs: 100
+  batch_size: 32
+  lr: 1.0e-4
+  lr_scheduler: cosine
+  early_stop_patience: 20
+  focal_gamma: 2.0

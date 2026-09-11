@@ -1,0 +1,51 @@
+# Garden preset: r8 — radius 8, 17×17×17 local patch (~20M params)
+#
+# Extended view. The agent sees a full 17-cell cube — useful for open
+# terrain, long corridors, or when the agent needs to anticipate
+# geometry several steps ahead.
+#
+# Train: anysearch garden train r8 --tag v1
+# Use:   pretrained_encoder: r8:v1
+name: r8
+approach: autoencoder
+architecture: voxel_box_3dcnn
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 300
+          num_boxes: [2, 15]
+          box_min_size: [2, 2, 2]
+          box_max_size: [30, 30, 30]
+          grid_size: 64
+          total_samples: 60000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 1.0
+
+encoder:
+  box_radius: 8
+  conv_channels: [32, 64, 128, 256]
+  latent_dim: 256
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.05
+  translation_jitter: 2
+  morph_prob: 0.2
+  cutout:
+    count: 3
+    min_size: 1
+    max_size: 4
+
+training:
+  epochs: 100
+  batch_size: 16
+  lr: 1.0e-4
+  lr_scheduler: cosine
+  early_stop_patience: 20
+  focal_gamma: 2.0

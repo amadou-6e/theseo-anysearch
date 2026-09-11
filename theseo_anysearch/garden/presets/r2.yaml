@@ -1,0 +1,50 @@
+# Garden preset: r2 — radius 2, 5×5×5 local patch (~600k params)
+#
+# Standard granularity. Encodes a 5-cell cube around the agent.
+# Good balance between context and compute; the recommended starting point.
+#
+# Train: anysearch garden train r2 --tag v1
+# Use:   pretrained_encoder: r2:v1
+name: r2
+approach: autoencoder
+architecture: voxel_box_3dcnn
+
+data:
+  sources:
+    - type: position_sample
+      geometry:
+        sampler:
+          type: random_boxes
+          num_geometries: 150
+          num_boxes: [1, 8]
+          box_min_size: [2, 2, 2]
+          box_max_size: [14, 14, 14]
+          grid_size: 32
+          total_samples: 50000
+  split:
+    val_fraction: 0.1
+  min_fill_pct: 2.0
+
+encoder:
+  box_radius: 2
+  conv_channels: [32, 64, 64]
+  latent_dim: 64
+
+augmentation:
+  rotate90: true
+  flip: true
+  noise_prob: 0.05
+  translation_jitter: 1
+  morph_prob: 0.2
+  cutout:
+    count: 2
+    min_size: 1
+    max_size: 2
+
+training:
+  epochs: 60
+  batch_size: 128
+  lr: 3.0e-4
+  lr_scheduler: cosine
+  early_stop_patience: 15
+  focal_gamma: 2.0

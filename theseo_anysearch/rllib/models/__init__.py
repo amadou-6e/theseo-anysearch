@@ -1,0 +1,17 @@
+"""Public exports for RLlib model helpers and voxel CNN registrations."""
+
+from theseo_anysearch.rllib.models.base import (
+    build_rllib_model_dict,
+    build_rllib_rl_module_model_config,
+)
+from theseo_anysearch.rllib.models.cnn import (
+    VoxelHierarchicalBox3DCNN,
+    register_voxel_cnn_models,
+)
+
+__all__ = [
+    "register_voxel_cnn_models",
+    "build_rllib_model_dict",
+    "build_rllib_rl_module_model_config",
+    "VoxelHierarchicalBox3DCNN",
+]

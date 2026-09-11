@@ -1,0 +1,76 @@
+name: Work item
+description: Propose a scoped feature, fix, experiment, integration change, or release-line change.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every issue should describe one primary unit of work. After creation, name the branch `<type>/<issue-number>`.
+
+  - type: dropdown
+    id: change_type
+    attributes:
+      label: Change type
+      description: This determines the branch prefix for the issue.
+      options:
+        - feat — new user-facing behavior or capability
+        - fix — bug fix or regression
+        - exp — experiment, benchmark, or research spike
+        - develop — development-line integration or maintenance
+        - master — release-line change or production hotfix
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: Explain the current behavior, limitation, or opportunity.
+      placeholder: What needs to change, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: Describe the intended change and identify anything explicitly out of scope.
+      placeholder: What should this issue deliver?
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that must be true before this issue is complete.
+      placeholder: |
+        - [ ] First completion condition
+        - [ ] Second completion condition
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Describe the tests, measurements, or manual checks that should validate the change.
+      placeholder: How will we know the implementation works?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add relevant links, logs, screenshots, configurations, or implementation notes.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: branch_convention
+    attributes:
+      label: Branch convention
+      options:
+        - label: I will use `<type>/<issue-number>` and will not use an `agent/` branch.
+          required: true

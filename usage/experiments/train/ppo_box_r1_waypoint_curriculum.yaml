@@ -1,0 +1,89 @@
+description: >
+  Trains the historical radius-1 stepped-terrain PPO policy as a waypoint
+  curriculum. Training begins on the known fixed route and moves to a new
+  reproducibly sampled valid route after each deterministic evaluation success.
+
+experiment:
+  name: ppo-box-r1-waypoint-curriculum
+  output_dir: runtime/train/box_r1_waypoint_curriculum
+  seed: 42
+
+env:
+  max_steps: 96
+  seed: 42
+  agent_count: 1
+  trail_mode: true
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    grid_size: 32
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_18
+
+  rewards:
+    step_cost: -0.01
+    collision_cost: 0.0
+    goal_reward: 1.0
+    distance_shaping: 0.2
+    distance_reward_mode: progress
+
+  waypoint_curriculum:
+    enabled: true
+    initial_start: [9, 29, 1]
+    initial_goal: [6, 7, 1]
+    seed: 42
+    training_sampling:
+      current_stage_probability: 0.75
+      retained_stage_probability: 0.25
+
+training:
+  algorithm: ppo
+  model: fcnet
+  runner: local
+  iterations: 80
+  checkpoint_interval: 20
+  require_gpu: true
+  num_env_runners: 6
+  num_envs_per_env_runner: 4
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 0
+evaluation:
+  episodes: 10
+  seed: 142
+  min_success_rate: 0.8
+  num_env_runners: 4
+  num_envs_per_env_runner: 4
+  waypoint_curriculum:
+    enabled: true
+    frequency: 1
+    stages: all
+    episodes: 3
+    min_success_rate: 0.8
+    min_per_stage_success_rate: 0.67
+    advance:
+      mode: success
+      successes_required: 1
+
+algorithm_config:
+  lr: 0.00047613798737828277
+  train_batch_size: 1024
+  gamma: 0.9784356671807992
+  clip_param: 0.14250875942490643
+  kl_coeff: 0.18279103186070939
+  num_sgd_iter: 20
+  minibatch_size: 128
+  lambda_: 0.9423692880503198
+
+model_config:
+  hidden_sizes: [128, 128, 128, 128]
+  activation: relu
+
+mlflow:
+  tracking_uri: sqlite:///runtime/experiments/mlflow.db

@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pytest
+
+from theseo_anysearch.experiments.trajectory import (
+    collect_eval_episode,
+    collect_eval_episodes,
+    collect_multi_eval_episode,
+    collect_vectorized_eval_episodes,
+)
+
+
+def _observation() -> dict[str, np.ndarray]:
+    return {"steps_remaining": np.asarray([1.0], dtype=np.float32)}
+
+
+class _OneStepEnv:
+    def __init__(
+        self,
+        *,
+        goal_reached: bool = False,
+        terminated: bool = True,
+        truncated: bool = False,
+    ) -> None:
+        self.goal_reached = goal_reached
+        self.terminated = terminated
+        self.truncated = truncated
+        self.actions: list[Any] = []
+
+    def reset(self, seed: int | None = None):
+        return _observation(), {}
+
+    def step(self, action: Any):
+        self.actions.append(action)
+        return (
+            _observation(),
+            1.0,
+            self.terminated,
+            self.truncated,
+            {"goal_reached": self.goal_reached},
+        )
+
+    def close(self) -> None:
+        return None
+
+
+class _RecordingAlgorithm:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.calls: list[dict[str, Any]] = []
+
+    def compute_single_action(self, observation: Any, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return self.result
+
+
+class _VariableLengthEnv(_OneStepEnv):
+    lengths = {10: 1, 11: 3, 12: 2}
+
+    def __init__(self, env_config: dict[str, Any]) -> None:
+        super().__init__()
+        self.remaining = 0
+
+    def reset(self, seed: int | None = None):
+        self.remaining = self.lengths[int(seed)]
+        return _observation(), {}
+
+    def step(self, action: Any):
+        self.actions.append(action)
+        self.remaining -= 1
+        done = self.remaining == 0
+        return (
+            _observation(),
+            1.0,
+            done,
+            False,
+            {"goal_reached": done},
+        )
+
+
+class _BatchRecordingAlgorithm:
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def compute_actions(self, observations: list[Any], **kwargs: Any):
+        self.batch_sizes.append(len(observations))
+        assert kwargs == {"policy_id": "default_policy", "explore": False}
+        return np.ones(len(observations), dtype=np.int64)
+
+
+def test_collect_eval_episode_uses_deterministic_policy_inference() -> None:
+    algorithm = _RecordingAlgorithm(np.int64(7))
+    environment = _OneStepEnv(goal_reached=True)
+
+    episode = collect_eval_episode(
+        algorithm,
+        {"max_steps": 1},
+        env=environment,
+    )
+
+    assert algorithm.calls == [
+        {"policy_id": "default_policy", "explore": False}
+    ]
+    assert environment.actions == [np.int64(7)]
+    assert episode.steps[0].action == 7
+    assert episode.success is True
+
+
+def test_collect_eval_episode_unwraps_legacy_rllib_action_tuple() -> None:
+    algorithm = _RecordingAlgorithm((np.int64(9), [], {}))
+    environment = _OneStepEnv(goal_reached=True)
+
+    episode = collect_eval_episode(
+        algorithm,
+        {"max_steps": 1},
+        env=environment,
+    )
+
+    assert environment.actions == [np.int64(9)]
+    assert episode.steps[0].action == 9
+
+
+def test_collect_eval_episode_surfaces_policy_inference_failure() -> None:
+    class _FailingAlgorithm:
+        def compute_single_action(self, observation: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("policy inference failed")
+
+    with pytest.raises(RuntimeError, match="policy inference failed"):
+        collect_eval_episode(
+            _FailingAlgorithm(),
+            {"max_steps": 1},
+            env=_OneStepEnv(),
+        )
+
+
+def test_collect_multi_eval_episode_aborts_on_policy_inference_failure() -> None:
+    class _FailingAlgorithm:
+        def compute_single_action(self, observation: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("policy inference failed")
+
+    class _MultiAgentEnv:
+        possible_agents = ["agent_0", "agent_1"]
+
+        def __init__(self) -> None:
+            self.agents = list(self.possible_agents)
+            self.step_calls = 0
+
+        def reset(self, seed: int | None = None):
+            return {agent_id: _observation() for agent_id in self.agents}, {}
+
+        def step(self, actions: dict[str, int]):
+            self.step_calls += 1
+            raise AssertionError("env.step must not be called after inference failure")
+
+    environment = _MultiAgentEnv()
+
+    with pytest.raises(RuntimeError, match="agent_0.*shared_policy") as exc_info:
+        collect_multi_eval_episode(
+            _FailingAlgorithm(),
+            {"max_steps": 1},
+            env=environment,
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "policy inference failed"
+    assert environment.step_calls == 0
+
+
+def test_collect_eval_episode_does_not_treat_truncation_as_success() -> None:
+    episode = collect_eval_episode(
+        _RecordingAlgorithm(np.int64(3)),
+        {"max_steps": 1},
+        env=_OneStepEnv(terminated=False, truncated=True),
+    )
+
+    assert episode.success is False
+
+
+def test_collect_eval_episodes_uses_stable_sequential_seeds(monkeypatch) -> None:
+    seeds: list[int | None] = []
+    sentinel = object()
+
+    def _collect(algorithm, env_config, *, seed=None):
+        seeds.append(seed)
+        return sentinel
+
+    monkeypatch.setattr(
+        "theseo_anysearch.experiments.trajectory.collect_eval_episode",
+        _collect,
+    )
+
+    episodes = collect_eval_episodes(object(), {}, 3, seed=12)
+
+    assert episodes == [sentinel, sentinel, sentinel]
+    assert seeds == [12, 13, 14]
+
+
+def test_collect_eval_episodes_rejects_empty_batch() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        collect_eval_episodes(object(), {}, 0)
+
+
+def test_vectorized_collection_handles_different_episode_lengths(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "theseo_anysearch.environments.gymnasium.voxel_env.VoxelEnv",
+        _VariableLengthEnv,
+    )
+    algorithm = _BatchRecordingAlgorithm()
+
+    episodes = collect_vectorized_eval_episodes(
+        algorithm,
+        {"max_steps": 3},
+        (10, 11, 12),
+    )
+
+    assert algorithm.batch_sizes == [3, 2, 1]
+    assert [len(episode.steps) for episode in episodes] == [1, 3, 2]
+    assert [episode.total_reward for episode in episodes] == [1.0, 3.0, 2.0]
+    assert all(episode.success for episode in episodes)

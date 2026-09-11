@@ -1,0 +1,78 @@
+description: >
+  Uses ASHA to tune the radial-observation PPO maps baseline on augmented industrial map crops. It prunes weak trials while searching for settings that produce consistent goal completion.
+
+experiment:
+  name: ppo-maps-asha
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 192
+  trail_mode: true
+
+  geometry:
+    grid_size: 64
+
+    pool:
+      pool_dir: ../../../runtime/geometry_pools/preview
+      augmentation:
+        paste_boxes:
+          num_boxes: [1, 4]
+          box_min_size: [1, 1, 1]
+          box_max_size: [5, 5, 5]
+          prob: 0.5
+
+  observation:
+    mode: radial
+
+  rewards:
+    step_cost: -0.05
+    goal_reward: 10.0
+    distance_shaping: 0.02
+    collision_cost: -0.5
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 120
+  checkpoint_interval: 40
+  trajectory_every: 5
+  best_trajectory: true
+  require_gpu: true
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 4096
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+  kl_coeff: 0.2
+  gamma: 0.99
+
+model_config:
+  hidden_sizes: [256, 256]
+  activation: relu
+
+tune_config:
+  scheduler: asha
+  num_samples: 24
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 12
+  checkpoint_frequency: 10
+  asha_config:
+    max_t: 120
+    grace_period: 20
+    reduction_factor: 3
+  search_space:
+    algorithm_config:
+      lr: {loguniform: [1.0e-5, 3.0e-3]}
+      train_batch_size: {choice: [2048, 4096, 8192]}
+      clip_param: {uniform: [0.1, 0.3]}
+      kl_coeff: {uniform: [0.05, 0.4]}
+      num_sgd_iter: {choice: [5, 10, 20]}
+      lambda_: {uniform: [0.9, 0.99]}
+      gamma: {uniform: [0.97, 0.999]}
+
+mlflow: {}
