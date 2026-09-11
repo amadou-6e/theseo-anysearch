@@ -27,6 +27,7 @@ These configurations are longer-running policy-training baselines and task-speci
 - [`ppo_tiny_overfit.yaml`](ppo_tiny_overfit.yaml) is an intentionally tiny fixed task used to diagnose whether PPO, evaluation, and replay can learn and report a simple solution.
 - [`ppo_tiny_overfit_imitation.yaml`](ppo_tiny_overfit_imitation.yaml) behavior-clones the same PPO policy from A-star demonstrations before normal reinforcement learning.
 - [`ppo_box_r1_fixed_imitation.yaml`](ppo_box_r1_fixed_imitation.yaml) applies A-star pretraining to the strongest fixed radius-1 stepped-terrain PPO policy for a direct non-Tune comparison.
+- [`ppo_waypoint_ed7db_00008_all_stage_policy_pretraining/`](ppo_waypoint_ed7db_00008_all_stage_policy_pretraining/) archives the record no-trail, all-stage imitation-pretrained waypoint run, its exact historical YAML, and a current-schema reproduction configuration.
 
 Use the showcase configurations for fast installation checks; use these files when comparing learning behavior or producing durable checkpoints.
 - [`ppo_empty_grid_waypoint_curriculum.yaml`](ppo_empty_grid_waypoint_curriculum.yaml) tests curriculum advancement and retained-stage learning on an obstacle-free 32³ grid with vectorized training and evaluation.
