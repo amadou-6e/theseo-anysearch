@@ -1,7 +1,19 @@
 """Position-aware compact bottlenecks for fixed 33-cubed observations."""
 import torch
 from torch import nn
-from torch.nn import functional as F
+
+
+def ordered_pool(volume, side):
+    """Adaptive average bins with deterministic CUDA backward via axis reductions."""
+    for axis in (-1, -2, -3):
+        length = volume.shape[axis]
+        bins = []
+        for i in range(side):
+            start = i * length // side
+            end = ((i + 1) * length + side - 1) // side
+            bins.append(volume.narrow(axis, start, end - start).mean(dim=axis))
+        volume = torch.stack(bins, dim=axis)
+    return volume
 
 
 class CompactAggregation(nn.Module):
@@ -27,8 +39,8 @@ class CompactAggregation(nn.Module):
         if volume.ndim != 5 or volume.shape[1:] != (8, 33, 33, 33):
             raise ValueError("expected B x 8 x 33 x 33 x 33 spatial features")
         if self.mode == "strided":
-            return self.project(F.adaptive_avg_pool3d(self.convs(volume), 3).flatten(1))
-        grid = F.adaptive_avg_pool3d(volume, 5)
+            return self.project(ordered_pool(self.convs(volume), 3).flatten(1))
+        grid = ordered_pool(volume, 5)
         if self.mode == "grid":
             return self.project(grid.flatten(1))
         tokens = self.tokens(grid.flatten(2).transpose(1, 2)) + self.position

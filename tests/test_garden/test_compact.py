@@ -1,7 +1,7 @@
 import io
 import pytest
 import torch
-from theseo_anysearch.garden.compact import CompactAggregation, CompactEncoder, query_features
+from theseo_anysearch.garden.compact import CompactAggregation, CompactEncoder, query_features, ordered_pool
 from theseo_anysearch.garden.pilots import local_geometry as base
 
 
@@ -68,3 +68,28 @@ def test_smoke_data_is_disjoint_and_query_eligible():
     before = s.identity(rows)
     rows["train"]["targets"]["boundary_f1"][0, 0] += 1
     assert before != s.identity(rows)
+
+
+def test_ordered_pool_matches_adaptive_bins_and_gradients():
+    x = torch.randn(2, 3, 9, 9, 9, dtype=torch.float64, requires_grad=True)
+    a = ordered_pool(x, 5)
+    b = torch.nn.functional.adaptive_avg_pool3d(x, 5)
+    assert torch.allclose(a, b, atol=1e-12, rtol=1e-12)
+    ga = torch.autograd.grad(a.square().sum(), x, retain_graph=True)[0]
+    gb = torch.autograd.grad(b.square().sum(), x)[0]
+    assert torch.allclose(ga, gb, atol=1e-12, rtol=1e-12)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@pytest.mark.parametrize("mode", ["grid", "strided", "attention"])
+def test_cuda_deterministic_joint_backward(mode, monkeypatch):
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    previous = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(True)
+    try:
+        model = CompactAggregation(64, mode).cuda()
+        x = torch.randn(1, 8, 33, 33, 33, device="cuda", requires_grad=True)
+        model(x).square().mean().backward()
+        assert torch.isfinite(x.grad).all() and x.grad.abs().sum() > 0
+    finally:
+        torch.use_deterministic_algorithms(previous)

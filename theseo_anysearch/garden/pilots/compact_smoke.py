@@ -15,7 +15,7 @@ from ..compact import CompactEncoder, query_features
 from . import context_scale as prior
 
 d = prior.d
-PLAN = {"study_id": "compact-c0c3-smoke-v1", "seed": 0, "side": 33,
+PLAN = {"study_id": "compact-c0c3-smoke-v2", "seed": 0, "side": 33,
         "splits": ["train", "probe", "development"], "scenes_per_split": 12,
         "queries": 256, "train_steps": 96, "probe_steps": 128, "batch": 4,
         "dimension_train": 128, "dimensions_profile": [64, 128, 192],
@@ -31,7 +31,7 @@ def data():
         ids, hashes = [], []
         rngq = torch.Generator().manual_seed(37900 + PLAN["splits"].index(split))
         for i in range(12):
-            gid = f"compact-c0c3-smoke-v1-{split}-{i:03d}"
+            gid = f"compact-c0c3-smoke-v2-{split}-{i:03d}"
             occ = prior.scene(gid, prior.PLAN["families"][(i % 6) // 3], [.08, .16, .28][i % 3])
             sha = hashlib.sha256(occ.tobytes()).hexdigest()
             if sha in seen:
