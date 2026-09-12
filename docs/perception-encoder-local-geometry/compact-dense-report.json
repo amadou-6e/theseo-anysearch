@@ -1,0 +1,424 @@
+{
+  "artifacts": {
+    "encoder.pt": "3a3bbee22b153814fbc1aa9eb7196d13ea22a38f59dfdaaecbf56f7841dac7c7",
+    "oracle.pt": "a0721deeffc5bae6981b48e48b8c5a7b1f21affd650fe01dbc80ff21e35269f1",
+    "table.pt": "c0b44fd23db896f409eb79586b2555b06d15c10a93e427cc31a3d3ab173ec1ca"
+  },
+  "elapsed_seconds": 76.76500000001397,
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 3060 Ti",
+    "torch": "2.13.0+cu126"
+  },
+  "promotion_eligible": false,
+  "records": [
+    {
+      "curve": [
+        {
+          "auprc": 0.8114252352175256,
+          "bce": 0.49254307972305805,
+          "f1": 0.6454975388476016,
+          "iou": 0.47655693316232006,
+          "loss": 0.7245684266090393,
+          "per_scene": [
+            {
+              "f1": 0.32049180327868854,
+              "iou": 0.1908247925817472
+            },
+            {
+              "f1": 0.6834563612679114,
+              "iou": 0.5191292875989446
+            },
+            {
+              "f1": 0.7786259541984732,
+              "iou": 0.6375
+            },
+            {
+              "f1": 0.7582892839980778,
+              "iou": 0.6106811145510835
+            }
+          ],
+          "step": 128
+        },
+        {
+          "auprc": 0.94150844008201,
+          "bce": 0.36147083638419647,
+          "f1": 0.7654659805603202,
+          "iou": 0.6200444609114487,
+          "loss": 0.5225916504859924,
+          "per_scene": [
+            {
+              "f1": 0.36644798500468606,
+              "iou": 0.22432587492828457
+            },
+            {
+              "f1": 0.8776418242491657,
+              "iou": 0.7819623389494549
+            },
+            {
+              "f1": 0.8807163415414135,
+              "iou": 0.7868571428571428
+            },
+            {
+              "f1": 0.9371293001186239,
+              "iou": 0.8816964285714286
+            }
+          ],
+          "step": 256
+        },
+        {
+          "auprc": 0.9933821617686656,
+          "bce": 0.22652182628281695,
+          "f1": 0.8121815093423926,
+          "iou": 0.683758937691522,
+          "loss": 0.33030620217323303,
+          "per_scene": [
+            {
+              "f1": 0.3852216748768473,
+              "iou": 0.23856009762050032
+            },
+            {
+              "f1": 0.9801242236024845,
+              "iou": 0.9610231425091352
+            },
+            {
+              "f1": 0.9146462969113252,
+              "iou": 0.8427172582619339
+            },
+            {
+              "f1": 0.9930861093651792,
+              "iou": 0.9862671660424469
+            }
+          ],
+          "step": 512
+        },
+        {
+          "auprc": 1.0,
+          "bce": 0.11675880962877794,
+          "f1": 0.9595756880733946,
+          "iou": 0.9222926426012675,
+          "loss": 0.17479291558265686,
+          "per_scene": [
+            {
+              "f1": 0.7765640516385303,
+              "iou": 0.6347402597402597
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 0.9797225186766275,
+              "iou": 0.9602510460251046
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 1024
+        }
+      ],
+      "name": "oracle",
+      "overfit_target_met": false,
+      "parameters": 34391,
+      "peak_allocated_bytes": 70646272,
+      "seconds": 1.1719999999913853
+    },
+    {
+      "curve": [
+        {
+          "auprc": 1.0,
+          "bce": 0.004137579602002446,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 0.005763329565525055,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 128
+        },
+        {
+          "auprc": 1.0,
+          "bce": 0.0015216298203635107,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 0.0021159558091312647,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 256
+        },
+        {
+          "auprc": 1.0,
+          "bce": 0.000507383577962134,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 0.0007047253893688321,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 512
+        },
+        {
+          "auprc": 1.0,
+          "bce": 0.0001610918195194245,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 0.00022351977531798184,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 1024
+        }
+      ],
+      "name": "table",
+      "overfit_target_met": true,
+      "parameters": 634289,
+      "peak_allocated_bytes": 82624512,
+      "seconds": 1.25
+    },
+    {
+      "curve": [
+        {
+          "auprc": 1.0,
+          "bce": 2.2623084068975318e-07,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 1.5030059330456425e-07,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 128
+        },
+        {
+          "auprc": 1.0,
+          "bce": 1.7641860270523005e-07,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 9.185650640120002e-08,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 256
+        },
+        {
+          "auprc": 1.0,
+          "bce": 1.4436959119118787e-07,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 5.5156863965066805e-08,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 512
+        },
+        {
+          "auprc": 1.0,
+          "bce": 1.2529009036467216e-07,
+          "f1": 1.0,
+          "iou": 1.0,
+          "loss": 3.398944059540554e-08,
+          "per_scene": [
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            },
+            {
+              "f1": 1.0,
+              "iou": 1.0
+            }
+          ],
+          "step": 1024
+        }
+      ],
+      "name": "encoder",
+      "overfit_target_met": true,
+      "parameters": 1004481,
+      "peak_allocated_bytes": 267075584,
+      "seconds": 72.42199999999139
+    }
+  ],
+  "registration": {
+    "identity_sha256": "110c20ca0ac3be4b1a25f92d0154a7ea8b75d9a531c2f2637896b14802b1d95f",
+    "payload": {
+      "data": {
+        "arrays": {
+          "codes": "00e670b1c2127e883ae6757045f5f2ceff0e462877154170c2e8896e3606eaa2",
+          "hidden": "2bc1a0e241a513ecece472e99da08274d47d06e818350042f938f31276c62fc3",
+          "occupancy": "b98b2ef812527ca8a561bd9389070760b65db75193061ecb5f8e93dc46e20c0d",
+          "targets": "f5508bf9e40f80b7e25478efb7d5bdc81b224d081bf35758138ecc2d723eb340"
+        },
+        "ids": [
+          "compact-dense-v1-scene-0",
+          "compact-dense-v1-scene-1",
+          "compact-dense-v1-scene-2",
+          "compact-dense-v1-scene-3"
+        ],
+        "parents": [
+          "e5c51eb3fe390785631886bad4cbadbe627f426e0cc695812f879274047b652c",
+          "3d718da8cd3bd7191102ce54166c7af714c61d3f2427189f783ac039138df22e",
+          "d9c3e6d39b7ca37f0c2fc49674bb66c999ea973d64df5321c303db4f15a6c13a",
+          "ba322f7a458fd2118560ab1aaa7af913428ce94e1fbe4283f5874bde9a04d63d"
+        ]
+      },
+      "plan": {
+        "cap_seconds": 1200,
+        "checkpoints": [
+          128,
+          256,
+          512,
+          1024
+        ],
+        "fit_cap_seconds": 600,
+        "generalization_claim": false,
+        "lr": 0.003,
+        "sources": [
+          "oracle",
+          "table",
+          "encoder"
+        ],
+        "steps": 1024,
+        "study_id": "compact-dense-v1"
+      },
+      "preparation_seconds": 0.09299999999348074,
+      "source_commit": "2afe8f0394b8cc142c60b0b7b5ab485ca5f74862",
+      "source_encoders": [
+        {
+          "file_hash": "b8e0a500de367ca396c07cead0dc017584b4a258e5991b509e592c700f46ee29",
+          "path": "new-0/joint-0-encoder.pt",
+          "seed": 0,
+          "state_hash": "9e09028b97276c61aa67b987574dc3a588f567013f1fa35e329dceb06ff8d112"
+        },
+        {
+          "file_hash": "9df81cd47a7a33b8308af7836d7ac053f8478535c9db24ff4034fae6b730a88a",
+          "path": "new-1/joint-1-encoder.pt",
+          "seed": 1,
+          "state_hash": "00eec35733c031133de517f3e6151e33ba8f037291c31eff951a2896467dbced"
+        },
+        {
+          "file_hash": "2b563f4b8ce15e9e1fe0ee5b856c8d1c849142fd875e515275a042926b3bc413",
+          "path": "new-2/joint-2-encoder.pt",
+          "seed": 2,
+          "state_hash": "9050fd3eee78a9e9ca64da85368b1f473563ef056071cd8eb90eb1ff16f5a476"
+        }
+      ],
+      "spec_commit": "fd8eba978a6100b997cc762dbea6078d3b0f5686",
+      "spec_path": "projects/theseo-anysearch/python/perception-encoder-compact-dense.md"
+    }
+  },
+  "report_payload_sha256": "ab01e6a66c5c83969149f8ba9bbfdd2df3eff28f7b2b25f4573b7b5f19939e96",
+  "status": "dense_learnability_completed"
+}
