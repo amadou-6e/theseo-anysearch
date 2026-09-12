@@ -1,0 +1,68 @@
+{
+  "identity_sha256": "110c20ca0ac3be4b1a25f92d0154a7ea8b75d9a531c2f2637896b14802b1d95f",
+  "payload": {
+    "data": {
+      "arrays": {
+        "codes": "00e670b1c2127e883ae6757045f5f2ceff0e462877154170c2e8896e3606eaa2",
+        "hidden": "2bc1a0e241a513ecece472e99da08274d47d06e818350042f938f31276c62fc3",
+        "occupancy": "b98b2ef812527ca8a561bd9389070760b65db75193061ecb5f8e93dc46e20c0d",
+        "targets": "f5508bf9e40f80b7e25478efb7d5bdc81b224d081bf35758138ecc2d723eb340"
+      },
+      "ids": [
+        "compact-dense-v1-scene-0",
+        "compact-dense-v1-scene-1",
+        "compact-dense-v1-scene-2",
+        "compact-dense-v1-scene-3"
+      ],
+      "parents": [
+        "e5c51eb3fe390785631886bad4cbadbe627f426e0cc695812f879274047b652c",
+        "3d718da8cd3bd7191102ce54166c7af714c61d3f2427189f783ac039138df22e",
+        "d9c3e6d39b7ca37f0c2fc49674bb66c999ea973d64df5321c303db4f15a6c13a",
+        "ba322f7a458fd2118560ab1aaa7af913428ce94e1fbe4283f5874bde9a04d63d"
+      ]
+    },
+    "plan": {
+      "cap_seconds": 1200,
+      "checkpoints": [
+        128,
+        256,
+        512,
+        1024
+      ],
+      "fit_cap_seconds": 600,
+      "generalization_claim": false,
+      "lr": 0.003,
+      "sources": [
+        "oracle",
+        "table",
+        "encoder"
+      ],
+      "steps": 1024,
+      "study_id": "compact-dense-v1"
+    },
+    "preparation_seconds": 0.09299999999348074,
+    "source_commit": "2afe8f0394b8cc142c60b0b7b5ab485ca5f74862",
+    "source_encoders": [
+      {
+        "file_hash": "b8e0a500de367ca396c07cead0dc017584b4a258e5991b509e592c700f46ee29",
+        "path": "new-0/joint-0-encoder.pt",
+        "seed": 0,
+        "state_hash": "9e09028b97276c61aa67b987574dc3a588f567013f1fa35e329dceb06ff8d112"
+      },
+      {
+        "file_hash": "9df81cd47a7a33b8308af7836d7ac053f8478535c9db24ff4034fae6b730a88a",
+        "path": "new-1/joint-1-encoder.pt",
+        "seed": 1,
+        "state_hash": "00eec35733c031133de517f3e6151e33ba8f037291c31eff951a2896467dbced"
+      },
+      {
+        "file_hash": "2b563f4b8ce15e9e1fe0ee5b856c8d1c849142fd875e515275a042926b3bc413",
+        "path": "new-2/joint-2-encoder.pt",
+        "seed": 2,
+        "state_hash": "9050fd3eee78a9e9ca64da85368b1f473563ef056071cd8eb90eb1ff16f5a476"
+      }
+    ],
+    "spec_commit": "fd8eba978a6100b997cc762dbea6078d3b0f5686",
+    "spec_path": "projects/theseo-anysearch/python/perception-encoder-compact-dense.md"
+  }
+}
