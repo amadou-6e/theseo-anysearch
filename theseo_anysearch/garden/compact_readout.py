@@ -15,7 +15,7 @@ def validate(z, indices, dimension=64):
 class ConvolutionalReadout(nn.Module):
     def __init__(self, dimension=64):
         super().__init__()
-        if dimension not in (64, 128):
+        if dimension not in (64, 128, 125, 250, 500, 729, 1000):
             raise ValueError("unsupported convolutional code dimension")
         self.dimension = dimension
         self.expand = nn.Linear(dimension, 16 * 125)

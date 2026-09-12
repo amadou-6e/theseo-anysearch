@@ -162,10 +162,11 @@ def resume_charge(progress):
 
 
 class Campaign:
-    def __init__(self, output, env, progress, start, elapsed_before):
+    def __init__(self, output, env, progress, start, elapsed_before, plan=None):
+        self.plan = PLAN if plan is None else plan
         self.output, self.env, self.progress = output, env, progress
         self.start, self.elapsed_before = start, elapsed_before
-        self.deadline = start + PLAN["cap_seconds"] - elapsed_before
+        self.deadline = start + self.plan["cap_seconds"] - elapsed_before
 
     def save(self):
         self.progress["elapsed_seconds"] = self.elapsed_before + time.monotonic() - self.start
@@ -199,10 +200,10 @@ class Campaign:
             self.progress["artifacts"][name] = record["sha256"]; self.save()
         return open_cache(self.output / name, record["shape"], record["sha256"])
 
-    def fit(self, name, model, kind, values, row):
+    def fit(self, name, model, kind, values, row, lr=.001):
         state = self.progress["stages"].get(name)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=.001, weight_decay=.01)
-        rng = torch.Generator().manual_seed(39700); first = 0; prior = 0.; curve = []
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=.01)
+        rng = torch.Generator().manual_seed(self.plan.get("sampling_seed", 39700)); first = 0; prior = 0.; curve = []
         if state:
             saved = self.load(state["checkpoint"])
             if saved["state"] != state:
@@ -210,24 +211,25 @@ class Campaign:
             model.load_state_dict(saved["model"])
             if d.base.encoder_state_sha256(model) != state["model_state_sha256"]:
                 raise ValueError("saved model mismatch")
-            if state["steps"] == PLAN["steps"]:
+            if state["steps"] == self.plan["steps"]:
                 return model
             optimizer.load_state_dict(saved["optimizer"]); rng.set_state(saved["rng"])
             first, prior, curve = state["steps"], state["fit_seconds"], state["curve"][:]
-        cutoff = self.phase(name, PLAN["fit_cap_seconds"])
-        fit_start = time.monotonic(); cutoff = min(cutoff, fit_start + PLAN["fit_cap_seconds"] - prior)
+        cutoff = self.phase(name, self.plan["fit_cap_seconds"])
+        fit_start = time.monotonic(); cutoff = min(cutoff, fit_start + self.plan["fit_cap_seconds"] - prior)
         prevalence = row["targets"][:, :2].mean((0, 2)).cuda()
         weights = (1 - prevalence) / prevalence.clamp_min(1e-5)
         target, hidden, bank = fit_labels(row)
         labels = (target.cuda(), hidden.cuda(), bank)
         torch.cuda.reset_peak_memory_stats(); model.train()
-        for step in range(first + 1, PLAN["steps"] + 1):
+        base_lr = lr
+        for step in range(first + 1, self.plan["steps"] + 1):
             d.check_deadline(cutoff)
-            lr = nonlinear.learning_rate({"steps": PLAN["steps"], "lr": .001}, step)
+            lr = nonlinear.learning_rate({"steps": self.plan["steps"], "lr": base_lr}, step)
             for group in optimizer.param_groups:
                 group["lr"] = lr
-            ids = torch.randint(len(values), (PLAN["batch"],), generator=rng)
-            indices = torch.randint(4913, (PLAN["batch"], PLAN["queries"]), generator=rng)
+            ids = torch.randint(len(values), (self.plan["batch"],), generator=rng)
+            indices = torch.randint(4913, (self.plan["batch"], self.plan["queries"]), generator=rng)
             logits = model(model_input(kind, values, ids, indices), indices.cuda())
             target, hidden = batch_labels(labels, ids, indices)
             loss = search.objective(logits, target, hidden, weights, {"boundary_weight": 1., "distance_weight": 10.})
@@ -244,7 +246,7 @@ class Campaign:
                          "model_state_sha256": d.base.encoder_state_sha256(model),
                          "fit_seconds": prior + time.monotonic() - fit_start,
                          "parameters": sum(p.numel() for p in model.parameters()),
-                         "sampled_queries": step * PLAN["batch"] * PLAN["queries"],
+                         "sampled_queries": step * self.plan["batch"] * self.plan["queries"],
                          "peak_allocated_bytes": torch.cuda.max_memory_allocated()}
                 self.artifact(checkpoint, {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                                            "rng": rng.get_state(), "state": state})

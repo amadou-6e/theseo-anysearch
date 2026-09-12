@@ -1,5 +1,6 @@
 """Target-density-balanced geometry and exact-mask frozen feature caches."""
 import hashlib
+from numbers import Integral
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -40,8 +41,11 @@ def scene(gid, family, fraction):
     return field <= np.quantile(old.helpers.prior.crop(field, 17), fraction)
 
 
-def data(splits=None, *, study_id="compact-diversity-v1", counts=None, bank_splits=("train",)):
+def data(splits=None, *, study_id="compact-diversity-v1", counts=None, bank_splits=("train",), bank_sizes=None):
     counts = COUNTS if counts is None else counts
+    bank_sizes = {} if bank_sizes is None else bank_sizes
+    if any(isinstance(n, bool) or not isinstance(n, Integral) or n < 1 for n in bank_sizes.values()):
+        raise ValueError("positive integer mask-bank sizes required")
     result = {}; seen = set()
     for split in (list(counts) if splits is None else splits):
         occupancy, hidden, targets, ids, hashes = [], [], [], [], []
@@ -55,7 +59,7 @@ def data(splits=None, *, study_id="compact-diversity-v1", counts=None, bank_spli
             truth = d.base.compute_geometry_targets(occ, truncation=8.)
             occupancy.append(old.helpers.prior.crop(occ, 33).copy())
             masks = [np.random.default_rng(seed(f"{gid}-mask-{j}")).random((33, 33, 33)) < .2
-                     for j in range(BANK if split in bank_splits else 1)]
+                     for j in range(int(bank_sizes.get(split, BANK)) if split in bank_splits else 1)]
             hidden.append(np.stack(masks) if split in bank_splits else masks[0])
             targets.append(np.stack([old.helpers.prior.crop(v, 17).copy()
                                      for v in (occ, truth.boundary, np.maximum(truth.signed_distance / 8, 0))]))
