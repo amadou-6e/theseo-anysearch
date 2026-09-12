@@ -1,0 +1,198 @@
+{
+  "identity_sha256": "e373ae52c357b7835c68e2804ea6818a510a38526f4c8db975f107abd6e846fd",
+  "payload": {
+    "data": {
+      "development": {
+        "ids": [
+          "compact-c0c3-smoke-v2-development-000",
+          "compact-c0c3-smoke-v2-development-001",
+          "compact-c0c3-smoke-v2-development-002",
+          "compact-c0c3-smoke-v2-development-003",
+          "compact-c0c3-smoke-v2-development-004",
+          "compact-c0c3-smoke-v2-development-005",
+          "compact-c0c3-smoke-v2-development-006",
+          "compact-c0c3-smoke-v2-development-007",
+          "compact-c0c3-smoke-v2-development-008",
+          "compact-c0c3-smoke-v2-development-009",
+          "compact-c0c3-smoke-v2-development-010",
+          "compact-c0c3-smoke-v2-development-011"
+        ],
+        "indices": {
+          "boundary_f1": "89c05e726d7c3282bf80238adec936c306a27e08e6dc451120aa6fc266e57f51",
+          "clearance_nmae": "f97b176c789ca8d82db69219f28288223acb8fe121c23d29705659aef8273793",
+          "occupied_iou": "77124ddbf6dba68664a48a41434caafbd26cc88ab0b2a2fcb9ba00a04b9f1d56",
+          "recovery_nmae": "f9a7af541515bca1694e5a12b33ed0f6a17bbd71d971a92347a0b467cba4390f"
+        },
+        "inputs": {
+          "hidden": "142de76156c666e55044cc6befa2068524823a3fd4f469e67d440c9ce3314e2b",
+          "occupancy": "ef3c52b6530d601983c7a5017aebcf0925a7c08c9632b13d0ae0760aaa1a2dea"
+        },
+        "parents": [
+          "b205ab691735592099e7f7f3f20ceba0d0a67af4e47b9218471945ccd32d7344",
+          "4c100cabca4f62b6d7576f6bb7d5bceaaeb2e3300bc80920d488d1c7dba3b37c",
+          "bc5165f6ffec8ce4fbde41a743817ccfa3f143b0ee642f97a36de07f5315e42c",
+          "6a3b352919f05dd26cf654f7cce22cb106408b9d4bf66d9ae489c4828eb27e07",
+          "957d2dee82da5b4137e92d8679f470f3dd9b4103f7124870619ed8d0c5c5c6c0",
+          "2d0e9d1aefad2eca2f3d0c5f09baa3cdc2dc11a83e3c297323f139da6370381c",
+          "09c35fa80ff2ee77f6787daf65f21a0035fea168395466ed3b37736bb2783685",
+          "1b659dd9e0359fac58ab08cf6ffaaad7b015480d095637f62d7a94307acd4f27",
+          "5f9149f5d02362a3731cd71ab3cdc2f46daa3f13dc8e9d3169d5459702f5576f",
+          "83d9ce5fc9e5850cf1c4ea5ce2b289d8cab6fa3fb310cb100244f3880bfe6543",
+          "a4f7d3c7601e31d6638f9cee6887a524513aec660f6e8a7b84644f5092e98755",
+          "87e622f54ec57d5710dc0bab805f1152e709332214569bc30c11abf904d23757"
+        ],
+        "targets": {
+          "boundary_f1": "efcccb807888d9f60dc015b1713e2fc21dbf09cd453f9a6824ce56299589b2f1",
+          "clearance_nmae": "e49414ccd64763637cd7996a1fcbc8339889d0912bc497b29a4f1d8eb8e65269",
+          "occupied_iou": "8b36740e591bf94f18ea3026df4efef121f5797290460316822d9e23e7471139",
+          "recovery_nmae": "d9e9bf95adae6fa2fd607f721259afb9c6a6676a8e4994bfaf42ce22d2ee9a56"
+        }
+      },
+      "probe": {
+        "ids": [
+          "compact-c0c3-smoke-v2-probe-000",
+          "compact-c0c3-smoke-v2-probe-001",
+          "compact-c0c3-smoke-v2-probe-002",
+          "compact-c0c3-smoke-v2-probe-003",
+          "compact-c0c3-smoke-v2-probe-004",
+          "compact-c0c3-smoke-v2-probe-005",
+          "compact-c0c3-smoke-v2-probe-006",
+          "compact-c0c3-smoke-v2-probe-007",
+          "compact-c0c3-smoke-v2-probe-008",
+          "compact-c0c3-smoke-v2-probe-009",
+          "compact-c0c3-smoke-v2-probe-010",
+          "compact-c0c3-smoke-v2-probe-011"
+        ],
+        "indices": {
+          "boundary_f1": "c31ca9678a360d64126d0d6679c67a749041ad72e4f100d395a37ab0a74a908d",
+          "clearance_nmae": "39d649cd0393acaef49f4848aeef33ef12ea74b71e3f5e37e5c8bccd9797925b",
+          "occupied_iou": "4c6e3ea3e48b253e132257f44e408214fe98c409e824938508d2362bdcd76037",
+          "recovery_nmae": "956f1f7955f25ec2b2d43f52351e8bfb47c4b022a2a56cf81b25e64c4ca2ab93"
+        },
+        "inputs": {
+          "hidden": "d034c9ee64b20e76786813ec8b4cf6665286e0fe06d43d742185efa0aa577c43",
+          "occupancy": "e3d58373965c937ed15f3822f10ff8a10dbbd3d43212f447195b066aabc19f59"
+        },
+        "parents": [
+          "9a0185628c014b40ad0ba003302af2518d71f113d7822a0e4b7a5b1b83ed8bb7",
+          "babdf0f65c4327577790be929fa492ae9fd8cc10b661a70c982599664847045f",
+          "e2d0dbb58e0e42ebf9c7e541c246f43bdf9ffc2649a3e11c62b70b3fcaee3a14",
+          "1c22c46ef3eac8ca75542fa9b86b6f302bdeb1d8e966a6a92d34499a20eae838",
+          "e367bc5fed1b0a9eca03f6537642cde84bc0f91a85f5928306aefd93c1df6393",
+          "114bcd2660fca6bb1197e7e5607138de6a9a1965fd01110d45f08d3e83630d01",
+          "cd51cb63a1a2b16514fa7967ac4ce5df8f23e47df95228650f1d0cb72eaaf1c1",
+          "bff7d256aa8fb5e8c6b8192774deabcc80497716884e0722bed08adff39c392e",
+          "49bedc71c4d1c44988968eb578eedd137725c1ca03e8232cacccea2d63281fd7",
+          "ade14883d9726e90835adba84155844518021a4d93b8f3ef8244e9792ee9bec7",
+          "6835c5f20115327f0f5545db3c4c4ab82f657c5b74850cb2ae040f4235373ad2",
+          "44676ae22f4363e11c2f3853fbb2b9372595d4f4b9cead9452c6ee7372efd9a8"
+        ],
+        "targets": {
+          "boundary_f1": "2092de0d475f6ae0ff1b376d25463f4ab8e73b2f99aeb66b0ec2e5f8b3af2fe5",
+          "clearance_nmae": "66e46dce21277beb5a873a695bc862af8b378fc8028357d18f6c2ebe63263df7",
+          "occupied_iou": "38c754cd2cdde8b0a8d557a742f129b71a1e2e75d4dcbae56b0d8743ad9d37f4",
+          "recovery_nmae": "cfd3324dd89f2378e2e3b5a25ec650aba01929600aa0412ac861776fd4e7cc09"
+        }
+      },
+      "train": {
+        "ids": [
+          "compact-c0c3-smoke-v2-train-000",
+          "compact-c0c3-smoke-v2-train-001",
+          "compact-c0c3-smoke-v2-train-002",
+          "compact-c0c3-smoke-v2-train-003",
+          "compact-c0c3-smoke-v2-train-004",
+          "compact-c0c3-smoke-v2-train-005",
+          "compact-c0c3-smoke-v2-train-006",
+          "compact-c0c3-smoke-v2-train-007",
+          "compact-c0c3-smoke-v2-train-008",
+          "compact-c0c3-smoke-v2-train-009",
+          "compact-c0c3-smoke-v2-train-010",
+          "compact-c0c3-smoke-v2-train-011"
+        ],
+        "indices": {
+          "boundary_f1": "b8502b7cc6d7f99d6b32386bbbd1834c70182a4c5d9dbcac087d83ed2661346b",
+          "clearance_nmae": "400fac5ca35d9916fdae31ffbac1a10d90653e49f3ef9c930e792ed8a0da52ec",
+          "occupied_iou": "0764e396f7ed1a4c731d733c8d3b950fdddf3027d519b23796981b35c1e1d087",
+          "recovery_nmae": "fd752183c5d5df61f8ff7b7c12e3e9f200eebfad4175d189c6b33d45763f5470"
+        },
+        "inputs": {
+          "hidden": "babe3fbad2fd22e9d85de23137db9bd2333f79a6eb7c66d726eb521256512c65",
+          "occupancy": "3c15ddd6d64050e89330c3e8aa906f7b6f60eecf406dfb85a588bcd90f66e20a"
+        },
+        "parents": [
+          "b880ae4eb6676ded79141ce139548b1fc7fe682bb6d28aabaa0f725462ec4622",
+          "0979bcf914fc0fe127541436a129352c9444053098616caf0eafd665d9905aba",
+          "4a2e701dda589e0eccd4b602a7bb4c55e9fdc319ec36dd991f4de2e86fae2f26",
+          "6fe8f845637a35fe185748938f94487b72e25b89fc4ff4639173bd7f303a88f4",
+          "2803effb75291c28a3da1bdffda2143972bb9ca6080ae8ad118ba1fd66df841f",
+          "cb0618da23ba3a4a62596e9ab8fe9180dda3c8aeb1726485a752443368890466",
+          "01edd56b9cd858a3f72d78421575dd0aedb0ea8a772be27283be37fa5e67c4d3",
+          "9edc5d40600c797f49755ef213edd9362d7a6b3195a32cafbf556e653430dc75",
+          "0ce9ce2eb8e1ebf02be92a35b44964f6d35208739cfe21ef0def54537aa6486d",
+          "dee948c8148c920d43b332065d91464e1b2cbaa9c45b347644644cbeb50cf081",
+          "917971a342814dd63e084be27ddf285221b83b1088707465cd15c60e63a20ef2",
+          "c71fb5c3042f0cbc43f8dbc2f2bdaed82c163d40e2b1a3466790410d774818ce"
+        ],
+        "targets": {
+          "boundary_f1": "a1eb8a43923f1fd574879144570a30975e9a7d176c87b372e50ee6357aa09b23",
+          "clearance_nmae": "1d16548f1b61fe3e78e98b387873652c0a17dea67c1f7cd410362590702ac5f1",
+          "occupied_iou": "25dd80881547e9c45ef7974b9878e4066b2183234dd82f621b8fa37b7b92653a",
+          "recovery_nmae": "78855244ccbe9aac8a2f67e33bdd75e881715e54500156979f0975687e3a6e15"
+        }
+      }
+    },
+    "plan": {
+      "batch": 4,
+      "cap_seconds": 1200,
+      "dimension_train": 128,
+      "dimensions_profile": [
+        64,
+        128,
+        192
+      ],
+      "final_assessment": false,
+      "modes": [
+        "grid",
+        "strided",
+        "attention"
+      ],
+      "probe_steps": 128,
+      "quality_claim": false,
+      "queries": 256,
+      "scenes_per_split": 12,
+      "seed": 0,
+      "side": 33,
+      "splits": [
+        "train",
+        "probe",
+        "development"
+      ],
+      "study_id": "compact-c0c3-smoke-v2",
+      "train_steps": 96
+    },
+    "preparation_seconds": 1.125,
+    "source_commit": "d34e534ab4b9594e183f2ff373351dabe278577c",
+    "sources": [
+      {
+        "file_hash": "b8e0a500de367ca396c07cead0dc017584b4a258e5991b509e592c700f46ee29",
+        "path": "new-0/joint-0-encoder.pt",
+        "seed": 0,
+        "state_hash": "9e09028b97276c61aa67b987574dc3a588f567013f1fa35e329dceb06ff8d112"
+      },
+      {
+        "file_hash": "9df81cd47a7a33b8308af7836d7ac053f8478535c9db24ff4034fae6b730a88a",
+        "path": "new-1/joint-1-encoder.pt",
+        "seed": 1,
+        "state_hash": "00eec35733c031133de517f3e6151e33ba8f037291c31eff951a2896467dbced"
+      },
+      {
+        "file_hash": "2b563f4b8ce15e9e1fe0ee5b856c8d1c849142fd875e515275a042926b3bc413",
+        "path": "new-2/joint-2-encoder.pt",
+        "seed": 2,
+        "state_hash": "9050fd3eee78a9e9ca64da85368b1f473563ef056071cd8eb90eb1ff16f5a476"
+      }
+    ],
+    "spec_commit": "04673aba3906a50c9a51e4631ef910f8a3e767e7",
+    "spec_path": "projects/theseo-anysearch/python/perception-encoder-compact-smoke.md"
+  }
+}
