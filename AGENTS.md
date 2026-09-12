@@ -47,3 +47,47 @@ Promotion is selective:
 Specifications under `specs/` are maintained in their own repository. Specification
 changes and evidence must be committed and pushed there according to `specs/AGENTS.md`;
 do not leave them only in the ignored implementation checkout.
+
+
+## Autonomous experiment continuation
+
+When the user authorizes an experiment campaign or says to continue until its
+objective is resolved, treat that authorization as covering the remaining
+in-scope work, not just the next diagnostic.
+
+- Continue the implementation -> validation -> experiment -> assessment -> next
+  evidence-directed action loop within the authorized scope and compute budget.
+  Do not ask for another "go ahead" at each routine milestone.
+- A completed diagnostic, passing test suite, opened PR, weak score, or
+  inconclusive result is not by itself a stopping point. Report it in a progress
+  update, identify the next justified action, and execute it when authorized.
+  Do not end a turn with only a proposed next step when that step can be done.
+- Quality failures direct the next bounded experiment. Validity failures require
+  fixing the affected path and excluding invalid evidence before continuing.
+  Neither permits lowering acceptance criteria, reusing a contaminated test set,
+  changing a frozen run silently, or claiming success from weak results.
+- Before each follow-up, check scope, remaining budget, dependencies and protocol.
+  Record and freeze required revisions and fresh identities before execution.
+  Existing issue/branch/spec/PR requirements still apply. A review dependency may
+  be bypassed only by explicit user authorization to stack or execute unmerged
+  work; this never authorizes merging or promotion.
+- Maintain a durable checkpoint in the tracking issue or campaign progress file:
+  objective, governing spec SHA, branch/source SHA, completed runs and artifacts,
+  assessment, next concrete action, active process/run IDs, authorized budget
+  and recorded usage, and any unresolved approval boundary. Update it at meaningful
+  milestones and before a planned handoff. After interruption, inspect this
+  checkpoint and existing processes/artifacts before resuming; do not duplicate
+  runs or restart the campaign from scratch.
+- Pause only when the campaign objective is actually complete, the user pauses
+  or redirects it, an explicit approval is needed, the authorized budget is
+  exhausted, or a genuine blocker prevents further meaningful in-scope work.
+  Do not infer approval of a proposed larger budget from a generic "continue".
+  Try safe alternatives and complete unaffected work before declaring a blocker.
+- At an unavoidable stop, state what completed, the precise stopping condition,
+  the next action, and the minimum decision or external change needed. Do not
+  present ordinary poor quality as a permission blocker or invent endless
+  follow-ups after the agreed objective is met.
+
+This is an operating rule for the agent, not a background scheduler. Platform
+interruptions, tool permissions and session limits still apply; checkpointing
+must make the next authorized resume straightforward.
