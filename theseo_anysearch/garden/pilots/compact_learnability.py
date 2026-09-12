@@ -26,11 +26,11 @@ def analytic(code, xyz):
     return phase.sin().abs() <= code[:, None, 5]
 
 
-def data():
+def data(study_id="compact-learnability-v1"):
     occs, masks, codes, targets, ids, hashes = [], [], [], [], [], []
     coords = np.stack(np.meshgrid(*([np.arange(-24, 25)/8]*3), indexing="ij"))
     for i, fraction in enumerate((.08, .16, .28, .16)):
-        gid = f"compact-learnability-v1-scene-{i}"
+        gid = f"{study_id}-scene-{i}"
         rng = np.random.default_rng(int.from_bytes(hashlib.sha256(gid.encode()).digest()[:8], "little"))
         normal = rng.normal(size=3); normal /= np.linalg.norm(normal)
         frequency = rng.uniform(4, 8); phase = rng.uniform(-np.pi, np.pi)
