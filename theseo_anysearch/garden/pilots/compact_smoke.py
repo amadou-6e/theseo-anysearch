@@ -23,15 +23,16 @@ PLAN = {"study_id": "compact-c0c3-smoke-v2", "seed": 0, "side": 33,
         "quality_claim": False, "final_assessment": False}
 
 
-def data():
+def data(*, study_id="compact-c0c3-smoke-v2", counts=None, query_seed=37900):
+    counts = counts or {s: 12 for s in PLAN["splits"]}
     result, seen = {}, set()
-    for split in PLAN["splits"]:
+    for split, count in counts.items():
         values = {k: [] for k in ("occupancy", "hidden")}
         indices, targets = {k: [] for k in d.base.TASKS}, {k: [] for k in d.base.TASKS}
         ids, hashes = [], []
-        rngq = torch.Generator().manual_seed(37900 + PLAN["splits"].index(split))
-        for i in range(12):
-            gid = f"compact-c0c3-smoke-v2-{split}-{i:03d}"
+        rngq = torch.Generator().manual_seed(query_seed + list(counts).index(split))
+        for i in range(count):
+            gid = f"{study_id}-{split}-{i:03d}"
             occ = prior.scene(gid, prior.PLAN["families"][(i % 6) // 3], [.08, .16, .28][i % 3])
             sha = hashlib.sha256(occ.tobytes()).hexdigest()
             if sha in seen:
