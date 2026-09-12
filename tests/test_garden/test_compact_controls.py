@@ -58,3 +58,19 @@ def test_new_data_identity_and_source_disjointness():
     for name in ("context65-preregistration.json", "tiles-preregistration.json", "scale-preregistration.json"):
         identity = json.loads((root/name).read_text())["payload"]["identity"]
         assert not hashes.intersection(h for v in identity.values() for h in v["hashes"])
+
+
+def test_completed_report_integrity():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]/"docs/perception-encoder-local-geometry"
+    report = json.loads((root/"compact-controls-report.json").read_text())
+    sha = report.pop("report_payload_sha256")
+    assert s.d.base.payload_sha256(report) == sha
+    env = json.loads((root/"compact-controls-preregistration.json").read_text())
+    assert env == report["registration"]
+    assert s.d.base.payload_sha256(env["payload"]) == env["identity_sha256"]
+    assert env["payload"]["plan"] == s.PLAN
+    assert len(report["records"]) == len(report["artifacts"]) == 60
+    assert not report["promotion_eligible"]
+    assert {r["recipe"] for r in report["records"]} == set(s.PLAN["recipes"])
