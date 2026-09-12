@@ -40,12 +40,13 @@ def scene(gid, family, fraction):
     return field <= np.quantile(old.helpers.prior.crop(field, 17), fraction)
 
 
-def data(splits=None):
+def data(splits=None, *, study_id="compact-diversity-v1", counts=None, bank_splits=("train",)):
+    counts = COUNTS if counts is None else counts
     result = {}; seen = set()
-    for split in (list(COUNTS) if splits is None else splits):
+    for split in (list(counts) if splits is None else splits):
         occupancy, hidden, targets, ids, hashes = [], [], [], [], []
-        for i in range(COUNTS[split]):
-            gid = f"compact-diversity-v1-{split}-{i:04d}"
+        for i in range(counts[split]):
+            gid = f"{study_id}-{split}-{i:04d}"
             occ = scene(gid, old.FAMILIES[(i % 12) // 3], [.08, .16, .28][i % 3])
             digest = hashlib.sha256(occ.tobytes()).hexdigest()
             if digest in seen:
@@ -54,8 +55,8 @@ def data(splits=None):
             truth = d.base.compute_geometry_targets(occ, truncation=8.)
             occupancy.append(old.helpers.prior.crop(occ, 33).copy())
             masks = [np.random.default_rng(seed(f"{gid}-mask-{j}")).random((33, 33, 33)) < .2
-                     for j in range(BANK if split == "train" else 1)]
-            hidden.append(np.stack(masks) if split == "train" else masks[0])
+                     for j in range(BANK if split in bank_splits else 1)]
+            hidden.append(np.stack(masks) if split in bank_splits else masks[0])
             targets.append(np.stack([old.helpers.prior.crop(v, 17).copy()
                                      for v in (occ, truth.boundary, np.maximum(truth.signed_distance / 8, 0))]))
         result[split] = {"occupancy": torch.tensor(np.stack(occupancy), dtype=torch.bool),
@@ -67,7 +68,7 @@ def data(splits=None):
 
 def support(rows):
     from .compact_search import check_support
-    check_support({s: {**v, "hidden": v["hidden"][:, 0] if s == "train" else v["hidden"]}
+    check_support({s: {**v, "hidden": v["hidden"][:, 0] if v["hidden"].ndim == 5 else v["hidden"]}
                    for s, v in rows.items()})
 
 
