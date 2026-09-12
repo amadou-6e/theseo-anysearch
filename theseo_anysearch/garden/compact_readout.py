@@ -6,23 +6,26 @@ from torch.nn import functional as F
 from .compact import query_coordinates
 
 
-def validate(z, indices):
-    if z.ndim != 2 or z.shape[1] != 64 or indices.ndim != 2 or len(z) != len(indices):
-        raise ValueError("expected batch-aligned 64-vector codes and query indices")
+def validate(z, indices, dimension=64):
+    if z.ndim != 2 or z.shape[1] != dimension or indices.ndim != 2 or len(z) != len(indices):
+        raise ValueError(f"expected batch-aligned {dimension}-vector codes and query indices")
     return query_coordinates(indices)
 
 
 class ConvolutionalReadout(nn.Module):
-    def __init__(self):
+    def __init__(self, dimension=64):
         super().__init__()
-        self.expand = nn.Linear(64, 16 * 125)
+        if dimension not in (64, 128):
+            raise ValueError("unsupported convolutional code dimension")
+        self.dimension = dimension
+        self.expand = nn.Linear(dimension, 16 * 125)
         self.spatial = nn.Sequential(
             nn.ConvTranspose3d(16, 16, 3, stride=2, padding=1), nn.GroupNorm(4, 16), nn.SiLU(),
             nn.ConvTranspose3d(16, 8, 3, stride=2, padding=1), nn.GroupNorm(4, 8), nn.SiLU(),
             nn.Conv3d(8, 3, 3, padding=1))
 
     def forward(self, z, indices):
-        validate(z, indices)
+        validate(z, indices, self.dimension)
         volume = self.spatial(F.silu(self.expand(z)).reshape(-1, 16, 5, 5, 5)).flatten(2)
         return volume.gather(2, indices[:, None].expand(-1, 3, -1))
 
