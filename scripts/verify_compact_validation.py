@@ -113,6 +113,7 @@ def verify_inputs(report, rows, output, package_root, seed, deadline):
     encoder, head, _ = common.package.load_compact_package(package_root, seed=seed, device="cuda")
     del head
     before = common.package.encoder_state_sha256(encoder)
+    backbone_sha = common.package.encoder_state_sha256(encoder.backbone)
     if report["encoder_states"][str(seed)] != {"before": before, "after": before}:
         raise ValueError("transfer frozen state mismatch")
     memo = {}; batches = 0
@@ -134,7 +135,7 @@ def verify_inputs(report, rows, output, package_root, seed, deadline):
     if common.package.encoder_state_sha256(encoder) != before:
         raise ValueError("input replay changed encoder")
     del encoder
-    return memo, batches
+    return memo, batches, backbone_sha
 
 
 def verify_transfer(report, rows, output, package_root, deadline):
@@ -144,9 +145,12 @@ def verify_transfer(report, rows, output, package_root, deadline):
                      "thresholds": {f"{r['seed']}-{r['kind']}": r["threshold"] for r in report["calibration"]}}
     if lock != expected_lock or len(lock["thresholds"]) != 12:
         raise ValueError("calibration lock mismatch")
-    results = []; calibrations = []; predictions = {}; batches = 0; replays = 0
+    results = []; calibrations = []; predictions = {}; batches = 0; replays = 0; backbone_hashes = set()
     for seed in transfer.PLAN["seeds"]:
-        memo, count = verify_inputs(report, rows, output, package_root, seed, deadline); batches += count
+        memo, count, backbone_sha = verify_inputs(report, rows, output, package_root, seed, deadline); batches += count
+        backbone_hashes.add(backbone_sha)
+        if len(backbone_hashes) != 1:
+            raise ValueError("shared spatial cache requires identical packaged backbones")
         for kind in transfer.PLAN["representations"]:
             stage = report["stages"][f"head-{seed}-{kind}"]
             checkpoint = load(output, report, stage["checkpoint"])
