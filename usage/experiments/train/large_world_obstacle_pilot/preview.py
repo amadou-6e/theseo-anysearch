@@ -31,8 +31,19 @@ def write_preview_files(report: dict, output_dir: Path) -> list[Path]:
         "extent": extent,
         "manifest_path": os.path.relpath(manifest_path, output_dir).replace("\\", "/"),
     }
+    entries = [
+        (f"region_{region['index']:02d}.json", region["start"])
+        for region in report["route_regions"]
+    ]
+    for index, wall in enumerate(report.get("portal_walls", [])):
+        side = wall["side"]
+        center_y, center_z = wall["center"]
+        entries.append((
+            f"portal_{index:02d}.json",
+            (wall["x"] - 4, center_y - side // 2, center_z),
+        ))
     paths = []
-    for iteration, region in enumerate(report["route_regions"]):
+    for iteration, (filename, start) in enumerate(entries):
         data = {
             "schema_version": 2,
             "experiment_name": "large-world-obstacle-preview",
@@ -47,13 +58,13 @@ def write_preview_files(report: dict, output_dir: Path) -> list[Path]:
                 "total_reward": 0.0,
                 "steps_taken": 0,
                 "success": False,
-                "start_pos": list(region["start"]),
+                "start_pos": list(start),
                 "goal_pos": None,
                 "steps": [],
             },
             "world": world,
         }
-        path = output_dir / f"region_{region['index']:02d}.json"
+        path = output_dir / filename
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         paths.append(path)
     return paths
@@ -78,6 +89,7 @@ def write_preview_images(output_dir: Path) -> list[Path]:
         LOCAL_SOURCES,
         LOCAL_START,
         OFFSETS,
+        PORTAL_WALLS,
         REGION_INDICES,
         route_start,
     )
@@ -90,6 +102,8 @@ def write_preview_images(output_dir: Path) -> list[Path]:
             x1, y1, _ = source.maximum_inclusive
             ax.add_patch(Rectangle((x0, y0), x1 - x0 + 1, y1 - y0 + 1,
                                    facecolor="#94a3b8", edgecolor="#64748b", alpha=0.3))
+        for x, _ in PORTAL_WALLS:
+            ax.axvline(x, color="#1d4ed8", linewidth=1, alpha=0.6)
         for index, (x, y, z) in enumerate(OFFSETS):
             if z != layer:
                 continue
@@ -105,7 +119,7 @@ def write_preview_images(output_dir: Path) -> list[Path]:
         ax.set_aspect("equal")
         ax.grid(alpha=0.2)
     axes[-1].set_xlabel("X (voxels)")
-    fig.suptitle("4096 x 2048 x 512 compiled world; pale cross lies at Z=254")
+    fig.suptitle("4096 x 2048 x 512 compiled world; blue lines are portal walls")
     fig.tight_layout()
     fig.savefig(global_path, dpi=160)
     plt.close(fig)
@@ -150,7 +164,22 @@ def write_preview_images(output_dir: Path) -> list[Path]:
     fig.tight_layout()
     fig.savefig(local_path, dpi=160)
     plt.close(fig)
-    return [global_path, local_path]
+
+    portal_path = output_dir / "portal_progression.png"
+    fig, axes = plt.subplots(1, len(PORTAL_WALLS), figsize=(16, 4), sharex=True, sharey=True)
+    for ax, (x, side) in zip(axes, PORTAL_WALLS):
+        ax.add_patch(Rectangle((-20, -20), 40, 40, facecolor="#2563eb"))
+        ax.add_patch(Rectangle((-side / 2, -side / 2), side, side,
+                               facecolor="white", edgecolor="#1e293b", linewidth=1))
+        ax.set(xlim=(-20, 20), ylim=(-20, 20), title=f"X={x}\n{side} x {side}")
+        ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.suptitle("Central 40 x 40 YZ cutaway of each full-section wall; white is open")
+    fig.tight_layout(rect=(0, 0, 1, 0.8))
+    fig.savefig(portal_path, dpi=160)
+    plt.close(fig)
+    return [global_path, local_path, portal_path]
 
 
 def main() -> None:

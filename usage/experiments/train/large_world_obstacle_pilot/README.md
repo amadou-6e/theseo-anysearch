@@ -12,14 +12,23 @@ Run from the repository root:
 python -m usage.experiments.train.large_world_obstacle_pilot.preflight --samples-per-stage 2
 ```
 
-The deterministic source in `preflight.py` is a sparse 4096 x 2048 x 512
-world: 4,294,967,296 logical cells, 242 box sources, and 724,648 occupied
-voxels. Sixteen translated obstacle structures span the X, Y, and Z ranges;
-each has three two-voxel-thick partitions, staggered 16 x 12 doorways, and
-three interior blocks. Two long, thin obstacles also cross the central space.
-The compiler writes the pack and report only under ignored
-`runtime/obstacle-waypoint-pilot/`. Its identity is
-`7495d2b506e550a7accf572c1f24c07a46fe95449793c07faa32ae1912708b1a`.
+The deterministic source in `preflight.py` is a 4096 x 2048 x 512 world:
+4,294,967,296 logical cells, 266 box sources, and 7,014,727 occupied
+voxels. Six full YZ-section walls at X=512, 1152,
+1792, 2432, 3072, and 3712 divide the long X axis. Each one-voxel-thick
+wall has a centered square portal, shrinking in travel order through 32 x 32,
+16 x 16, 8 x 8, 4 x 4, 2 x 2, and finally **1 x 1 voxel** at
+`(3712, 1024, 256)`. The walls span the entire Y and Z ranges, so the final
+portal is the only crossing at that X plane. Sixteen translated local obstacle
+structures remain at widely separated positions for bounded waypoint-route
+preflight. Two long, thin obstacles also cross the central space. The compiler
+writes the pack and report only under ignored `runtime/obstacle-waypoint-pilot/`.
+The pack identity is
+`bd9b1982b02bc43b0cbbb5c06ab8925463ea96197b99d77f0116f00831c308f4`.
+This fixed-route pilot writes an empty candidate index: enumerating every
+surface voxel on the full-section walls would exhaust memory, and no
+candidate-index-based spawn/goal provider is used here. Occupancy, rendering,
+and A* planning still use the complete compiled geometry.
 
 The preflight samples two deterministic 96-action curriculum routes at each of
 the 11 configured segment-distance stages (1, 3, ..., 19, 20) in four widely
@@ -43,7 +52,8 @@ For seed `415001`, the direct actions cross geometry but A* finds a 114-step
 route. Executing that A* plan in the actual compiled-world environment reached
 all waypoints without collision in 114 steps. The raw per-seed report is
 `runtime/obstacle-waypoint-pilot/preflight.json` and is intentionally not
-committed.
+committed. The report also records six short A* wall crossings and confirms
+that the final crossing uses `(3712, 1024, 256)`.
 
 ## Preview the obstacles
 
@@ -55,22 +65,24 @@ python -m usage.experiments.train.large_world_obstacle_pilot.preview --images
 ```
 
 Open `runtime/obstacle-waypoint-pilot/previews/global_obstacles.png` to see the
-16 separated regions across both Z layers. Open `local_obstacles.png` to see
-one region's walls, staggered doors, and interior blocks (blue = partitions,
-orange = blocks, red = route start). The same layout is translated to all 16
-regions.
+full-width wall positions and 16 separated local regions. Open
+`portal_progression.png` to compare the six openings in equal-scale YZ
+cutaways, and `local_obstacles.png` for one local region's partitions and
+blocks. The latter layout is translated to all 16 regions.
 
-The four `region_*.json` files can be opened together with `voxel-replay` for
-interactive inspection of the actual compiled pack. Use `[` and `]` to switch
-regions; the global overview is enabled by default, and the regional view is
-centered on each route start. These are geometry-only previews, not recorded
-training episodes.
+The four `region_*.json` and six `portal_*.json` files can be opened together
+with `voxel-replay` for interactive inspection of the actual compiled pack.
+Use `[` and `]` to switch views; the global overview is enabled by default,
+and the regional view is centered near each route start or portal. These are
+geometry-only previews, not recorded training episodes.
 
 This is a *large-extent, local-route* test. The 96-action episodes sample far
 apart starting regions, but no single episode traverses thousands of voxels.
 It validates regional loading and obstacle-aware local routing at widely
 separated coordinates; it does not validate long-distance navigation across
-the entire world. During an earlier boundary-adjacent attempt, an A* query at
+the entire world or train a policy to traverse the portal sequence. The six
+short A* crossing probes establish portal connectivity only. During an earlier
+boundary-adjacent attempt, an A* query at
 the top Z coordinate raised a native out-of-bounds error. The retained fixture
 keeps routes away from that edge; boundary behavior needs its own follow-up.
 

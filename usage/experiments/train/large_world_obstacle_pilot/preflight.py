@@ -55,6 +55,41 @@ OFFSETS = tuple(
     for y in (128, 1856)
     for z in (96, 352)
 )
+# Full YZ cross-section walls divide the long X axis into progressively harder
+# chambers. Each wall is one voxel thick and has exactly one square aperture;
+# the final aperture is the single voxel (x, 1024, 256).
+PORTAL_WALLS = (
+    (512, 32),
+    (1152, 16),
+    (1792, 8),
+    (2432, 4),
+    (3072, 2),
+    (3712, 1),
+)
+PORTAL_CENTER = (1024, 256)
+
+
+def portal_bounds(side: int) -> tuple[int, int, int, int]:
+    """Inclusive YZ bounds of a centered square aperture."""
+    y0 = PORTAL_CENTER[0] - side // 2
+    z0 = PORTAL_CENTER[1] - side // 2
+    return y0, y0 + side - 1, z0, z0 + side - 1
+
+
+def wall_sources(x: int, side: int) -> tuple[BoxSource, ...]:
+    """Tile a whole YZ plane with four boxes, leaving one exact aperture."""
+    y0, y1, z0, z1 = portal_bounds(side)
+    return (
+        BoxSource((x, 0, 0), (x, y0 - 1, EXTENT[2] - 1)),
+        BoxSource((x, y1 + 1, 0), (x, EXTENT[1] - 1, EXTENT[2] - 1)),
+        BoxSource((x, y0, 0), (x, y1, z0 - 1)),
+        BoxSource((x, y0, z1 + 1), (x, y1, EXTENT[2] - 1)),
+    )
+
+
+WALL_SOURCES = tuple(
+    source for x, side in PORTAL_WALLS for source in wall_sources(x, side)
+)
 GLOBAL_SOURCES = (
     BoxSource((0, 1020, 254), (4095, 1021, 255)),
     BoxSource((2040, 0, 254), (2041, 2047, 255)),
@@ -66,7 +101,7 @@ SOURCES = tuple(
     )
     for offset in OFFSETS
     for source in LOCAL_SOURCES
-) + GLOBAL_SOURCES
+) + GLOBAL_SOURCES + WALL_SOURCES
 REGION_INDICES = (0, 5, 10, 15)
 
 
@@ -133,7 +168,13 @@ def preflight(
     region_indices: tuple[int, ...] = REGION_INDICES,
 ) -> dict:
     """Compare direct route actions with obstacle-aware A* on fixed random routes."""
-    compiled = compile_world(SOURCES, WorldExtent.from_value(EXTENT), cache_dir)
+    # The route starts and goals are fixed by this preflight. The generic
+    # surface-candidate index would enumerate millions of full-wall voxels,
+    # consume excessive memory, and is not used by these waypoint routes.
+    compiled = compile_world(
+        SOURCES, WorldExtent.from_value(EXTENT), cache_dir,
+        generate_candidates=False,
+    )
     env = VoxelEnv(
         {
             "agent_count": 1,
@@ -209,14 +250,31 @@ def preflight(
                     )
                     if replay is None and astar_feasible and not direct_free and astar_steps <= MAX_PLANNED_STEPS:
                         replay = replay_astar_route(compiled.root, route, seed)
+        portal_crossings = []
+        for x, side in PORTAL_WALLS:
+            start = (x - 2, *PORTAL_CENTER)
+            goal = (x + 2, *PORTAL_CENTER)
+            path = planner._find_path(start, goal)
+            wall_step = next(point for point in path if point[0] == x)
+            portal_crossings.append({
+                "x": x,
+                "side": side,
+                "crossing": wall_step,
+                "steps": len(path) - 1,
+            })
         return {
             "world_identity": compiled.manifest.identity_sha256,
             "pack_path": str(compiled.root),
             "extent": EXTENT,
             "logical_cells": EXTENT[0] * EXTENT[1] * EXTENT[2],
+            "candidate_index": "empty",
             "occupied_voxels": sum(chunk.occupied_voxels for chunk in compiled.manifest.chunks),
             "route_regions": [
                 {"index": index, "start": route_start(index)} for index in region_indices
+            ],
+            "portal_walls": [
+                {"x": x, "side": side, "center": PORTAL_CENTER}
+                for x, side in PORTAL_WALLS
             ],
             "sources": [
                 {"minimum": source.minimum, "maximum_inclusive": source.maximum_inclusive}
@@ -226,6 +284,7 @@ def preflight(
             "route_length": ROUTE_LENGTH,
             "episode_budget": MAX_PLANNED_STEPS,
             "routes": results,
+            "portal_crossings": portal_crossings,
             "astar_detour_replay": replay,
         }
     finally:

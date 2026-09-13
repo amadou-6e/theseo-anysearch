@@ -61,6 +61,27 @@ def test_compiler_emits_sparse_surface_and_free_candidates(tmp_path: Path) -> No
     assert candidates.sample(1, "portal", seed=1, stream=3) == ()
 
 
+def test_fixed_route_pack_can_omit_candidate_index_without_changing_occupancy(
+    tmp_path: Path,
+) -> None:
+    sources = [BoxSource((2, 2, 2), (2, 5, 5))]
+    extent = WorldExtent(x=8, y=8, z=8)
+    full = compile_world(sources, extent, tmp_path)
+    fixed_route = compile_world(
+        sources, extent, tmp_path, generate_candidates=False
+    )
+
+    assert full.manifest.identity_sha256 != fixed_route.manifest.identity_sha256
+    assert full.pack_path.read_bytes() == fixed_route.pack_path.read_bytes()
+    assert fixed_route.manifest.compiler["identity_contract"]["candidate_index"] == "empty"
+    candidates = CandidateIndexHandle(
+        fixed_route.root, world_identity=fixed_route.manifest.identity_sha256
+    )
+    assert candidates.sample(20, "spawn", seed=1, stream=1) == ()
+    assert candidates.sample(20, "surface", seed=1, stream=2) == ()
+    validate_compiled_world(fixed_route.root)
+
+
 def test_boxes_compile_without_coordinate_tuple_expansion(tmp_path: Path) -> None:
     compiled = compile_world(
         [BoxSource((1, 2, 3), (6, 5, 4))],
