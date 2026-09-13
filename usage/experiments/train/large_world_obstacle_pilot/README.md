@@ -9,35 +9,49 @@ at specs commit `a94227bc4ee484287a026f89ec6cd47d5ca16d26`.
 Run from the repository root:
 
 ```powershell
-python usage/experiments/train/large_world_obstacle_pilot/preflight.py --samples-per-stage 2
+python -m usage.experiments.train.large_world_obstacle_pilot.preflight --samples-per-stage 2
 ```
 
-The deterministic source in `preflight.py` is a 128 x 96 x 64 world with three
-two-voxel-thick partitions, staggered 16 x 12 doorways, and three interior
-blocks. The compiler writes the pack and report only under ignored
-`runtime/obstacle-waypoint-pilot/`. The first pack identity is
-`ff8c1e946e90525ef9c9270757d37316c63f19cea2c0d9ae47717ad7d94165ab`;
-its manifest records 43,755 occupied voxels.
+The deterministic source in `preflight.py` is a sparse 4096 x 2048 x 512
+world: 4,294,967,296 logical cells, 242 box sources, and 724,648 occupied
+voxels. Sixteen translated obstacle structures span the X, Y, and Z ranges;
+each has three two-voxel-thick partitions, staggered 16 x 12 doorways, and
+three interior blocks. Two long, thin obstacles also cross the central space.
+The compiler writes the pack and report only under ignored
+`runtime/obstacle-waypoint-pilot/`. Its identity is
+`7495d2b506e550a7accf572c1f24c07a46fe95449793c07faa32ae1912708b1a`.
 
 The preflight samples two deterministic 96-action curriculum routes at each of
-the 11 configured segment-distance stages (1, 3, ..., 19, 20). It checks every
+the 11 configured segment-distance stages (1, 3, ..., 19, 20) in four widely
+separated regions. Starts are `(144,176,128)`, `(1424,176,384)`,
+`(2704,1904,128)`, and `(3856,1904,384)`. It checks every
 endpoint against compiled occupancy, searches every segment with the existing
 lazy A* planner, checks PR #217's 128-step episode budget, and checks the exact
 `shortest_actions` that the current `continue_route` imitation collector uses.
 
 | Check | Routes |
 | --- | ---: |
-| Sampled | 22 |
-| A* feasible and within 128 steps | 20 |
-| Direct empty-grid actions collision-free | 16 |
-| Random route contains an occupied waypoint | 2 |
-| A* feasible but direct actions cross geometry | 4 |
+| Sampled | 88 |
+| A* feasible | 74 |
+| A* feasible and within 128 steps | 73 |
+| Direct empty-grid actions collision-free | 55 |
+| Random route contains an occupied waypoint | 14 |
+| A* feasible but direct actions cross geometry | 19 |
+| A* feasible but above the episode budget | 1 |
 
 For seed `415001`, the direct actions cross geometry but A* finds a 114-step
 route. Executing that A* plan in the actual compiled-world environment reached
 all waypoints without collision in 114 steps. The raw per-seed report is
 `runtime/obstacle-waypoint-pilot/preflight.json` and is intentionally not
 committed.
+
+This is a *large-extent, local-route* test. The 96-action episodes sample far
+apart starting regions, but no single episode traverses thousands of voxels.
+It validates regional loading and obstacle-aware local routing at widely
+separated coordinates; it does not validate long-distance navigation across
+the entire world. During an earlier boundary-adjacent attempt, an A* query at
+the top Z coordinate raised a native out-of-bounds error. The retained fixture
+keeps routes away from that edge; boundary behavior needs its own follow-up.
 
 This demonstrates why copying PR #217's YAML directly is unsafe. Its imitation
 collector's `_route_action_plan` takes the `continue_route` branch and calls

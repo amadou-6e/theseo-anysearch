@@ -19,10 +19,14 @@ def test_direct_waypoint_actions_detect_an_obstacle() -> None:
 
 
 def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
-    report = preflight(tmp_path / "worlds", samples_per_stage=1)
+    report = preflight(tmp_path / "worlds", samples_per_stage=1, region_indices=(0,))
 
     assert report["extent"] == EXTENT
     assert len(report["sources"]) == len(SOURCES)
+    assert report["logical_cells"] == 4_294_967_296
+    assert max(source.maximum_inclusive[0] for source in SOURCES) > 3900
+    assert max(source.maximum_inclusive[1] for source in SOURCES) > 1900
+    assert max(source.maximum_inclusive[2] for source in SOURCES) > 400
     assert len(report["routes"]) == 11
     assert any(route["astar_feasible"] for route in report["routes"])
     assert any(

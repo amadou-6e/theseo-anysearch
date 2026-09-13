@@ -22,15 +22,16 @@ from theseo_anysearch.rllib.trainer.waypoint_routes import sample_route
 from theseo_anysearch.worlds.compiler import BoxSource, compile_world
 from theseo_anysearch.worlds.manifest import WorldExtent
 
-EXTENT = (128, 96, 64)
-START = (16, 48, 32)
+EXTENT = (4096, 2048, 512)
+LOCAL_START = (16, 48, 32)
 ACTION_MODE = "discrete_18"
 ROUTE_LENGTH = 96
 MAX_PLANNED_STEPS = 128
 
-# Three two-voxel-thick partitions. Each has a different 16 x 12 doorway,
-# forcing some shortest paths to detour while keeping the chambers connected.
-SOURCES = (
+# A local obstacle structure with three two-voxel-thick partitions, staggered
+# 16 x 12 doorways, and interior blocks. Translating it to widely separated
+# positions tests actual regional pack reads across a multi-billion-cell world.
+LOCAL_SOURCES = (
     BoxSource((31, 0, 0), (32, 39, 63)),
     BoxSource((31, 56, 0), (32, 95, 63)),
     BoxSource((31, 40, 0), (32, 55, 25)),
@@ -47,6 +48,30 @@ SOURCES = (
     BoxSource((76, 68, 14), (83, 78, 48)),
     BoxSource((105, 27, 6), (111, 37, 44)),
 )
+
+OFFSETS = tuple(
+    (x, y, z)
+    for x in (128, 1408, 2688, 3840)
+    for y in (128, 1856)
+    for z in (96, 352)
+)
+GLOBAL_SOURCES = (
+    BoxSource((0, 1020, 254), (4095, 1021, 255)),
+    BoxSource((2040, 0, 254), (2041, 2047, 255)),
+)
+SOURCES = tuple(
+    BoxSource(
+        tuple(a + b for a, b in zip(source.minimum, offset)),
+        tuple(a + b for a, b in zip(source.maximum_inclusive, offset)),
+    )
+    for offset in OFFSETS
+    for source in LOCAL_SOURCES
+) + GLOBAL_SOURCES
+REGION_INDICES = (0, 5, 10, 15)
+
+
+def route_start(region_index: int) -> tuple[int, int, int]:
+    return tuple(a + b for a, b in zip(LOCAL_START, OFFSETS[region_index]))
 
 
 def direct_path_is_free(world: object, start: tuple[int, int, int], goal: tuple[int, int, int]) -> bool:
@@ -102,7 +127,11 @@ def replay_astar_route(pack_path: Path, route: object, seed: int) -> dict:
         env.close()
 
 
-def preflight(cache_dir: Path, samples_per_stage: int) -> dict:
+def preflight(
+    cache_dir: Path,
+    samples_per_stage: int,
+    region_indices: tuple[int, ...] = REGION_INDICES,
+) -> dict:
     """Compare direct route actions with obstacle-aware A* on fixed random routes."""
     compiled = compile_world(SOURCES, WorldExtent.from_value(EXTENT), cache_dir)
     env = VoxelEnv(
@@ -117,7 +146,7 @@ def preflight(cache_dir: Path, samples_per_stage: int) -> dict:
             "action_mode": ACTION_MODE,
             # Keep the runtime cursor and goal out of sampled routes: both are
             # represented as occupied overlay cells in world_occupied().
-            "waypoints": {"start": (127, 95, 63), "goal": (128, 95, 63)},
+            "waypoints": {"start": (2048, 2000, 500), "goal": (2049, 2000, 500)},
         }
     )
     try:
@@ -126,62 +155,69 @@ def preflight(cache_dir: Path, samples_per_stage: int) -> dict:
         planner = VoxelAStarOracle(env)
         results = []
         replay = None
-        for stage in range(11):
-            distance = min(1 + 2 * stage, 20)
-            for sample in range(samples_per_stage):
-                seed = 409_000 + stage * 1_000 + sample
-                route = sample_route(
-                    start=START,
-                    total_distance=ROUTE_LENGTH,
-                    segment_distance=distance,
-                    action_mode=ACTION_MODE,
-                    seed=seed,
-                    extent=EXTENT,
-                )
-                points = (route.start, *route.waypoints)
-                direct_free = True
-                astar_feasible = True
-                astar_steps = 0
-                expanded_nodes = 0
-                failure = None
-                for start, goal in zip(points, points[1:]):
-                    if world.world_occupied(start) or world.world_occupied(goal):
-                        astar_feasible = False
-                        direct_free = False
-                        failure = "occupied_endpoint"
-                        break
-                    direct_free &= direct_path_is_free(world, start, goal)
-                    try:
-                        path = planner._find_path(start, goal)
-                    except nx.NetworkXNoPath:
-                        astar_feasible = False
-                        failure = "no_path"
-                        break
-                    astar_steps += len(path) - 1
-                    expanded_nodes += planner._last_search_nodes
-                if astar_feasible and astar_steps > MAX_PLANNED_STEPS:
-                    failure = "episode_budget"
-                results.append(
-                    {
-                        "stage": stage,
-                        "seed": seed,
-                        "segment_distance": distance,
-                        "waypoint_count": len(route.waypoints),
-                        "direct_path_free": direct_free,
-                        "astar_feasible": astar_feasible,
-                        "astar_steps": astar_steps if astar_feasible else None,
-                        "within_episode_budget": astar_feasible and astar_steps <= MAX_PLANNED_STEPS,
-                        "expanded_nodes": expanded_nodes,
-                        "failure": failure,
-                    }
-                )
-                if replay is None and astar_feasible and not direct_free and astar_steps <= MAX_PLANNED_STEPS:
-                    replay = replay_astar_route(compiled.root, route, seed)
+        for region_index in region_indices:
+            for stage in range(11):
+                distance = min(1 + 2 * stage, 20)
+                for sample in range(samples_per_stage):
+                    seed = 409_000 + region_index * 100_000 + stage * 1_000 + sample
+                    route = sample_route(
+                        start=route_start(region_index),
+                        total_distance=ROUTE_LENGTH,
+                        segment_distance=distance,
+                        action_mode=ACTION_MODE,
+                        seed=seed,
+                        extent=EXTENT,
+                    )
+                    points = (route.start, *route.waypoints)
+                    direct_free = True
+                    astar_feasible = True
+                    astar_steps = 0
+                    expanded_nodes = 0
+                    failure = None
+                    for start, goal in zip(points, points[1:]):
+                        if world.world_occupied(start) or world.world_occupied(goal):
+                            astar_feasible = False
+                            direct_free = False
+                            failure = "occupied_endpoint"
+                            break
+                        direct_free &= direct_path_is_free(world, start, goal)
+                        try:
+                            path = planner._find_path(start, goal)
+                        except nx.NetworkXNoPath:
+                            astar_feasible = False
+                            failure = "no_path"
+                            break
+                        astar_steps += len(path) - 1
+                        expanded_nodes += planner._last_search_nodes
+                    if astar_feasible and astar_steps > MAX_PLANNED_STEPS:
+                        failure = "episode_budget"
+                    results.append(
+                        {
+                            "region_index": region_index,
+                            "start": route.start,
+                            "stage": stage,
+                            "seed": seed,
+                            "segment_distance": distance,
+                            "waypoint_count": len(route.waypoints),
+                            "direct_path_free": direct_free,
+                            "astar_feasible": astar_feasible,
+                            "astar_steps": astar_steps if astar_feasible else None,
+                            "within_episode_budget": astar_feasible and astar_steps <= MAX_PLANNED_STEPS,
+                            "expanded_nodes": expanded_nodes,
+                            "failure": failure,
+                        }
+                    )
+                    if replay is None and astar_feasible and not direct_free and astar_steps <= MAX_PLANNED_STEPS:
+                        replay = replay_astar_route(compiled.root, route, seed)
         return {
             "world_identity": compiled.manifest.identity_sha256,
             "pack_path": str(compiled.root),
             "extent": EXTENT,
+            "logical_cells": EXTENT[0] * EXTENT[1] * EXTENT[2],
             "occupied_voxels": sum(chunk.occupied_voxels for chunk in compiled.manifest.chunks),
+            "route_regions": [
+                {"index": index, "start": route_start(index)} for index in region_indices
+            ],
             "sources": [
                 {"minimum": source.minimum, "maximum_inclusive": source.maximum_inclusive}
                 for source in SOURCES
