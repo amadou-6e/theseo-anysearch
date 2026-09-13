@@ -1,11 +1,14 @@
 """Obstacle-world waypoint preflight exercises the compiled regional backend."""
 
+import json
+
 from usage.experiments.train.large_world_obstacle_pilot.preflight import (
     EXTENT,
     SOURCES,
     direct_path_is_free,
     preflight,
 )
+from usage.experiments.train.large_world_obstacle_pilot.preview import write_preview_files
 
 
 def test_direct_waypoint_actions_detect_an_obstacle() -> None:
@@ -34,3 +37,9 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         for route in report["routes"]
     )
     assert report["astar_detour_replay"]["success"]
+    previews = write_preview_files(report, tmp_path / "previews")
+    assert len(previews) == 1
+    preview = json.loads(previews[0].read_text(encoding="utf-8"))
+    assert preview["world"]["identity_sha256"] == report["world_identity"]
+    assert preview["episode"]["start_pos"] == list(report["route_regions"][0]["start"])
+    assert (previews[0].parent / preview["world"]["manifest_path"]).resolve().is_file()

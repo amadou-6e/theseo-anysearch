@@ -45,6 +45,27 @@ all waypoints without collision in 114 steps. The raw per-seed report is
 `runtime/obstacle-waypoint-pilot/preflight.json` and is intentionally not
 committed.
 
+## Preview the obstacles
+
+From the repository root, generate four replayer views plus static global and
+local close-up images without enumerating the compiled voxel volume:
+
+```powershell
+python -m usage.experiments.train.large_world_obstacle_pilot.preview --images
+```
+
+Open `runtime/obstacle-waypoint-pilot/previews/global_obstacles.png` to see the
+16 separated regions across both Z layers. Open `local_obstacles.png` to see
+one region's walls, staggered doors, and interior blocks (blue = partitions,
+orange = blocks, red = route start). The same layout is translated to all 16
+regions.
+
+The four `region_*.json` files can be opened together with `voxel-replay` for
+interactive inspection of the actual compiled pack. Use `[` and `]` to switch
+regions; the global overview is enabled by default, and the regional view is
+centered on each route start. These are geometry-only previews, not recorded
+training episodes.
+
 This is a *large-extent, local-route* test. The 96-action episodes sample far
 apart starting regions, but no single episode traverses thousands of voxels.
 It validates regional loading and obstacle-aware local routing at widely
