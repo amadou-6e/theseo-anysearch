@@ -14,6 +14,7 @@ from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
 )
 from theseo_anysearch.rllib.trainer.waypoint_routes import route_distance
 from theseo_anysearch.settings.environment import EnvConfig
+from theseo_anysearch.worlds import world_contract
 from usage.experiments.train.large_world_obstacle_pilot.curriculum import (
     STAGE_LENGTHS,
     gate_curriculum_settings,
@@ -39,6 +40,17 @@ def test_large_world_training_smoke_config_matches_gate_curriculum() -> None:
     assert config.training.iterations == 2
     assert config.imitation.generation.episodes == 12
     assert config.env.max_steps == 4608
+    assert config.env.to_runtime_dict()["world_identity_sha256"] == (
+        "ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05"
+    )
+    pack_manifest = json.loads(
+        (config.env.geometry.compiled_world_path / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert world_contract(config.env.to_runtime_dict())["identity_sha256"] == (
+        pack_manifest["identity_sha256"]
+    )
     assert config.experiment.output_dir == (
         Path("runtime/gs").resolve()
     )

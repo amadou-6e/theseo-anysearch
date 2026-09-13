@@ -17,6 +17,7 @@ env:
   geometry:
     extent: [4096, 2048, 512]
     compiled_world_path: runtime/obstacle-waypoint-pilot/worlds/ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05
+    world_identity_sha256: ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05
   observation:
     mode: box
     box_radius: 1
@@ -102,7 +103,7 @@ imitation:
     validation_fraction: 0.08333333333333333
     reuse_dataset: false
     curriculum_stages: all
-    dataset_dir: runtime/gs/dataset
+    dataset_dir: runtime/gs/dataset-identity-pinned
   pretraining:
     epochs: 2
     batch_size: 256

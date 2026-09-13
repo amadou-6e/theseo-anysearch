@@ -137,6 +137,11 @@ class GeometryConfig(BaseModel):
     compiled_world_path: Path | None = Field(
         None, description="Validated compiled-world directory loaded lazily by each worker."
     )
+    world_identity_sha256: str | None = Field(
+        None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Expected immutable compiled-world identity for run and dataset provenance.",
+    )
     node_cache: Path | None = Field(
         None,
         description=(

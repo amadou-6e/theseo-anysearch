@@ -187,6 +187,11 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 if self.geometry.compiled_world_path is not None
                 else None
             ),
+            **(
+                {"world_identity_sha256": self.geometry.world_identity_sha256}
+                if self.geometry.world_identity_sha256 is not None
+                else {}
+            ),
             "compiled_world_node_cache": (
                 str(self.geometry.node_cache)
                 if self.geometry.node_cache is not None
