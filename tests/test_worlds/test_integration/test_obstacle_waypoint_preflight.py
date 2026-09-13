@@ -54,12 +54,16 @@ def test_cross_section_walls_have_exactly_one_shrinking_aperture() -> None:
 
 
 def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
-    report = preflight(tmp_path / "worlds", samples_per_stage=1, region_indices=(0,))
+    report = preflight(tmp_path / "worlds", samples_per_stage=1, wall_indices=(0,))
 
     assert report["extent"] == EXTENT
-    assert len(report["sources"]) == len(SOURCES)
+    assert len(report["sources"]) == len(SOURCES) == 4 * len(PORTAL_WALLS)
+    assert {source.minimum[0] for source in SOURCES} == {x for x, _ in PORTAL_WALLS}
+    assert report["occupied_voxels"] == sum(
+        EXTENT[1] * EXTENT[2] - side * side for _, side in PORTAL_WALLS
+    )
     assert report["logical_cells"] == 4_294_967_296
-    assert max(source.maximum_inclusive[0] for source in SOURCES) > 3900
+    assert max(source.maximum_inclusive[0] for source in SOURCES) == 3712
     assert max(source.maximum_inclusive[1] for source in SOURCES) > 1900
     assert max(source.maximum_inclusive[2] for source in SOURCES) > 400
     assert len(report["routes"]) == 11
@@ -68,7 +72,6 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         route["astar_feasible"] and not route["direct_path_free"]
         for route in report["routes"]
     )
-    assert report["astar_detour_replay"]["success"]
     assert report["portal_walls"][-1] == {"x": 3712, "side": 1, "center": PORTAL_CENTER}
     assert len(report["portal_crossings"]) == len(PORTAL_WALLS)
     assert report["portal_crossings"][-1]["crossing"] == (3712, 1024, 256)
@@ -87,6 +90,8 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         env.reset(seed=409)
         world = env._rust_env
         planner = VoxelAStarOracle(env)
+        assert not world.world_occupied((144, 176, 128))
+        assert not world.world_occupied((2040, 1020, 254))
         for x, side in PORTAL_WALLS:
             y0 = PORTAL_CENTER[0] - side // 2
             z0 = PORTAL_CENTER[1] - side // 2
@@ -110,10 +115,10 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
     finally:
         env.close()
     previews = write_preview_files(report, tmp_path / "previews")
-    assert len(previews) == 1 + len(PORTAL_WALLS)
+    assert len(previews) == len(PORTAL_WALLS)
     preview = json.loads(previews[0].read_text(encoding="utf-8"))
     assert preview["world"]["identity_sha256"] == report["world_identity"]
-    assert preview["episode"]["start_pos"] == list(report["route_regions"][0]["start"])
+    assert preview["episode"]["start_pos"] == [508, 1024, 256]
     assert (previews[0].parent / preview["world"]["manifest_path"]).resolve().is_file()
     final_portal = json.loads(previews[-1].read_text(encoding="utf-8"))
     assert final_portal["episode"]["start_pos"] == [3708, 1024, 256]

@@ -23,38 +23,10 @@ from theseo_anysearch.worlds.compiler import BoxSource, compile_world
 from theseo_anysearch.worlds.manifest import WorldExtent
 
 EXTENT = (4096, 2048, 512)
-LOCAL_START = (16, 48, 32)
 ACTION_MODE = "discrete_18"
 ROUTE_LENGTH = 96
 MAX_PLANNED_STEPS = 128
 
-# A local obstacle structure with three two-voxel-thick partitions, staggered
-# 16 x 12 doorways, and interior blocks. Translating it to widely separated
-# positions tests actual regional pack reads across a multi-billion-cell world.
-LOCAL_SOURCES = (
-    BoxSource((31, 0, 0), (32, 39, 63)),
-    BoxSource((31, 56, 0), (32, 95, 63)),
-    BoxSource((31, 40, 0), (32, 55, 25)),
-    BoxSource((31, 40, 38), (32, 55, 63)),
-    BoxSource((63, 0, 0), (64, 19, 63)),
-    BoxSource((63, 36, 0), (64, 95, 63)),
-    BoxSource((63, 20, 0), (64, 35, 19)),
-    BoxSource((63, 20, 32), (64, 35, 63)),
-    BoxSource((95, 0, 0), (96, 54, 63)),
-    BoxSource((95, 71, 0), (96, 95, 63)),
-    BoxSource((95, 55, 0), (96, 70, 27)),
-    BoxSource((95, 55, 40), (96, 70, 63)),
-    BoxSource((43, 12, 8), (49, 19, 42)),
-    BoxSource((76, 68, 14), (83, 78, 48)),
-    BoxSource((105, 27, 6), (111, 37, 44)),
-)
-
-OFFSETS = tuple(
-    (x, y, z)
-    for x in (128, 1408, 2688, 3840)
-    for y in (128, 1856)
-    for z in (96, 352)
-)
 # Full YZ cross-section walls divide the long X axis into progressively harder
 # chambers. Each wall is one voxel thick and has exactly one square aperture;
 # the final aperture is the single voxel (x, 1024, 256).
@@ -90,23 +62,13 @@ def wall_sources(x: int, side: int) -> tuple[BoxSource, ...]:
 WALL_SOURCES = tuple(
     source for x, side in PORTAL_WALLS for source in wall_sources(x, side)
 )
-GLOBAL_SOURCES = (
-    BoxSource((0, 1020, 254), (4095, 1021, 255)),
-    BoxSource((2040, 0, 254), (2041, 2047, 255)),
-)
-SOURCES = tuple(
-    BoxSource(
-        tuple(a + b for a, b in zip(source.minimum, offset)),
-        tuple(a + b for a, b in zip(source.maximum_inclusive, offset)),
-    )
-    for offset in OFFSETS
-    for source in LOCAL_SOURCES
-) + GLOBAL_SOURCES + WALL_SOURCES
-REGION_INDICES = (0, 5, 10, 15)
+SOURCES = WALL_SOURCES
+WALL_INDICES = tuple(range(len(PORTAL_WALLS)))
 
 
-def route_start(region_index: int) -> tuple[int, int, int]:
-    return tuple(a + b for a, b in zip(LOCAL_START, OFFSETS[region_index]))
+def route_start(wall_index: int) -> tuple[int, int, int]:
+    x, _ = PORTAL_WALLS[wall_index]
+    return x - 4, *PORTAL_CENTER
 
 
 def direct_path_is_free(world: object, start: tuple[int, int, int], goal: tuple[int, int, int]) -> bool:
@@ -165,7 +127,7 @@ def replay_astar_route(pack_path: Path, route: object, seed: int) -> dict:
 def preflight(
     cache_dir: Path,
     samples_per_stage: int,
-    region_indices: tuple[int, ...] = REGION_INDICES,
+    wall_indices: tuple[int, ...] = WALL_INDICES,
 ) -> dict:
     """Compare direct route actions with obstacle-aware A* on fixed random routes."""
     # The route starts and goals are fixed by this preflight. The generic
@@ -196,13 +158,13 @@ def preflight(
         planner = VoxelAStarOracle(env)
         results = []
         replay = None
-        for region_index in region_indices:
+        for wall_index in wall_indices:
             for stage in range(11):
                 distance = min(1 + 2 * stage, 20)
                 for sample in range(samples_per_stage):
-                    seed = 409_000 + region_index * 100_000 + stage * 1_000 + sample
+                    seed = 409_000 + wall_index * 100_000 + stage * 1_000 + sample
                     route = sample_route(
-                        start=route_start(region_index),
+                        start=route_start(wall_index),
                         total_distance=ROUTE_LENGTH,
                         segment_distance=distance,
                         action_mode=ACTION_MODE,
@@ -234,7 +196,7 @@ def preflight(
                         failure = "episode_budget"
                     results.append(
                         {
-                            "region_index": region_index,
+                            "wall_index": wall_index,
                             "start": route.start,
                             "stage": stage,
                             "seed": seed,
@@ -269,8 +231,8 @@ def preflight(
             "logical_cells": EXTENT[0] * EXTENT[1] * EXTENT[2],
             "candidate_index": "empty",
             "occupied_voxels": sum(chunk.occupied_voxels for chunk in compiled.manifest.chunks),
-            "route_regions": [
-                {"index": index, "start": route_start(index)} for index in region_indices
+            "route_walls": [
+                {"index": index, "start": route_start(index)} for index in wall_indices
             ],
             "portal_walls": [
                 {"x": x, "side": side, "center": PORTAL_CENTER}

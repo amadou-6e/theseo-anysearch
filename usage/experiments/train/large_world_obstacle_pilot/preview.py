@@ -1,7 +1,7 @@
 """Generate lightweight replayer entries for the compiled obstacle-world pack.
 
 No training trajectory or voxel enumeration is needed: each entry points to
-the immutable pack and places the camera at one preflight route start.
+the immutable pack and places the camera just before one portal wall.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def write_preview_files(report: dict, output_dir: Path) -> list[Path]:
-    """Write one geometry-only replayer entry per sampled world region."""
+    """Write one geometry-only replayer entry per portal wall."""
     pack_path = Path(report["pack_path"]).resolve()
     manifest_path = pack_path / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -31,16 +31,12 @@ def write_preview_files(report: dict, output_dir: Path) -> list[Path]:
         "extent": extent,
         "manifest_path": os.path.relpath(manifest_path, output_dir).replace("\\", "/"),
     }
-    entries = [
-        (f"region_{region['index']:02d}.json", region["start"])
-        for region in report["route_regions"]
-    ]
+    entries = []
     for index, wall in enumerate(report.get("portal_walls", [])):
-        side = wall["side"]
         center_y, center_z = wall["center"]
         entries.append((
             f"portal_{index:02d}.json",
-            (wall["x"] - 4, center_y - side // 2, center_z),
+            (wall["x"] - 4, center_y, center_z),
         ))
     paths = []
     for iteration, (filename, start) in enumerate(entries):
@@ -71,7 +67,7 @@ def write_preview_files(report: dict, output_dir: Path) -> list[Path]:
 
 
 def write_preview_images(output_dir: Path) -> list[Path]:
-    """Render global placement and a local obstacle close-up from source boxes."""
+    """Render wall locations and equal-scale aperture cutaways."""
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = output_dir / ".matplotlib"
     cache_dir.mkdir(exist_ok=True)
@@ -81,88 +77,27 @@ def write_preview_images(output_dir: Path) -> list[Path]:
     matplotlib.use("Agg", force=True)
     from matplotlib import pyplot as plt
     from matplotlib.patches import Rectangle
-    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     from usage.experiments.train.large_world_obstacle_pilot.preflight import (
         EXTENT,
-        GLOBAL_SOURCES,
-        LOCAL_SOURCES,
-        LOCAL_START,
-        OFFSETS,
+        PORTAL_CENTER,
         PORTAL_WALLS,
-        REGION_INDICES,
-        route_start,
     )
 
     global_path = output_dir / "global_obstacles.png"
-    fig, axes = plt.subplots(2, 1, figsize=(14, 9), sharex=True, sharey=True)
-    for ax, layer in zip(axes, (96, 352)):
-        for source in GLOBAL_SOURCES:
-            x0, y0, _ = source.minimum
-            x1, y1, _ = source.maximum_inclusive
-            ax.add_patch(Rectangle((x0, y0), x1 - x0 + 1, y1 - y0 + 1,
-                                   facecolor="#94a3b8", edgecolor="#64748b", alpha=0.3))
-        for x, _ in PORTAL_WALLS:
-            ax.axvline(x, color="#1d4ed8", linewidth=1, alpha=0.6)
-        for index, (x, y, z) in enumerate(OFFSETS):
-            if z != layer:
-                continue
-            ax.add_patch(Rectangle((x, y), 112, 96, fill=False,
-                                   edgecolor="#2563eb", linewidth=1.5))
-            ax.text(x + 56, y + 48, str(index), ha="center", va="center", fontsize=8)
-        for index in REGION_INDICES:
-            if OFFSETS[index][2] == layer:
-                x, y, _ = route_start(index)
-                ax.scatter(x, y, color="#dc2626", s=48, zorder=5)
-        ax.set(xlim=(0, EXTENT[0]), ylim=(0, EXTENT[1]), ylabel="Y (voxels)",
-               title=f"Obstacle regions at Z offset {layer}; red dots are preview starts")
-        ax.set_aspect("equal")
-        ax.grid(alpha=0.2)
-    axes[-1].set_xlabel("X (voxels)")
-    fig.suptitle("4096 x 2048 x 512 compiled world; blue lines are portal walls")
+    fig, ax = plt.subplots(figsize=(14, 7))
+    for x, side in PORTAL_WALLS:
+        ax.axvline(x, color="#2563eb", linewidth=1.5)
+        ax.scatter(x, PORTAL_CENTER[0], color="#f97316", s=36, zorder=5)
+        ax.text(x, PORTAL_CENTER[0] + 60, f"{side} x {side}",
+                ha="center", fontsize=9)
+    ax.set(xlim=(0, EXTENT[0]), ylim=(0, EXTENT[1]), xlabel="X (voxels)",
+           ylabel="Y (voxels)",
+           title=f"Full YZ-section walls; portals centered at Y={PORTAL_CENTER[0]}, Z={PORTAL_CENTER[1]}")
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.2)
     fig.tight_layout()
     fig.savefig(global_path, dpi=160)
-    plt.close(fig)
-
-    local_path = output_dir / "local_obstacles.png"
-    fig = plt.figure(figsize=(16, 6))
-    ax_xy = fig.add_subplot(1, 3, 1)
-    ax_xz = fig.add_subplot(1, 3, 2)
-    ax_3d = fig.add_subplot(1, 3, 3, projection="3d")
-    for index, source in enumerate(LOCAL_SOURCES):
-        x0, y0, z0 = source.minimum
-        x1, y1, z1 = source.maximum_inclusive
-        color = "#2563eb" if index < 12 else "#f97316"
-        if z0 <= LOCAL_START[2] <= z1:
-            ax_xy.add_patch(Rectangle((x0, y0), x1 - x0 + 1, y1 - y0 + 1,
-                                      facecolor=color, edgecolor="#1e293b"))
-        if y0 <= LOCAL_START[1] <= y1:
-            ax_xz.add_patch(Rectangle((x0, z0), x1 - x0 + 1, z1 - z0 + 1,
-                                      facecolor=color, edgecolor="#1e293b"))
-        vertices = (
-            (x0, y0, z0), (x1 + 1, y0, z0), (x1 + 1, y1 + 1, z0), (x0, y1 + 1, z0),
-            (x0, y0, z1 + 1), (x1 + 1, y0, z1 + 1),
-            (x1 + 1, y1 + 1, z1 + 1), (x0, y1 + 1, z1 + 1),
-        )
-        faces = ([vertices[i] for i in face] for face in (
-            (0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
-            (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
-        ))
-        ax_3d.add_collection3d(Poly3DCollection(
-            list(faces), facecolors=color, edgecolors="#1e293b",
-            linewidths=0.25, alpha=0.25 if index < 12 else 0.65,
-        ))
-    ax_xy.scatter(LOCAL_START[0], LOCAL_START[1], color="#dc2626", s=35, zorder=5)
-    ax_xy.set(xlim=(0, 128), ylim=(0, 96), xlabel="X", ylabel="Y", title="XY slice at Z=32")
-    ax_xz.scatter(LOCAL_START[0], LOCAL_START[2], color="#dc2626", s=35, zorder=5)
-    ax_xz.set(xlim=(0, 128), ylim=(0, 64), xlabel="X", ylabel="Z", title="XZ slice at Y=48")
-    ax_3d.scatter(*LOCAL_START, color="#dc2626", s=25)
-    ax_3d.set(xlim=(0, 128), ylim=(0, 96), zlim=(0, 64), xlabel="X", ylabel="Y",
-              zlabel="Z", title="One repeated obstacle region")
-    ax_3d.set_box_aspect((128, 96, 64))
-    ax_3d.view_init(elev=25, azim=-65)
-    fig.tight_layout()
-    fig.savefig(local_path, dpi=160)
     plt.close(fig)
 
     portal_path = output_dir / "portal_progression.png"
@@ -179,7 +114,7 @@ def write_preview_images(output_dir: Path) -> list[Path]:
     fig.tight_layout(rect=(0, 0, 1, 0.8))
     fig.savefig(portal_path, dpi=160)
     plt.close(fig)
-    return [global_path, local_path, portal_path]
+    return [global_path, portal_path]
 
 
 def main() -> None:
