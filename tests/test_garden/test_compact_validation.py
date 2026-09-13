@@ -7,6 +7,33 @@ from theseo_anysearch.garden.collision_transfer import CollisionHead, decision_t
 from theseo_anysearch.garden.pilots import compact_validation_data as data
 from theseo_anysearch.garden.pilots import compact_validation as common
 from theseo_anysearch.garden.pilots import compact_collision_transfer as transfer
+from scripts import verify_compact_validation as verifier
+
+
+def test_replay_verifier_rejects_changed_prediction():
+    verifier.same_prediction(torch.ones(2, 3), torch.ones(2, 3))
+    with pytest.raises(AssertionError):
+        verifier.same_prediction(torch.zeros(2, 3), torch.ones(2, 3))
+    with pytest.raises(ValueError):
+        verifier.same_prediction(torch.full((2, 3), torch.nan), torch.ones(2, 3))
+
+
+def test_replay_verifier_requires_artifact_and_report_integrity(tmp_path):
+    import json
+    artifact = tmp_path / "prediction.pt"
+    torch.save(torch.ones(2), artifact)
+    env = {"identity_sha256": "fixture"}
+    report = {"registration": env, "status": "completed", "artifacts": {artifact.name: common.package.file_sha(artifact)}}
+    report["report_payload_sha256"] = common.base.payload_sha256(report)
+    (tmp_path / "report.json").write_text(json.dumps(report))
+    assert verifier.checked_report(tmp_path, env) == report
+    torch.save(torch.zeros(2), artifact)
+    with pytest.raises(ValueError, match="artifact integrity"):
+        verifier.checked_report(tmp_path, env)
+    report["status"] = "forged"
+    (tmp_path / "report.json").write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="report identity"):
+        verifier.checked_report(tmp_path, env)
 
 
 @pytest.mark.parametrize("family", data.FAMILIES)
