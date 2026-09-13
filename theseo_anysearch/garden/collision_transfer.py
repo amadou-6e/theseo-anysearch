@@ -18,13 +18,9 @@ class CollisionHead(nn.Module):
         positions = torch.arange(17) / 2; lo = positions.long(); hi = positions.ceil().long(); weight = positions - lo
         self.register_buffer("interpolation", F.one_hot(lo, 9).float() * (1 - weight[:, None]) + F.one_hot(hi, 9).float() * weight[:, None])
 
-    def forward(self, grids, paths, valid, geometry_indices):
+    def feature_grid(self, grids):
         if grids.ndim != 5 or grids.shape[2:] not in ((9, 9, 9), (33, 33, 33)):
             raise ValueError("expected9 or33 cubic feature grids")
-        if paths.ndim != 3 or paths.shape[1:] != (9, 3) or valid.shape != paths.shape[:2] or valid.dtype != torch.bool:
-            raise ValueError("expected padded9-node paths and boolean validity")
-        if paths.dtype != torch.long or ((paths < 0) | (paths >= 17)).any() or not valid.any(1).all():
-            raise ValueError("invalid query coordinates")
         x = self.grid(grids)
         if x.shape[-1] == 9:
             # Separable aligned-corner interpolation avoids nondeterministic CUDA resize backward.
@@ -33,6 +29,14 @@ class CollisionHead(nn.Module):
             x = torch.einsum("ok,bcijk->bcijo", self.interpolation, x)
         else:
             x = x[:, :, 8:25, 8:25, 8:25]
+        return x
+
+    def forward(self, grids, paths, valid, geometry_indices):
+        if paths.ndim != 3 or paths.shape[1:] != (9, 3) or valid.shape != paths.shape[:2] or valid.dtype != torch.bool:
+            raise ValueError("expected padded9-node paths and boolean validity")
+        if paths.dtype != torch.long or ((paths < 0) | (paths >= 17)).any() or not valid.any(1).all():
+            raise ValueError("invalid query coordinates")
+        x = self.feature_grid(grids)
         indices = paths[..., 0] * 289 + paths[..., 1] * 17 + paths[..., 2]
         features = x.flatten(2)[geometry_indices].gather(2, indices[:, None].expand(-1, 8, -1)).transpose(1, 2)
         features = self.point(torch.cat((features, paths.float() / 8 - 1), -1))
