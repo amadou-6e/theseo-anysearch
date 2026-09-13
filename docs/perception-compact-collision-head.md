@@ -7,7 +7,7 @@ The observed input is33 cubed; candidate paths are confined to its central17 cub
 Collision means an occupied discrete path node for a zero-radius agent. It does
 not cover swept volumes between arbitrary points, finite body radius, or dynamics.
 
-After the run completes, the runtime artifact directory contains the12 fitted
+The completed runtime artifact directory contains the12 fitted
 heads and the calibration-only threshold lock. The snippet below loads seed401
 by numeric ID, not because it was the best test seed. Code729 is a1x9x9x9 spatial
 layout, not a192-dimensional global vector. No raw/spatial bypass enters this head.

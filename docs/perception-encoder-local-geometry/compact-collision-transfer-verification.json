@@ -1,0 +1,10 @@
+{
+  "artifacts_verified": 164,
+  "elapsed_seconds": 83.5,
+  "encoder_batches_replayed": 486,
+  "heads_verified": 12,
+  "prediction_groups_replayed": 48,
+  "queries_replayed": 82944,
+  "report_payload_sha256": "3c058b813540b08c7eb8f7499a13c2c6b08b44549689a2fc1d9f2a76ec7f8d67",
+  "verified": true
+}
