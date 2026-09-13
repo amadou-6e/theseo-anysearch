@@ -19,11 +19,13 @@ from pathlib import Path
 import numpy as np
 
 from theseo_anysearch.environments.routing_manifests import (
+    ArtifactRef,
     ConversionRecord,
     GridFrame,
     RightsRecord,
     RoutingSplitRecord,
     RoutingTaskRecord,
+    RoutingReferenceRecord,
     RoutingWorldRecord,
     SourceFile,
     SourceRecord,
@@ -200,21 +202,26 @@ def _storage(point_m: tuple[float, float, float], voxel_m: float) -> tuple[int, 
     return tuple(int(item) for item in value)  # type: ignore[return-value]
 
 
-def _route_length(
+def _shortest_route(
     blocked: np.ndarray,
     start: tuple[int, int, int],
     goal: tuple[int, int, int],
     *,
     planar: bool = False,
-) -> int | None:
+) -> tuple[tuple[int, int, int], ...] | None:
     if blocked[start] or blocked[goal]:
         return None
-    frontier = deque([(start, 0)])
-    seen = {start}
+    frontier = deque([start])
+    parent: dict[tuple[int, int, int], tuple[int, int, int] | None] = {start: None}
     while frontier:
-        position, distance = frontier.popleft()
+        position = frontier.popleft()
         if position == goal:
-            return distance
+            result = []
+            current: tuple[int, int, int] | None = goal
+            while current is not None:
+                result.append(current)
+                current = parent[current]
+            return tuple(reversed(result))
         for axis in range(2 if planar else 3):
             for step in (-1, 1):
                 neighbor = list(position)
@@ -222,12 +229,54 @@ def _route_length(
                 coordinate = tuple(neighbor)
                 if (
                     0 <= coordinate[axis] < blocked.shape[axis]
-                    and coordinate not in seen
+                    and coordinate not in parent
                     and not blocked[coordinate]
                 ):
-                    seen.add(coordinate)
-                    frontier.append((coordinate, distance + 1))
+                    parent[coordinate] = position
+                    frontier.append(coordinate)
     return None
+
+
+def _segment_hits_expanded_box(
+    start_m: np.ndarray, goal_m: np.ndarray, box: Box, radius_m: float
+) -> bool:
+    """Exact line/AABB slab check in box coordinates, conservatively expanded."""
+
+    start = (start_m - np.asarray(box.center_m)) @ box.rotation
+    delta = (goal_m - start_m) @ box.rotation
+    half = np.asarray(box.size_m) / 2 + radius_m
+    enter, leave = 0.0, 1.0
+    for axis in range(3):
+        if abs(delta[axis]) <= 1e-12:
+            if abs(start[axis]) <= half[axis]:
+                continue
+            return False
+        a = (-half[axis] - start[axis]) / delta[axis]
+        b = (half[axis] - start[axis]) / delta[axis]
+        enter = max(enter, min(a, b))
+        leave = min(leave, max(a, b))
+        if enter <= leave:
+            continue
+        return False
+    return True
+
+
+def validate_continuous_route(
+    route: tuple[tuple[int, int, int], ...], boxes: tuple[Box, ...],
+    voxel_m: float, body_radius_m: float,
+) -> None:
+    """Replay every grid-center segment against original collision boxes."""
+
+    if not route:
+        raise ValueError("route witness is empty")
+    origin = np.asarray(BOUNDS_MIN)
+    for start, goal in zip(route, route[1:]):
+        if sum(abs(a - b) for a, b in zip(start, goal)) != 1:
+            raise ValueError("route contains a non-axis-adjacent segment")
+        a = origin + (np.asarray(start) + 0.5) * voxel_m
+        b = origin + (np.asarray(goal) + 0.5) * voxel_m
+        if any(_segment_hits_expanded_box(a, b, box, body_radius_m) for box in boxes):
+            raise ValueError("route collides with an expanded source collision box")
 
 
 def _sha(path: Path) -> str:
@@ -315,8 +364,10 @@ def export_scene(
         for box in boxes
     )
     blocked = rasterize_boxes(clearance_boxes, voxel_m).astype(bool)
-    distance = _route_length(blocked, start, goal)
-    planar_distance = _route_length(blocked, start, goal, planar=True)
+    route = _shortest_route(blocked, start, goal)
+    planar_route = _shortest_route(blocked, start, goal, planar=True)
+    distance = None if route is None else len(route) - 1
+    planar_distance = None if planar_route is None else len(planar_route) - 1
     direct_cells = int(round(abs(goal[0] - start[0])))
     if (
         distance is None
@@ -324,6 +375,8 @@ def export_scene(
         or (layout == "altitude" and planar_distance is not None)
     ):
         raise ValueError("generated task does not have its required detour/altitude topology")
+    assert route is not None
+    validate_continuous_route(route, boxes, voxel_m, body_radius_m)
     output.mkdir(parents=True)
     np.save(output / "occupancy.npy", occupancy, allow_pickle=False)
     occupancy_sha = _sha(output / "occupancy.npy")
@@ -373,6 +426,21 @@ def export_scene(
         ),
     )
     validate_task_endpoints(task, world, occupancy)
+    (output / "route-storage.json").write_text(
+        json.dumps(route, separators=(",", ":")), encoding="utf-8"
+    )
+    route_sha = _sha(output / "route-storage.json")
+    reference = RoutingReferenceRecord(
+        task_identity_sha256=task.identity_sha256,
+        claim="independently_validated",
+        route_artifact=ArtifactRef(relative_path="route-storage.json", sha256=route_sha),
+        cost=distance * voxel_m,
+        verification_evidence=(
+            "Every 6-axis grid-center segment replayed against source URDF "
+            "collision boxes expanded by body radius; no optimality claim "
+            "outside this conservative grid"
+        ),
+    )
     split = RoutingSplitRecord(
         dataset_id=f"aerial-gym-compact-{layout}-{seed}-v1",
         members=(
@@ -386,11 +454,11 @@ def export_scene(
     )
     dataset_sha = validate_routing_bundle(
         sources=(source,), conversions=(conversion,), worlds=(world,), tasks=(task,),
-        observations=(), references=(), split=split,
+        observations=(), references=(reference,), split=split,
     )
     for name, record in (
         ("source", source), ("conversion", conversion), ("world", world),
-        ("task", task), ("split", split),
+        ("task", task), ("reference", reference), ("split", split),
     ):
         write_sidecar(output / f"{name}.json", record)
     report = {
@@ -400,12 +468,14 @@ def export_scene(
         "dataset_identity_sha256": dataset_sha,
         "world_identity_sha256": world.identity_sha256,
         "task_identity_sha256": task.identity_sha256,
+        "reference_identity_sha256": reference.identity_sha256,
         "occupied_cells": int(occupancy.sum()),
         "route_cells_6_axis": distance,
         "same_altitude_route_cells": planar_distance,
         "straight_cells": direct_cells,
         "collision_boxes": len(boxes),
         "scene_instances_sha256": scene_sha,
+        "route_sha256": route_sha,
         "source_rights_status": source.rights.status,
         "claim": "derived_static_collision_grid_not_native_simulator",
     }

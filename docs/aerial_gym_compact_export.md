@@ -36,16 +36,19 @@ python -m theseo_anysearch.environments.aerial_gym_export `
 The output directory must not exist. Its `occupancy.npy` is full-world truth
 in storage-axis `(x,y,z)` order, 0 free/1 occupied, at 0.25 m per voxel by
 default. It is not a sensor observation. The `source`, `conversion`, `world`,
-`task`, and `split` sidecars use the #411 version-1 contracts. The conversion
+`task`, `reference`, and `split` sidecars use the #411 version-1 contracts. The conversion
 identity includes the pose-file hash, rasterization version, seed, layout,
 voxel size and body radius. `export-report.json` records route checks but is
-not a certified-optimal route reference.
+not a certified-optimal route reference. `route-storage.json` holds a witness
+whose six-axis segments are replayed against the original transformed URDF
+collision boxes expanded by body radius. Its `independently_validated` claim
+means collision-checked, not globally optimal in continuous space.
 
 Each collision box is transformed by the actor and URDF collision origins.
 Voxelization marks cells that may intersect a box (conservative local-axis
 bound). For the 6-axis route check, each box is expanded by the body radius
 before voxelization. This yields a conservative continuous box-clearance
-witness for grid-center moves; it is **not** a validated flight trajectory,
+witness for grid-center moves; it is **not** a validated dynamic flight trajectory,
 dynamic-obstacle episode or performance comparison with the upstream task.
 
 ## Verified local slice

@@ -15,10 +15,12 @@ from theseo_anysearch.environments.aerial_gym_export import (
     parse_collision_boxes,
     rasterize_boxes,
     scene_instances,
+    validate_continuous_route,
 )
 from theseo_anysearch.environments.routing_manifests import (
     ConversionRecord,
     RoutingTaskRecord,
+    RoutingReferenceRecord,
     RoutingWorldRecord,
     SourceRecord,
     read_sidecar,
@@ -101,6 +103,20 @@ def test_rasterization_tracks_rotated_collision_interiors():
     assert not grid[0, 0, 0]
 
 
+def test_rasterization_preserves_an_opening_and_replay_rejects_collision():
+    boxes = (
+        Box((0.1, 1.0, 1.0), (0.0, -1.5, -1.0), np.eye(3)),
+        Box((0.1, 1.0, 1.0), (0.0, 1.5, -1.0), np.eye(3)),
+    )
+    grid = rasterize_boxes(boxes, 0.25)
+    assert grid[20, 14, 8]
+    assert grid[20, 26, 8]
+    assert not grid[20, 20, 8]
+    crossing = (Box((0.1, 1.0, 1.0), (0.0, 0.0, -1.0), np.eye(3)),)
+    with pytest.raises(ValueError, match="collides"):
+        validate_continuous_route(((19, 20, 8), (20, 20, 8)), crossing, 0.25, 0.0)
+
+
 @pytest.mark.parametrize("layout", ["detour", "altitude"])
 def test_export_is_hash_identical_and_tasks_have_required_topology(
     tmp_path, synthetic_source, layout
@@ -120,10 +136,14 @@ def test_export_is_hash_identical_and_tasks_have_required_topology(
     conversion = read_sidecar(first / "conversion.json", ConversionRecord)
     world = read_sidecar(first / "world.json", RoutingWorldRecord)
     task = read_sidecar(first / "task.json", RoutingTaskRecord)
+    reference = read_sidecar(first / "reference.json", RoutingReferenceRecord)
     assert source.rights.allowed_uses == ()
     assert conversion.parameters["scene_instances_sha256"] == a["scene_instances_sha256"]
     assert task.provenance == "derived"
     assert task.world_identity_sha256 == world.identity_sha256
+    assert reference.task_identity_sha256 == task.identity_sha256
+    assert reference.claim == "independently_validated"
+    assert len(json.loads((first / "route-storage.json").read_text())) == a["route_cells_6_axis"] + 1
     assert np.load(first / "occupancy.npy", allow_pickle=False).shape == world.extent.as_tuple()
     assert len(json.loads((first / "scene-instances.json").read_text())) == a["collision_boxes"]
 
