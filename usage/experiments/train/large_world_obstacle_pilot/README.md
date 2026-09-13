@@ -124,7 +124,8 @@ learned the obstacle task.
 per fixed stage (12 total), at most 12 collection attempts, two behavior-cloning
 epochs, and two PPO iterations. Each distinct fixed route is collected once;
 the validation episode is held out by episode. The run uses the radius-1
-voxel-encoder PPO settings from PR #217, except that its rollout batch is
+voxel-encoder PPO settings from PR #217, except that its unavailable custom
+reward is replaced with the built-in progress reward and its rollout batch is
 reduced to 1024 for the bounded smoke. Its 4608-step episode limit applies to
 every stage. Curriculum retention evaluation is scheduled after the smoke's
 two iterations, so this run tests pretraining and PPO execution, **not**
@@ -133,7 +134,7 @@ is `ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05`.
 Run from this worktree root with:
 
 ```powershell
-anysearch run usage/experiments/train/large_world_obstacle_pilot/experiment.yaml
+python -c "from theseo_anysearch.cli.main import app; app()" run usage/experiments/train/large_world_obstacle_pilot/experiment.yaml
 ```
 
 The fixture and run are governed only as feasibility work by the pinned
