@@ -3,8 +3,8 @@ description: >
   feasibility run, not a preregistered perception-encoder comparison.
 
 experiment:
-  name: large-world-six-gate-imitation-smoke
-  output_dir: ../../../../runtime/train/large_world_six_gate_imitation_smoke
+  name: gate-smoke
+  output_dir: ../../../../runtime/gs
   seed: 42
 
 env:
@@ -102,7 +102,7 @@ imitation:
     validation_fraction: 0.08333333333333333
     reuse_dataset: false
     curriculum_stages: all
-    dataset_dir: runtime/train/large_world_six_gate_imitation_smoke/dataset
+    dataset_dir: runtime/gs/dataset
   pretraining:
     epochs: 2
     batch_size: 256

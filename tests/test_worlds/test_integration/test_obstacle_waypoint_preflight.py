@@ -40,7 +40,7 @@ def test_large_world_training_smoke_config_matches_gate_curriculum() -> None:
     assert config.imitation.generation.episodes == 12
     assert config.env.max_steps == 4608
     assert config.experiment.output_dir == (
-        Path("runtime/train/large_world_six_gate_imitation_smoke").resolve()
+        Path("runtime/gs").resolve()
     )
     assert [
         route.model_dump(mode="python") for route in config.env.waypoint_curriculum.routes
