@@ -18,9 +18,14 @@ from theseo_anysearch.environments.action_spaces import (
 )
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
-from theseo_anysearch.rllib.trainer.waypoint_routes import sample_route
+from theseo_anysearch.rllib.trainer.waypoint_routes import route_distance, sample_route
 from theseo_anysearch.worlds.compiler import BoxSource, compile_world
 from theseo_anysearch.worlds.manifest import WorldExtent
+from usage.experiments.train.large_world_obstacle_pilot.curriculum import (
+    MAX_EPISODE_STEPS,
+    STAGE_LENGTHS,
+    gate_routes,
+)
 
 EXTENT = (4096, 2048, 512)
 ACTION_MODE = "discrete_18"
@@ -156,6 +161,22 @@ def preflight(
         env.reset(seed=409)
         world = env._rust_env
         planner = VoxelAStarOracle(env)
+        curriculum_stages = []
+        for stage, (length, route) in enumerate(zip(STAGE_LENGTHS, gate_routes())):
+            points = (route.start, *route.waypoints)
+            if route_distance(route, ACTION_MODE) != length:
+                raise ValueError("gate curriculum route has the wrong action length")
+            if any(world.world_occupied(point) for point in points) or not all(
+                direct_path_is_free(world, start, goal)
+                for start, goal in zip(points, points[1:])
+            ):
+                raise ValueError("gate curriculum route crosses occupied geometry")
+            curriculum_stages.append({
+                "stage": stage,
+                "route_length": length,
+                "route": route.model_dump(mode="python"),
+                "direct_path_free": True,
+            })
         results = []
         replay = None
         for wall_index in wall_indices:
@@ -245,6 +266,8 @@ def preflight(
             "action_mode": ACTION_MODE,
             "route_length": ROUTE_LENGTH,
             "episode_budget": MAX_PLANNED_STEPS,
+            "curriculum_max_steps": MAX_EPISODE_STEPS,
+            "curriculum_stages": curriculum_stages,
             "routes": results,
             "portal_crossings": portal_crossings,
             "astar_detour_replay": replay,
@@ -268,6 +291,10 @@ def main() -> None:
     print(json.dumps({
         "report": str(path),
         "world_identity": report["world_identity"],
+        "curriculum_lengths": [
+            stage["route_length"] for stage in report["curriculum_stages"]
+        ],
+        "curriculum_max_steps": report["curriculum_max_steps"],
         "routes": len(routes),
         "astar_feasible": sum(item["astar_feasible"] for item in routes),
         "within_episode_budget": sum(item["within_episode_budget"] for item in routes),

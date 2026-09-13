@@ -25,15 +25,34 @@ the gates remains. The compiler writes the pack and report only under ignored
 `runtime/obstacle-waypoint-pilot/`.
 The pack identity is
 `ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05`.
-This fixed-route pilot writes an empty candidate index: enumerating every
+This pilot writes an empty candidate index: enumerating every
 surface voxel on the full-section walls would exhaust memory, and no
 candidate-index-based spawn/goal provider is used here. Occupancy, rendering,
 and A* planning still use the complete compiled geometry.
 
-The preflight samples two deterministic 96-action curriculum routes at each of
-the 11 configured segment-distance stages (1, 3, ..., 19, 20) beside each of
-the six gates. Starts are four voxels before each wall at the common portal
-center `(Y=1024, Z=256)`. It checks every
+## Twelve-stage gate curriculum
+
+`curriculum.py` defines exactly 12 fixed, success-advanced routes. Stage `i`
+(zero-based) has `2^(i+1)` optimal actions: **2, 4, 8, 16, 32, 64, 128, 256,
+512, 1024, 2048, 4096**. Each starts at `(1, 1024, 256)` and follows the
+portal centers along X. The final route crosses all six gates. The native
+occupancy query rejects X=4096, so it ends its X traverse at 4095 and adds
+two Y actions after the final gate to reach exactly 4096 actions. The episode
+limit is 4608 actions, leaving 512 actions of slack; the curriculum cap itself
+is 4096. The preflight checks exact action lengths, source occupancy, and
+collision-free direct teacher actions. An integration test executes all 4096
+actions in the compiled-world environment and reaches the final goal.
+
+The trainer now accepts explicit `routes` under the existing
+`completion_mode: continue_route`. `gate_curriculum_settings()` returns the waypoint-curriculum
+config block. Evaluation may repeat a frozen route with separate environment
+seeds rather than trying to sample distinct routes that do not exist. This is
+configuration and validity evidence, not a training result.
+
+The separate stochastic feasibility probe still samples two deterministic
+96-action routes at each of 11 segment-distance settings (1, 3, ..., 19, 20)
+beside each of the six gates. Starts are four voxels before each wall at the
+common portal center `(Y=1024, Z=256)`. It checks every
 endpoint against compiled occupancy, searches every segment with the existing
 lazy A* planner, checks PR #217's 128-step episode budget, and checks the exact
 `shortest_actions` that the current `continue_route` imitation collector uses.
@@ -73,11 +92,11 @@ Use `[` and `]` to switch views; the global overview is enabled by default,
 and the regional view is centered near each portal. These are
 geometry-only previews, not recorded training episodes.
 
-This is a *large-extent, gate-local-route* test. The 96-action episodes sample
-near each gate, but no single episode traverses thousands of voxels. It
-validates gate-adjacent route feasibility, not long-distance navigation across
-the entire world or policy traversal of the whole portal sequence. The six
-short A* crossing probes establish portal connectivity only. During an earlier
+The stochastic 96-action probe samples near each gate, but does not validate
+long-distance policy navigation. The new 4096-action route validates the
+teacher and environment along the complete sequence, not that a policy can
+learn it. The six short A* crossing probes establish portal connectivity.
+During an earlier
 boundary-adjacent attempt, an A* query at
 the top Z coordinate raised a native out-of-bounds error. The retained fixture
 keeps routes away from that edge; boundary behavior needs its own follow-up.
@@ -85,12 +104,16 @@ keeps routes away from that edge; boundary behavior needs its own follow-up.
 This demonstrates why copying PR #217's YAML directly is unsafe. Its imitation
 collector's `_route_action_plan` takes the `continue_route` branch and calls
 `shortest_actions`; it does **not** invoke the configured `replanning_astar`
-provider in that branch. Behavior cloning still runs, but its teacher actions
-are not obstacle-aware. The existing geometry-pool A* reset-feasibility option
-does not validate these separately sampled compiled-world waypoint routes.
+provider in that branch. The new fixed routes are intentionally aligned with
+the gates, and preflight proves those direct actions collision-free. Random
+gate-adjacent routes are not generally safe for this collector. The existing
+geometry-pool A* reset-feasibility option does not validate separately sampled
+compiled-world waypoint routes.
 
-Before a training comparison, generate or reject routes using occupancy and
-bounded A* feasibility, and make the imitation collector execute the planned
-paths. Freeze separate scratch and imitation run configurations, seeds, pack
-identity, teacher budget, and evaluation routes. Do not treat this preflight as
-evidence that a policy has learned the obstacle task.
+The fixed gate-axis routes are validated for the existing direct-action teacher.
+If a comparison uses random routes instead, generate or reject them using
+occupancy and bounded A* feasibility, and make the imitation collector execute
+the planned paths. Before either training comparison, freeze separate scratch
+and imitation run configurations, seeds, pack identity, teacher budget, and
+evaluation routes. Do not treat this preflight as evidence that a policy has
+learned the obstacle task.

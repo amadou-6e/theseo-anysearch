@@ -5,7 +5,7 @@ from theseo_anysearch.settings.environment.action import ActionConfig, ActionExt
 from theseo_anysearch.settings.environment.agent import AgentConfig, HunterAndHuntedConfig
 from theseo_anysearch.settings.environment.environment import EnvConfig
 from theseo_anysearch.settings.environment.curriculum import (
-    WaypointAdvanceConfig, WaypointCurriculumConfig, WaypointDifficultyConfig,
+    FixedWaypointRouteConfig, WaypointAdvanceConfig, WaypointCurriculumConfig, WaypointDifficultyConfig,
     WaypointRouteLengthConfig, WaypointTrainingSamplingConfig,
 )
 from theseo_anysearch.settings.environment.geometry import GeometryConfig, GeometryProviderSelector, GeometryValidationConfig
@@ -19,5 +19,5 @@ from theseo_anysearch.settings.environment.scenarios import ScenarioConfig, Scen
 
 __all__ = [
     "ActionConfig", "ActionExtensionSelector", "AgentConfig", "EnvConfig", "GeometryConfig", "GeometryProviderSelector", "GeometryValidationConfig", "HunterAndHuntedConfig", "NestedFieldAccessMixin",
-    "LifecycleConfig", "LifecycleRuleSelector", "ObservationConfig", "RewardConfig", "RewardSelector", "ScenarioConfig", "ScenarioProviderSelector", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
+    "LifecycleConfig", "LifecycleRuleSelector", "ObservationConfig", "RewardConfig", "RewardSelector", "ScenarioConfig", "ScenarioProviderSelector", "FixedWaypointRouteConfig", "WaypointAdvanceConfig", "WaypointCurriculumConfig", "WaypointDifficultyConfig", "WaypointRouteLengthConfig", "WaypointTrainingSamplingConfig",
 ]

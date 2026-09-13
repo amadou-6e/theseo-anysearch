@@ -2,8 +2,21 @@
 
 import json
 
+from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
+from theseo_anysearch.models import WaypointCurriculumConfig
+from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
+    WaypointCurriculum,
+    configure_initial_waypoint_curriculum,
+)
+from theseo_anysearch.rllib.trainer.waypoint_routes import route_distance
+from theseo_anysearch.settings.environment import EnvConfig
+from usage.experiments.train.large_world_obstacle_pilot.curriculum import (
+    STAGE_LENGTHS,
+    gate_curriculum_settings,
+    gate_routes,
+)
 from usage.experiments.train.large_world_obstacle_pilot.preflight import (
     EXTENT,
     PORTAL_CENTER,
@@ -63,6 +76,41 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         EXTENT[1] * EXTENT[2] - side * side for _, side in PORTAL_WALLS
     )
     assert report["logical_cells"] == 4_294_967_296
+    assert [stage["route_length"] for stage in report["curriculum_stages"]] == list(STAGE_LENGTHS)
+    assert len(report["curriculum_stages"]) == 12
+    assert all(stage["direct_path_free"] for stage in report["curriculum_stages"])
+    assert report["curriculum_stages"][-1]["route"]["waypoints"][-1] == (4095, 1026, 256)
+    curriculum = WaypointCurriculum(
+        WaypointCurriculumConfig.model_validate(gate_curriculum_settings()),
+        {"extent": EXTENT, "max_steps": report["curriculum_max_steps"],
+         "action_mode": "discrete_18", "compiled_world_path": report["pack_path"]},
+    )
+    assert curriculum.maximum_stage == 11
+    assert curriculum.observe(1, 1)
+    assert [
+        route_distance(route, "discrete_18")
+        for route in curriculum.configured_route_stages({"extent": EXTENT})
+    ] == list(STAGE_LENGTHS)
+    configured_env = EnvConfig.model_validate({
+        "max_steps": report["curriculum_max_steps"],
+        "agent_count": 1,
+        "trail_mode": False,
+        "geometry": {"extent": EXTENT, "compiled_world_path": report["pack_path"]},
+        "observation": {"mode": "box", "box_radius": 1},
+        "action": {"mode": "discrete_18"},
+        "waypoint_curriculum": gate_curriculum_settings(),
+    })
+    runtime_config = configured_env.to_runtime_dict()
+    stage_env = VoxelEnv(runtime_config)
+    try:
+        configure_initial_waypoint_curriculum(stage_env, runtime_config)
+        stage_env.reset(seed=409)
+        for action in shortest_actions((1, 1024, 256), (3, 1024, 256), "discrete_18"):
+            _, _, terminated, truncated, info = stage_env.step(action)
+            assert not truncated
+        assert terminated and info["goal_reached"]
+    finally:
+        stage_env.close()
     assert max(source.maximum_inclusive[0] for source in SOURCES) == 3712
     assert max(source.maximum_inclusive[1] for source in SOURCES) > 1900
     assert max(source.maximum_inclusive[2] for source in SOURCES) > 400
@@ -114,6 +162,34 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         ) == 1
     finally:
         env.close()
+    final_route = gate_routes()[-1]
+    route_env = VoxelEnv({
+        "agent_count": 1,
+        "max_steps": report["curriculum_max_steps"],
+        "trail_mode": False,
+        "extent": EXTENT,
+        "compiled_world_path": report["pack_path"],
+        "obs_mode": "box",
+        "box_radius": 1,
+        "action_mode": "discrete_18",
+        "waypoint_route": final_route.model_dump(mode="python"),
+    })
+    try:
+        route_env.reset(seed=409)
+        steps = 0
+        for start, goal in zip(
+            (final_route.start, *final_route.waypoints[:-1]),
+            final_route.waypoints,
+        ):
+            for action in shortest_actions(start, goal, "discrete_18"):
+                _, _, terminated, truncated, info = route_env.step(action)
+                steps += 1
+                assert not info["collision"]
+                assert not truncated
+        assert steps == 4096
+        assert terminated and info["goal_reached"]
+    finally:
+        route_env.close()
     previews = write_preview_files(report, tmp_path / "previews")
     assert len(previews) == len(PORTAL_WALLS)
     preview = json.loads(previews[0].read_text(encoding="utf-8"))

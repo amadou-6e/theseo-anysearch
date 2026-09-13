@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from theseo_anysearch.models import WaypointCurriculumConfig, WaypointRouteLengthConfig
-from theseo_anysearch.rllib.trainer.curriculum.waypoint import CurriculumController
+from theseo_anysearch.rllib.trainer.curriculum.waypoint import (
+    CurriculumController,
+    build_route_evaluation_suite,
+)
 from theseo_anysearch.rllib.trainer.waypoint_curriculum import WaypointCurriculum
 from theseo_anysearch.rllib.trainer.waypoint_routes import (
     action_step_distance,
@@ -45,6 +48,51 @@ def route_environment() -> dict[str, object]:
 def test_route_length_modes_resolve_exactly():
     assert WaypointRouteLengthConfig(mode="fixed", distance=150).resolve(200) == 150
     assert WaypointRouteLengthConfig(mode="fraction", fraction=0.75).resolve(200) == 150
+
+
+def test_fixed_route_schedule_advances_and_repeats_routes_for_evaluation():
+    config = WaypointCurriculumConfig.model_validate({
+        "enabled": True,
+        "completion_mode": "continue_route",
+        "initial_start": [1, 4, 4],
+        "initial_goal": [3, 4, 4],
+        "routes": [
+            {"start": [1, 4, 4], "waypoints": [[3, 4, 4]]},
+            {"start": [1, 4, 4], "waypoints": [[5, 4, 4]]},
+        ],
+        "advance": {"mode": "success"},
+    })
+    env = {"extent": (8, 8, 8), "max_steps": 8, "action_mode": "discrete_18"}
+    curriculum = WaypointCurriculum(config, env)
+
+    assert curriculum.maximum_stage == 1
+    assert [route_distance(route, "discrete_18") for route in curriculum.configured_route_stages(env)] == [2, 4]
+    suite = build_route_evaluation_suite(curriculum, env, 0, 3, 100)
+    assert [seed for seed, _ in suite] == [100, 101, 102]
+    assert all(route == suite[0][1] for _, route in suite)
+    assert curriculum.observe(1, 1)
+    curriculum.advance_stage(1, curriculum.sample_stage(env))
+    assert curriculum.terminal
+    assert route_distance(curriculum.route_for_stage(env, 1), "discrete_18") == 4
+
+
+def test_fixed_route_schedule_rejects_missing_or_out_of_bounds_routes():
+    with pytest.raises(ValueError, match="requires route_length"):
+        WaypointCurriculumConfig.model_validate({
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [1, 4, 4],
+            "initial_goal": [3, 4, 4],
+        })
+    config = WaypointCurriculumConfig.model_validate({
+        "enabled": True,
+        "completion_mode": "continue_route",
+        "initial_start": [1, 4, 4],
+        "initial_goal": [9, 4, 4],
+        "routes": [{"start": [1, 4, 4], "waypoints": [[9, 4, 4]]}],
+    })
+    with pytest.raises(ValueError, match="outside the task extent"):
+        WaypointCurriculum(config, {"extent": (8, 8, 8)})
 
 
 @pytest.mark.parametrize(
