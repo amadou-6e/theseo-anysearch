@@ -136,8 +136,8 @@ def load_voxel_map(path: Path) -> tuple[np.ndarray, str, int]:
     if any(value <= 0 for value in dimensions) or math.prod(dimensions) > MAX_VOXELS:
         raise ValueError("voxel map extent is invalid or too large")
     grid = np.full(dimensions, header[0] == "rev_voxel", dtype=np.uint8)
-    seen: set[tuple[int, int, int]] = set()
     repeated_coordinates = 0
+    listed_value = int(header[0] == "voxel")
     for line_number, line in enumerate(lines[1:], start=2):
         tokens = line.split()
         if len(tokens) != 3:
@@ -150,10 +150,9 @@ def load_voxel_map(path: Path) -> tuple[np.ndarray, str, int]:
             not 0 <= position[axis] < dimensions[axis] for axis in range(3)
         ):
             raise ValueError(f"map line {line_number}: out-of-bounds voxel")
-        if position in seen:
+        if grid[position] == listed_value:
             repeated_coordinates += 1
-        seen.add(position)
-        grid[position] = int(header[0] == "voxel")
+        grid[position] = listed_value
     return grid, member.filename, repeated_coordinates
 
 
