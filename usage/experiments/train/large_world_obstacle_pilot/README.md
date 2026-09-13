@@ -142,3 +142,5 @@ The fixture and run are governed only as feasibility work by the pinned
 Runtime dataset, checkpoints, and logs remain ignored; record their IDs and
 hashes in the issue/PR after execution. A longer comparison requires a
 separately frozen compute budget and scratch control.
+The completed bounded run and its limitations are recorded in
+[SMOKE-RESULTS.md](SMOKE-RESULTS.md).
