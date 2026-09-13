@@ -36,6 +36,20 @@ def test_replay_verifier_requires_artifact_and_report_integrity(tmp_path):
         verifier.checked_report(tmp_path, env)
 
 
+def test_query_audit_rejects_hidden_label_tampering():
+    occupancy = torch.zeros(1, 33, 33, 33, dtype=torch.bool)
+    hidden = torch.zeros_like(occupancy)
+    paths, valid = data.paths("audit", data.crop(occupancy[0], 17).numpy(), data.crop(hidden[0], 17).numpy())
+    row = {"occupancy": occupancy, "hidden": hidden, "paths": torch.from_numpy(paths)[None],
+           "valid": torch.from_numpy(valid)[None], "ids": ["audit"], "parents": ["unique"],
+           "labels": torch.zeros(1, 32, dtype=torch.bool), "visible_hit": torch.zeros(1, 32, dtype=torch.bool),
+           "unknown_path": torch.zeros(1, 32, dtype=torch.bool)}
+    assert verifier.audit_queries({"fixture": row}) == 32
+    row["labels"][0, 0] = True
+    with pytest.raises(ValueError, match="query labels"):
+        verifier.audit_queries({"fixture": row})
+
+
 @pytest.mark.parametrize("family", data.FAMILIES)
 def test_generators_repeat_and_density(family):
     a = data.scene("fixture-geometry", family, .16)

@@ -29,6 +29,34 @@ def same_prediction(actual, saved):
     torch.testing.assert_close(actual, saved, rtol=1e-5, atol=1e-6)
 
 
+def audit_queries(rows):
+    """Check saved query labels and visible-only starts independently of the head."""
+    checked = 0
+    parents = set()
+    for row in rows.values():
+        if parents.intersection(row["parents"]) or len(set(row["parents"])) != len(row["parents"]):
+            raise ValueError("query corpus parent overlap")
+        parents.update(row["parents"])
+        occupancy = common.data.crop(row["occupancy"], 17)
+        hidden = common.data.crop(row["hidden"], 17)
+        for i, gid in enumerate(row["ids"]):
+            paths = row["paths"][i]; valid = row["valid"][i]
+            expected_paths, expected_valid = common.data.paths(gid, occupancy[i].numpy(), hidden[i].numpy())
+            if not np.array_equal(expected_paths, paths.numpy()) or not np.array_equal(expected_valid, valid.numpy()):
+                raise ValueError("query sampling replay mismatch")
+            x, y, z = paths.unbind(-1)
+            occupied = occupancy[i, x, y, z]; unknown = hidden[i, x, y, z]
+            expected = {"labels": (occupied & valid).any(1),
+                        "visible_hit": (occupied & ~unknown & valid).any(1),
+                        "unknown_path": (unknown & valid).any(1)}
+            if occupied[:, 0].any() or unknown[:, 0].any():
+                raise ValueError("query start is not visibly free")
+            if any(not torch.equal(value, row[name][i]) for name, value in expected.items()):
+                raise ValueError("collision query labels mismatch")
+            checked += len(paths)
+    return checked
+
+
 def load(output, report, name):
     if name not in report["artifacts"]:
         raise ValueError("untracked replay artifact")
@@ -110,6 +138,7 @@ def verify_inputs(report, rows, output, package_root, seed, deadline):
 
 
 def verify_transfer(report, rows, output, package_root, deadline):
+    queries_checked = audit_queries(rows)
     lock = json.loads((output / "selection-lock.json").read_text())
     expected_lock = {"identity_sha256": report["registration"]["identity_sha256"],
                      "thresholds": {f"{r['seed']}-{r['kind']}": r["threshold"] for r in report["calibration"]}}
@@ -172,7 +201,8 @@ def verify_transfer(report, rows, output, package_root, deadline):
                     "definite_errors": int(((row["visible_hit"] != row["labels"]) & definite).sum()), "definite_count": int(definite.sum())}
         if report["visible_grid_rule"][split] != expected:
             raise ValueError("visible rule mismatch")
-    return {"prediction_groups_replayed": replays, "encoder_batches_replayed": batches, "heads_verified": 12}
+    return {"prediction_groups_replayed": replays, "encoder_batches_replayed": batches,
+            "heads_verified": 12, "queries_replayed": queries_checked}
 
 
 def main():
