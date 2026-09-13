@@ -117,3 +117,27 @@ the planned paths. Before either training comparison, freeze separate scratch
 and imitation run configurations, seeds, pack identity, teacher budget, and
 evaluation routes. Do not treat this preflight as evidence that a policy has
 learned the obstacle task.
+
+## Bounded imitation-then-PPO smoke
+
+`experiment.yaml` freezes a small validation run on this pack: one demonstration
+per fixed stage (12 total), at most 12 collection attempts, two behavior-cloning
+epochs, and two PPO iterations. Each distinct fixed route is collected once;
+the validation episode is held out by episode. The run uses the radius-1
+voxel-encoder PPO settings from PR #217, except that its rollout batch is
+reduced to 1024 for the bounded smoke. Its 4608-step episode limit applies to
+every stage. Curriculum retention evaluation is scheduled after the smoke's
+two iterations, so this run tests pretraining and PPO execution, **not**
+12-stage policy mastery or curriculum advancement. The frozen world identity
+is `ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05`.
+Run from this worktree root with:
+
+```powershell
+anysearch run usage/experiments/train/large_world_obstacle_pilot/experiment.yaml
+```
+
+The fixture and run are governed only as feasibility work by the pinned
+[perception-encoder pilot spec](https://github.com/amadou-6e/specs/blob/a94227bc4ee484287a026f89ec6cd47d5ca16d26/projects/theseo-anysearch/python/perception-encoder-pilots.md).
+Runtime dataset, checkpoints, and logs remain ignored; record their IDs and
+hashes in the issue/PR after execution. A longer comparison requires a
+separately frozen compute budget and scratch control.

@@ -1,9 +1,11 @@
 """Obstacle-world waypoint preflight exercises the compiled regional backend."""
 
 import json
+from pathlib import Path
 
 from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+from theseo_anysearch.experiments.loader import load_experiment
 from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
 from theseo_anysearch.models import WaypointCurriculumConfig
 from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
@@ -27,6 +29,22 @@ from usage.experiments.train.large_world_obstacle_pilot.preflight import (
     wall_sources,
 )
 from usage.experiments.train.large_world_obstacle_pilot.preview import write_preview_files
+
+
+def test_large_world_training_smoke_config_matches_gate_curriculum() -> None:
+    config_path = Path(
+        "usage/experiments/train/large_world_obstacle_pilot/experiment.yaml"
+    )
+    config = load_experiment(config_path)
+    assert config.training.iterations == 2
+    assert config.imitation.generation.episodes == 12
+    assert config.env.max_steps == 4608
+    assert config.experiment.output_dir == (
+        Path("runtime/train/large_world_six_gate_imitation_smoke").resolve()
+    )
+    assert [
+        route.model_dump(mode="python") for route in config.env.waypoint_curriculum.routes
+    ] == gate_curriculum_settings()["routes"]
 
 
 def test_direct_waypoint_actions_detect_an_obstacle() -> None:
