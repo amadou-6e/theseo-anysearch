@@ -1,0 +1,85 @@
+{
+  "artifacts": {
+    "401": {
+      "encoder_state_sha256": "d2c2ed105bbbd97a1d564cae77d960ab5bead83fa212ad52dad1e5baa3bbd920",
+      "file": "seed401.pt",
+      "head_state_sha256": "185bc35b7c4149a2b760b723f42c5c96309e5783e0b57041b1083e800cd25592",
+      "sha256": "52ee93f19e985ffa8a71c537d61441edb4c0a89dad617187065a26a63407d65e",
+      "source_aggregation_state_sha256": "de01ae4c73113efe93a88008f3dd78ede4c06a1f3d68c6e9d5d5bb58502bc5cb",
+      "source_head_checkpoint_sha256": "94ec84cb6ba5de58e70b3f5bb9dc1a55b1e9dc3b14476f54be624cb2c1feb032",
+      "source_train_checkpoint_sha256": "5aedbd4bf6de00c4be64d44dbd71916cf96c02a8013f802522d5183ed6059b17",
+      "thresholds": {
+        "boundary_f1": 0.8,
+        "occupied_iou": 0.8
+      }
+    },
+    "402": {
+      "encoder_state_sha256": "05b539e2b9adba49e4f9eae9a55afad943a418aae5da9a152e718e47c7f574ef",
+      "file": "seed402.pt",
+      "head_state_sha256": "56769a70a3a7e91b5e22d1a57c86ae08359cbd47e824326b5f935b00d67eac60",
+      "sha256": "27dcb7be50b894f014521d3391132325d9f36a60aadd81cc341aae947282b8ad",
+      "source_aggregation_state_sha256": "576a8709e54ea50a69d0e691428ae57b1360fbeb579c46c0d3e1f6cd5b8980dd",
+      "source_head_checkpoint_sha256": "74fcc906c265930e30a8ea90656a0ade30b79aef47f662b7f475fa636b6f9706",
+      "source_train_checkpoint_sha256": "45936cf8fb6d16b83743c6ee731960b364bfdb46041eccb45832c1cf80940f9c",
+      "thresholds": {
+        "boundary_f1": 0.8,
+        "occupied_iou": 0.82
+      }
+    },
+    "403": {
+      "encoder_state_sha256": "21a147cca7ec58d7b0a05c09a50d2f3da90dfdff68c5b3b97cc2f03acf005e8e",
+      "file": "seed403.pt",
+      "head_state_sha256": "6cf4b98d76e28ffb64537e28f5b2e5c00ed3fceb713afd133fe6763af26e23db",
+      "sha256": "46432b3307bfc452d84793034088ed8bc02d783bf5079832ee705894ce269f00",
+      "source_aggregation_state_sha256": "af6b1b9f1f4b72ddec7a867ad5317013eac9758ac38f4e66225695f3e750e161",
+      "source_head_checkpoint_sha256": "0d361687c960da7d01f5fb65f9b59c3fb242d0b19a9d11e76bbc3163649687d7",
+      "source_train_checkpoint_sha256": "f2e24217b2575b28b0de430dc0034083ccfefc17b8d9d589c8a2e504b0d2ac77",
+      "thresholds": {
+        "boundary_f1": 0.81,
+        "occupied_iou": 0.84
+      }
+    }
+  },
+  "cap_seconds": 1800,
+  "contract": {
+    "default_seed": 401,
+    "dimension": 729,
+    "dtype": "float32",
+    "format": "compact-spatial-code-v1",
+    "head": "native_spatial_readout",
+    "input_side": 33,
+    "latent_centers": [
+      8,
+      24,
+      2
+    ],
+    "latent_shape": [
+      1,
+      9,
+      9,
+      9
+    ],
+    "normalization": "frozen_probe_channel_population_float64",
+    "promotion_eligible": false,
+    "seeds": [
+      401,
+      402,
+      403
+    ],
+    "status": "experimental",
+    "target_side": 17
+  },
+  "limits": [
+    "fixed_backbone",
+    "synthetic_local_geometry",
+    "native_head_only",
+    "narrow_random_field_f1_margin",
+    "not_navigation_or_topology_validated"
+  ],
+  "manifest_payload_sha256": "2ddf188ecedff4699dba434fec05a851c5649119c07dcf30c9d9afd1292d4ed1",
+  "run_id": "compact-package-v1-run1",
+  "source_commit": "65e6f8f3480d3caca5046d5b03391f14cf343dd7",
+  "source_report": "f7d65863a81c3c905d24649d78a4d2d55ce747ccc0c89d361feb796d4bfc7c10",
+  "spec_commit": "1eedc6ca419b4f62f9bb320d1e983d65cb8999ca",
+  "validation": "first_and_last_32_development_rows_each_seed"
+}
