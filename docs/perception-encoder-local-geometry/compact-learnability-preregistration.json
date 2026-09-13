@@ -1,0 +1,74 @@
+{
+  "identity_sha256": "4d4383a48db4f661fe157acc44425a2cd786419d5661a6bf8628f182a7cf8b7d",
+  "payload": {
+    "data": {
+      "arrays": {
+        "codes": "ecf46f8a438ffea030f42ca1a1731bfb38f0faf17781e665a0faf4737a0d9ef5",
+        "hidden": "ad1adcf92451fdba0c6ccc30cfe2731e9fbdfeca49391c97ed7bf1a1fcdfc58e",
+        "occupancy": "2820c89f5ae34fc89a01b486764fff4666a4ef6f387ca356f5db43c1e77d1183",
+        "targets": "707534f313f0ba89f4e12883e9e04fa46c785234d247620f2ed6ba0bfe20ff3a"
+      },
+      "ids": [
+        "compact-learnability-v1-scene-0",
+        "compact-learnability-v1-scene-1",
+        "compact-learnability-v1-scene-2",
+        "compact-learnability-v1-scene-3"
+      ],
+      "parents": [
+        "713463542acb4fb1ec5687ac3880559cdfd388a182d29f3b7f7425d98e1d5c77",
+        "3f8c1071eae270ead8154426c8cca87cb41998a0e8de5a979e022c21029788f5",
+        "b77d401a31502b3c933fe286b78544dfd0e66d482c77bc37428b4325235520c9",
+        "5279e5741afc9af2964c8b8dfb7e4768753d17ed11c05cea79b23ba0e0f5edda"
+      ]
+    },
+    "plan": {
+      "cap_seconds": 1800,
+      "checkpoints": [
+        128,
+        512,
+        1024,
+        2048
+      ],
+      "decoders": [
+        "plain32",
+        "fourier128"
+      ],
+      "fit_cap_seconds": 600,
+      "generalization_claim": false,
+      "overfit_f1": 0.97,
+      "overfit_iou": 0.95,
+      "queries": 256,
+      "sources": [
+        "oracle",
+        "table",
+        "encoder"
+      ],
+      "steps": 2048,
+      "study_id": "compact-learnability-v1"
+    },
+    "preparation_seconds": 0.07899999999790452,
+    "source_commit": "91d50ada82a382ca79b2ad6234fcef4db7a0edfe",
+    "source_encoders": [
+      {
+        "file_hash": "b8e0a500de367ca396c07cead0dc017584b4a258e5991b509e592c700f46ee29",
+        "path": "new-0/joint-0-encoder.pt",
+        "seed": 0,
+        "state_hash": "9e09028b97276c61aa67b987574dc3a588f567013f1fa35e329dceb06ff8d112"
+      },
+      {
+        "file_hash": "9df81cd47a7a33b8308af7836d7ac053f8478535c9db24ff4034fae6b730a88a",
+        "path": "new-1/joint-1-encoder.pt",
+        "seed": 1,
+        "state_hash": "00eec35733c031133de517f3e6151e33ba8f037291c31eff951a2896467dbced"
+      },
+      {
+        "file_hash": "2b563f4b8ce15e9e1fe0ee5b856c8d1c849142fd875e515275a042926b3bc413",
+        "path": "new-2/joint-2-encoder.pt",
+        "seed": 2,
+        "state_hash": "9050fd3eee78a9e9ca64da85368b1f473563ef056071cd8eb90eb1ff16f5a476"
+      }
+    ],
+    "spec_commit": "1bf1359b55b7c9aef2de1fe23a831e2e850009e0",
+    "spec_path": "projects/theseo-anysearch/python/perception-encoder-compact-learnability.md"
+  }
+}
