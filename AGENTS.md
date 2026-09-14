@@ -12,6 +12,22 @@ results do not enter `develop` before the preregistered comparisons are complete
 - `exp/perception-encoder` is the long-lived integration branch. It starts from
   `develop` and may periodically merge `develop` forward, but it is never merged
   wholesale back into `develop`.
+- This line is only for perception-encoder architectures, pretraining,
+  encoder-specific evaluation, and frozen-encoder heads. A task belongs here
+  only when its acceptance criteria directly test or deliver an encoder
+  capability. General-purpose geometry generation/loading, world providers,
+  routing or planning benchmarks, simulation, and replayer/CLI infrastructure
+  do not belong here merely because an encoder experiment might use them.
+- Develop reusable non-encoder capabilities through their own issues and PRs to
+  `develop`, or through a separately approved integration line. Encoder tasks
+  consume those capabilities from a reviewed `develop` commit or an exactly
+  identified external artifact; do not bury shared infrastructure in an
+  encoder task PR. Keep narrow encoder-specific fixtures on this line only
+  when their acceptance criteria and ownership are explicitly encoder-focused.
+- Treat already integrated non-encoder work as migration debt. Separate it in
+  reviewed follow-up work that preserves frozen evidence and updates dependent
+  task branches and PR bases. Do not force-push, rewrite public history, or
+  silently change experiment identities to make the branch appear clean.
 - Each scoped task has a GitHub issue and branch `exp/<issue-number>`. Create the branch
   from the latest `origin/exp/perception-encoder`, not directly from `develop`.
 - Every task issue and frozen run manifest must link the governing specs files at one
