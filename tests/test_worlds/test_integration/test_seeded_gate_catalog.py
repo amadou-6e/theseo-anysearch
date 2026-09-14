@@ -65,6 +65,13 @@ def test_candidate_training_config_has_distinct_world_and_run_identity() -> None
     assert candidate.env.geometry.compiled_world_path is None
 
 
+def test_catalog_contract_does_not_change_legacy_world_fingerprints() -> None:
+    assert "catalog_identity_sha256" not in world_contract({
+        "extent": [4096, 2048, 512],
+        "world_identity_sha256": "legacy-world",
+    })
+
+
 def test_catalog_integrity_seed_mapping_and_runtime_routes(catalog_path: Path) -> None:
     catalog = load_catalog(catalog_path)
     assert catalog.for_seed(0).identity_sha256 != catalog.for_seed(1).identity_sha256

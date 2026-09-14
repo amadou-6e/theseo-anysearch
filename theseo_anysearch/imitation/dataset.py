@@ -375,7 +375,7 @@ def collect_demonstrations(
         source_origin=tuple(normalized_world["source_origin"]),
         world_extent=tuple(normalized_world["extent"]),
         world_identity_sha256=normalized_world["identity_sha256"],
-        world_catalog_sha256=normalized_world["catalog_identity_sha256"],
+        world_catalog_sha256=normalized_world.get("catalog_identity_sha256"),
         episode_world_identities=(accepted_world_identities or None),
         generation_provider_name=imitation.generation.provider.name,
         generation_provider_parameters=imitation.generation.provider.parameters,
@@ -461,7 +461,7 @@ def load_compatible_dataset(
 def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, Any]:
     """Recover the explicit world contract persisted beside a dataset."""
 
-    return {
+    contract = {
         "schema_version": manifest.world_schema_version,
         "coordinate_type": manifest.coordinate_type,
         "storage_coordinate_convention": manifest.storage_coordinate_convention,
@@ -470,5 +470,7 @@ def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, A
         "source_origin": list(manifest.source_origin),
         "extent": list(manifest.world_extent),
         "identity_sha256": manifest.world_identity_sha256,
-        "catalog_identity_sha256": manifest.world_catalog_sha256,
     }
+    if manifest.world_catalog_sha256 is not None:
+        contract["catalog_identity_sha256"] = manifest.world_catalog_sha256
+    return contract
