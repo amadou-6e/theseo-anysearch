@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from theseo_anysearch.environments.routing_manifests import (
     validate_task_endpoints,
     verify_artifact,
 )
+from theseo_anysearch.environments.shape_collision import Sphere, swept_voxel_segment_clear
 
 
 def sha256(path: Path) -> str:
@@ -43,38 +43,6 @@ class VerifiedBundle:
     split: RoutingSplitRecord
     dataset_identity_sha256: str
     occupancy: np.ndarray
-
-
-def _segment_clear(grid: np.ndarray, a: tuple[int, int, int], b: tuple[int, int, int], radius: float) -> bool:
-    """Exact axis-segment distance to nearby occupied voxel cubes and solid bounds."""
-
-    shape = grid.shape
-    if any(
-        min(a[i], b[i]) - radius <= -0.5 or max(a[i], b[i]) + radius >= shape[i] - 0.5
-        for i in range(3)
-    ):
-        return False
-    axis = next(i for i in range(3) if a[i] != b[i])
-    margin = math.ceil(radius + 0.5)
-    lower = [max(0, min(a[i], b[i]) - margin) for i in range(3)]
-    upper = [min(shape[i], max(a[i], b[i]) + margin + 1) for i in range(3)]
-    region = grid[tuple(slice(x, y) for x, y in zip(lower, upper))]
-    occupied = np.argwhere(region != 0)
-    if not len(occupied):
-        return True
-    occupied += np.asarray(lower)
-    distances = np.zeros((len(occupied), 3), dtype=np.float64)
-    for i in range(3):
-        if i == axis:
-            low, high = sorted((a[i], b[i]))
-            distances[:, i] = np.maximum.reduce((
-                occupied[:, i] - 0.5 - high,
-                low - occupied[:, i] - 0.5,
-                np.zeros(len(occupied)),
-            ))
-        else:
-            distances[:, i] = np.maximum(np.abs(occupied[:, i] - a[i]) - 0.5, 0)
-    return bool(np.all(np.sum(distances**2, axis=1) > radius**2))
 
 
 def _read_route(root: Path, reference: RoutingReferenceRecord) -> tuple[tuple[int, int, int], ...]:
@@ -130,9 +98,10 @@ def load_bundle(root: Path, *, use: str | None = None) -> VerifiedBundle:
         if route[0] != task.start_storage or route[-1] != task.goal_storage:
             raise ValueError("route endpoints disagree with task")
         radius = task.body_radius_m / world.frame.meters_per_voxel
+        shape = Sphere(radius)
         for a, b in zip(route, route[1:]):
             if sum(abs(x - y) for x, y in zip(a, b)) != 1:
                 raise ValueError("route contains a non-six-axis step")
-            if not _segment_clear(occupancy, a, b, radius):
+            if not swept_voxel_segment_clear(occupancy, a, b, shape=shape):
                 raise ValueError("route collides with occupied voxel cubes or world bounds")
     return VerifiedBundle(root, source, conversion, world, tasks, references, split, identity, occupancy)
