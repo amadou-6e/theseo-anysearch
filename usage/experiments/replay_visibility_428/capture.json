@@ -1,0 +1,31 @@
+{
+  "issue": 428,
+  "source_sha": "e5fff890b620827ce86e65838a3024f522335f21",
+  "trajectory_sha256": "FDA5337188B31AD10A50F0218B7C597DD555710F3B65D213EE9288D02DFB221A",
+  "world_identity_sha256": "ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05",
+  "binary_sha256": "3402C6E0A91465C79A8DB14F2E695D633017120F54AA07B1A9CF81F54A32D391",
+  "step": 3711,
+  "cursor": [3713, 1024, 256],
+  "wall_x": 3712,
+  "window_pixels": [1216, 799],
+  "pixel_roi": [700, 380, 780, 460],
+  "before": {
+    "file": "before.png",
+    "source_sha": "46507fd5213191b9b98f214554c0bfb6729e7a1f",
+    "sha256": "2F23D67FFFFA4466EB4964F6230B18AF0A885E79B6E6FE222B7A3D6A25716379",
+    "yellow_pixels": 0
+  },
+  "normal": {
+    "file": "after.png",
+    "sha256": "E2ABBFB74951F8033C5C931FEE92ACC706971454DBC79099D066D1FB43702DDE",
+    "yellow_pixels": 528,
+    "gray_pixels": 5967
+  },
+  "xray": {
+    "file": "xray.png",
+    "sha256": "B734E132E6584B49508662B39FCB1EB87589A0E9B3E8250B99BAA374178F0F14",
+    "yellow_pixels": 528,
+    "gray_pixels": 5967
+  },
+  "fixed": true
+}
