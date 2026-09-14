@@ -5,6 +5,9 @@ Status: source adapter and audit, based on integrated #411 at
 training corpus or an independent topology-family holdout. Governing roadmap:
 `amadou-6e/specs@1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
 Issue #414 records the earlier review-stage stacking deviation.
+This document describes the original #414 integration; the
+[#426 successor](cavedrone_route_witness.md) adds route witnesses and a
+six-seed preparation slice without changing the original evidence.
 
 ## Source and rights
 
@@ -41,8 +44,9 @@ exploration start/return mission. The fixed-goal selection requires at least
 separate goal with at least 2 m y displacement. Missing strata are recorded
 as rejections. Clearance conservatively bounds a spherical body against the
 occupied voxel cubes, map boundary and every six-neighbor centerline edge.
-No route witness, continuous controller validation or sensor observation is
-claimed.
+The original #414 export claimed no route witness, continuous controller
+validation or sensor observation. The #426 successor adds a voxel-cube
+collision-replayed route witness, not controller or sensor validation.
 
 ## Local source census
 

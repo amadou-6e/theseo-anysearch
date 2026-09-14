@@ -22,12 +22,14 @@ from theseo_anysearch.environments.routing_manifests import (
     SourceRecord,
     SplitMember,
     write_sidecar,
+    read_sidecar,
 )
 from theseo_anysearch.garden.external_routing import (
     axis_segment_clear,
     bind_matched_controls,
     compact_report,
     load_imported_world,
+    load_imported_worlds,
     prepare_routing_rows,
     read_prepared_dataset,
     synthetic_observation,
@@ -329,3 +331,55 @@ def test_frozen_feature_extraction_uses_observed_channels_only(tmp_path):
     model.aggregation.project[0].weight.requires_grad_(True)
     with pytest.raises(ValueError, match="entirely frozen"):
         extract_frozen_features(prepared, model)
+
+
+def test_numbered_tasks_share_one_world_and_keep_distinct_queries(tmp_path):
+    export, source_root = _fixture(tmp_path, "multiple")
+    task = read_sidecar(export / "task.json", RoutingTaskRecord)
+    reference = read_sidecar(export / "reference.json", RoutingReferenceRecord)
+    (export / "task.json").rename(export / "task-00.json")
+    (export / "reference.json").rename(export / "reference-00.json")
+    second_task = task.model_copy(update={"goal_storage": (18, 12, 12)})
+    second_route_path = export / "route-second.json"
+    second_route_path.write_text(json.dumps([[12, 12, 12], [18, 12, 12]]), encoding="utf-8")
+    second_reference = reference.model_copy(update={
+        "task_identity_sha256": second_task.identity_sha256,
+        "route_artifact": ArtifactRef(relative_path=second_route_path.name, sha256=_sha(second_route_path)),
+    })
+    write_sidecar(export / "task-01.json", second_task)
+    write_sidecar(export / "reference-01.json", second_reference)
+    imported = load_imported_worlds(export, source_root=source_root)
+    assert len(imported) == 2
+    prepared = prepare_routing_rows(
+        imported, dataset_id="fixture-multiple",
+        partitions={"multiple": "test"},
+    )
+    backward = prepare_routing_rows(
+        tuple(reversed(imported)), dataset_id="fixture-multiple",
+        partitions={"multiple": "test"},
+    )
+    assert prepared.dataset_identity_sha256 == backward.dataset_identity_sha256
+    assert prepared.query_identity_sha256 == backward.query_identity_sha256
+    assert len(prepared.split.members) == 1
+    assert len(prepared.rows) == 48
+    with pytest.raises(ValueError, match="multi-task"):
+        load_imported_world(export, source_root=source_root)
+
+
+def test_cli_plan_can_resolve_assets_from_declared_root(tmp_path):
+    export, source_root = _fixture(tmp_path, "asset-root-scene")
+    plan_dir = tmp_path / "configuration"
+    plan_dir.mkdir()
+    plan = plan_dir / "plan.json"
+    plan.write_text(json.dumps({
+        "governing_spec_sha": "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b",
+        "dataset_id": "asset-root-test",
+        "imports": [{
+            "export": export.name,
+            "source_root": source_root.name,
+            "partition": "test",
+        }],
+    }), encoding="utf-8")
+    report = run_plan(plan, tmp_path / "prepared-asset-root", asset_root=tmp_path)
+    assert report["rows"] == 24
+    assert report["split_coverage"] == "incomplete_not_fit_ready"
