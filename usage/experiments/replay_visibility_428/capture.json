@@ -1,31 +1,50 @@
 {
   "issue": 428,
-  "source_sha": "e5fff890b620827ce86e65838a3024f522335f21",
+  "source_sha": "c422b17a1d122596e1ce7a6d1b82d5aeaa1e02d8",
   "trajectory_sha256": "FDA5337188B31AD10A50F0218B7C597DD555710F3B65D213EE9288D02DFB221A",
   "world_identity_sha256": "ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05",
-  "binary_sha256": "3402C6E0A91465C79A8DB14F2E695D633017120F54AA07B1A9CF81F54A32D391",
-  "step": 3711,
-  "cursor": [3713, 1024, 256],
-  "wall_x": 3712,
+  "binary_sha256": "DE626E37E8E70C3D54EFE42B67FD93FAE1E57CDAD7D6497446E42372376E3235",
   "window_pixels": [1216, 799],
   "pixel_roi": [700, 380, 780, 460],
+  "show_trail_control_present": false,
   "before": {
     "file": "before.png",
     "source_sha": "46507fd5213191b9b98f214554c0bfb6729e7a1f",
     "sha256": "2F23D67FFFFA4466EB4964F6230B18AF0A885E79B6E6FE222B7A3D6A25716379",
     "yellow_pixels": 0
   },
-  "normal": {
-    "file": "after.png",
-    "sha256": "E2ABBFB74951F8033C5C931FEE92ACC706971454DBC79099D066D1FB43702DDE",
-    "yellow_pixels": 528,
-    "gray_pixels": 5967
+  "agent_front": {
+    "step": 3711,
+    "cursor": [3713, 1024, 256],
+    "normal": {
+      "file": "after.png",
+      "sha256": "920A4FE9496E5D74CBEE763B20F8E045CA3BD1E50854143945C73F8764DAF90D",
+      "yellow_pixels": 523,
+      "badge_pixels": 0
+    },
+    "diagnostic": {
+      "file": "agent-front-diagnostic.png",
+      "sha256": "5DB7097E143351A8C25419B61A896A96931674BA62E1960DA6E9B8D8E9059C45",
+      "yellow_pixels": 561,
+      "badge_pixels": 250
+    }
   },
-  "xray": {
-    "file": "xray.png",
-    "sha256": "B734E132E6584B49508662B39FCB1EB87589A0E9B3E8250B99BAA374178F0F14",
-    "yellow_pixels": 528,
-    "gray_pixels": 5967
+  "wall_front": {
+    "step": 3713,
+    "cursor": [3715, 1024, 256],
+    "normal": {
+      "file": "wall-front-normal.png",
+      "sha256": "9527107C31E04A5F00D23477392187A1409B84D8904ED7365AA6CCBE3D9D0872",
+      "yellow_pixels": 0,
+      "muted_yellow_pixels": 0,
+      "badge_pixels": 0
+    },
+    "diagnostic": {
+      "file": "wall-front-diagnostic.png",
+      "sha256": "744B6FB14BA1D16E39405F2A10284CFC395A0109979D2619C2BA731B5667A7D1",
+      "yellow_pixels": 257,
+      "badge_pixels": 250
+    }
   },
-  "fixed": true
+  "all_four_states_pass": true
 }
