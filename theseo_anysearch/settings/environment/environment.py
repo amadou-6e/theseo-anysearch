@@ -188,7 +188,7 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                 else None
             ),
             "compiled_world_catalog_path": (
-                str(self.geometry.compiled_world_catalog_path)
+                str(self.geometry.compiled_world_catalog_path.resolve())
                 if self.geometry.compiled_world_catalog_path is not None
                 else None
             ),

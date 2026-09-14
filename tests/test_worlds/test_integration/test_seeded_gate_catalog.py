@@ -63,6 +63,7 @@ def test_candidate_training_config_has_distinct_world_and_run_identity() -> None
     assert candidate.imitation.generation.episodes == 128
     assert candidate.env.geometry.compiled_world_catalog_path is not None
     assert candidate.env.geometry.compiled_world_path is None
+    assert Path(candidate.env.to_runtime_dict()["compiled_world_catalog_path"]).is_absolute()
 
 
 def test_catalog_contract_does_not_change_legacy_world_fingerprints() -> None:
