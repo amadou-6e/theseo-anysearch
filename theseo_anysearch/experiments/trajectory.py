@@ -386,7 +386,7 @@ class _VoxelEpisodeState:
 
         configure_initial_waypoint_curriculum(env, env_config)
         obs, initial_info = env.reset(seed=seed)
-        world = _compiled_world_reference(env_config)
+        world = _compiled_world_reference(getattr(env, "_config", env_config))
         init_filled: list[tuple[int, int, int]] = []
         start_pos: tuple[int, int, int] | None = None
         goal_pos: tuple[int, int, int] | None = None
@@ -641,7 +641,7 @@ def collect_heuristic_episode(
     )
 
     rust_env = env._rust_env
-    world = _compiled_world_reference(env_config)
+    world = _compiled_world_reference(getattr(env, "_config", env_config))
     init_filled = [] if world is not None else [
         (int(x), int(y), int(z))
         for x, y, z in rust_env.filled_voxels()

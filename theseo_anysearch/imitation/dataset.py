@@ -70,6 +70,7 @@ def _route_action_plan(
         env_config.get(key)
         for key in (
             "compiled_world_path",
+            "compiled_world_catalog_path",
             "stl_path",
             "stl_paths",
             "geometry_boxes",
@@ -126,6 +127,7 @@ def dataset_fingerprint(
     # Tune trial's rollout seed offset cannot affect collected examples.
     normalized_env.pop("seed", None)
     normalized_world = world_contract(env_config)
+    normalized_env.pop("compiled_world_catalog_path", None)
     normalized_env.pop("grid_size", None)
     normalized_env.pop("extent", None)
     normalized_env["extent"] = normalized_world["extent"]
@@ -203,6 +205,7 @@ def collect_demonstrations(
     actions: list[int | tuple[int, int, int]] = []
     episode_ids: list[int] = []
     accepted_seeds: list[int] = []
+    accepted_world_identities: list[str] = []
     teacher_successes = 0
     attempts = 0
     used_routes: set[tuple[Any, ...]] = set()
@@ -244,9 +247,13 @@ def collect_demonstrations(
                     "could not generate a unique waypoint route for demonstration collection"
                 )
             env.set_waypoint_curriculum(
-                [route.model_dump(mode="python")],
+                ([{"seeded_catalog_stage": stage_index}]
+                 if env_config.get("compiled_world_catalog_path")
+                 else [route.model_dump(mode="python")]),
                 [1.0],
             )
+            if env_config.get("compiled_world_catalog_path"):
+                seed = route_seed
         observation, _ = env.reset(seed=seed)
         success = False
         episode_observations: list[np.ndarray] = []
@@ -308,6 +315,8 @@ def collect_demonstrations(
             actions.extend(episode_actions)
             episode_ids.extend([episode_id] * len(episode_actions))
             accepted_seeds.append(seed)
+            if env_config.get("compiled_world_catalog_path"):
+                accepted_world_identities.append(env._active_world_identity)
             teacher_successes += int(success)
             if route_curriculum is not None:
                 stage_episode_counts[stage_index] += 1
@@ -366,6 +375,8 @@ def collect_demonstrations(
         source_origin=tuple(normalized_world["source_origin"]),
         world_extent=tuple(normalized_world["extent"]),
         world_identity_sha256=normalized_world["identity_sha256"],
+        world_catalog_sha256=normalized_world["catalog_identity_sha256"],
+        episode_world_identities=(accepted_world_identities or None),
         generation_provider_name=imitation.generation.provider.name,
         generation_provider_parameters=imitation.generation.provider.parameters,
         requested_episodes=imitation.generation.episodes,
@@ -459,4 +470,5 @@ def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, A
         "source_origin": list(manifest.source_origin),
         "extent": list(manifest.world_extent),
         "identity_sha256": manifest.world_identity_sha256,
+        "catalog_identity_sha256": manifest.world_catalog_sha256,
     }
