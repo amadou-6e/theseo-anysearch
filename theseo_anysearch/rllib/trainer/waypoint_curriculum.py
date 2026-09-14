@@ -88,6 +88,7 @@ class WaypointCurriculum:
         if config.initial_start is None:
             raise ValueError("waypoint curriculum requires an initial start")
         self.config = config
+        self._seeded_catalog = bool(env_config and env_config.get("compiled_world_catalog_path"))
         self._initial_route: WaypointRoute | None = None
         if config.completion_mode == "continue_route":
             if env_config is None:
@@ -106,10 +107,14 @@ class WaypointCurriculum:
     def stages(self) -> list[Any]:
         """Return the initial stage followed by every visited stage."""
         if self._initial_route is not None:
-            return [self._initial_route.model_dump(mode="python")] + [
+            stages = [self._initial_route.model_dump(mode="python")] + [
                 {"start": transition.start, "waypoints": transition.waypoints}
                 for transition in self.state.transitions
             ]
+            if self._seeded_catalog:
+                for index, stage in enumerate(stages):
+                    stage["seeded_catalog_stage"] = index
+            return stages
         initial = (self.config.initial_start, self.config.initial_goal)
         assert initial[0] is not None and initial[1] is not None
         return [(initial[0], initial[1])] + [
@@ -302,6 +307,17 @@ class WaypointCurriculum:
         if self.config.routes:
             if not 0 <= stage < len(self.config.routes):
                 raise IndexError("fixed route stage is out of range")
+            catalog_path = env_config.get("compiled_world_catalog_path")
+            if catalog_path:
+                from theseo_anysearch.worlds.seeded_catalog import load_catalog
+
+                catalog = load_catalog(catalog_path)
+                return catalog.route_for_stage(
+                    stage, self.config.seed + stage if seed is None else seed,
+                    variation_radius=(self.config.fixed_route_variation_radius
+                                      if seed is not None else 0),
+                    action_mode=str(env_config.get("action_mode", "discrete_18")),
+                )
             route = WaypointRoute.model_validate(
                 self.config.routes[stage].model_dump(mode="python")
             )

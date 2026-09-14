@@ -137,6 +137,9 @@ class GeometryConfig(BaseModel):
     compiled_world_path: Path | None = Field(
         None, description="Validated compiled-world directory loaded lazily by each worker."
     )
+    compiled_world_catalog_path: Path | None = Field(
+        None, description="Immutable seed-selected compiled-world catalog for episode variants."
+    )
     world_identity_sha256: str | None = Field(
         None,
         pattern=r"^[0-9a-f]{64}$",
