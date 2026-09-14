@@ -57,8 +57,8 @@ def test_candidate_training_config_has_distinct_world_and_run_identity() -> None
         "usage/experiments/train/large_world_obstacle_pilot/"
         "seeded_portals/experiment.yaml"
     ))
-    assert candidate.experiment.name == "gate-seeded-portals"
-    assert candidate.training.iterations == 400
+    assert candidate.experiment.name == "gate-seeded-portals-100"
+    assert candidate.training.iterations == 100
     assert candidate.imitation.pretraining.epochs == 20
     assert candidate.imitation.generation.episodes == 128
     assert candidate.env.geometry.compiled_world_catalog_path is not None

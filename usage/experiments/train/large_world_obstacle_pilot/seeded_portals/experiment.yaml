@@ -1,10 +1,10 @@
 description: >
-  Candidate new-run configuration for seed-selected staggered gate worlds.
-  Methodology and run identity are separate from the completed #409 baseline.
+  Preregistered 100-iteration rerun of the original-budget setup on the
+  seed-selected staggered gate catalog. Separate from completed #409.
 
 experiment:
-  name: gate-seeded-portals
-  output_dir: ../../../../../runtime/gsp
+  name: gate-seeded-portals-100
+  output_dir: ../../../../../runtime/gsp100
   seed: 42
 
 env:
@@ -61,7 +61,7 @@ training:
   algorithm: ppo
   model: voxel_encoder
   runner: local
-  iterations: 400
+  iterations: 100
   checkpoint_interval: 50
   require_gpu: true
   num_gpus: 0.3333333333333333
@@ -102,9 +102,9 @@ imitation:
   collection:
     seed_start: 1000
     validation_fraction: 0.1
-    reuse_dataset: false
+    reuse_dataset: true
     curriculum_stages: all
-    dataset_dir: runtime/gsp/dataset
+    dataset_dir: runtime/gsp100/dataset
   pretraining:
     epochs: 20
     batch_size: 256
