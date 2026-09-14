@@ -1241,7 +1241,13 @@ fn draw_exposed_face(
             (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
         )
     };
-    painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+    // Adjacent face quads otherwise leave anti-aliased seams through which an
+    // agent painted behind an opaque wall can faintly show. A same-color edge
+    // closes those seams without changing front/back depth ordering.
+    painter.add(Shape::convex_polygon(points.clone(), color, Stroke::new(1.5, color)));
+    // Restore a subtle voxel grid on top of the opaque backing, rather than
+    // using transparent anti-aliasing gaps as the grid line.
+    painter.add(Shape::closed_line(points, Stroke::new(0.35, Color32::from_gray(95))));
 }
 
 fn draw_cursor(painter: &egui::Painter, coordinate: StorageCoord,

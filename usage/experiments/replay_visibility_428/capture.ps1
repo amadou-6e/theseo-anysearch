@@ -55,12 +55,14 @@ function Count-AgentPixels([string]$Path) {
     $bitmap = [System.Drawing.Bitmap]::new($Path)
     try {
         $yellow = 0
+        $mutedYellow = 0
         $gray = 0
         $badge = 0
         for ($x = 700; $x -le 780; $x++) {
             for ($y = 380; $y -le 460; $y++) {
                 $c = $bitmap.GetPixel($x, $y)
                 if ($c.R -gt 210 -and $c.G -gt 180 -and $c.B -lt 80) { $yellow++ }
+                if ($c.R -gt ($c.B + 15) -and $c.G -gt ($c.B + 10)) { $mutedYellow++ }
                 if ($c.R -gt 85 -and $c.R -lt 170 -and
                     [Math]::Abs([int]$c.R - [int]$c.G) -lt 15 -and
                     [Math]::Abs([int]$c.G - [int]$c.B) -lt 25) { $gray++ }
@@ -72,7 +74,7 @@ function Count-AgentPixels([string]$Path) {
                 if ($c.R -gt 220 -and $c.G -gt 170 -and $c.B -lt 130) { $badge++ }
             }
         }
-        return [pscustomobject]@{ yellow = $yellow; gray = $gray; badge = $badge }
+        return [pscustomobject]@{ yellow = $yellow; muted_yellow = $mutedYellow; gray = $gray; badge = $badge }
     } finally { $bitmap.Dispose() }
 }
 
@@ -87,7 +89,7 @@ if ($trajectoryHash -ne 'FDA5337188B31AD10A50F0218B7C597DD555710F3B65D213EE9288D
 }
 $episode = Get-Content -LiteralPath $trajectoryPath -Raw | ConvertFrom-Json
 $stepIndex = if ($View -eq 'AgentFront') { 3711 } else { 3713 }
-$expectedX = if ($View -eq 'AgentFront') { 3713 } else { 3715 }
+$expectedX = $stepIndex + 2
 $step = $episode.episode.steps[$stepIndex]
 if ($step.cursor_x -ne $expectedX -or $step.cursor_y -ne 1024 -or $step.cursor_z -ne 256) {
     throw "Step $stepIndex cursor does not match the frozen gate-crossing frame."
@@ -117,7 +119,11 @@ try {
     Click-Replay $window 144 346
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}')
-    [System.Windows.Forms.SendKeys]::SendWait("$stepIndex{ENTER}")
+    if ($View -eq 'AgentFront') {
+        [System.Windows.Forms.SendKeys]::SendWait('3711{ENTER}')
+    } else {
+        [System.Windows.Forms.SendKeys]::SendWait('3713{ENTER}')
+    }
     Start-Sleep -Milliseconds 300
 
     # At AgentFront, orbit toward +X: the final gate wall is behind the agent.
@@ -171,13 +177,13 @@ try {
         wall_x = 3712
         window_pixels = @(1216, 799)
         pixel_roi = @(700, 380, 780, 460)
-        normal = [ordered]@{ sha256 = (Get-FileHash $normalPath -Algorithm SHA256).Hash; yellow_pixels = $normal.yellow; gray_pixels = $normal.gray; badge_pixels = $normal.badge }
-        diagnostic = [ordered]@{ sha256 = (Get-FileHash $diagnosticPath -Algorithm SHA256).Hash; yellow_pixels = $diagnostic.yellow; gray_pixels = $diagnostic.gray; badge_pixels = $diagnostic.badge }
+        normal = [ordered]@{ sha256 = (Get-FileHash $normalPath -Algorithm SHA256).Hash; yellow_pixels = $normal.yellow; muted_yellow_pixels = $normal.muted_yellow; gray_pixels = $normal.gray; badge_pixels = $normal.badge }
+        diagnostic = [ordered]@{ sha256 = (Get-FileHash $diagnosticPath -Algorithm SHA256).Hash; yellow_pixels = $diagnostic.yellow; muted_yellow_pixels = $diagnostic.muted_yellow; gray_pixels = $diagnostic.gray; badge_pixels = $diagnostic.badge }
         fixed = if ($View -eq 'AgentFront') {
             $normal.yellow -ge 300 -and $diagnostic.yellow -ge 300 -and $normal.gray -gt 4000 -and
                 $normal.badge -eq 0 -and $diagnostic.badge -ge 20
         } else {
-            $normal.yellow -le 50 -and $diagnostic.yellow -ge 150 -and $normal.gray -gt 4000 -and
+            $normal.yellow -eq 0 -and $normal.muted_yellow -eq 0 -and $diagnostic.yellow -ge 150 -and $normal.gray -gt 4000 -and
                 $normal.badge -eq 0 -and $diagnostic.badge -ge 20
         }
     }
