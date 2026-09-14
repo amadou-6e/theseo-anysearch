@@ -35,6 +35,7 @@ from theseo_anysearch.worlds.manifest import WorldExtent
 
 MAX_MAP_BYTES = 64 * 1024 * 1024
 MAX_VOXELS = 100_000_000
+GOVERNING_SPEC_SHA = "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b"
 NEIGHBORS_26 = tuple(
     (dx, dy, dz)
     for dx in (-1, 0, 1)
@@ -409,6 +410,7 @@ def run_diagnostic_slice(
         )
     report = {
         "status": "technical_diagnostic_not_comparable_to_published_scores",
+        "governing_spec_sha": GOVERNING_SPEC_SHA,
         "search_semantics": "26-neighbor Euclidean cost, no diagonal through filled corners or edges; voxel-distance heuristic",
         "opaque_scenario_columns": "preserved in parsed queries; upstream meanings unverified",
         "source_sha256": {map_zip.name: sha256_file(map_zip), scenarios.name: sha256_file(scenarios)},

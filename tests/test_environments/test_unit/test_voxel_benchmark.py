@@ -121,6 +121,7 @@ def test_end_to_end_compiles_world_and_records_noncomparable_run(tmp_path):
     assert report["world_pack_identity"]
     assert report["rights_status"] == "unreviewed"
     assert report["status"].startswith("technical_diagnostic")
+    assert report["governing_spec_sha"] == "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b"
     assert report["peak_process_memory_bytes"] > 0
     assert report["evaluated_queries"][0]["task_identity_sha256"]
 
