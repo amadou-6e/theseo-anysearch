@@ -478,6 +478,7 @@ def export_scene(
         "route_sha256": route_sha,
         "source_rights_status": source.rights.status,
         "claim": "derived_static_collision_grid_not_native_simulator",
+        "governing_spec_sha": "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b",
     }
     (output / "export-report.json").write_text(
         json.dumps(report, sort_keys=True, separators=(",", ":")), encoding="utf-8"

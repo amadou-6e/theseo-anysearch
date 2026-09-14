@@ -143,6 +143,7 @@ def test_export_is_hash_identical_and_tasks_have_required_topology(
     a = export_scene(synthetic_source, first, revision=_revision(synthetic_source), seed=3, layout=layout)
     b = export_scene(synthetic_source, second, revision=_revision(synthetic_source), seed=3, layout=layout)
     assert a == b
+    assert a["governing_spec_sha"] == "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b"
     assert {path.name: path.read_bytes() for path in first.iterdir()} == {
         path.name: path.read_bytes() for path in second.iterdir()
     }
