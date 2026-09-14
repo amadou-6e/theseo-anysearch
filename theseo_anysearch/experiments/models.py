@@ -18,6 +18,7 @@ from theseo_anysearch.settings import (
     Settings,
     TrainingConfig,
 )
+from theseo_anysearch.world_providers.models import WorldSelectionConfig
 
 
 def _default_anyscale_config() -> AnyscaleConfig:
@@ -429,6 +430,7 @@ class ExperimentConfig(AlgorithmEnvCompatibilityMixin, BaseModel):
     imitation: ImitationConfig = Field(default_factory=ImitationConfig)
     mlflow: MLflowConfig | None = None    # None → tracking disabled
     tune_config: TuneConfig | None = None
+    worlds: WorldSelectionConfig | None = None
     staging: StagingConfig | None = None
 
     @model_validator(mode="after")
