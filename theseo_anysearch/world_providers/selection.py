@@ -49,7 +49,9 @@ def _check_study_assignments(selection: WorldSelectionConfig, config_path: Path)
         seen += 1
         if seen > 2000:
             raise ValueError("study contains too many YAML files to check split assignments")
-        data = _yaml(candidate)
+        data = yaml.safe_load(candidate.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            continue
         other = data.get("worlds")
         if not isinstance(other, dict) or "root_geometry_id" not in other:
             continue

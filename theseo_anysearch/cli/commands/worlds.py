@@ -66,6 +66,8 @@ class ProviderGroup(TyperGroup):
                 "world_identity_sha256": report["world_identity_sha256"],
                 "tasks_verified": len(list(Path(output).glob("task-*.json"))),
                 "rejected_task_strata": report["rejected_task_strata"],
+                "topology_family": report["topology_family"],
+                "limitations": report["limitations"],
                 "previews": sorted(report["previews"]),
             }, sort_keys=True))
 
@@ -85,7 +87,11 @@ def list_worlds(remote: bool = typer.Option(False, "--remote", help="Show downlo
         for name, provider in sorted(installed_providers().items()):
             info = provider.info
             parameters = ", ".join(item.name for item in info.parameters) or "none"
-            typer.echo(f"provider {name} v{info.version}  native={info.native_meters_per_voxel:g} m/voxel  parameters={parameters}")
+            extent = "variable" if info.native_extent is None else "x".join(map(str, info.native_extent))
+            typer.echo(
+                f"provider {name} v{info.version}  native={extent} @ "
+                f"{info.native_meters_per_voxel:g} m/voxel  parameters={parameters}"
+            )
         for name, error in sorted(provider_errors().items()):
             typer.echo(f"provider {name}  unavailable: {error}")
         for row in local_worlds():

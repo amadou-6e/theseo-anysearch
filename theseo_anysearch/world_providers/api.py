@@ -63,6 +63,7 @@ class ProviderInfo:
     parameters: tuple[ProviderParameter, ...] = ()
     api_version: int = API_VERSION
     resolution_parameter: str | None = None
+    native_extent: tuple[int, int, int] | None = None
 
     def __post_init__(self) -> None:
         if not _NAME.fullmatch(self.name):
@@ -71,6 +72,11 @@ class ProviderInfo:
             raise ValueError(f"provider {self.name} requires unsupported API {self.api_version}")
         if not math.isfinite(self.native_meters_per_voxel) or self.native_meters_per_voxel <= 0:
             raise ValueError("native resolution must be positive")
+        if self.native_extent is not None and (
+            len(self.native_extent) != 3
+            or any(type(value) is not int or value <= 0 for value in self.native_extent)
+        ):
+            raise ValueError("native extent must contain three positive integers")
         names = [parameter.name for parameter in self.parameters]
         if len(names) != len(set(names)):
             raise ValueError("duplicate provider parameters")
@@ -91,6 +97,7 @@ class ProviderInfo:
 @dataclass(frozen=True)
 class GenerationSummary:
     rejected_task_strata: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
 
 
 class WorldProvider(Protocol):

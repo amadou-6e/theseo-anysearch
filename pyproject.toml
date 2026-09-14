@@ -51,6 +51,7 @@ include = ["theseo_anysearch*"]
 theseo_anysearch = [
   "environments/cave_drone_bridge.cpp",
   "world_providers/catalog.json",
+  "environments/cave_drone_bridge.cpp",
   "extension_sdk/Cargo.toml",
   "extension_sdk/Cargo.lock",
   "extension_sdk/src/*.rs",

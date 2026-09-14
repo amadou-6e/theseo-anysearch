@@ -67,3 +67,56 @@ These headings do not describe roll, so a future asymmetric body may need a
 richer pose contract. This checker operates on complete occupied voxel cubes.
 Aerial Gym's separate route witness still checks its original rotated source
 boxes; replacing that witness with a voxel check would weaken its claim.
+
+## Optional CaveDrone wheel
+
+`providers/cavedrone` builds the separate `theseo-anysearch-cavedrone` wheel.
+Install it with pip after installing the core wheel, then explicitly obtain
+the MIT-licensed [pinned CaveDroneSim source](cave_drone_holdout.md) at
+`ef7852198249390806d8c0cd42e576e02c73c19f`. Set
+`ANYSEARCH_CAVEDRONE_SOURCE` to that checkout and provide a C++23 `g++`
+(or set `ANYSEARCH_CAVEDRONE_CXX`). Installation never fetches or compiles the
+source. Every generation checks its Git revision, clean tracked tree, MIT
+notice and source-file hashes before compiling the existing bridge.
+
+```powershell
+python -m pip install .\providers\cavedrone
+$env:ANYSEARCH_CAVEDRONE_SOURCE = 'C:\path\to\cave-drone'
+anysearch worlds list
+anysearch worlds cavedrone --seed 42 --output worlds/cave-42
+anysearch worlds add worlds/cave-42 --config experiments/train.yaml
+```
+
+`list` advertises native 192 x 56 x 192 extent and 0.5 m voxels. The optional
+`--partition` is `train` (default), `calibration`, or `test`;
+`--body-radius-m` defaults to 0.25. There is no arbitrary native resolution
+parameter. The generated report names rejected task strata and the single
+`cavedronesim_native_chamber_tunnel_v1` topology family. Different seeds are
+within-family layouts, not a cross-family holdout. The route and PNGs show
+verified voxel geometry, not native flight-controller or sensor results.
+
+For a study audit, two YAMLs must explicitly use the same `worlds.study_id`
+and `worlds.study_root`, even when their filenames differ:
+
+```yaml
+# train.yaml, selected by worlds add
+worlds:
+  role: train
+  study_id: cave-study-1
+  study_root: .
+```
+
+```yaml
+# test.yaml, audit illustration only; worlds add does not attach test worlds
+worlds:
+  role: test
+  study_id: cave-study-1
+  study_root: .
+```
+
+Both YAMLs must also reference the same identified split record. Copying the
+**same root geometry** from `train.yaml` into `test.yaml` is rejected when
+either config is loaded: a root cannot cross roles within one study. The
+current `worlds add` implementation is train-only and refuses a second world
+in that study. This example documents the leakage check, not a runnable
+multi-world test configuration; that needs a separately reviewed extension.
