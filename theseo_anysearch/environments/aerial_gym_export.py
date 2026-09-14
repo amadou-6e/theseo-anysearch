@@ -289,7 +289,7 @@ def _sha(path: Path) -> str:
 
 def _verify_git_revision(source_root: Path, revision: str, paths: list[str]) -> None:
     if not (source_root / ".git").exists():
-        return
+        raise ValueError("upstream source root must be a Git checkout")
     try:
         head = subprocess.run(
             ["git", "-C", str(source_root), "rev-parse", "HEAD"],

@@ -1,6 +1,7 @@
 """No-network Aerial Gym adapter tests using hand-written collision URDFs."""
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 import numpy as np
@@ -61,7 +62,23 @@ def synthetic_source(tmp_path):
         else:
             size = (0.1, 1.0, 1.0)
         path.write_text(_urdf(size), encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "--all"], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(root), "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture",
+        ],
+        check=True,
+    )
     return root
+
+
+def _revision(root):
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
 
 
 def test_collision_origin_and_rotation_are_composed_and_visual_ignored(tmp_path):
@@ -123,8 +140,8 @@ def test_export_is_hash_identical_and_tasks_have_required_topology(
 ):
     first = tmp_path / "first"
     second = tmp_path / "second"
-    a = export_scene(synthetic_source, first, revision="test-revision", seed=3, layout=layout)
-    b = export_scene(synthetic_source, second, revision="test-revision", seed=3, layout=layout)
+    a = export_scene(synthetic_source, first, revision=_revision(synthetic_source), seed=3, layout=layout)
+    b = export_scene(synthetic_source, second, revision=_revision(synthetic_source), seed=3, layout=layout)
     assert a == b
     assert {path.name: path.read_bytes() for path in first.iterdir()} == {
         path.name: path.read_bytes() for path in second.iterdir()
@@ -150,13 +167,21 @@ def test_export_is_hash_identical_and_tasks_have_required_topology(
 
 def test_source_file_change_changes_export_identity(tmp_path, synthetic_source):
     first = export_scene(
-        synthetic_source, tmp_path / "first", revision="test-revision", seed=3,
+        synthetic_source, tmp_path / "first", revision=_revision(synthetic_source), seed=3,
         layout="detour",
     )
     config = synthetic_source / "aerial_gym/config/env_config/env_with_lidar_nav_obstacles.py"
     config.write_text("# modified synthetic config\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(synthetic_source), "add", "--", str(config)], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(synthetic_source), "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid", "commit", "-qm", "modified fixture",
+        ],
+        check=True,
+    )
     second = export_scene(
-        synthetic_source, tmp_path / "second", revision="test-revision", seed=3,
+        synthetic_source, tmp_path / "second", revision=_revision(synthetic_source), seed=3,
         layout="detour",
     )
     assert first["source_content_identity_sha256"] != second["source_content_identity_sha256"]
@@ -166,7 +191,6 @@ def test_source_file_change_changes_export_identity(tmp_path, synthetic_source):
 def test_git_checkout_revision_and_selected_file_cleanliness(
     tmp_path, synthetic_source, monkeypatch
 ):
-    (synthetic_source / ".git").mkdir()
     state = {"head": "correct", "dirty": ""}
 
     def fake_run(args, **_kwargs):
@@ -196,4 +220,14 @@ def test_invalid_layout_and_existing_output_are_rejected(tmp_path, synthetic_sou
     output = tmp_path / "result"
     output.mkdir()
     with pytest.raises(FileExistsError):
-        export_scene(synthetic_source, output, revision="test-revision", seed=0, layout="detour")
+        export_scene(synthetic_source, output, revision=_revision(synthetic_source), seed=0, layout="detour")
+
+
+def test_non_git_source_root_fails_closed(tmp_path):
+    source = tmp_path / "archive"
+    source.mkdir()
+    with pytest.raises(ValueError, match="Git checkout"):
+        export_scene(
+            source, tmp_path / "result", revision="0" * 40, seed=0, layout="detour"
+        )
+    assert not (tmp_path / "result").exists()

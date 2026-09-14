@@ -18,8 +18,9 @@ sample actor states at runtime. The export does **not** replay those samples;
 its fixed starts, goals, and obstacles have new identities and a `derived`
 provenance. Source config and every selected URDF have SHA-256 entries in the
 generated `source.json`; `scene-instances.json` records every resolved pose.
-If the source root is a Git checkout, the exporter verifies its HEAD and
-selected-file cleanliness against `--source-revision`.
+The source root must be a Git checkout; the exporter verifies its HEAD and
+selected-file cleanliness against `--source-revision`. An extracted archive
+without Git metadata fails closed.
 
 ## Export
 
