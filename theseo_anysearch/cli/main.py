@@ -26,6 +26,7 @@ from theseo_anysearch.cli.commands import ray_cmd
 from theseo_anysearch.cli.commands import replay as replay_cmd
 from theseo_anysearch.cli.commands import train as train_cmd
 from theseo_anysearch.cli.commands import tune as tune_cmd
+from theseo_anysearch.cli.commands import worlds as worlds_cmd
 from theseo_anysearch.cli.commands.explain import run_explain
 from theseo_anysearch.cli.commands.explain_ui import launch_explain_ui
 
@@ -1280,6 +1281,7 @@ app.add_typer(replay_cmd.app, name="replay")
 app.add_typer(mlflow_cmd.app, name="mlflow")
 app.add_typer(ray_cmd.app, name="ray")
 app.add_typer(garden_cmd.app, name="garden")
+app.add_typer(worlds_cmd.app, name="worlds")
 
 # Deprecated groups — kept for backward compatibility
 app.add_typer(
