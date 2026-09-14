@@ -43,10 +43,10 @@ is 4096. The preflight checks exact action lengths, source occupancy, and
 collision-free direct teacher actions. An integration test executes all 4096
 actions in the compiled-world environment and reaches the final goal.
 
-The trainer now accepts explicit `routes` under the existing
-`completion_mode: continue_route`. `gate_curriculum_settings()` returns the waypoint-curriculum
-config block. Evaluation may repeat a frozen route with separate environment
-seeds rather than trying to sample distinct routes that do not exist. This is
+The trainer accepts explicit `routes` under the existing
+`completion_mode: continue_route`. `gate_curriculum_settings()` returns the
+waypoint-curriculum config block with a two-voxel seeded variant radius.
+Retention evaluation samples distinct routes at each stage. This is
 configuration and validity evidence, not a training result.
 
 The separate stochastic feasibility probe still samples two deterministic
@@ -101,37 +101,32 @@ boundary-adjacent attempt, an A* query at
 the top Z coordinate raised a native out-of-bounds error. The retained fixture
 keeps routes away from that edge; boundary behavior needs its own follow-up.
 
-This demonstrates why copying PR #217's YAML directly is unsafe. Its imitation
-collector's `_route_action_plan` takes the `continue_route` branch and calls
-`shortest_actions`; it does **not** invoke the configured `replanning_astar`
-provider in that branch. The new fixed routes are intentionally aligned with
-the gates, and preflight proves those direct actions collision-free. Random
-gate-adjacent routes are not generally safe for this collector. The existing
-geometry-pool A* reset-feasibility option does not validate separately sampled
-compiled-world waypoint routes.
+PR #217's `continue_route` collector formerly bypassed its A* provider and
+used empty-grid `shortest_actions`. It now retains that fast path only for
+empty geometry. Compiled worlds invoke the configured teacher; `astar` plans
+each waypoint segment once, checks every direct-path voxel before using its
+optimal shortcut, and searches around an obstruction otherwise. The 12 gate
+routes remain fixed curriculum anchors, while seeded final-waypoint variants
+provide multiple unique routes per stage without changing the stage's exact
+action length. The collector rejects a variant if the executed teacher path
+changes that length, allocates accepted demonstrations round-robin across
+stages, and rejects duplicates.
 
-The fixed gate-axis routes are validated for the existing direct-action teacher.
-If a comparison uses random routes instead, generate or reject them using
-occupancy and bounded A* feasibility, and make the imitation collector execute
-the planned paths. Before either training comparison, freeze separate scratch
-and imitation run configurations, seeds, pack identity, teacher budget, and
-evaluation routes. Do not treat this preflight as evidence that a policy has
-learned the obstacle task.
+## Stratified collection configuration
 
-## Bounded imitation-then-PPO smoke
-
-`experiment.yaml` freezes a small validation run on this pack: one demonstration
-per fixed stage (12 total), at most 12 collection attempts, two behavior-cloning
-epochs, and two PPO iterations. Each distinct fixed route is collected once;
-the validation episode is held out by episode. The run uses the radius-1
-voxel-encoder PPO settings from PR #217, except that its unavailable custom
-reward is replaced with the built-in progress reward and its rollout batch is
-reduced to 1024 for the bounded smoke. Its 4608-step episode limit applies to
-every stage. Curriculum retention evaluation is scheduled after the smoke's
-two iterations, so this run tests pretraining and PPO execution, **not**
-12-stage policy mastery or curriculum advancement. The frozen world identity
-is `ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05`.
-Run from this worktree root with:
+`experiment.yaml` now requests 128 demonstrations (10 or 11 per stage) with a
+256-attempt limit, two behavior-cloning epochs, and two PPO iterations. A
+collection-only check accepted all 128 in 128 attempts: stage counts were
+`[11, 11, 11, 11, 11, 11, 11, 11, 10, 10, 10, 10]`, totaling 82,410 teacher
+actions. The final stage still crosses every gate. The radius-1 voxel-encoder
+settings follow PR #217 except for the built-in progress reward, smaller PPO
+batch, and bounded smoke iterations. The 4608-step episode limit applies to
+every stage. Retention evaluation is scheduled after the two smoke iterations,
+so this configuration alone cannot establish policy mastery or advancement.
+The configuration SHA-256 is
+`8fb0be6542b2ed423864a211e3f86efb93b4fddc119363a3b49f4558f71c32a1`.
+It has **not yet been launched** for pretraining or PPO. Run from this worktree
+root with:
 
 ```powershell
 python -c "from theseo_anysearch.cli.main import app; app()" run usage/experiments/train/large_world_obstacle_pilot/experiment.yaml
@@ -139,8 +134,8 @@ python -c "from theseo_anysearch.cli.main import app; app()" run usage/experimen
 
 The fixture and run are governed only as feasibility work by the pinned
 [perception-encoder pilot spec](https://github.com/amadou-6e/specs/blob/a94227bc4ee484287a026f89ec6cd47d5ca16d26/projects/theseo-anysearch/python/perception-encoder-pilots.md).
-Runtime dataset, checkpoints, and logs remain ignored; record their IDs and
-hashes in the issue/PR after execution. A longer comparison requires a
-separately frozen compute budget and scratch control.
-The completed bounded run and its limitations are recorded in
-[SMOKE-RESULTS.md](SMOKE-RESULTS.md).
+Runtime dataset, checkpoints, and logs remain ignored. A longer comparison
+requires a separately frozen compute budget, held-out all-stage evaluation,
+and scratch control. [SMOKE-RESULTS.md](SMOKE-RESULTS.md) records the earlier
+12-demonstration run at its pinned source revision; it predates this sampler
+and collector fix and is not evidence for the 128-route configuration.

@@ -14,6 +14,10 @@ from theseo_anysearch.rllib.trainer.waypoint_routes import (
     sample_route,
     segment_lengths,
 )
+from usage.experiments.train.large_world_obstacle_pilot.curriculum import (
+    STAGE_LENGTHS,
+    gate_curriculum_settings,
+)
 
 
 def route_curriculum_config(
@@ -93,6 +97,26 @@ def test_fixed_route_schedule_rejects_missing_or_out_of_bounds_routes():
     })
     with pytest.raises(ValueError, match="outside the task extent"):
         WaypointCurriculum(config, {"extent": (8, 8, 8)})
+
+
+def test_gate_stages_supply_unique_seeded_routes_for_stratified_collection():
+    env = {"extent": (4096, 2048, 512), "max_steps": 4608, "action_mode": "discrete_18"}
+    curriculum = WaypointCurriculum(
+        WaypointCurriculumConfig.model_validate(gate_curriculum_settings()), env
+    )
+    for stage, target_length in enumerate(STAGE_LENGTHS):
+        routes = {
+            route.goal: route
+            for seed in range(1000, 1512)
+            if (route := curriculum.route_for_stage(env, stage, seed=seed))
+        }
+        assert len(routes) >= 11
+        assert all(
+            route_distance(route, "discrete_18") == target_length
+            for route in routes.values()
+        )
+    evaluation = build_route_evaluation_suite(curriculum, env, 11, 3, 1000)
+    assert len({route.goal for _, route in evaluation}) == 3
 
 
 @pytest.mark.parametrize(

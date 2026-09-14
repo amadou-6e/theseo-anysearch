@@ -1,10 +1,10 @@
 description: >
-  Bounded imitation-then-PPO smoke on the six-gate compiled world. This is a
-  feasibility run, not a preregistered perception-encoder comparison.
+  Stratified 128-demonstration imitation-to-PPO smoke on the six-gate compiled
+  world. This is a feasibility configuration, not a preregistered comparison.
 
 experiment:
-  name: gate-smoke
-  output_dir: ../../../../runtime/gs
+  name: gate-stratified-smoke
+  output_dir: ../../../../runtime/gv
   seed: 42
 
 env:
@@ -48,6 +48,7 @@ env:
       - {start: [1, 1024, 256], waypoints: [[1025, 1024, 256]]}
       - {start: [1, 1024, 256], waypoints: [[2049, 1024, 256]]}
       - {start: [1, 1024, 256], waypoints: [[4095, 1024, 256], [4095, 1026, 256]]}
+    fixed_route_variation_radius: 2
     training_sampling:
       strategy: inverse_success
       minimum_weight: 0.5
@@ -92,18 +93,18 @@ imitation:
   enabled: true
   strategy: pretrain_then_rl
   generation:
-    provider: replanning_astar
-    episodes: 12
-    max_attempts: 12
+    provider: astar
+    episodes: 128
+    max_attempts: 256
     require_success: true
   sampling:
     provider: uniform_transition
   collection:
     seed_start: 1000
-    validation_fraction: 0.08333333333333333
+    validation_fraction: 0.1
     reuse_dataset: false
     curriculum_stages: all
-    dataset_dir: runtime/gs/dataset-identity-pinned
+    dataset_dir: runtime/gv/dataset
   pretraining:
     epochs: 2
     batch_size: 256

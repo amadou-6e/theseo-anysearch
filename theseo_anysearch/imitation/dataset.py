@@ -22,6 +22,7 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
 )
+from theseo_anysearch.rllib.trainer.waypoint_routes import route_distance
 from theseo_anysearch.worlds import world_contract
 from theseo_anysearch.environments.task_identity import (
     configured_geometry_identity,
@@ -60,10 +61,23 @@ def _configure_waypoint_curriculum(
 def _route_action_plan(
     env: VoxelEnv, env_config: dict[str, Any]
 ) -> list[int | tuple[int, int, int]] | None:
-    """Return a fast empty-grid plan for an active waypoint route."""
+    """Return direct actions only when a route has no configured geometry."""
 
     raw_curriculum = env_config.get("waypoint_curriculum") or {}
     if raw_curriculum.get("completion_mode") != "continue_route":
+        return None
+    if any(
+        env_config.get(key)
+        for key in (
+            "compiled_world_path",
+            "stl_path",
+            "stl_paths",
+            "geometry_boxes",
+            "geometry_pool",
+        )
+    ):
+        # The direct shortest_actions teacher ignores obstacles. Defer to the
+        # configured heuristic generation provider for populated worlds.
         return None
     raw_goal = env._rust_env.goal_pos()
     if raw_goal is None:
@@ -127,7 +141,8 @@ def dataset_fingerprint(
         }
 
     payload = {
-        # Version 7 adds path-independent accepted geometry/task semantics.
+        # Version 7 adds path-independent geometry/task semantics and
+        # distinguishes obstacle-aware teachers from direct-action teachers.
         "schema_version": 7,
         "env": normalized_env,
         "world": normalized_world,
@@ -273,6 +288,18 @@ def collect_demonstrations(
                 ]
                 episode_actions = list(episode.actions)
         except (nx.NetworkXNoPath, nx.NodeNotFound):
+            success = False
+
+        if (
+            success
+            and route_curriculum is not None
+            and route_curriculum.config.routes
+            and len(episode_actions)
+            != route_distance(route, str(env_config.get("action_mode", "discrete_26")))
+        ):
+            # These fixed-stage variants are labeled by exact planned action
+            # count. A geometry detour that changes it belongs to another
+            # stage, even if the goal was reachable within max_steps.
             success = False
 
         if success or not imitation.generation.require_success:

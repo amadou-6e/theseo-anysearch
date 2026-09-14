@@ -93,6 +93,7 @@ class WaypointCurriculumConfig(BaseModel):
     initial_goal: tuple[int, int, int] | None = None
     route_length: WaypointRouteLengthConfig | None = None
     routes: tuple[FixedWaypointRouteConfig, ...] = ()
+    fixed_route_variation_radius: int = Field(default=0, ge=0, le=16)
     seed: int = 42
     difficulty: WaypointDifficultyConfig = Field(default_factory=WaypointDifficultyConfig)
     training_sampling: WaypointTrainingSamplingConfig = Field(default_factory=WaypointTrainingSamplingConfig)
@@ -112,6 +113,8 @@ class WaypointCurriculumConfig(BaseModel):
             if self.initial_goal is not None and self.initial_goal != self.routes[0].waypoints[0]:
                 raise ValueError("initial_goal must match the first fixed waypoint")
             return self
+        if self.fixed_route_variation_radius:
+            raise ValueError("fixed_route_variation_radius requires fixed routes")
         if self.enabled and self.completion_mode == "terminate_episode" and (
             self.initial_start is None or self.initial_goal is None
         ):

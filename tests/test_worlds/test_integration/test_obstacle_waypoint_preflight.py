@@ -7,6 +7,8 @@ from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.experiments.loader import load_experiment
 from theseo_anysearch.heuristic.voxel.astar.standard import VoxelAStarOracle
+from theseo_anysearch.imitation.dataset import collect_demonstrations
+from theseo_anysearch.imitation.models import ImitationConfig
 from theseo_anysearch.models import WaypointCurriculumConfig
 from theseo_anysearch.rllib.trainer.waypoint_curriculum import (
     WaypointCurriculum,
@@ -38,7 +40,9 @@ def test_large_world_training_smoke_config_matches_gate_curriculum() -> None:
     )
     config = load_experiment(config_path)
     assert config.training.iterations == 2
-    assert config.imitation.generation.episodes == 12
+    assert config.imitation.generation.episodes == 128
+    assert config.imitation.generation.provider.name == "astar"
+    assert config.env.waypoint_curriculum.fixed_route_variation_radius == 2
     assert config.env.max_steps == 4608
     assert config.env.to_runtime_dict()["world_identity_sha256"] == (
         "ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05"
@@ -52,7 +56,7 @@ def test_large_world_training_smoke_config_matches_gate_curriculum() -> None:
         pack_manifest["identity_sha256"]
     )
     assert config.experiment.output_dir == (
-        Path("runtime/gs").resolve()
+        Path("runtime/gv").resolve()
     )
     assert [
         route.model_dump(mode="python") for route in config.env.waypoint_curriculum.routes
@@ -131,6 +135,31 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         "waypoint_curriculum": gate_curriculum_settings(),
     })
     runtime_config = configured_env.to_runtime_dict()
+    runtime_config["world_identity_sha256"] = report["world_identity"]
+    demonstrations = collect_demonstrations(
+        runtime_config,
+        ImitationConfig.model_validate({
+            "enabled": True,
+            "generation": {
+                "provider": "astar",
+                "episodes": 24,
+                "max_attempts": 48,
+                "require_success": True,
+            },
+            "collection": {
+                "seed_start": 1000,
+                "validation_fraction": 0.1,
+                "curriculum_stages": "all",
+            },
+        }),
+    )
+    assert demonstrations.manifest.stage_episode_counts == [2] * 12
+    assert demonstrations.manifest.attempted_episodes == 24
+    assert (
+        demonstrations.manifest.training_samples
+        + demonstrations.manifest.validation_samples
+    ) == 2 * sum(STAGE_LENGTHS)
+    assert demonstrations.manifest.world_identity_sha256 == report["world_identity"]
     stage_env = VoxelEnv(runtime_config)
     try:
         configure_initial_waypoint_curriculum(stage_env, runtime_config)
@@ -168,6 +197,9 @@ def test_compiled_obstacle_routes_require_planning(tmp_path) -> None:
         env.reset(seed=409)
         world = env._rust_env
         planner = VoxelAStarOracle(env)
+        long_path = planner._find_path((1, *PORTAL_CENTER), (4095, *PORTAL_CENTER))
+        assert len(long_path) - 1 == 4094
+        assert planner._last_search_nodes == 4095
         assert not world.world_occupied((144, 176, 128))
         assert not world.world_occupied((2040, 1020, 254))
         for x, side in PORTAL_WALLS:

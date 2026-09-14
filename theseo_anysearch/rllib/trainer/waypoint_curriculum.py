@@ -10,7 +10,11 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import WaypointCurriculumConfig
-from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample_route
+from theseo_anysearch.rllib.trainer.waypoint_routes import (
+    WaypointRoute,
+    sample_fixed_route_variant,
+    sample_route,
+)
 from theseo_anysearch.worlds.extent import (
     WorldExtent,
     contains_task_coordinate,
@@ -307,6 +311,14 @@ class WaypointCurriculum:
                 for point in (route.start, *route.waypoints)
             ):
                 raise ValueError("fixed route point is outside the task extent")
+            if seed is not None and self.config.fixed_route_variation_radius:
+                return sample_fixed_route_variant(
+                    route,
+                    radius=self.config.fixed_route_variation_radius,
+                    seed=seed,
+                    extent=extent,
+                    action_mode=str(env_config.get("action_mode", "discrete_26")),
+                )
             return route
         self._require_empty_geometry(env_config)
         difficulty = self.config.difficulty

@@ -23,7 +23,7 @@ def build_route_evaluation_suite(
     seed_start: int,
 ) -> list[tuple[int, WaypointRoute]]:
     """Build stable evaluation routes, repeating an explicitly fixed stage."""
-    if curriculum.config.routes:
+    if curriculum.config.routes and not curriculum.config.fixed_route_variation_radius:
         # These stages intentionally contain one frozen route each. Repeat it
         # with independent environment seeds instead of seeking nonexistent
         # distinct routes.

@@ -100,3 +100,39 @@ def route_distance(route: WaypointRoute, action_mode: str) -> int:
         action_step_distance(points[index], points[index + 1], action_mode)
         for index in range(len(points) - 1)
     )
+
+
+def sample_fixed_route_variant(
+    anchor: WaypointRoute,
+    *,
+    radius: int,
+    seed: int,
+    extent: WorldExtent,
+    action_mode: str,
+) -> WaypointRoute:
+    """Vary the last waypoint without changing a fixed stage's action length.
+
+    For multi-waypoint routes the candidates surround the preceding waypoint,
+    so the final two-action turn of the longest gate route stays two actions.
+    The collector checks geometry and planned length before accepting a sample.
+    """
+    if radius < 1:
+        return anchor
+    center = anchor.waypoints[-2] if len(anchor.waypoints) > 1 else anchor.goal
+    target_length = route_distance(anchor, action_mode)
+    candidates = []
+    for dy in range(-radius, radius + 1):
+        for dz in range(-radius, radius + 1):
+            goal = (anchor.goal[0], center[1] + dy, center[2] + dz)
+            if not contains_task_coordinate(extent, goal):
+                continue
+            candidate = WaypointRoute(
+                start=anchor.start,
+                waypoints=(*anchor.waypoints[:-1], goal),
+            )
+            if route_distance(candidate, action_mode) == target_length:
+                candidates.append(candidate)
+    if not candidates:
+        raise ValueError("fixed route has no in-bounds length-preserving variants")
+    rng = np.random.default_rng(seed)
+    return candidates[int(rng.integers(len(candidates)))]

@@ -45,5 +45,6 @@ def gate_curriculum_settings() -> dict:
         "initial_start": routes[0].start,
         "initial_goal": routes[0].waypoints[0],
         "routes": [route.model_dump(mode="python") for route in routes],
+        "fixed_route_variation_radius": 2,
         "advance": {"mode": "success", "successes_required": 1},
     }
