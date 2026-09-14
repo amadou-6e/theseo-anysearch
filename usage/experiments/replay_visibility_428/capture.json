@@ -1,6 +1,6 @@
 {
   "issue": 428,
-  "source_sha": "c422b17a1d122596e1ce7a6d1b82d5aeaa1e02d8",
+  "source_sha": "273c1852928daf2c219662ddd8e3a466ef201790",
   "trajectory_sha256": "FDA5337188B31AD10A50F0218B7C597DD555710F3B65D213EE9288D02DFB221A",
   "world_identity_sha256": "ed3f7cf6a2ab67d5d9bb82537bfa8fa50638a599cabc7ded2213fd4c3cc20c05",
   "binary_sha256": "DE626E37E8E70C3D54EFE42B67FD93FAE1E57CDAD7D6497446E42372376E3235",
@@ -18,14 +18,14 @@
     "cursor": [3713, 1024, 256],
     "normal": {
       "file": "after.png",
-      "sha256": "920A4FE9496E5D74CBEE763B20F8E045CA3BD1E50854143945C73F8764DAF90D",
-      "yellow_pixels": 523,
+      "sha256": "D1E399EB7436E04D5B66F98110B38B7A1B0A6B672D3B9CEF821298C925343117",
+      "yellow_pixels": 556,
       "badge_pixels": 0
     },
     "diagnostic": {
       "file": "agent-front-diagnostic.png",
-      "sha256": "5DB7097E143351A8C25419B61A896A96931674BA62E1960DA6E9B8D8E9059C45",
-      "yellow_pixels": 561,
+      "sha256": "B3D9331792E0F30B09DE969C2576719D2927835B2E65AD1BA1CA7CBABDA9312E",
+      "yellow_pixels": 563,
       "badge_pixels": 250
     }
   },
@@ -34,15 +34,15 @@
     "cursor": [3715, 1024, 256],
     "normal": {
       "file": "wall-front-normal.png",
-      "sha256": "9527107C31E04A5F00D23477392187A1409B84D8904ED7365AA6CCBE3D9D0872",
+      "sha256": "52AB02B77E0105918FBD032E09AD8C06F506EC8F467B0068E54243AF5201A671",
       "yellow_pixels": 0,
       "muted_yellow_pixels": 0,
       "badge_pixels": 0
     },
     "diagnostic": {
       "file": "wall-front-diagnostic.png",
-      "sha256": "744B6FB14BA1D16E39405F2A10284CFC395A0109979D2619C2BA731B5667A7D1",
-      "yellow_pixels": 257,
+      "sha256": "5E056E7CC25AD5FFBB4982A25CCA7D774122BBF0DC655DDC99FD2BED62CFEE79",
+      "yellow_pixels": 262,
       "badge_pixels": 250
     }
   },
