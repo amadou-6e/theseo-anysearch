@@ -306,7 +306,7 @@ def export_seed(
     report = {
         "schema_version": 1,
         "upstream_commit": UPSTREAM_COMMIT,
-        "draft_spec_sha": "766461e21d4a9c92e254557ca4a3f3e6c52eb9e5",
+        "governing_spec_sha": "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b",
         "seed": seed,
         "partition": partition,
         "source_identity_sha256": source.content_identity_sha256,

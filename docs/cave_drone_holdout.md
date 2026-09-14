@@ -1,10 +1,9 @@
 # CaveDroneSim tunnel-world export (#414)
 
-Status: draft adapter and source audit, stacked on #411. This is not a frozen
-training corpus or an independent topology-family holdout. Governing roadmap
-draft: `amadou-6e/specs@766461e21d4a9c92e254557ca4a3f3e6c52eb9e5`
-(specs PR #89 is not yet merged). Issue #414 records the stacked-work
-deviation; replace the draft pin after spec review.
+Status: source adapter and audit, stacked on #411. This is not a frozen
+training corpus or an independent topology-family holdout. Governing roadmap:
+`amadou-6e/specs@1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
+Issue #414 records the stacked-work deviation.
 
 ## Source and rights
 
