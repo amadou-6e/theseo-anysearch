@@ -22,7 +22,9 @@ check treats the world boundary as solid; labels are occupancy-derived, not
 independent source-CAD collision proofs. These labels define a narrow local
 collision-readout task, not long-range path planning.
 
-Plan JSON uses source and export paths relative to the plan file:
+Plan JSON uses source and export paths relative to the plan file by default.
+Use `--asset-root` to resolve them from a shared ignored asset directory when
+running from a Git worktree; the committed #426 plan uses this option.
 
 ```json
 {

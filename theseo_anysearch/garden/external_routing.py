@@ -26,6 +26,7 @@ from theseo_anysearch.environments.routing_manifests import (
     validate_task_endpoints,
     verify_artifact,
 )
+from theseo_anysearch.environments.voxel_route_replay import axis_segment_clear
 from theseo_anysearch.worlds.manifest import world_contract_fingerprint
 from theseo_anysearch.garden.compact import CompactEncoder
 from theseo_anysearch.garden.evaluation.probes import encoder_state_sha256
@@ -68,6 +69,17 @@ def load_imported_world(
 ) -> ImportedWorld:
     """Load a single-task export, checking rights, provenance and actual bytes."""
 
+    worlds = load_imported_worlds(root, source_root=source_root, use=use)
+    if len(worlds) != 1:
+        raise ValueError("single-task loader received a multi-task export")
+    return worlds[0]
+
+
+def load_imported_worlds(
+    root: Path, *, source_root: Path, use: Use = "training"
+) -> tuple[ImportedWorld, ...]:
+    """Load all tasks for one imported world with one shared occupancy array."""
+
     root = Path(root)
     source = read_sidecar(root / "source.json", SourceRecord)
     source.rights.require_allowed(use)
@@ -75,24 +87,34 @@ def load_imported_world(
         verify_artifact(Path(source_root), artifact)
     conversion = read_sidecar(root / "conversion.json", ConversionRecord)
     world = read_sidecar(root / "world.json", RoutingWorldRecord)
-    task = read_sidecar(root / "task.json", RoutingTaskRecord)
-    reference = read_sidecar(root / "reference.json", RoutingReferenceRecord)
+    task_paths = [root / "task.json"] if (root / "task.json").exists() else sorted(root.glob("task-*.json"))
+    reference_paths = [root / "reference.json"] if (root / "reference.json").exists() else sorted(root.glob("reference-*.json"))
+    if not task_paths or len(task_paths) != len(reference_paths):
+        raise ValueError("imported task and reference sidecars must match")
+    tasks = tuple(read_sidecar(path, RoutingTaskRecord) for path in task_paths)
+    references = tuple(read_sidecar(path, RoutingReferenceRecord) for path in reference_paths)
     original_split = read_sidecar(root / "split.json", RoutingSplitRecord)
     occupancy_path = root / "occupancy.npy"
     if _sha(occupancy_path) != world.occupancy_sha256:
         raise ValueError("imported occupancy bytes differ from the world sidecar")
     occupancy = np.load(occupancy_path, allow_pickle=False)
-    validate_task_endpoints(task, world, occupancy)
-    if reference.claim not in {"independently_validated", "certified_optimal"}:
-        raise ValueError("compact routing rows require an independently checked route")
-    if reference.route_artifact is None:
-        raise ValueError("imported route artifact is missing")
-    verify_artifact(root, reference.route_artifact)
+    for task, reference in zip(tasks, references):
+        validate_task_endpoints(task, world, occupancy)
+        if reference.task_identity_sha256 != task.identity_sha256:
+            raise ValueError("reference does not match its numbered task")
+        if reference.claim not in {"independently_validated", "certified_optimal"}:
+            raise ValueError("compact routing rows require an independently checked route")
+        if reference.route_artifact is None:
+            raise ValueError("imported route artifact is missing")
+        verify_artifact(root, reference.route_artifact)
     validate_routing_bundle(
-        sources=(source,), conversions=(conversion,), worlds=(world,), tasks=(task,),
-        observations=(), references=(reference,), split=original_split,
+        sources=(source,), conversions=(conversion,), worlds=(world,), tasks=tasks,
+        observations=(), references=references, split=original_split,
     )
-    return ImportedWorld(root, source, conversion, world, task, reference, occupancy)
+    return tuple(
+        ImportedWorld(root, source, conversion, world, task, reference, occupancy)
+        for task, reference in zip(tasks, references)
+    )
 
 
 def _crop(truth: np.ndarray, center: tuple[int, int, int]) -> tuple[np.ndarray, np.ndarray]:
@@ -137,51 +159,6 @@ def synthetic_observation(
     occupied = visible & truth.astype(bool)
     free = visible & ~truth.astype(bool)
     return occupied, free, ~visible
-
-
-def axis_segment_clear(
-    truth: np.ndarray,
-    start: tuple[int, int, int],
-    endpoint: tuple[int, int, int],
-    *,
-    body_radius_voxels: float,
-) -> bool:
-    """Conservative swept-sphere check against occupied voxel AABBs."""
-
-    if body_radius_voxels < 0 or not np.isfinite(body_radius_voxels):
-        raise ValueError("body radius must be finite and nonnegative")
-    if sum(a != b for a, b in zip(start, endpoint)) != 1:
-        raise ValueError("candidate path must be one axis-aligned segment")
-    shape = truth.shape
-    if any(not 0 <= start[axis] < shape[axis] for axis in range(3)):
-        raise ValueError("start outside world")
-    if any(not 0 <= point[axis] < shape[axis] for point in (start, endpoint) for axis in range(3)):
-        return False
-    if body_radius_voxels > 0 and any(
-        min(start[index], endpoint[index]) - body_radius_voxels <= -0.5
-        or max(start[index], endpoint[index]) + body_radius_voxels >= shape[index] - 0.5
-        for index in range(3)
-    ):
-        return False
-    axis = next(index for index in range(3) if start[index] != endpoint[index])
-    margin = int(np.ceil(body_radius_voxels + 0.5))
-    lows = [max(0, min(start[i], endpoint[i]) - margin) for i in range(3)]
-    highs = [min(shape[i], max(start[i], endpoint[i]) + margin + 1) for i in range(3)]
-    occupied = np.argwhere(truth[tuple(slice(a, b) for a, b in zip(lows, highs))] != 0)
-    if len(occupied) == 0:
-        return True
-    occupied += np.asarray(lows)
-    distances = np.zeros((len(occupied), 3), dtype=np.float64)
-    for index in range(3):
-        if index == axis:
-            low, high = sorted((start[index], endpoint[index]))
-            distances[:, index] = np.maximum.reduce(
-                (occupied[:, index] - 0.5 - high, low - occupied[:, index] - 0.5,
-                 np.zeros(len(occupied)))
-            )
-        else:
-            distances[:, index] = np.maximum(np.abs(occupied[:, index] - start[index]) - 0.5, 0)
-    return bool(np.all(np.sum(distances**2, axis=1) > body_radius_voxels**2))
 
 
 @dataclass(frozen=True)
@@ -236,6 +213,7 @@ def prepare_routing_rows(
         for item in imported if item.world.topology_family in held_out
     )):
         raise ValueError("held-out topology families must be test-only with another family available")
+    unique_worlds = {item.world.identity_sha256: item for item in imported}
     split = RoutingSplitRecord(
         dataset_id=dataset_id,
         members=tuple(
@@ -246,21 +224,24 @@ def prepare_routing_rows(
                 site_id=item.world.site_id,
                 partition=partitions[item.world.root_geometry_id],
             )
-            for item in imported
+            for item in unique_worlds.values()
         ),
     )
     sources = {item.source.identity_sha256: item.source for item in imported}
+    conversions = {item.conversion.identity_sha256: item.conversion for item in imported}
     dataset_identity = validate_routing_bundle(
         sources=tuple(sources.values()),
-        conversions=tuple(item.conversion for item in imported),
-        worlds=tuple(item.world for item in imported),
+        conversions=tuple(conversions.values()),
+        worlds=tuple(item.world for item in unique_worlds.values()),
         tasks=tuple(item.task for item in imported),
         observations=(),
         references=tuple(item.reference for item in imported),
         split=split,
     )
     rows: list[RoutingRow] = []
-    for item in sorted(imported, key=lambda entry: entry.world.identity_sha256):
+    for item in sorted(
+        imported, key=lambda entry: (entry.world.identity_sha256, entry.task.identity_sha256)
+    ):
         world_id = item.world.identity_sha256
         task_id = item.task.identity_sha256
         for anchor in dict.fromkeys((item.task.start_storage, item.task.goal_storage)):

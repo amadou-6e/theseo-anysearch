@@ -17,9 +17,11 @@ import numpy as np
 from scipy import ndimage
 
 from theseo_anysearch.environments.routing_manifests import (
+    ArtifactRef,
     ConversionRecord,
     GridFrame,
     RightsRecord,
+    RoutingReferenceRecord,
     RoutingSplitRecord,
     RoutingTaskRecord,
     RoutingWorldRecord,
@@ -30,6 +32,10 @@ from theseo_anysearch.environments.routing_manifests import (
     validate_task_endpoints,
     verify_artifact,
     write_sidecar,
+)
+from theseo_anysearch.environments.voxel_route_replay import (
+    replay_six_axis_route,
+    shortest_six_axis_route,
 )
 from theseo_anysearch.worlds.manifest import WorldExtent
 
@@ -269,23 +275,58 @@ def export_seed(
         root_geometry_id=f"cavedronesim-{UPSTREAM_COMMIT[:12]}-seed-{seed}",
         topology_family=GENERATOR_FAMILY,
     )
-    tasks = [
-        RoutingTaskRecord(
+    passable = clearance_mask(occupied, body_radius_m=body_radius_m)
+    tasks = []
+    references = []
+    route_rows = []
+    for name, start, goal in pairs:
+        route = shortest_six_axis_route(passable, start, goal)
+        if route is None:
+            raise ValueError("connected CaveDroneSim task lost its six-axis route")
+        replay_six_axis_route(
+            occupied, route,
+            body_radius_m=body_radius_m,
+            meters_per_voxel=EXPECTED_VOXEL_SIZE_M,
+        )
+        task = RoutingTaskRecord(
             world_identity_sha256=world.identity_sha256,
             provenance="derived",
             family="drone_flight",
             start_storage=start,
             goal_storage=goal,
-            movement_model="6-connected voxel-center existence; swept path not certified",
+            movement_model="6-axis voxel-center route; swept sphere checked against occupied cubes",
             body_radius_m=body_radius_m,
             derivation_reason=f"CaveDroneSim full-truth fixed-goal {name} pair; not native exploration",
         )
-        for name, start, goal in pairs
-    ]
-    for task in tasks:
         validate_task_endpoints(task, world, occupied)
+        route_path = output_dir / f"route-{name}.json"
+        route_path.write_text(json.dumps(route, separators=(",", ":")), encoding="utf-8")
+        reference = RoutingReferenceRecord(
+            task_identity_sha256=task.identity_sha256,
+            claim="independently_validated",
+            route_artifact=ArtifactRef(relative_path=route_path.name, sha256=_sha256(route_path)),
+            cost=(len(route) - 1) * EXPECTED_VOXEL_SIZE_M,
+            verification_evidence=(
+                "Every six-axis centerline segment replayed as a swept sphere against "
+                "the complete pinned-source occupied voxel cubes and solid world bounds; "
+                "not a validated dynamic-flight trajectory or continuous-space optimum"
+            ),
+        )
+        tasks.append(task)
+        references.append(reference)
+        route_rows.append({
+            "name": name,
+            "task_identity_sha256": task.identity_sha256,
+            "reference_identity_sha256": reference.identity_sha256,
+            "route_sha256": reference.route_artifact.sha256,
+            "route_steps": len(route) - 1,
+            "route_cost_m": reference.cost,
+            "altitude_range_m": (
+                max(cell[1] for cell in route) - min(cell[1] for cell in route)
+            ) * EXPECTED_VOXEL_SIZE_M,
+        })
     split = RoutingSplitRecord(
-        dataset_id=f"cavedronesim-{UPSTREAM_COMMIT[:12]}-seed-{seed}",
+        dataset_id=f"cavedronesim-route-v1-{UPSTREAM_COMMIT[:12]}-seed-{seed}",
         members=(SplitMember(
             world_identity_sha256=world.identity_sha256,
             root_geometry_id=world.root_geometry_id,
@@ -295,16 +336,17 @@ def export_seed(
     )
     dataset_sha = validate_routing_bundle(
         sources=[source], conversions=[conversion], worlds=[world],
-        tasks=tasks, observations=[], references=[], split=split,
+        tasks=tasks, observations=[], references=references, split=split,
     )
     write_sidecar(output_dir / "source.json", source)
     write_sidecar(output_dir / "conversion.json", conversion)
     write_sidecar(output_dir / "world.json", world)
     write_sidecar(output_dir / "split.json", split)
-    for index, task in enumerate(tasks):
+    for index, (task, reference) in enumerate(zip(tasks, references)):
         write_sidecar(output_dir / f"task-{index:02d}.json", task)
+        write_sidecar(output_dir / f"reference-{index:02d}.json", reference)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "upstream_commit": UPSTREAM_COMMIT,
         "governing_spec_sha": "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b",
         "seed": seed,
@@ -316,10 +358,13 @@ def export_seed(
         "occupied_voxels": int(np.count_nonzero(occupied)),
         "topology_census": topology_census(occupied, body_radius_m=body_radius_m),
         "task_ids": [task.identity_sha256 for task in tasks],
+        "reference_ids": [reference.identity_sha256 for reference in references],
+        "routes": route_rows,
         "rejected_task_strata": rejections,
         "topology_family": GENERATOR_FAMILY,
         "cross_family_holdout_supported": False,
         "observation_status": "not_exported; full truth is not sensor-visible input",
+        "route_claim": "swept-sphere voxel-cube replay; not native continuous flight",
     }
     (output_dir / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
