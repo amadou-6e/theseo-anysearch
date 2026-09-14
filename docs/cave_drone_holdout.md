@@ -1,9 +1,10 @@
 # CaveDroneSim tunnel-world export (#414)
 
-Status: source adapter and audit, stacked on #411. This is not a frozen
+Status: source adapter and audit, based on integrated #411 at
+`0f6bc476de2fe9ab3d7678a3c1eb52c9cb2ac154`. This is not a frozen
 training corpus or an independent topology-family holdout. Governing roadmap:
 `amadou-6e/specs@1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
-Issue #414 records the stacked-work deviation.
+Issue #414 records the earlier review-stage stacking deviation.
 
 ## Source and rights
 
