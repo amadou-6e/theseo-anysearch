@@ -121,12 +121,14 @@ collection-only check accepted all 128 in 128 attempts: stage counts were
 actions. The final stage still crosses every gate. The radius-1 voxel-encoder
 settings follow PR #217 except for the built-in progress reward, smaller PPO
 batch, and bounded smoke iterations. The 4608-step episode limit applies to
-every stage. Retention evaluation is scheduled after the two smoke iterations,
-so this configuration alone cannot establish policy mastery or advancement.
+every stage. All-stage curriculum retention evaluation has frequency 10, so it
+is not reached by the two-iteration smoke. This configuration alone cannot
+establish policy mastery or advancement.
 The configuration SHA-256 is
 `8fb0be6542b2ed423864a211e3f86efb93b4fddc119363a3b49f4558f71c32a1`.
-It has **not yet been launched** for pretraining or PPO. Run from this worktree
-root with:
+It completed pretraining and two PPO iterations in run `fb696335`; see
+[STRATIFIED-SMOKE-RESULTS.md](STRATIFIED-SMOKE-RESULTS.md) for the outcome and
+artifact hashes. Reproduction from this worktree root uses:
 
 ```powershell
 python -c "from theseo_anysearch.cli.main import app; app()" run usage/experiments/train/large_world_obstacle_pilot/experiment.yaml
