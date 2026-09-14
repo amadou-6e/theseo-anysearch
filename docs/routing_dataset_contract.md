@@ -1,9 +1,8 @@
 # Imported 3D routing dataset contract
 
 Status: foundation for [issue #411](https://github.com/amadou-6e/theseo-anysearch/issues/411),
-not a benchmark result or authorization to train. The governing draft roadmap is
-[specs@766461e](https://github.com/amadou-6e/specs/blob/766461e21d4a9c92e254557ca4a3f3e6c52eb9e5/projects/theseo-anysearch/routing-geometry-integration-roadmap.md).
-Replace that pin with the merged spec SHA before integration.
+not a benchmark result or authorization to train. The governing roadmap is
+[specs@1dc8397](https://github.com/amadou-6e/specs/blob/1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b/projects/theseo-anysearch/routing-geometry-integration-roadmap.md).
 
 The contracts live in
 [`environments/routing_manifests.py`](../theseo_anysearch/environments/routing_manifests.py).
