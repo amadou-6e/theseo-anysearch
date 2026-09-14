@@ -1,7 +1,8 @@
 # Plant01 point-path import diagnostic
 
 Status: technical validation for [#412](https://github.com/amadou-6e/theseo-anysearch/issues/412),
-stacked on draft [#411](https://github.com/amadou-6e/theseo-anysearch/pull/419).
+based on integrated [#411](https://github.com/amadou-6e/theseo-anysearch/pull/419)
+at `0f6bc476de2fe9ab3d7678a3c1eb52c9cb2ac154`.
 The governing roadmap is
 [specs@1dc8397](https://github.com/amadou-6e/specs/blob/1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b/projects/theseo-anysearch/routing-geometry-integration-roadmap.md).
 This is **not** a published-score comparison or a training run. Source rights
