@@ -1,5 +1,9 @@
 # Compact Aerial Gym collision export (#413)
 
+Integration base: [#411](https://github.com/amadou-6e/theseo-anysearch/pull/419)
+at `0f6bc476de2fe9ab3d7678a3c1eb52c9cb2ac154`. Governing roadmap:
+`amadou-6e/specs@1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
+
 This optional adapter exports two **derived static tasks**, not episodes from
 the Isaac Gym simulator. It uses the collision boxes in seven pinned upstream
 URDFs, the six source wall placement ratios, and a deterministic local recipe
