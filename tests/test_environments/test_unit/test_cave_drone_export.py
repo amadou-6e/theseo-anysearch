@@ -18,10 +18,12 @@ from theseo_anysearch.environments.cave_drone_export import (
     topology_census,
 )
 from theseo_anysearch.environments.routing_manifests import (
+    RoutingReferenceRecord,
     RoutingTaskRecord,
     RoutingWorldRecord,
     read_sidecar,
 )
+from theseo_anysearch.garden.external_routing import load_imported_worlds, prepare_routing_rows
 
 
 def _corridor() -> np.ndarray:
@@ -97,7 +99,7 @@ def test_real_source_repeat_has_identical_content_hashes(tmp_path: Path) -> None
     for key in (
         "source_identity_sha256", "world_identity_sha256",
         "dataset_identity_sha256", "occupancy_sha256", "task_ids",
-        "topology_census",
+        "reference_ids", "routes", "topology_census",
     ):
         assert first[key] == second[key]
     assert (tmp_path / "first" / "occupancy.npy").read_bytes() == (
@@ -105,10 +107,22 @@ def test_real_source_repeat_has_identical_content_hashes(tmp_path: Path) -> None
     ).read_bytes()
     world = read_sidecar(tmp_path / "first" / "world.json", RoutingWorldRecord)
     task = read_sidecar(tmp_path / "first" / "task-00.json", RoutingTaskRecord)
+    reference = read_sidecar(tmp_path / "first" / "reference-00.json", RoutingReferenceRecord)
     assert task.world_identity_sha256 == world.identity_sha256
+    assert reference.task_identity_sha256 == task.identity_sha256
+    assert reference.claim == "independently_validated"
     assert task.provenance == "derived"
     assert task.family == "drone_flight"
     assert first["cross_family_holdout_supported"] is False
+    imported = load_imported_worlds(tmp_path / "first", source_root=source)
+    assert len(imported) == len(first["task_ids"]) == 2
+    prepared = prepare_routing_rows(
+        imported, dataset_id="real-source-test-only",
+        partitions={world.root_geometry_id: "test"},
+    )
+    assert len(prepared.rows) == 48
+    assert any(row.traversable for row in prepared.rows)
+    assert any(not row.traversable for row in prepared.rows)
 
 
 def test_invalid_source_revision_fails_closed(tmp_path: Path) -> None:
