@@ -2,8 +2,8 @@
 
 Status: technical validation for [#412](https://github.com/amadou-6e/theseo-anysearch/issues/412),
 stacked on draft [#411](https://github.com/amadou-6e/theseo-anysearch/pull/419).
-The governing roadmap remains draft
-[specs@766461e](https://github.com/amadou-6e/specs/blob/766461e21d4a9c92e254557ca4a3f3e6c52eb9e5/projects/theseo-anysearch/routing-geometry-integration-roadmap.md).
+The governing roadmap is
+[specs@1dc8397](https://github.com/amadou-6e/specs/blob/1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b/projects/theseo-anysearch/routing-geometry-integration-roadmap.md).
 This is **not** a published-score comparison or a training run. Source rights
 are still unreviewed; no third-party map, scenario, or converted corpus is
 committed.
