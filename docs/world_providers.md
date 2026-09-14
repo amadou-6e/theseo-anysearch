@@ -59,3 +59,11 @@ a useful training family. Six-axis swept-sphere replay establishes voxel-cube
 collision freedom, not continuous controller feasibility or path optimality.
 Other motion/constraint models need an explicitly reviewed independent
 checker before they can register verified tasks.
+
+The voxel-route checker uses `Sphere(radius_voxels)` and accepts an optional
+`AxisHeading` (`+x`, `-x`, `+y`, `-y`, `+z`, `-z`). A sphere is heading-invariant;
+other body shapes are rejected until their sweep semantics and tests exist.
+These headings do not describe roll, so a future asymmetric body may need a
+richer pose contract. This checker operates on complete occupied voxel cubes.
+Aerial Gym's separate route witness still checks its original rotated source
+boxes; replacing that witness with a voxel check would weaken its claim.
