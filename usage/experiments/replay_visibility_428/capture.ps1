@@ -40,6 +40,16 @@ function Snapshot-Replay([IntPtr]$Window, [string]$Path) {
     if (($rect.Right - $rect.Left) -ne 1216 -or ($rect.Bottom - $rect.Top) -ne 799) {
         throw 'Expected a 1216x799 window at 100% display scaling.'
     }
+    $display = [System.Windows.Forms.Screen]::FromHandle($Window).Bounds
+    if ($display.Right -ge ($rect.Right + 16)) {
+        $park = [System.Drawing.Point]::new($rect.Right + 12, $rect.Top + 20)
+    } elseif ($display.Bottom -ge ($rect.Bottom + 16)) {
+        $park = [System.Drawing.Point]::new($rect.Left + 20, $rect.Bottom + 12)
+    } else {
+        throw 'Need desktop space outside the replay window to park the pointer.'
+    }
+    [System.Windows.Forms.Cursor]::Position = $park
+    Start-Sleep -Milliseconds 100
     $bitmap = [System.Drawing.Bitmap]::new(1216, 799)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     try {
