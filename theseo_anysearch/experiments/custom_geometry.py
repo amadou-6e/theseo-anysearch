@@ -215,6 +215,9 @@ def preflight_geometry_provider(geometry: Any, env: Any, config_path: Path | Non
     selector = geometry.provider
     if selector is None:
         return None
+    extent = tuple(geometry.extent or (geometry.grid_size,) * 3)
+    max_steps = int(env.max_steps)
+    action_mode = str(env.action.mode)
     source = discover_geometry_source(config_path, selector.name)
     if source is None:
         from theseo_anysearch.experiments.native_extensions import (
@@ -228,24 +231,30 @@ def preflight_geometry_provider(geometry: Any, env: Any, config_path: Path | Non
                 manifest_path.read_text(encoding="utf-8")
             )
             if selector.name in manifest.geometries:
-                return load_native_geometry_provider(
+                provider = load_native_geometry_provider(
                     manifest_path.parent.joinpath(manifest.library).resolve(),
                     selector.name,
                 )
+                _preflight_native_provider(
+                    provider,
+                    extent,
+                    seed=int(env.seed),
+                    max_steps=max_steps,
+                    action_mode=action_mode,
+                    parameters=selector.parameters,
+                )
+                return provider
         expected = config_path.with_name("geometry.py") if config_path else Path("geometry.py")
         raise CustomGeometryError(
             f"geometry provider {selector.name!r} requires {expected} or a compiled native export"
         )
     provider = load_geometry_provider(source, selector.name)
     assert provider is not None
-    extent = tuple(geometry.extent or (geometry.grid_size,) * 3)
     context = GeometryContext(
         seed=int(env.seed),
         attempt=1,
         extent=extent,
-        task=GeometryTaskRequirements(
-            max_steps=int(env.max_steps), action_mode=str(env.action.mode)
-        ),
+        task=GeometryTaskRequirements(max_steps=max_steps, action_mode=action_mode),
         parameters=selector.parameters,
         world=_EmptyWorld(extent),
     )
@@ -256,3 +265,48 @@ def preflight_geometry_provider(geometry: Any, env: Any, config_path: Path | Non
             f"geometry provider {selector.name!r} is nondeterministic for a fixed context"
         )
     return provider
+
+
+def _preflight_native_provider(
+    provider: GeometryProvider,
+    extent: tuple[int, int, int],
+    *,
+    seed: int,
+    max_steps: int,
+    action_mode: str,
+    parameters: dict[str, Any],
+) -> None:
+    """Trigger the native ABI's own determinism check before Ray starts.
+
+    ``generate_native_geometry_v1`` (the Rust binding) already invokes a
+    native provider twice per call and rejects a mismatched output as a
+    ``ValueError`` -- see ``NativeGeometryV1::invoke_deterministic``. That
+    guards every real reset, but the first reset can already be well into a
+    Ray Tune sweep. This calls it once against a throwaway, obstacle-free
+    probe environment so a nondeterministic native provider fails at
+    preflight, the same point a nondeterministic Python provider already
+    fails at above.
+    """
+    import json
+
+    from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+    probe = VoxelEnv({"extent": extent, "max_steps": max_steps, "action_mode": action_mode})
+    try:
+        parameters_json = json.dumps(parameters, sort_keys=True)
+        task_json = GeometryTaskRequirements(
+            max_steps=max_steps, action_mode=action_mode
+        ).model_dump_json()
+        try:
+            probe._rust_env.generate_native_geometry_v1(
+                str(provider.source_path),
+                provider.name,
+                seed,
+                1,
+                parameters_json,
+                task_json,
+            )
+        except ValueError as exc:
+            raise CustomGeometryError(str(exc)) from exc
+    finally:
+        probe.close()
