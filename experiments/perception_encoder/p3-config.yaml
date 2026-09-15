@@ -1,0 +1,21 @@
+pilot: P3
+spec_commit: f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d
+device: cuda:0
+precision: fp32
+compile: false
+seed: 0
+batch_size: 1
+radii: [8, 16, 32]
+warmup_inferences: 100
+measured_inferences: 500
+training_steps: 20
+candidates:
+  current_dense:
+    channels: [18, 36, 72, 144]
+    embedding_dim: 192
+  dense_residual: tiny
+  triplanar: tiny
+  shared_pyramid:
+    capacity: tiny
+    per_level_side: 17
+  sparse_residual: optional

@@ -1,0 +1,558 @@
+{
+  "accelerator_hours": 0.009499801472221507,
+  "cells": [
+    {
+      "candidate": "current_dense",
+      "checkpoint_bytes": 4649285,
+      "error": null,
+      "flops": 267483240,
+      "latency_p50_ms": 1.2144639492034912,
+      "latency_p95_ms": 1.4030224323272704,
+      "output_contract": "legacy_global_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ]
+      },
+      "parameters": 1154568,
+      "peak_inference_allocated_bytes": 25141248,
+      "peak_inference_reserved_bytes": 46137344,
+      "peak_training_allocated_bytes": 40806400,
+      "peak_training_reserved_bytes": 52428800,
+      "radius": 8,
+      "status": "completed",
+      "training_examples_per_second": 138.28274949938768
+    },
+    {
+      "candidate": "current_dense",
+      "checkpoint_bytes": 4649285,
+      "error": null,
+      "flops": 1709581032,
+      "latency_p50_ms": 1.1873759627342224,
+      "latency_p95_ms": 1.431500840187072,
+      "output_contract": "legacy_global_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ]
+      },
+      "parameters": 1154568,
+      "peak_inference_allocated_bytes": 32794112,
+      "peak_inference_reserved_bytes": 52428800,
+      "peak_training_allocated_bytes": 60883968,
+      "peak_training_reserved_bytes": 77594624,
+      "radius": 16,
+      "status": "completed",
+      "training_examples_per_second": 180.69132500950758
+    },
+    {
+      "candidate": "current_dense",
+      "checkpoint_bytes": 4649285,
+      "error": null,
+      "flops": 12228827112,
+      "latency_p50_ms": 4.654079914093018,
+      "latency_p95_ms": 5.775462508201599,
+      "output_contract": "legacy_global_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ]
+      },
+      "parameters": 1154568,
+      "peak_inference_allocated_bytes": 102756352,
+      "peak_inference_reserved_bytes": 161480704,
+      "peak_training_allocated_bytes": 210560512,
+      "peak_training_reserved_bytes": 299892736,
+      "radius": 32,
+      "status": "completed",
+      "training_examples_per_second": 52.450459230101835
+    },
+    {
+      "candidate": "dense_residual",
+      "checkpoint_bytes": 4608415,
+      "error": null,
+      "flops": 351258496,
+      "latency_p50_ms": 2.4024479389190674,
+      "latency_p95_ms": 2.7289920210838314,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          17,
+          17,
+          17
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          17,
+          17,
+          17
+        ]
+      },
+      "parameters": 1148064,
+      "peak_inference_allocated_bytes": 24778240,
+      "peak_inference_reserved_bytes": 299892736,
+      "peak_training_allocated_bytes": 41162752,
+      "peak_training_reserved_bytes": 304087040,
+      "radius": 8,
+      "status": "completed",
+      "training_examples_per_second": 123.15763870220881
+    },
+    {
+      "candidate": "dense_residual",
+      "checkpoint_bytes": 4608415,
+      "error": null,
+      "flops": 2291076992,
+      "latency_p50_ms": 2.5170079469680786,
+      "latency_p95_ms": 2.919924747943877,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          33,
+          33,
+          33
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          33,
+          33,
+          33
+        ]
+      },
+      "parameters": 1148064,
+      "peak_inference_allocated_bytes": 38959104,
+      "peak_inference_reserved_bytes": 304087040,
+      "peak_training_allocated_bytes": 76722176,
+      "peak_training_reserved_bytes": 308281344,
+      "radius": 16,
+      "status": "completed",
+      "training_examples_per_second": 128.55321074310032
+    },
+    {
+      "candidate": "dense_residual",
+      "checkpoint_bytes": 4608415,
+      "error": null,
+      "flops": 16552894336,
+      "latency_p50_ms": 7.363183975219727,
+      "latency_p95_ms": 8.34522271156311,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          65,
+          65,
+          65
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          65,
+          65,
+          65
+        ]
+      },
+      "parameters": 1148064,
+      "peak_inference_allocated_bytes": 153767936,
+      "peak_inference_reserved_bytes": 308281344,
+      "peak_training_allocated_bytes": 370973696,
+      "peak_training_reserved_bytes": 421527552,
+      "radius": 32,
+      "status": "completed",
+      "training_examples_per_second": 39.11253654529763
+    },
+    {
+      "candidate": "triplanar",
+      "checkpoint_bytes": 4532465,
+      "error": null,
+      "flops": 126276384,
+      "latency_p50_ms": 5.227136135101318,
+      "latency_p95_ms": 5.9154144525527945,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          26,
+          17,
+          17,
+          17
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          17,
+          17,
+          17
+        ]
+      },
+      "parameters": 1129814,
+      "peak_inference_allocated_bytes": 24752128,
+      "peak_inference_reserved_bytes": 421527552,
+      "peak_training_allocated_bytes": 41609216,
+      "peak_training_reserved_bytes": 421527552,
+      "radius": 8,
+      "status": "completed",
+      "training_examples_per_second": 68.36926651075994
+    },
+    {
+      "candidate": "triplanar",
+      "checkpoint_bytes": 4532465,
+      "error": null,
+      "flops": 411379488,
+      "latency_p50_ms": 5.198911905288696,
+      "latency_p95_ms": 5.725951933860778,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          26,
+          33,
+          33,
+          33
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          33,
+          33,
+          33
+        ]
+      },
+      "parameters": 1129814,
+      "peak_inference_allocated_bytes": 40856064,
+      "peak_inference_reserved_bytes": 421527552,
+      "peak_training_allocated_bytes": 64446976,
+      "peak_training_reserved_bytes": 421527552,
+      "radius": 16,
+      "status": "completed",
+      "training_examples_per_second": 64.82782539947775
+    },
+    {
+      "candidate": "triplanar",
+      "checkpoint_bytes": 4532465,
+      "error": null,
+      "flops": 1476931872,
+      "latency_p50_ms": 5.912591934204102,
+      "latency_p95_ms": 6.498227286338806,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          26,
+          65,
+          65,
+          65
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          65,
+          65,
+          65
+        ]
+      },
+      "parameters": 1129814,
+      "peak_inference_allocated_bytes": 169221632,
+      "peak_inference_reserved_bytes": 450887680,
+      "peak_training_allocated_bytes": 264750080,
+      "peak_training_reserved_bytes": 551550976,
+      "radius": 32,
+      "status": "completed",
+      "training_examples_per_second": 63.243506473086875
+    },
+    {
+      "candidate": "shared_pyramid",
+      "checkpoint_bytes": 4763664,
+      "error": null,
+      "flops": 351332608,
+      "latency_p50_ms": 2.6193599700927734,
+      "latency_p95_ms": 2.8395968794822686,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          17,
+          17,
+          17
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          17,
+          17,
+          17
+        ]
+      },
+      "parameters": 1186465,
+      "peak_inference_allocated_bytes": 24933888,
+      "peak_inference_reserved_bytes": 551550976,
+      "peak_training_allocated_bytes": 41929216,
+      "peak_training_reserved_bytes": 551550976,
+      "radius": 8,
+      "status": "completed",
+      "training_examples_per_second": 132.7406903972215
+    },
+    {
+      "candidate": "shared_pyramid",
+      "checkpoint_bytes": 4763664,
+      "error": null,
+      "flops": 702591488,
+      "latency_p50_ms": 4.5371198654174805,
+      "latency_p95_ms": 5.066555047035218,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          17,
+          17,
+          17
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ],
+          "2": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          17,
+          17,
+          17
+        ]
+      },
+      "parameters": 1186465,
+      "peak_inference_allocated_bytes": 25348608,
+      "peak_inference_reserved_bytes": 551550976,
+      "peak_training_allocated_bytes": 46018048,
+      "peak_training_reserved_bytes": 551550976,
+      "radius": 16,
+      "status": "completed",
+      "training_examples_per_second": 84.383022978802
+    },
+    {
+      "candidate": "shared_pyramid",
+      "checkpoint_bytes": 4763664,
+      "error": null,
+      "flops": 1053850368,
+      "latency_p50_ms": 6.444447994232178,
+      "latency_p95_ms": 6.832340836524963,
+      "output_contract": "global_scale_local_v1",
+      "output_shapes": {
+        "global": [
+          1,
+          192
+        ],
+        "local": [
+          1,
+          16,
+          17,
+          17,
+          17
+        ],
+        "scales": {
+          "1": [
+            1,
+            192
+          ],
+          "2": [
+            1,
+            192
+          ],
+          "4": [
+            1,
+            192
+          ]
+        },
+        "validity": [
+          1,
+          1,
+          17,
+          17,
+          17
+        ]
+      },
+      "parameters": 1186465,
+      "peak_inference_allocated_bytes": 25749504,
+      "peak_inference_reserved_bytes": 551550976,
+      "peak_training_allocated_bytes": 50019328,
+      "peak_training_reserved_bytes": 551550976,
+      "radius": 32,
+      "status": "completed",
+      "training_examples_per_second": 61.52714054435017
+    }
+  ],
+  "code_sha": "fb85c08e2052c6043703e882306328f744b4693e",
+  "configuration": {
+    "batch_size": 1,
+    "compilation": false,
+    "measured_inferences": 500,
+    "precision": "fp32",
+    "radii": [
+      8,
+      16,
+      32
+    ],
+    "seed": 0,
+    "training_steps": 20,
+    "warmup_inferences": 100
+  },
+  "dataset_identity": "not_applicable_random_weight_profile",
+  "decision_record": {
+    "decision": "tie",
+    "next_pilot": "P4",
+    "parameter_match_ratio": 1.0501418817610686,
+    "parameter_match_within_10_percent": true,
+    "quality_claim": false,
+    "rejected": {
+      "sparse_residual": [
+        "MinkowskiEngine is not installed for this Python/device platform"
+      ]
+    },
+    "retained": [
+      "current_dense",
+      "dense_residual",
+      "triplanar",
+      "shared_pyramid"
+    ],
+    "retained_reasons": {
+      "current_dense": [
+        "reference_control"
+      ],
+      "dense_residual": [
+        "passed_output_oom_and_resource_rule"
+      ],
+      "shared_pyramid": [
+        "passed_output_oom_and_resource_rule"
+      ],
+      "triplanar": [
+        "passed_output_oom_and_resource_rule"
+      ]
+    }
+  },
+  "hardware": {
+    "capability": [
+      8,
+      6
+    ],
+    "device": "NVIDIA GeForce RTX 3060 Ti",
+    "driver": "560.94",
+    "total_memory_bytes": 8589279232
+  },
+  "integration_base_sha": "0b8476f90a5da45b060bd641daedb8f5468d0189",
+  "issue": 279,
+  "optional_sparse": {
+    "radii": [
+      8,
+      16,
+      32
+    ],
+    "reason": "MinkowskiEngine is not installed for this Python/device platform",
+    "status": "skipped"
+  },
+  "pilot": "P3",
+  "query_identity": "not_applicable_random_weight_profile",
+  "report_payload_sha256": "5ab2dafd27394893fdb8087d12db68d6078b07f838a33d9e00b4b94a71d55dbf",
+  "resolved_config_sha256": "5a30dbbc2ee70a053db541c2b861165c01d00529603da19b7434ac4eff54a739",
+  "software": {
+    "cuda_runtime": "12.6",
+    "python": "3.12.10",
+    "torch": "2.13.0+cu126"
+  },
+  "spec_commit": "f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d",
+  "status": "completed",
+  "trial_counts": {
+    "cap": 15,
+    "completed": 12,
+    "failed": 0,
+    "skipped": 3
+  }
+}
