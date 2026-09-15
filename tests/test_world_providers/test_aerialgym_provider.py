@@ -10,6 +10,25 @@ from anysearch_aerialgym import Provider
 from theseo_anysearch.world_providers.bundle import load_bundle
 
 
+def test_cli_help_lists_layouts_without_download():
+    import click
+    from click.testing import CliRunner
+    from typer.main import get_command
+    from theseo_anysearch.cli.commands.worlds import app
+
+    with patch("theseo_anysearch.cli.commands.worlds.load_provider", return_value=Provider()), \
+         patch("anysearch_aerialgym.cached_sources") as cache:
+        group = get_command(app)
+        command = group.get_command(click.Context(group), "aerialgym")
+        result = CliRunner().invoke(command, ["--help"])
+    assert result.exit_code == 0, result.output
+    help_text = " ".join(result.output.split())
+    assert "detour (route around a blocking obstacle)" in help_text
+    assert "altitude (change altitude to cross a barrier)" in help_text
+    assert "Default: detour" in help_text
+    cache.assert_not_called()
+
+
 @pytest.mark.parametrize("parameters", [{"meters-per-voxel": 0.13}, {"layout": "unsupported"}, {"body-radius-m": float("nan")}])
 def test_bad_parameters_do_not_download(tmp_path, parameters):
     with patch("anysearch_aerialgym.cached_sources") as cache:

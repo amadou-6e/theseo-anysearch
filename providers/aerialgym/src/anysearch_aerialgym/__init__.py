@@ -35,7 +35,11 @@ class Provider:
         native_meters_per_voxel=0.25,
         parameters=(
             ProviderParameter("meters-per-voxel", "number", default=0.25, minimum=0.10, maximum=0.50),
-            ProviderParameter("layout", "text", default="detour", help="detour or altitude"),
+            ProviderParameter(
+                "layout", "text", default="detour",
+                help="Available layouts: detour (route around a blocking obstacle); "
+                     "altitude (change altitude to cross a barrier). Default: detour.",
+            ),
             ProviderParameter("body-radius-m", "number", default=0.25, minimum=0, maximum=0.50),
             ProviderParameter("offline", "boolean", default=False, help="use verified cache only"),
         ),
