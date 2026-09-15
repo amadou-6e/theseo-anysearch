@@ -1,0 +1,90 @@
+schema_version: 4
+program: voxel-encoder-pilot-v2r2
+protocol_id: voxel-encoder-pilot-v2r2-audit-protocol-1
+dataset_id: voxel-encoder-pilot-v2r2-dataset-1
+r0_run_id: voxel-encoder-pilot-v2r2-r0-1
+downstream_ids:
+  - voxel-encoder-pilot-v2r2-preregistration-1
+  - voxel-encoder-pilot-v2r2-p0c-1
+  - voxel-encoder-pilot-v2r2-p0d-1
+  - voxel-encoder-pilot-v2r2-p1-1
+governing_spec_sha: 0060366f43892bade5acf734cf2e189d8a666ad2
+foundation_sha: f03509f926d217cf8a0c8c34cd0da38020a5034c
+predecessor_spec_sha: 0c9e3c633799f5d42b7a603e0845cac0bd494cda
+generator: native-v2-visible-conditioned-patches-v1
+root_seed: 3402701
+training_geometries_per_stratum: 72
+donor_geometries_per_configuration: 96
+donor_neighbours: 16
+query_attempts: 1
+configurations: A_native_r8_B_native_r16_stride2
+conditioning: visible_hamming_topk_uniform_iid_with_replacement
+r0_strata: observed_optimistic_lexicographic_path_span_no_label_conditioning
+r1_positive_strata: completed_lexicographic_shortest_path_span
+r1_negative_strata: observed_optimistic_path_span_single_bin
+stratum_weights: [0.3333333333333333, 0.3333333333333333, 0.3333333333333333]
+assessment:
+  geometries_per_stratum_per_domain: 24
+  counterfactuals_per_context: 64
+  minimum_contexts_per_geometry: 1
+  minimum_class_queries: 64
+  maximum_conditional_entropy_bits: 0.90
+  minimum_visible_skill_bits: 0.02
+  maximum_forbidden_skill_bits: 0.02
+  maximum_transfer_drop_bits: 0.05
+  coverage: 0.95
+  bootstrap_resamples: 10000
+  bootstrap_seed: 3402702
+  probability_clip: 0.000001
+  entropy_estimator: plugin_with_exact_binomial_envelope
+  weighting: equal_geometry_then_equal_context
+controls:
+  updates: 1024
+  learning_rate: 0.001
+  weight_decay: 0.01
+  visible_hidden_width: 128
+  forbidden_hidden_width: 32
+  seed: 3402703
+  maximum_wall_seconds: 900
+  optimizer: adamw_full_batch
+  checkpoint: last_update_no_evaluation_selection
+  weighting: equal_geometry_then_equal_context
+  geometric_prior: linear_observed_density_unknown_density_l1_separation
+calibration:
+  candidate_probe: global192_plus_coordinates6_mlp128
+  raw_control: conv3d_2_8_16_32_globalmean_coords_mlp144
+  empirical_reference: conv3d_2_32_64_128_globalmean_coords_mlp512
+  input_information: observed_occupancy_unknown_and_query_coordinates_only
+  normalization: binary_voxels_unit_coordinates_no_fitted_normalization
+  optimizer: adamw_full_batch
+  updates: 5000
+  learning_rate: 0.001
+  weight_decay: 0.01
+  selection: last_update_no_evaluation_selection
+  menu: [conditional_log_loss_gain, occlusion_auprc]
+  metric_rule: conditional_log_loss_gain_only_no_fallback
+  minimum_headroom: 0.1
+  probability_clip: 0.000001
+  anchor_count: 4
+  anchor_selection: hash_rank_observed_free_cells
+  threshold_grid: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  threshold_selection: training_geometry_threefold_max_balanced_accuracy_lowest_tie
+  minimum_negative_support: 200
+  false_merge_rule: min_control_reference_upper95_plus_margin_capped1
+  false_merge_margin: 0.02
+  veto_uncertainty: geometry_cluster_bootstrap_upper95
+  selectivity_minimum_component_normalized_gain: 0.05
+  embedding_necessity_minimum_component_normalized_gain: 0.05
+  retention_rule: all_four_components_required_geodesic_deferred
+  p0d_density_multiplier: 4
+  p0d_maximum_headroom_change: 0.02
+  p0d_maximum_false_merge_change: 0.02
+  model_free_reference: diagnostic_only_geometry_disjoint_knn_k15_visible_features
+  local_templates: v2r1_masked_occupied_iou_boundary_f1_clearance_nmae
+r0_wall_cap_seconds: 3600
+r0_accelerator_hour_cap: 0.5
+p0c_accelerator_hour_cap: 2
+p0d_accelerator_hour_cap: 2
+p1_accelerator_hour_cap: 4
+workers: 4
+required_topology_components: [reachability]

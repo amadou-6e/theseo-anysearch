@@ -1,0 +1,235 @@
+{
+  "assessment": {
+    "assessment_payload_sha256": "5ebd995a8059c1abc5b165fd2b3f7dac8c1e3bdd10c628deb309b82bc516f3ed",
+    "authorizes_comparative_run": false,
+    "decision": "defer",
+    "input_sha256": "86c9af31ce64bdaac73a8a74b90de97da7cfcf497b0bec529d16a4d1ac7b3ecb",
+    "kind": "r0_assessment_not_execution_report",
+    "limitations": [
+      "Requires IID conditional completions and externally verified fitting provenance.",
+      "Cluster-bootstrap coverage is approximate, not a certified confidence guarantee.",
+      "Forbidden-feature predictability alone does not prove leakage into encoder inputs.",
+      "This assessment is not the frozen protocol or a replacement P1 result."
+    ],
+    "reasons": [
+      "1-2:heldout_generator:insufficient_support",
+      "3-5:heldout_generator:insufficient_support",
+      "6+:entropy:insufficient_evidence",
+      "6+:visible_skill:insufficient_evidence",
+      "6+:forbidden_predictability:insufficient_evidence",
+      "6+:generator_transfer:insufficient_evidence"
+    ],
+    "settings": {
+      "bootstrap_resamples": 10000,
+      "bootstrap_seed": 3402702,
+      "counterfactuals_per_context": 64,
+      "coverage": 0.95,
+      "entropy_estimator": "plugin_with_exact_binomial_envelope",
+      "geometries_per_stratum_per_domain": 24,
+      "maximum_conditional_entropy_bits": 0.9,
+      "maximum_forbidden_skill_bits": 0.02,
+      "maximum_transfer_drop_bits": 0.05,
+      "minimum_class_queries": 64,
+      "minimum_contexts_per_geometry": 1,
+      "minimum_visible_skill_bits": 0.02,
+      "probability_clip": 1e-06,
+      "weighting": "equal_geometry_then_equal_context"
+    },
+    "strata": {
+      "1-2": {
+        "checks": {},
+        "domains": {
+          "heldout_generator": {
+            "contexts": 24,
+            "geometries": 24,
+            "negative_queries": 0,
+            "positive_queries": 1536,
+            "queries": 1536,
+            "support_passed": false
+          },
+          "in_domain": {
+            "conditional_entropy_bits": 0.28084322884741303,
+            "conditional_entropy_interval_bits": [
+              0.021167387254658186,
+              0.8049586154222191
+            ],
+            "contexts": 24,
+            "geometries": 24,
+            "log_loss_bits": {
+              "coordinates_only": 0.6243694752506933,
+              "forbidden": 0.3055165311222894,
+              "geometric_prior": 0.4506923265552174,
+              "visible_context": 0.32730792956620686
+            },
+            "negative_queries": 84,
+            "positive_queries": 1452,
+            "queries": 1536,
+            "support_passed": true,
+            "unknown_fraction": 0.05882352941176471
+          }
+        }
+      },
+      "3-5": {
+        "checks": {},
+        "domains": {
+          "heldout_generator": {
+            "contexts": 24,
+            "geometries": 24,
+            "negative_queries": 0,
+            "positive_queries": 1536,
+            "queries": 1536,
+            "support_passed": false
+          },
+          "in_domain": {
+            "conditional_entropy_bits": 0.2723111974214616,
+            "conditional_entropy_interval_bits": [
+              0.02209713684277352,
+              0.8002787672622905
+            ],
+            "contexts": 24,
+            "geometries": 24,
+            "log_loss_bits": {
+              "coordinates_only": 0.6296109424504005,
+              "forbidden": 0.293202808348162,
+              "geometric_prior": 0.4454183517625472,
+              "visible_context": 0.3293825438943234
+            },
+            "negative_queries": 79,
+            "positive_queries": 1457,
+            "queries": 1536,
+            "support_passed": true,
+            "unknown_fraction": 0.17647058823529405
+          }
+        }
+      },
+      "6+": {
+        "checks": {
+          "entropy": {
+            "limit": 0.9,
+            "passed": false,
+            "upper": 0.9157328915401973
+          },
+          "forbidden_predictability": {
+            "limit": 0.02,
+            "passed": false,
+            "upper": 0.14412527709323827
+          },
+          "generator_transfer": {
+            "limit": 0.05,
+            "passed": false,
+            "upper": 0.15645392418516652
+          },
+          "visible_skill": {
+            "limit": 0.02,
+            "lower": -0.07785915493199046,
+            "passed": false
+          }
+        },
+        "domains": {
+          "heldout_generator": {
+            "conditional_entropy_bits": 0.44708201649097307,
+            "conditional_entropy_interval_bits": [
+              0.06947439404310955,
+              0.9157328915401973
+            ],
+            "contexts": 24,
+            "geometries": 24,
+            "log_loss_bits": {
+              "coordinates_only": 0.6772080723773901,
+              "forbidden": 0.49452357743440295,
+              "geometric_prior": 0.5384767903787308,
+              "visible_context": 0.5443408144749469
+            },
+            "negative_queries": 154,
+            "positive_queries": 1382,
+            "queries": 1536,
+            "support_passed": true,
+            "unknown_fraction": 0.3529411764705881
+          },
+          "in_domain": {
+            "conditional_entropy_bits": 0.3629934948772991,
+            "conditional_entropy_interval_bits": [
+              0.0395750971810433,
+              0.8600130368990972
+            ],
+            "contexts": 24,
+            "geometries": 24,
+            "log_loss_bits": {
+              "coordinates_only": 0.6524459296554381,
+              "forbidden": 0.39327993066415146,
+              "geometric_prior": 0.4960339539172056,
+              "visible_context": 0.47231535639649996
+            },
+            "negative_queries": 117,
+            "positive_queries": 1419,
+            "queries": 1536,
+            "support_passed": true,
+            "unknown_fraction": 0.3529411764705881
+          }
+        }
+      }
+    }
+  },
+  "candidate_training_updates": 0,
+  "code_sha": "f902b428c61b3a20c386fb3a91d28726fdd470d3",
+  "control_artifacts_sha256": "f421e888bdcea131e14caa56eef4a6819648ca8a48ba9daaff54a3408b34f595",
+  "data_manifest_sha256": "18e9335430799e1588dd89e586ed1d879147d3833d2a7c10b384732c85074f73",
+  "dataset_id": "voxel-encoder-pilot-v2r2-dataset-1",
+  "decision": "no_topology_identifiable",
+  "donor_bank_sha256": {
+    "A": "1421eb9e3d8f651589e63691b0b0c6035af07508e585f7f03b4e48f5fea8a90b",
+    "B": "b1ffdafd14f910ca7ec35807a525140e7ae87a7f08adeb0bc1415967255f7cd5"
+  },
+  "execution_addendum_spec_sha": "a0d03c434be72d6eab7d962e53af62a7dd57b11d",
+  "finished_at": "2026-09-08T15:38:07.804005+00:00",
+  "limitations": [
+    "Conditional entropy is for the registered empirical patch prior, not a true native-world posterior.",
+    "Completions are IID conditional on fixed donor banks; uncertainty conditions on those banks.",
+    "Imported-family volumes are synthetic ellipsoids, not real imported assets.",
+    "R0 bins use observed optimistic paths to avoid conditioning uncertainty on hidden labels; R1 positives use completed paths.",
+    "The transfer configuration changes voxel sampling scale, not the whole generator family.",
+    "A failed audit is insufficient evidence under this distribution/budget, not proof topology is impossible."
+  ],
+  "next_stage": null,
+  "p0c_started": false,
+  "p0d_started": false,
+  "p1_started": false,
+  "pool_plan_sha256": "af923f0e3157f212b442746f0791f92739a5336834291b82b6e1dddccaa887c1",
+  "predictions_sha256": "a4887e9d49da918b3c2fd7c7ee11e71c92e017d2c3488817c4e61692f74f2f03",
+  "protocol_sha256": "8230bd97ea14f14f8a8910af61cde7ad211a6c189c9129981d225b45c79a8fe3",
+  "query_plan_sha256": "e6ca0e1834cf474b37d846f986ca2ca9cbadb96a581b07d0341d084d77367df7",
+  "r0_decision": "defer",
+  "report_payload_sha256": "f14bacb88d29c1da009fb3ed02a6fa63648675706fef488661eb1c44dff9e71c",
+  "resources": {
+    "accelerator_hours_upper_bound": 0.0022329438055546944,
+    "control_fits": [
+      {
+        "accelerator_hours_upper_bound": 0.0012995511388887988,
+        "candidate_training_updates": 0,
+        "control_training_updates": 4096,
+        "device": "cuda",
+        "device_name": "NVIDIA GeForce RTX 3060 Ti",
+        "wall_seconds": 4.6783840999996755
+      },
+      {
+        "accelerator_hours_upper_bound": 0.0009333926666658954,
+        "candidate_training_updates": 0,
+        "control_training_updates": 4096,
+        "device": "cuda",
+        "device_name": "NVIDIA GeForce RTX 3060 Ti",
+        "wall_seconds": 3.3602135999972234
+      }
+    ]
+  },
+  "run_id": "voxel-encoder-pilot-v2r2-r0-1",
+  "runtime_head_sha": "6c34230632920534b54bb4a625b784b7636d26dd",
+  "selected_contexts": {
+    "r0_in_domain": 72,
+    "r0_train": 216,
+    "r0_transfer": 72
+  },
+  "spec_sha": "0060366f43892bade5acf734cf2e189d8a666ad2",
+  "started_at": "2026-09-08T15:37:33.899431+00:00",
+  "status": "completed",
+  "wall_seconds": 33.904757600001176
+}

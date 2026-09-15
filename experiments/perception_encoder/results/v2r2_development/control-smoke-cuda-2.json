@@ -1,0 +1,346 @@
+{
+  "authorizes_comparative_run": false,
+  "candidate_training_updates": 0,
+  "code_sha": "d6d4500bbf7913a3ca92fe176b35e4fc5ec0249e",
+  "completions_per_context": 16,
+  "dirty_worktree": false,
+  "domains": {
+    "heldout_generator": {
+      "evaluation_contexts": 12,
+      "fit_artifact": {
+        "authorizes_comparative_run": false,
+        "device": "cuda",
+        "forbidden_features_reach_visible_model": false,
+        "kind": "r0_control_fit_v1",
+        "models": {
+          "coordinates_only": {
+            "input_width": 6,
+            "mean_sha256": "89d85939f8f97bb44b64397e1702b970f3e4fa4ca54f0718e8a0d9af2e83aadd",
+            "parameter_count": 7,
+            "scale_sha256": "d21ccf1b0c049a6d88cc064f602b2ff79813ab2cf442f699f1a6510b9f908e2c",
+            "state_sha256": "4501a5fb3529f932b610867609b22d5ebf0a78f933f45f78f7271bd794dc8627",
+            "updates": 128
+          },
+          "forbidden": {
+            "input_width": 2,
+            "mean_sha256": "5e45c3b0e7d0d76d0e040de7fda1dfcb368bb74388a3d562891ffeb95b64a84e",
+            "parameter_count": 65,
+            "scale_sha256": "4bfc149210ba7c37bb2608acb15c50bd4ad399f3e18c60b62b83f26baf4ebd49",
+            "state_sha256": "16ca363b32d882aefc670564e5c0400d48c9680a86c804db2399779c10648d23",
+            "updates": 128
+          },
+          "geometric_prior": {
+            "input_width": 3,
+            "mean_sha256": "32fb68b6e9d8ccd5e5bd92720e3dce93ff0fb410aece27f58f41f243d4df3406",
+            "parameter_count": 4,
+            "scale_sha256": "cc1186e374e10fb764bd15690bb5b341f11b64c21eb498b420e782535c2c6d00",
+            "state_sha256": "f3bb7dc601036529cf37c22c8e54b8d14e804d02e2c1d1585bc83dfd3559721b",
+            "updates": 128
+          },
+          "visible_context": {
+            "input_width": 9832,
+            "mean_sha256": "d305f4ac852f52c2dee5a7ee1828319f24e7379b85a81f08a4d3927a72384a55",
+            "parameter_count": 629377,
+            "scale_sha256": "b84892b8b350c0029a87c46beac1939ed3a7d90e9613eacf8691ad8f29f4d80c",
+            "state_sha256": "06153b3ca0468fb610a56e6dc5683a810d346b4130bce414c9ecb1cf3ff6c794",
+            "updates": 128
+          }
+        },
+        "recipe": {
+          "checkpoint": "last_update_no_evaluation_selection",
+          "forbidden_hidden_width": 16,
+          "geometric_prior": "linear_observed_density_unknown_density_l1_separation",
+          "learning_rate": 0.001,
+          "maximum_wall_seconds": 120.0,
+          "optimizer": "adamw_full_batch",
+          "seed": 340,
+          "updates": 128,
+          "visible_hidden_width": 64,
+          "weight_decay": 0.01,
+          "weighting": "equal_geometry_then_equal_context"
+        },
+        "torch_version": "2.13.0+cu126",
+        "training_generator_configurations": [
+          "A"
+        ],
+        "training_geometry_ids": [
+          "development-r0-control-0",
+          "development-r0-control-1",
+          "development-r0-control-10",
+          "development-r0-control-11",
+          "development-r0-control-12",
+          "development-r0-control-13",
+          "development-r0-control-14",
+          "development-r0-control-15",
+          "development-r0-control-16",
+          "development-r0-control-17",
+          "development-r0-control-18",
+          "development-r0-control-19",
+          "development-r0-control-2",
+          "development-r0-control-20",
+          "development-r0-control-21",
+          "development-r0-control-22",
+          "development-r0-control-23",
+          "development-r0-control-24",
+          "development-r0-control-25",
+          "development-r0-control-26",
+          "development-r0-control-27",
+          "development-r0-control-28",
+          "development-r0-control-29",
+          "development-r0-control-3",
+          "development-r0-control-30",
+          "development-r0-control-31",
+          "development-r0-control-4",
+          "development-r0-control-5",
+          "development-r0-control-6",
+          "development-r0-control-7",
+          "development-r0-control-8",
+          "development-r0-control-9"
+        ],
+        "training_sha256": "4ade07e87562e4c00ff3529b7268cca5d83cb76e38234bc6d541552263177a12"
+      },
+      "fold": {
+        "domain": "heldout_generator",
+        "evaluation_geometry_ids": [
+          "development-r0-control-44",
+          "development-r0-control-45",
+          "development-r0-control-46",
+          "development-r0-control-47",
+          "development-r0-control-48",
+          "development-r0-control-49",
+          "development-r0-control-50",
+          "development-r0-control-51",
+          "development-r0-control-52",
+          "development-r0-control-53",
+          "development-r0-control-54",
+          "development-r0-control-55"
+        ],
+        "fit_artifact_sha256": "4e085796fbb23d9a49aa211c12a61749309835946832f9c65b02324805409608",
+        "fold_id": "development-heldout_generator",
+        "training_generator_configurations": [
+          "A"
+        ],
+        "training_geometry_ids": [
+          "development-r0-control-0",
+          "development-r0-control-1",
+          "development-r0-control-10",
+          "development-r0-control-11",
+          "development-r0-control-12",
+          "development-r0-control-13",
+          "development-r0-control-14",
+          "development-r0-control-15",
+          "development-r0-control-16",
+          "development-r0-control-17",
+          "development-r0-control-18",
+          "development-r0-control-19",
+          "development-r0-control-2",
+          "development-r0-control-20",
+          "development-r0-control-21",
+          "development-r0-control-22",
+          "development-r0-control-23",
+          "development-r0-control-24",
+          "development-r0-control-25",
+          "development-r0-control-26",
+          "development-r0-control-27",
+          "development-r0-control-28",
+          "development-r0-control-29",
+          "development-r0-control-3",
+          "development-r0-control-30",
+          "development-r0-control-31",
+          "development-r0-control-4",
+          "development-r0-control-5",
+          "development-r0-control-6",
+          "development-r0-control-7",
+          "development-r0-control-8",
+          "development-r0-control-9"
+        ]
+      },
+      "prediction_payload_sha256": "2ad091c1478966c39d513a51ed4b1294b1d78d94d47d3b158f0ec024d7424598",
+      "resources": {
+        "accelerator_hours_upper_bound": 0.00011237027777800297,
+        "candidate_training_updates": 0,
+        "control_training_updates": 512,
+        "device": "cuda",
+        "device_name": "NVIDIA GeForce RTX 3060 Ti",
+        "wall_seconds": 0.4045330000008107
+      }
+    },
+    "in_domain": {
+      "evaluation_contexts": 12,
+      "fit_artifact": {
+        "authorizes_comparative_run": false,
+        "device": "cuda",
+        "forbidden_features_reach_visible_model": false,
+        "kind": "r0_control_fit_v1",
+        "models": {
+          "coordinates_only": {
+            "input_width": 6,
+            "mean_sha256": "89d85939f8f97bb44b64397e1702b970f3e4fa4ca54f0718e8a0d9af2e83aadd",
+            "parameter_count": 7,
+            "scale_sha256": "d21ccf1b0c049a6d88cc064f602b2ff79813ab2cf442f699f1a6510b9f908e2c",
+            "state_sha256": "4501a5fb3529f932b610867609b22d5ebf0a78f933f45f78f7271bd794dc8627",
+            "updates": 128
+          },
+          "forbidden": {
+            "input_width": 2,
+            "mean_sha256": "5e45c3b0e7d0d76d0e040de7fda1dfcb368bb74388a3d562891ffeb95b64a84e",
+            "parameter_count": 65,
+            "scale_sha256": "4bfc149210ba7c37bb2608acb15c50bd4ad399f3e18c60b62b83f26baf4ebd49",
+            "state_sha256": "16ca363b32d882aefc670564e5c0400d48c9680a86c804db2399779c10648d23",
+            "updates": 128
+          },
+          "geometric_prior": {
+            "input_width": 3,
+            "mean_sha256": "32fb68b6e9d8ccd5e5bd92720e3dce93ff0fb410aece27f58f41f243d4df3406",
+            "parameter_count": 4,
+            "scale_sha256": "cc1186e374e10fb764bd15690bb5b341f11b64c21eb498b420e782535c2c6d00",
+            "state_sha256": "f3bb7dc601036529cf37c22c8e54b8d14e804d02e2c1d1585bc83dfd3559721b",
+            "updates": 128
+          },
+          "visible_context": {
+            "input_width": 9832,
+            "mean_sha256": "d305f4ac852f52c2dee5a7ee1828319f24e7379b85a81f08a4d3927a72384a55",
+            "parameter_count": 629377,
+            "scale_sha256": "b84892b8b350c0029a87c46beac1939ed3a7d90e9613eacf8691ad8f29f4d80c",
+            "state_sha256": "06153b3ca0468fb610a56e6dc5683a810d346b4130bce414c9ecb1cf3ff6c794",
+            "updates": 128
+          }
+        },
+        "recipe": {
+          "checkpoint": "last_update_no_evaluation_selection",
+          "forbidden_hidden_width": 16,
+          "geometric_prior": "linear_observed_density_unknown_density_l1_separation",
+          "learning_rate": 0.001,
+          "maximum_wall_seconds": 120.0,
+          "optimizer": "adamw_full_batch",
+          "seed": 340,
+          "updates": 128,
+          "visible_hidden_width": 64,
+          "weight_decay": 0.01,
+          "weighting": "equal_geometry_then_equal_context"
+        },
+        "torch_version": "2.13.0+cu126",
+        "training_generator_configurations": [
+          "A"
+        ],
+        "training_geometry_ids": [
+          "development-r0-control-0",
+          "development-r0-control-1",
+          "development-r0-control-10",
+          "development-r0-control-11",
+          "development-r0-control-12",
+          "development-r0-control-13",
+          "development-r0-control-14",
+          "development-r0-control-15",
+          "development-r0-control-16",
+          "development-r0-control-17",
+          "development-r0-control-18",
+          "development-r0-control-19",
+          "development-r0-control-2",
+          "development-r0-control-20",
+          "development-r0-control-21",
+          "development-r0-control-22",
+          "development-r0-control-23",
+          "development-r0-control-24",
+          "development-r0-control-25",
+          "development-r0-control-26",
+          "development-r0-control-27",
+          "development-r0-control-28",
+          "development-r0-control-29",
+          "development-r0-control-3",
+          "development-r0-control-30",
+          "development-r0-control-31",
+          "development-r0-control-4",
+          "development-r0-control-5",
+          "development-r0-control-6",
+          "development-r0-control-7",
+          "development-r0-control-8",
+          "development-r0-control-9"
+        ],
+        "training_sha256": "4ade07e87562e4c00ff3529b7268cca5d83cb76e38234bc6d541552263177a12"
+      },
+      "fold": {
+        "domain": "in_domain",
+        "evaluation_geometry_ids": [
+          "development-r0-control-32",
+          "development-r0-control-33",
+          "development-r0-control-34",
+          "development-r0-control-35",
+          "development-r0-control-36",
+          "development-r0-control-37",
+          "development-r0-control-38",
+          "development-r0-control-39",
+          "development-r0-control-40",
+          "development-r0-control-41",
+          "development-r0-control-42",
+          "development-r0-control-43"
+        ],
+        "fit_artifact_sha256": "4e085796fbb23d9a49aa211c12a61749309835946832f9c65b02324805409608",
+        "fold_id": "development-in_domain",
+        "training_generator_configurations": [
+          "A"
+        ],
+        "training_geometry_ids": [
+          "development-r0-control-0",
+          "development-r0-control-1",
+          "development-r0-control-10",
+          "development-r0-control-11",
+          "development-r0-control-12",
+          "development-r0-control-13",
+          "development-r0-control-14",
+          "development-r0-control-15",
+          "development-r0-control-16",
+          "development-r0-control-17",
+          "development-r0-control-18",
+          "development-r0-control-19",
+          "development-r0-control-2",
+          "development-r0-control-20",
+          "development-r0-control-21",
+          "development-r0-control-22",
+          "development-r0-control-23",
+          "development-r0-control-24",
+          "development-r0-control-25",
+          "development-r0-control-26",
+          "development-r0-control-27",
+          "development-r0-control-28",
+          "development-r0-control-29",
+          "development-r0-control-3",
+          "development-r0-control-30",
+          "development-r0-control-31",
+          "development-r0-control-4",
+          "development-r0-control-5",
+          "development-r0-control-6",
+          "development-r0-control-7",
+          "development-r0-control-8",
+          "development-r0-control-9"
+        ]
+      },
+      "prediction_payload_sha256": "ae702babaeedd6b96cf76cbff0007b241e26d0025d53acd86ef53d4056d6f49a",
+      "resources": {
+        "accelerator_hours_upper_bound": 0.0005121178333330237,
+        "candidate_training_updates": 0,
+        "control_training_updates": 512,
+        "device": "cuda",
+        "device_name": "NVIDIA GeForce RTX 3060 Ti",
+        "wall_seconds": 1.8436241999988852
+      }
+    }
+  },
+  "kind": "development_control_smoke",
+  "limitations": "Toy balanced completions and nominal generator configurations exercise plumbing only; no identifiability, transfer-quality or encoder-quality claim.",
+  "non_evidential": true,
+  "r0_executed": false,
+  "report_payload_sha256": "9e3f9a3e2235a66810eac15dda22c165b849c06595d0d41799749f2b4ed00707",
+  "shape": [
+    17,
+    17,
+    17
+  ],
+  "source_sha256": {
+    "experiments/perception_encoder/v2r2_control_smoke.py": "e06304eb7ea4250a316face1a90e1b9646b702ed2d55d0519037b816a6f911df",
+    "theseo_anysearch/garden/pilots/v2r2_audit.py": "8d90ac2d83995d470764890c4c3134b177a73412600fc16a0609a862ee157c58",
+    "theseo_anysearch/garden/pilots/v2r2_controls.py": "7b8a4039c687a09a6db89f7c23d2991141414d979f402cf4d9a77adda238173e"
+  },
+  "status": "passed",
+  "training_geometries": 32
+}
