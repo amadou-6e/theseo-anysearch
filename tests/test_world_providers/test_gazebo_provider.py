@@ -119,8 +119,11 @@ def test_generation_pipeline_with_collision_fixture(tmp_path, monkeypatch):
             assert config.read_text() == original
     assert bundles[0].world.root_geometry_id == bundles[1].world.root_geometry_id
     assert bundles[0].world.identity_sha256 != bundles[1].world.identity_sha256
-    assert bundles[0].world.extent.as_tuple() == (184, 184, 18)
-    assert bundles[1].world.extent.as_tuple() == (368, 368, 36)
+    assert bundles[0].world.extent.as_tuple() == (184, 18, 184)
+    assert bundles[1].world.extent.as_tuple() == (368, 36, 368)
+    assert bundles[0].world.frame.storage_axes_in_source == (
+        (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0),
+    )
     assert bundles[0].conversion.parameters["original_open_top_world_sha256"]
     assert (bundles[0].root / "world-open-top.json").exists()
 
