@@ -1,8 +1,11 @@
 # Aerial Gym provider validation (#457)
 
 Governing provider spec: `amadou-6e/specs@6e4f2d7d43cb8f90e14d9e68cd1df1d492c66a6d`
-(specs PR #96). Existing route contract: `1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
-Foundation: #459 / PR #460, stacked on `develop`; no merge authorized.
+(specs PR #96, merged as `f5e701b23c9c52a01f48ca7b76ed7be89a62268a`, same
+reviewed provider text). Existing route contract: `1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b`.
+Foundation: #459 / PR #460, merged into `develop` as
+`f084059537cdacddfab2619c42890d11a3921e62`. Provider PR #461 is now updated
+from and targets `develop`. The 39 focused tests passed again on that base.
 
 Built both distributions and installed the core `aerialgym` extra using
 `pip --no-index --find-links` against local wheels in the previously isolated

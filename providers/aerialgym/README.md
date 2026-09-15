@@ -26,4 +26,4 @@ is preserved in each bundle. Different resolutions share a root geometry and
 must not be split across train/test roles. Current CLI attaches one world and
 one selected task per training YAML; generation does not start training.
 
-Governing spec: `amadou-6e/specs@6e4f2d7d43cb8f90e14d9e68cd1df1d492c66a6d`.
+Governing merged spec: `amadou-6e/specs@f5e701b23c9c52a01f48ca7b76ed7be89a62268a`.
