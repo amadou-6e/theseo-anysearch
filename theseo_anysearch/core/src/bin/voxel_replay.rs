@@ -1778,6 +1778,9 @@ struct VoxelReplayApp {
     regional_sources: Vec<Option<RegionalReplaySource>>,
     regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
     pending_region: Option<PendingRegion>,
+    /// Autoplay destination awaiting its matching regional frame. The visible
+    /// iteration and step remain unchanged until that frame is published.
+    pending_play_position: Option<(usize, usize)>,
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
@@ -1842,6 +1845,7 @@ impl VoxelReplayApp {
             regional_sources,
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1877,6 +1881,7 @@ impl VoxelReplayApp {
             regional_sources: Vec::new(),
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1916,22 +1921,41 @@ impl VoxelReplayApp {
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
+        self.pending_play_position = None;
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
         self.coarse_chunks.clear();
     }
 
-    fn current_region_key(&self) -> Option<RegionRequestKey> {
-        let trajectory = self.trajectories.get(self.iter_idx)?;
+    fn region_key(&self, iteration: usize, step: usize) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(iteration)?;
         trajectory.world.as_ref()?;
         Some(RegionRequestKey {
-            iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            iteration,
+            step,
+            center: selected_agent_center(trajectory, step)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        self.region_key(self.iter_idx, self.step_idx)
+    }
+
+    fn desired_region_key(&self) -> Option<RegionRequestKey> {
+        let (iteration, step) = self
+            .pending_play_position
+            .unwrap_or((self.iter_idx, self.step_idx));
+        self.region_key(iteration, step)
+    }
+
+    fn stop_pending_playback(&mut self) {
+        if self.pending_play_position.take().is_some() {
+            self.playing = false;
+            self.next_play_advance_at = None;
+        }
     }
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
@@ -1964,7 +1988,7 @@ impl VoxelReplayApp {
     }
 
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
-        let current_key = self.current_region_key();
+        let current_key = self.desired_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(loaded)) => {
@@ -1975,11 +1999,16 @@ impl VoxelReplayApp {
                         self.detailed_chunks = loaded.detailed;
                         self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
+                        self.publish_pending_play_position(
+                            pending.key.iteration,
+                            pending.key.step,
+                        );
                     }
                 }
                 Ok(Err(error)) => {
                     if Some(pending.key) == current_key {
                         self.regional_error = Some(error);
+                        self.stop_pending_playback();
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -1988,7 +2017,11 @@ impl VoxelReplayApp {
                     return;
                 }
                 Err(TryRecvError::Disconnected) => {
-                    self.regional_error = Some("regional world loader disconnected".to_string());
+                    if Some(pending.key) == current_key {
+                        self.regional_error =
+                            Some("regional world loader disconnected".to_string());
+                        self.stop_pending_playback();
+                    }
                 }
             }
         }
@@ -2004,6 +2037,7 @@ impl VoxelReplayApp {
             .cloned()
         else {
             self.regional_error = Some("compiled world could not be opened".to_string());
+            self.stop_pending_playback();
             return;
         };
         let mutations = replay_mutations_at(
@@ -2098,18 +2132,29 @@ impl VoxelReplayApp {
     fn n_iters(&self) -> usize { self.trajectories.len() }
     fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
-    /// Advance one step during play.  Returns false when the run is fully finished.
-    fn play_advance(&mut self) -> bool {
-        let n = self.n_steps();
-        if self.step_idx + 1 < n {
-            self.step_idx += 1;
-            true
+    fn next_play_position(&self) -> Option<(usize, usize)> {
+        if self.step_idx + 1 < self.n_steps() {
+            Some((self.iter_idx, self.step_idx + 1))
         } else if self.iter_idx + 1 < self.n_iters() {
-            self.iter_idx += 1;
-            self.step_idx = 0;
-            true
+            Some((self.iter_idx + 1, 0))
         } else {
-            false
+            None
+        }
+    }
+
+    fn stage_or_publish_play_position(&mut self, position: (usize, usize), regional: bool) {
+        if regional {
+            self.pending_play_position = Some(position);
+        } else {
+            (self.iter_idx, self.step_idx) = position;
+        }
+    }
+
+    fn publish_pending_play_position(&mut self, iteration: usize, step: usize) {
+        if self.pending_play_position == Some((iteration, step)) {
+            self.iter_idx = iteration;
+            self.step_idx = step;
+            self.pending_play_position = None;
         }
     }
 
@@ -2118,6 +2163,9 @@ impl VoxelReplayApp {
     fn update_autoplay(&mut self, now: Instant, regional_ready: bool) -> Option<Duration> {
         if !self.playing {
             return None;
+        }
+        if self.pending_play_position.is_some() {
+            return Some(REGIONAL_LOAD_POLL_INTERVAL);
         }
         if !regional_ready {
             self.next_play_advance_at = None;
@@ -2131,13 +2179,15 @@ impl VoxelReplayApp {
             return Some(deadline.duration_since(now));
         }
 
-        if !self.play_advance() {
+        let Some(next) = self.next_play_position() else {
             self.playing = false;
             self.next_play_advance_at = None;
             // The controls were drawn before autoplay updated the state, so
             // repaint once to replace the stale "Pause" label with replay.
             return Some(Duration::ZERO);
-        }
+        };
+        let regional = self.trajectories[next.0].world.is_some();
+        self.stage_or_publish_play_position(next, regional);
         self.next_play_advance_at = None;
         Some(Duration::ZERO)
     }
@@ -2171,6 +2221,7 @@ impl VoxelReplayApp {
         }
         if !self.playing {
             self.next_play_advance_at = None;
+            self.pending_play_position = None;
         }
     }
 }
@@ -2840,7 +2891,7 @@ impl eframe::App for VoxelReplayApp {
 
         // ---- Auto-play: advance one step per presentation interval ---------
         if self.playing {
-            let current_region = self.current_region_key();
+            let current_region = self.desired_region_key();
             let loaded_region = self.regional_frame.as_ref().map(|(key, _)| *key);
             let ready = regional_playback_ready(
                 current_region,
@@ -2929,6 +2980,23 @@ mod autoplay_timing_tests {
             Some(loaded_at + PLAYBACK_STEP_INTERVAL)
         );
         assert_eq!(app.step_idx, 0);
+    }
+
+    #[test]
+    fn regional_autoplay_publishes_step_only_with_matching_frame() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+
+        app.stage_or_publish_play_position((0, 1), true);
+        assert_eq!(app.step_idx, 0, "the old step remains visible while loading");
+        assert_eq!(app.pending_play_position, Some((0, 1)));
+
+        app.publish_pending_play_position(0, 0);
+        assert_eq!(app.step_idx, 0, "an unrelated frame cannot publish the step");
+        assert_eq!(app.pending_play_position, Some((0, 1)));
+
+        app.publish_pending_play_position(0, 1);
+        assert_eq!(app.step_idx, 1);
+        assert_eq!(app.pending_play_position, None);
     }
 
     #[test]
