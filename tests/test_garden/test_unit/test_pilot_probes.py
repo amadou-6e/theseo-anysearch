@@ -163,3 +163,10 @@ def test_encoder_hash_detects_parameter_changes() -> None:
     with torch.no_grad():
         module.weight[0, 0] += 1
     assert encoder_state_sha256(module) != before
+
+
+def test_encoder_hash_supports_scalar_integer_buffers() -> None:
+    module = nn.BatchNorm3d(2)
+    before = encoder_state_sha256(module)
+    module.num_batches_tracked += 1
+    assert encoder_state_sha256(module) != before

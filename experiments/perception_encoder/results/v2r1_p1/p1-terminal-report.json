@@ -1,0 +1,39 @@
+{
+  "code_sha": "5851f9a522e7c6dfdd776484aeab86725d92dcfd",
+  "dataset_id": "voxel-encoder-pilot-v2r1-dataset-1",
+  "decision": {
+    "decision": "blocked",
+    "detail": "No calibrated objective bundle was eligible for a replacement P1 screen",
+    "next": null,
+    "reason": "p0d_no_retained_bundle"
+  },
+  "disposition": "reject",
+  "execution": {
+    "accelerator_hours": 0.0,
+    "new_training_results": false,
+    "optimizer_updates": 0,
+    "trials_started": 0
+  },
+  "integration_base_sha": "71522999c9ce34efd3a7d95fb239691d524ffaa9",
+  "issue": 337,
+  "prerequisite": {
+    "decision_reason": "no_retained_bundle",
+    "report_payload_sha256": "4af619e2e3c2256c0e8f6655f65534580fbcabc4178257a4b100348699461775",
+    "run_id": "voxel-encoder-pilot-v2r1-p0d-1",
+    "status": "blocked"
+  },
+  "report_payload_sha256": "f499d7ede0049ab568297bc3aa6ad810d0400071214648ef940b05781bcdb542",
+  "run_id": "voxel-encoder-pilot-v2r1-p1-1",
+  "spec_commit": "0c9e3c633799f5d42b7a603e0845cac0bd494cda",
+  "status": "not_started",
+  "v1_p1_supersede": {
+    "evidence_report_sha256": "a7a149f9235b38f9ff1f1a230ce791367cf528fc6705e0f987674f1a48d4ea43",
+    "fired_veto": "false_open_rate_max",
+    "prior_decision": "no_viable_direction",
+    "program": "voxel-encoder-pilot-v1",
+    "reason": "calibration_contract_invalidated",
+    "replacement_run_executed": false,
+    "run_id": "voxel-encoder-pilot-v1-p1-1",
+    "status": "superseded"
+  }
+}

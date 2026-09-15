@@ -1,0 +1,221 @@
+{
+  "active_gate_components": [
+    "occupied_iou",
+    "boundary_f1",
+    "clearance_nmae",
+    "reachability_auprc"
+  ],
+  "anchors": {
+    "boundary_f1": {
+      "ceiling": 0.7906976744186046,
+      "ceiling_effective_rank_fraction": null,
+      "ceiling_method": "bayes_error_knn",
+      "ceiling_non_collapse_verified": true,
+      "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+      "deferral_reason": null,
+      "floor": 0.5617977528089888,
+      "floor_source": "measured:coordinates_only:pilot_calibration",
+      "higher_is_better": true,
+      "status": "active",
+      "triviality": {
+        "mdl_embedding_bits": 69.46317661850264,
+        "mdl_null_bits": 196.68542038519178,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.8433127035289999,
+        "pvi_gain": 0.8843981454123379,
+        "pvi_null": -0.04108544188333792
+      }
+    },
+    "clearance_nmae": {
+      "ceiling": 0.15183858309143375,
+      "ceiling_effective_rank_fraction": null,
+      "ceiling_method": "knn_residual",
+      "ceiling_non_collapse_verified": true,
+      "ceiling_source": "measured:knn_residual:pilot_calibration",
+      "deferral_reason": null,
+      "floor": 0.32011594131376264,
+      "floor_source": "measured:frequency:pilot_calibration",
+      "higher_is_better": false,
+      "status": "active",
+      "triviality": {
+        "mdl_embedding_bits": 1e-06,
+        "mdl_null_bits": 519.6036650937076,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 11.240648692787683,
+        "pvi_gain": 11.298944609054438,
+        "pvi_null": -0.05829591626675337
+      }
+    },
+    "geodesic_nmae": {
+      "ceiling": 0.04816410017751241,
+      "ceiling_effective_rank_fraction": 0.010898,
+      "ceiling_method": "regularized_reference",
+      "ceiling_non_collapse_verified": false,
+      "ceiling_source": "measured:supervised_reference:voxel-encoder-pilot-v2-p0-calibration-1",
+      "deferral_reason": "frequency NMAE 0.022515 is below the 0.15 pilot noise floor and the supervised reference did not improve it; deferred to Stage 2 wide context",
+      "floor": 0.022515243950901476,
+      "floor_source": "measured:frequency:voxel-encoder-pilot-v2-p0-calibration-1",
+      "higher_is_better": false,
+      "status": "deferred",
+      "triviality": {
+        "mdl_embedding_bits": 1.0,
+        "mdl_null_bits": 1.0,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": false,
+        "pvi_embedding": 0.0,
+        "pvi_gain": 0.0,
+        "pvi_null": 0.0
+      }
+    },
+    "occupied_iou": {
+      "ceiling": 0.7583333333333333,
+      "ceiling_effective_rank_fraction": null,
+      "ceiling_method": "bayes_error_knn",
+      "ceiling_non_collapse_verified": true,
+      "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+      "deferral_reason": null,
+      "floor": 0.5260416666666666,
+      "floor_source": "measured:coordinates_only:pilot_calibration",
+      "higher_is_better": true,
+      "status": "active",
+      "triviality": {
+        "mdl_embedding_bits": 56.78483220707822,
+        "mdl_null_bits": 207.25193628763714,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.8160906409880712,
+        "pvi_gain": 0.8349118152704551,
+        "pvi_null": -0.018821174282383904
+      }
+    },
+    "reachability_auprc": {
+      "ceiling": 0.9433896205781991,
+      "ceiling_effective_rank_fraction": null,
+      "ceiling_method": "bayes_error_knn",
+      "ceiling_non_collapse_verified": true,
+      "ceiling_source": "measured:bayes_error_knn:pilot_calibration",
+      "deferral_reason": null,
+      "floor": 0.5771307103633069,
+      "floor_source": "measured:coordinates_only:pilot_calibration",
+      "higher_is_better": true,
+      "status": "active",
+      "triviality": {
+        "mdl_embedding_bits": 60.86187120948478,
+        "mdl_null_bits": 196.98963935429475,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.6744636476091138,
+        "pvi_gain": 0.7829892793411655,
+        "pvi_null": -0.10852563173205171
+      }
+    }
+  },
+  "dataset_id": "voxel-encoder-pilot-v2r1-dataset-1",
+  "diagnostics": {
+    "boundary_f1": {
+      "ceiling": 0.7906976744186046,
+      "ceiling_samples": 192,
+      "floor": 0.5617977528089888,
+      "floors": {
+        "coordinates_only": 0.5617977528089888,
+        "fixed_random_projection": 0.5617977528089888,
+        "frequency": 0.5617977528089888,
+        "pca": 0.5617977528089888
+      },
+      "selected_floor": "coordinates_only",
+      "triviality": {
+        "mdl_embedding_bits": 69.46317661850264,
+        "mdl_null_bits": 196.68542038519178,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.8433127035289999,
+        "pvi_gain": 0.8843981454123379,
+        "pvi_null": -0.04108544188333792
+      }
+    },
+    "clearance_nmae": {
+      "ceiling": 0.15183858309143375,
+      "ceiling_samples": 192,
+      "floor": 0.32011594131376264,
+      "floors": {
+        "coordinates_only": 0.32793464319952487,
+        "fixed_random_projection": 0.3269977479959969,
+        "frequency": 0.32011594131376264,
+        "pca": 0.32523410956467885
+      },
+      "selected_floor": "frequency",
+      "triviality": {
+        "mdl_embedding_bits": 1e-06,
+        "mdl_null_bits": 519.6036650937076,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 11.240648692787683,
+        "pvi_gain": 11.298944609054438,
+        "pvi_null": -0.05829591626675337
+      }
+    },
+    "geodesic_nmae": {
+      "reason": "frequency NMAE 0.022515 is below the 0.15 pilot noise floor and the supervised reference did not improve it; deferred to Stage 2 wide context",
+      "status": "deferred"
+    },
+    "occupied_iou": {
+      "ceiling": 0.7583333333333333,
+      "ceiling_samples": 192,
+      "floor": 0.5260416666666666,
+      "floors": {
+        "coordinates_only": 0.5260416666666666,
+        "fixed_random_projection": 0.5260416666666666,
+        "frequency": 0.5260416666666666,
+        "pca": 0.5260416666666666
+      },
+      "selected_floor": "coordinates_only",
+      "triviality": {
+        "mdl_embedding_bits": 56.78483220707822,
+        "mdl_null_bits": 207.25193628763714,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.8160906409880712,
+        "pvi_gain": 0.8349118152704551,
+        "pvi_null": -0.018821174282383904
+      }
+    },
+    "reachability_auprc": {
+      "ceiling": 0.9433896205781991,
+      "ceiling_samples": 192,
+      "floor": 0.5771307103633069,
+      "floors": {
+        "coordinates_only": 0.5771307103633069,
+        "fixed_random_projection": 0.49010674481919203,
+        "frequency": 0.4895833333333333,
+        "pca": 0.558977456850752
+      },
+      "selected_floor": "coordinates_only",
+      "triviality": {
+        "mdl_embedding_bits": 60.86187120948478,
+        "mdl_null_bits": 196.98963935429475,
+        "min_pvi_gain": 0.05,
+        "null_input": "coordinates_only",
+        "passes": true,
+        "pvi_embedding": 0.6744636476091138,
+        "pvi_gain": 0.7829892793411655,
+        "pvi_null": -0.10852563173205171
+      }
+    }
+  },
+  "protocol_sha256": "1e847a26a386ade6e85c6c41692b3086388041f13aa8e90f067a3fafefd09bec",
+  "report_payload_sha256": "fd2caf3c98c3b64c2302079f80b3970b8b364acbfdb46abb9c35df66dad721f4",
+  "run_id": "voxel-encoder-pilot-v2r1-p0c-1",
+  "spec_commit": "0c9e3c633799f5d42b7a603e0845cac0bd494cda",
+  "stage": "F8 deterministic CPU smoke",
+  "status": "passed"
+}

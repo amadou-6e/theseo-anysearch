@@ -66,6 +66,34 @@ def _resolve_device(device: str) -> str:
     return device
 
 
+@app.command("pilot")
+def pilot(
+    stage: str = typer.Argument(..., help="Pilot stage to execute (currently P0)."),
+    config: Path = typer.Option(
+        Path("experiments/perception_encoder/p0-config.yaml"),
+        "--config",
+        help="Frozen pilot configuration.",
+    ),
+    output: Path = typer.Option(
+        Path("experiments/perception_encoder/results/p0"),
+        "--output",
+        help="Directory for content-addressed pilot records.",
+    ),
+) -> None:
+    """Execute an encoder-only perception pilot contract."""
+
+    if stage.upper() != "P0":
+        err_console.print(f"[red]Error:[/red] unsupported pilot stage {stage!r}")
+        raise typer.Exit(2)
+    from theseo_anysearch.garden.pilots.runner import run_p0
+
+    report = run_p0(config, output)
+    console.print(
+        f"P0 {report['status']}: {report['trial_counts']['completed']} completed, "
+        f"{report['trial_counts']['failed']} failed"
+    )
+
+
 # ---------------------------------------------------------------------------
 # presets
 # ---------------------------------------------------------------------------

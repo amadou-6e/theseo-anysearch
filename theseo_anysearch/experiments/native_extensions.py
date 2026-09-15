@@ -27,6 +27,7 @@ CAP_EVALUATION_METRICS = 4
 CAP_PREDICATE = 8
 CAP_OUTCOME = 16
 CAP_SCENARIO = 32
+CAP_GEOMETRY = 64
 METRIC_BUFFER_SIZE = 65536
 
 
@@ -60,6 +61,7 @@ class NativeExtensionManifest(BaseModel):
     predicates: tuple[str, ...] = ()
     outcomes: tuple[str, ...] = ()
     scenarios: tuple[str, ...] = ()
+    geometries: tuple[str, ...] = ()
     platform: str
     machine: str
 
@@ -180,6 +182,43 @@ def _selected_scenario_names(experiment_dir: Path) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
+def _selected_geometry_names(experiment_dir: Path) -> tuple[str, ...]:
+    """Return distinct procedural geometry provider names."""
+    import yaml
+
+    candidates = [experiment_dir.joinpath("experiment.yaml"), experiment_dir.joinpath("config.yaml")]
+    candidates.extend(sorted(experiment_dir.glob("*.yaml")))
+    config_path = next((path for path in candidates if path.is_file()), None)
+    if config_path is None:
+        return ()
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    names: list[str] = []
+    owners = [raw.get("env") or {}, raw.get("evaluation") or {}]
+    for stage in ((raw.get("staging") or {}).get("stages") or []):
+        owners.extend((stage.get("env") or {}, stage.get("evaluation") or {}))
+    for owner in owners:
+        selected = ((owner.get("geometry") or {}).get("provider"))
+        if isinstance(selected, str):
+            names.append(selected)
+        elif isinstance(selected, dict) and selected.get("name"):
+            names.append(str(selected["name"]))
+    return tuple(dict.fromkeys(names))
+
+
+def _selected_python_geometry_names(experiment_dir: Path, names: tuple[str, ...]) -> tuple[str, ...]:
+    source = experiment_dir.joinpath("geometry.py")
+    if not source.is_file():
+        return ()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(f"_geometry_probe_{digest[:16]}", source)
+    if spec is None or spec.loader is None:
+        raise NativeExtensionError(f"Cannot import {source}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(name for name in names if callable(getattr(module, name, None)))
+
+
 def _selected_python_scenario_names(
     experiment_dir: Path,
     scenario_names: tuple[str, ...],
@@ -226,6 +265,8 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     predicate_names, outcome_names = _selected_action_names(root)
     scenario_names = _selected_scenario_names(root)
     python_scenario_names = _selected_python_scenario_names(root, scenario_names)
+    geometry_names = _selected_geometry_names(root)
+    python_geometry_names = _selected_python_geometry_names(root, geometry_names)
     build_dir = root.joinpath(".anysearch", "build", source_sha)
     stable_manifest = root.joinpath(".anysearch", "extension.json")
     if stable_manifest.is_file() and not force:
@@ -246,12 +287,17 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
             for name in scenario_names
             if name not in python_scenario_names or name in current.scenarios
         )
+        expected_geometries = tuple(
+            name for name in geometry_names
+            if name not in python_geometry_names or name in current.geometries
+        )
         if (
             current.source_sha256 == source_sha
             and current.rewards == expected_rewards
             and current.predicates == expected_predicates
             and current.outcomes == expected_outcomes
             and current.scenarios == expected_scenarios
+            and current.geometries == expected_geometries
             and candidate.is_file()
         ):
             loaded = NativeExtension.load(stable_manifest)
@@ -287,9 +333,14 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
     predicates = tuple(name for name in predicate_names if probe.has_predicate(name))
     outcomes = tuple(name for name in outcome_names if probe.has_outcome(name))
     scenarios = tuple(name for name in scenario_names if probe.has_scenario(name))
+    geometries = tuple(name for name in geometry_names if probe.has_geometry(name))
     if scenarios and "scenario" not in capabilities:
         raise NativeExtensionError(
             "A scenario-capable extension must include capability bit 32"
+        )
+    if geometries and "geometry" not in capabilities:
+        raise NativeExtensionError(
+            "A geometry-capable extension must include capability bit 64"
         )
     missing_predicates = set(predicate_names) - set(predicates) - built_in_predicates
     missing_outcomes = set(outcome_names) - set(outcomes) - built_in_outcomes
@@ -305,11 +356,16 @@ def compile_native_extension(experiment_dir: Path, *, force: bool = False) -> Pa
         raise NativeExtensionError(
             f"Missing native scenario exports: {sorted(missing_scenarios)}"
         )
+    missing_geometries = set(geometry_names) - set(geometries) - set(python_geometry_names)
+    if missing_geometries:
+        raise NativeExtensionError(
+            f"Missing native geometry exports: {sorted(missing_geometries)}"
+        )
     manifest = NativeExtensionManifest(
         abi_version=ABI_VERSION, source_sha256=source_sha,
         binary_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
         library=relative, capabilities=capabilities, rewards=rewards,
-        predicates=predicates, outcomes=outcomes, scenarios=scenarios,
+        predicates=predicates, outcomes=outcomes, scenarios=scenarios, geometries=geometries,
         platform=sys.platform, machine=platform.machine(),
     )
     stable_content = manifest.model_dump_json(indent=2)
@@ -353,8 +409,15 @@ def discover_native_manifest(config_path: Path | None) -> Path | None:
         for name in expected_scenarios
         if name not in python_scenarios or name in manifest.scenarios
     )
+    expected_geometries = _selected_geometry_names(config_path.parent)
+    python_geometries = _selected_python_geometry_names(config_path.parent, expected_geometries)
+    expected_native_geometries = tuple(
+        name for name in expected_geometries
+        if name not in python_geometries or name in manifest.geometries
+    )
     if (manifest.predicates != expected_predicates or manifest.outcomes != expected_outcomes
-            or manifest.scenarios != expected_native_scenarios):
+            or manifest.scenarios != expected_native_scenarios
+            or manifest.geometries != expected_native_geometries):
         raise NativeExtensionError(
             "Selected YAML action extensions changed; run "
             f"'anysearch compile {config_path.parent}'"
@@ -399,7 +462,7 @@ class NativeExtension:
         pairs = ((CAP_REWARD, "reward"), (CAP_TRAINING_METRICS, "training_metrics"),
                  (CAP_EVALUATION_METRICS, "evaluation_metrics"),
                  (CAP_PREDICATE, "predicate"), (CAP_OUTCOME, "outcome"),
-                 (CAP_SCENARIO, "scenario"))
+                 (CAP_SCENARIO, "scenario"), (CAP_GEOMETRY, "geometry"))
         return tuple(name for flag, name in pairs if self.capabilities & flag)
 
     def validate_reward(self, name: str) -> None:
@@ -423,6 +486,9 @@ class NativeExtension:
         return hasattr(self._library, f"anysearch_scenario_{name}_v2") or hasattr(
             self._library, f"anysearch_scenario_{name}_v1"
         )
+
+    def has_geometry(self, name: str) -> bool:
+        return hasattr(self._library, f"anysearch_geometry_{name}_v1")
 
     @classmethod
     def load_library(cls, path: Path) -> "NativeExtension":

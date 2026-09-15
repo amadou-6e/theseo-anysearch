@@ -1,0 +1,51 @@
+program: voxel-encoder-pilot-v1
+spec_commit: f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d
+preregistration: experiments/perception_encoder/results/p0/preregistration.yaml
+reference_accelerator: NVIDIA GeForce RTX 3060 Ti 8GB
+precision: fp32
+compilation_enabled: false
+batch_size: 2
+probe:
+  coordinate_train_queries: 100000
+  coordinate_dev_queries: 20000
+  pair_train_queries: 50000
+  pair_dev_queries: 10000
+  intermediate_updates: 200
+  final_updates: 500
+  batch_size: 1024
+  learning_rate: 0.001
+  hidden_dim: 128
+p1:
+  bundles: [T0, T1, T2, T3]
+  learning_rates: [0.0001, 0.0003]
+  seeds: [0, 1]
+  updates: 2000
+  trial_cap: 16
+p2:
+  learning_rates: [0.0001, 0.0003]
+  seed: 0
+  updates: 3000
+  trial_cap: 12
+  variants:
+    T0:
+      baseline: {}
+      focal_gamma_2: {focal_gamma: 2.0}
+      surface_frontier_only: {surface_only: true}
+    T1:
+      baseline: {mask_ratio: 0.60}
+      mask_0_40: {mask_ratio: 0.40}
+      mask_0_75: {mask_ratio: 0.75}
+    T2:
+      baseline: {esdf_radius_fraction: 0.25}
+      truncation_0_125: {esdf_radius_fraction: 0.125}
+      truncation_0_50: {esdf_radius_fraction: 0.50}
+    T3:
+      baseline: {mask_ratio: 0.60, ema_decay: 0.996}
+      mask_0_40: {mask_ratio: 0.40, ema_decay: 0.996}
+      ema_0_99: {mask_ratio: 0.60, ema_decay: 0.99}
+validity_limits:
+  - direction_finding_only
+  - synthetic_mesh_import_fixture_is_not_external_out_of_family_evidence
+  - P0_analytic_normalization_anchors_are_corpus_miscalibrated
+  - current_encoder_false_open_reference_is_unavailable
+  - probe_optimizer_was_frozen_after_P0_implementation_but_before_P1_candidate_results

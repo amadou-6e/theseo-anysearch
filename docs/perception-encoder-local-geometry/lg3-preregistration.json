@@ -1,0 +1,199 @@
+{
+  "identity_sha256": "722f883c542eb74af862b68d067d92c6fbaa860f205fbcb14bffee5b3bc055ee",
+  "payload": {
+    "artifacts": {
+      "files": {
+        "joint-0-encoder.pt": "c6c9c0f5a6908142f20f9c4629b5f719c9b291ff94bb3851f6740e639cd869bf",
+        "joint-0-evaluation.pt": "72e213153cc4106212a9c69d9ba8a8f00b799e9cb35a3d0a101b7a4fadbd3cbb",
+        "joint-1-encoder.pt": "83d417a676dc9999527c65024ccf918d0fccc0b66a7729f4e1a7212a9c47890e",
+        "joint-1-evaluation.pt": "dff21af0d14cd97bfadbe7ce022f04bd1fc407036865969e1bc6e6dcaf4c75a4",
+        "joint-2-encoder.pt": "b1c059ea398f72f85dad14c36704c114106327919993f29326ecf75de1636cf6",
+        "joint-2-evaluation.pt": "6aa15ef0f2cb231a7ad9dff6605b5c0bc093e0f822fdaae0d0d7ee5b94650217"
+      },
+      "states": {
+        "0": {
+          "final_state_sha256": "6a3093372e4951f8ec4a3f7c9be3f433d1690f7f963d19368afd54ad9b79f672",
+          "initial_state_sha256": "9b4a103b2a6cf8b7c39fbdd4f629663fa85bff7355d7f81387f9ee4983d03547",
+          "run_id": "voxel-encoder-local-geometry-v1-lg2-joint-seed-0"
+        },
+        "1": {
+          "final_state_sha256": "422a7ecdecd5ff4304c91c90fdbfbca4079195b2a01909d9f15f8cfaa8530586",
+          "initial_state_sha256": "19d807632b59399d62f2b78df3942c7c2a8ac56d8df216f853bf4a7f6c52572a",
+          "run_id": "voxel-encoder-local-geometry-v1-lg2-joint-seed-1"
+        },
+        "2": {
+          "final_state_sha256": "b1a8b4c1c3452baa722c9743a16d80b45de2d3e9ece5ebff5a743c85d23ccf2c",
+          "initial_state_sha256": "d3e31c42908623d64a839da3bad5961f8fd5ba7d37c7f091a7b111d53fb5b062",
+          "run_id": "voxel-encoder-local-geometry-v1-lg2-joint-seed-2"
+        }
+      }
+    },
+    "geometry_ids": {
+      "evaluation": [
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-000",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-001",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-002",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-003",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-004",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-005",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-006",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-007",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-008",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-009",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-010",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-011",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-012",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-013",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-014",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-015",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-016",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-017",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-018",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-019",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-020",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-021",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-022",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-023",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-024",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-025",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-026",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-027",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-028",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-029",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-030",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-031",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-032",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-033",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-034",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-035",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-036",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-037",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-038",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-039",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-040",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-041",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-042",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-043",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-044",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-045",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-046",
+        "voxel-encoder-local-geometry-v1-dataset-3-evaluation-047"
+      ],
+      "probe": [
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-000",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-001",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-002",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-003",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-004",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-005",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-006",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-007",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-008",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-009",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-010",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-011",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-012",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-013",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-014",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-015",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-016",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-017",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-018",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-019",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-020",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-021",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-022",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-023",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-024",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-025",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-026",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-027",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-028",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-029",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-030",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-031",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-032",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-033",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-034",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-035",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-036",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-037",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-038",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-039",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-040",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-041",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-042",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-043",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-044",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-045",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-046",
+        "voxel-encoder-local-geometry-v1-dataset-3-probe-047"
+      ]
+    },
+    "plan": {
+      "bootstrap_replicates": 2000,
+      "bootstrap_seed": 354,
+      "dataset_id": "voxel-encoder-local-geometry-v1-dataset-3",
+      "encoder_updates": 0,
+      "families": [
+        "random_field",
+        "oblique_sheets",
+        "height_field",
+        "curved_tubes"
+      ],
+      "family_absolute_gates": true,
+      "hours_cap": 2,
+      "occupied_fractions": [
+        0.08,
+        0.16,
+        0.28
+      ],
+      "ordering_exception": "User explicitly authorizes stacking on unmerged LG2 and execution before review; no merges.",
+      "query_id": "voxel-encoder-local-geometry-v1-queries-3",
+      "query_mask_streams": {
+        "evaluation": 35402,
+        "probe": 35401
+      },
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "shared_settings": {
+        "absolute_bars": {
+          "boundary_f1": 0.7,
+          "clearance_nmae": 0.15,
+          "occupied_iou": 0.6,
+          "recovery_nmae": 0.2
+        },
+        "classification_improvement": 0.05,
+        "encoder_batch": 8,
+        "encoder_lr": 0.001,
+        "hours_cap": 4,
+        "local_channels": 8,
+        "mask_probability": 0.2,
+        "near_dead_std": 1e-05,
+        "observation_index": 1,
+        "probe_batch": 1024,
+        "probe_hidden": 32,
+        "probe_lr": 0.001,
+        "probe_steps": 512,
+        "queries_per_geometry": 256,
+        "radius": 8,
+        "regression_relative_reduction": 0.1,
+        "stem_width": 8,
+        "truncation": 8.0,
+        "weight_decay": 0.01
+      },
+      "source_report_sha256": "a1c99cf09adc3301dbd36307575e723a094c55a1335d996761a6cc5a1f3f135a",
+      "split_counts": {
+        "evaluation": 48,
+        "probe": 48
+      },
+      "study_id": "voxel-encoder-local-geometry-v1-lg3"
+    },
+    "source_commit": "21d1ea2c8f03d7def5dc5619d36d1dae5cdf2b9f",
+    "spec_commit": "082f5b7e8979fe8e9fdf840087fa93df7c430dc2",
+    "spec_path": "projects/theseo-anysearch/python/perception-encoder-local-geometry-lg3.md"
+  }
+}

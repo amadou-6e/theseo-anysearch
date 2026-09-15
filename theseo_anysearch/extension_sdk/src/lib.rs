@@ -4,8 +4,8 @@ use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub use anysearch_extension_macros::{
-    anysearch_outcome, anysearch_predicate, anysearch_reward, anysearch_scenario,
-    anysearch_scenario_v2,
+    anysearch_geometry_v1, anysearch_outcome, anysearch_predicate, anysearch_reward,
+    anysearch_scenario, anysearch_scenario_v2,
 };
 
 pub const ABI_VERSION: u32 = 2;
@@ -98,6 +98,8 @@ pub unsafe fn export_scenario_v1(
 pub const WORLD_QUERY_ABI_VERSION: u32 = 1;
 pub const SCENARIO_ABI_VERSION_V2: u32 = 2;
 pub const MAX_SCENARIO_OUTPUT_BYTES: usize = 1_048_576;
+pub const GEOMETRY_ABI_VERSION_V1: u32 = 1;
+pub const MAX_GEOMETRY_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,6 +124,19 @@ pub enum ScenarioStatusV2 {
     SerializationFailure = 4,
     InsufficientBuffer = 5,
     OutputTooLarge = 6,
+}
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeometryStatusV1 {
+    Success = 0,
+    InvalidArgument = 1,
+    InvalidContext = 2,
+    Panic = 3,
+    SerializationFailure = 4,
+    InsufficientBuffer = 5,
+    OutputTooLarge = 6,
+    BudgetExceeded = 7,
+    ProviderError = 8,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -251,6 +266,87 @@ pub struct ScenarioContextV2Raw {
     pub extent: WorldCoordV1,
     pub world_identity: *const u8,
     pub world_identity_len: usize,
+}
+#[repr(C)]
+pub struct GeometryContextV1Raw {
+    pub abi_version: u32,
+    pub struct_size: u32,
+    pub seed: u64,
+    pub attempt: u32,
+    pub extent: WorldCoordV1,
+    pub parameters_json: *const u8,
+    pub parameters_json_len: usize,
+    pub task_json: *const u8,
+    pub task_json_len: usize,
+    pub world: *const WorldQueryApiV1,
+}
+
+pub struct GeometryContextV1<'a> {
+    pub seed: u64,
+    pub attempt: u32,
+    pub extent: [u32; 3],
+    pub parameters: serde_json::Value,
+    pub task: serde_json::Value,
+    pub world: WorldQuery<'a>,
+}
+
+unsafe fn geometry_context_v1<'a>(
+    raw: *const GeometryContextV1Raw,
+) -> Result<GeometryContextV1<'a>, GeometryStatusV1> {
+    if raw.is_null() {
+        return Err(GeometryStatusV1::InvalidContext);
+    }
+    let raw = &*raw;
+    if raw.abi_version != GEOMETRY_ABI_VERSION_V1
+        || (raw.struct_size as usize) < std::mem::size_of::<GeometryContextV1Raw>()
+        || raw.world.is_null()
+    {
+        return Err(GeometryStatusV1::InvalidContext);
+    }
+    unsafe fn parse(ptr: *const u8, len: usize) -> Result<serde_json::Value, GeometryStatusV1> {
+        if ptr.is_null() && len != 0 {
+            return Err(GeometryStatusV1::InvalidContext);
+        }
+        serde_json::from_slice(std::slice::from_raw_parts(ptr, len))
+            .map_err(|_| GeometryStatusV1::InvalidContext)
+    }
+    Ok(GeometryContextV1 {
+        seed: raw.seed,
+        attempt: raw.attempt,
+        extent: [raw.extent.x, raw.extent.y, raw.extent.z],
+        parameters: parse(raw.parameters_json, raw.parameters_json_len)?,
+        task: parse(raw.task_json, raw.task_json_len)?,
+        world: WorldQuery::validate(&*raw.world).map_err(|_| GeometryStatusV1::InvalidContext)?,
+    })
+}
+
+pub unsafe fn export_geometry_v1(
+    context: *const GeometryContextV1Raw,
+    output: *mut u8,
+    capacity: usize,
+    required: *mut usize,
+    function: for<'a> fn(&GeometryContextV1<'a>) -> serde_json::Value,
+) -> GeometryStatusV1 {
+    if required.is_null() || (capacity != 0 && output.is_null()) {
+        return GeometryStatusV1::InvalidArgument;
+    }
+    let encoded = match catch_unwind(AssertUnwindSafe(|| {
+        let context = geometry_context_v1(context)?;
+        serde_json::to_vec(&function(&context)).map_err(|_| GeometryStatusV1::SerializationFailure)
+    })) {
+        Ok(Ok(value)) => value,
+        Ok(Err(status)) => return status,
+        Err(_) => return GeometryStatusV1::Panic,
+    };
+    if encoded.len() > MAX_GEOMETRY_OUTPUT_BYTES {
+        return GeometryStatusV1::OutputTooLarge;
+    }
+    required.write(encoded.len());
+    if capacity < encoded.len() {
+        return GeometryStatusV1::InsufficientBuffer;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), output, encoded.len());
+    GeometryStatusV1::Success
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1081,6 +1177,17 @@ mod tests {
         ScenarioResult::goal([1, 1, 1], [2, 2, 2], "v2")
     }
 
+    #[anysearch_geometry_v1]
+    fn procedural_wall(context: &GeometryContextV1<'_>) -> serde_json::Value {
+        assert!(context.world.point([2, 2, 2]).unwrap().is_some());
+        serde_json::json!({
+            "proposal_id": format!("wall-{}", context.seed),
+            "version": "1",
+            "sources": [{"type": "boxes", "boxes": [[4, 1, 1, 4, 6, 6]]}],
+            "metadata": {}
+        })
+    }
+
     fn raw_v2_context(api: &WorldQueryApiV1) -> ScenarioContextV2Raw {
         let json = b"null";
         ScenarioContextV2Raw {
@@ -1106,6 +1213,65 @@ mod tests {
             world_identity: std::ptr::null(),
             world_identity_len: 0,
         }
+    }
+
+    #[test]
+    fn geometry_v1_macro_negotiates_typed_proposal() {
+        let api = WorldQueryApiV1 {
+            abi_version: WORLD_QUERY_ABI_VERSION,
+            struct_size: std::mem::size_of::<WorldQueryApiV1>() as u32,
+            coordinate_size: std::mem::size_of::<WorldCoordV1>() as u32,
+            block_size: std::mem::size_of::<WorldBlockV1>() as u32,
+            region_entry_size: std::mem::size_of::<WorldRegionEntryV1>() as u32,
+            ray_hit_size: std::mem::size_of::<WorldRayHitV1>() as u32,
+            context: 1usize as *mut _,
+            call_token: 1,
+            point: Some(test_point),
+            region: None,
+            ray: None,
+            count_region: None,
+            sample_candidates: None,
+        };
+        let context = GeometryContextV1Raw {
+            abi_version: GEOMETRY_ABI_VERSION_V1,
+            struct_size: std::mem::size_of::<GeometryContextV1Raw>() as u32,
+            seed: 9,
+            attempt: 1,
+            extent: WorldCoordV1 { x: 8, y: 8, z: 8 },
+            parameters_json: b"{}".as_ptr(),
+            parameters_json_len: 2,
+            task_json: b"{}".as_ptr(),
+            task_json_len: 2,
+            world: &api,
+        };
+        let mut required = 0;
+        assert_eq!(
+            unsafe {
+                anysearch_geometry_procedural_wall_v1(
+                    &context,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut required,
+                )
+            },
+            GeometryStatusV1::InsufficientBuffer
+        );
+        let mut output = vec![0; required];
+        assert_eq!(
+            unsafe {
+                anysearch_geometry_procedural_wall_v1(
+                    &context,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut required,
+                )
+            },
+            GeometryStatusV1::Success
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap()["proposal_id"],
+            "wall-9"
+        );
     }
 
     #[test]

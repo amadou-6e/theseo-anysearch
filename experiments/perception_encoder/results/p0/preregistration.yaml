@@ -1,0 +1,320 @@
+envelope_version: 1
+identity_sha256: 26c6bd55a8442f33463efceff0ccd2de71c0c68287677b22c4132862dc6f285b
+kind: FrozenPreregistration
+payload:
+  accelerator_caps:
+    per_pilot_hours:
+      P0: 1.0
+      P1: 4.0
+      P2: 4.0
+      P3: 1.0
+      P4: 8.0
+      P4D: 2.0
+      P5: 4.0
+      P6: 8.0
+      P7: 12.0
+      P8: 4.0
+    reference_accelerator: NVIDIA GeForce RTX 3060 Ti 8GB
+    total_comparative_hours: 48.0
+  fresh_draws:
+    P4:
+      assignment_sha256: c53c4f6b1673093161a0943de65c9af70cfa9b149aa09cae6e9770ed0a95533d
+      pool: pilot_dev_arch
+      query_sha256: 8914e0ff064d6935209ba7eb042c0cd826189f1b6e9ac6e7ddf216b2cd522bba
+      seed: 104
+    P6:
+      assignment_sha256: 0633ab114571bfed975a24c751259d4609ff5141c21764410707dd98cffc95e7
+      pool: pilot_dev_interaction
+      query_sha256: e94f53116b68dd228cbf1de4a329579990cd8a5193266416f21ed968d8b5a6bc
+      seed: 106
+    P7:
+      assignment_sha256: a2968e91be353e5ed441a1183f1c727511e1c52dcd39b91f23ac016f0df18e27
+      pool: pilot_confirm
+      query_sha256: 437cbf2a3022bfa7bd3112e3ee2bd1180eee721bcc86af2f69a185eee9eb698b
+      seed: 107
+  frozen_at: '2026-09-02T07:15:00Z'
+  pools:
+    pilot_confirm:
+      assignment_sha256: a2968e91be353e5ed441a1183f1c727511e1c52dcd39b91f23ac016f0df18e27
+      geometry_ids:
+      - pilot-v1-confirm-15
+      - pilot-v1-confirm-01
+      - pilot-v1-confirm-09
+      - pilot-v1-confirm-02
+      - pilot-v1-confirm-04
+      - pilot-v1-confirm-14
+      - pilot-v1-confirm-11
+      - pilot-v1-confirm-10
+      - pilot-v1-confirm-12
+      - pilot-v1-confirm-00
+      - pilot-v1-confirm-03
+      - pilot-v1-confirm-07
+      - pilot-v1-confirm-05
+      - pilot-v1-confirm-08
+      - pilot-v1-confirm-06
+      - pilot-v1-confirm-13
+      - pilot-v1-confirm-16
+      - pilot-v1-confirm-18
+      - pilot-v1-confirm-19
+      - pilot-v1-confirm-22
+      - pilot-v1-confirm-17
+      - pilot-v1-confirm-20
+      - pilot-v1-confirm-21
+      - pilot-v1-confirm-23
+      - pilot-v1-confirm-26
+      - pilot-v1-confirm-31
+      - pilot-v1-confirm-29
+      - pilot-v1-confirm-28
+      - pilot-v1-confirm-27
+      - pilot-v1-confirm-24
+      - pilot-v1-confirm-30
+      - pilot-v1-confirm-25
+      observations: 12000
+      query_sha256: 437cbf2a3022bfa7bd3112e3ee2bd1180eee721bcc86af2f69a185eee9eb698b
+    pilot_dev_arch:
+      assignment_sha256: c53c4f6b1673093161a0943de65c9af70cfa9b149aa09cae6e9770ed0a95533d
+      geometry_ids:
+      - pilot-v1-107
+      - pilot-v1-099
+      - pilot-v1-163
+      - pilot-v1-128
+      - pilot-v1-084
+      - pilot-v1-052
+      - pilot-v1-165
+      - pilot-v1-061
+      - pilot-v1-125
+      - pilot-v1-022
+      - pilot-v1-014
+      - pilot-v1-138
+      - pilot-v1-047
+      - pilot-v1-159
+      - pilot-v1-103
+      - pilot-v1-104
+      - pilot-v1-096
+      - pilot-v1-016
+      - pilot-v1-081
+      - pilot-v1-145
+      - pilot-v1-101
+      - pilot-v1-166
+      - pilot-v1-158
+      - pilot-v1-150
+      observations: 6000
+      query_sha256: 8914e0ff064d6935209ba7eb042c0cd826189f1b6e9ac6e7ddf216b2cd522bba
+    pilot_dev_early:
+      assignment_sha256: 0e891861f953b1779cc8a0dcae8a5b6093745da509b98eb36e012bc3f1be28b2
+      geometry_ids:
+      - pilot-v1-083
+      - pilot-v1-015
+      - pilot-v1-043
+      - pilot-v1-092
+      - pilot-v1-036
+      - pilot-v1-004
+      - pilot-v1-129
+      - pilot-v1-049
+      - pilot-v1-017
+      - pilot-v1-010
+      - pilot-v1-050
+      - pilot-v1-114
+      - pilot-v1-035
+      - pilot-v1-003
+      - pilot-v1-151
+      - pilot-v1-080
+      - pilot-v1-108
+      - pilot-v1-028
+      - pilot-v1-117
+      - pilot-v1-025
+      - pilot-v1-029
+      - pilot-v1-106
+      - pilot-v1-098
+      - pilot-v1-090
+      observations: 6000
+      query_sha256: da44fe8cb64876dfa6ef401c97dce8d0a868ee1d71a3e08ef0577c3b5bf09d2e
+    pilot_dev_interaction:
+      assignment_sha256: 0633ab114571bfed975a24c751259d4609ff5141c21764410707dd98cffc95e7
+      geometry_ids:
+      - pilot-v1-155
+      - pilot-v1-027
+      - pilot-v1-007
+      - pilot-v1-152
+      - pilot-v1-048
+      - pilot-v1-088
+      - pilot-v1-141
+      - pilot-v1-073
+      - pilot-v1-005
+      - pilot-v1-046
+      - pilot-v1-038
+      - pilot-v1-054
+      - pilot-v1-011
+      - pilot-v1-147
+      - pilot-v1-019
+      - pilot-v1-044
+      - pilot-v1-000
+      - pilot-v1-148
+      - pilot-v1-069
+      - pilot-v1-157
+      - pilot-v1-077
+      - pilot-v1-070
+      - pilot-v1-074
+      - pilot-v1-078
+      observations: 6000
+      query_sha256: e94f53116b68dd228cbf1de4a329579990cd8a5193266416f21ed968d8b5a6bc
+    pilot_train:
+      assignment_sha256: 8acb32026cd234f4b41f38816a6814cf0cdbb79313a4135234fee8eb9d4ebda2
+      geometry_ids:
+      - pilot-v1-143
+      - pilot-v1-051
+      - pilot-v1-139
+      - pilot-v1-116
+      - pilot-v1-060
+      - pilot-v1-160
+      - pilot-v1-045
+      - pilot-v1-133
+      - pilot-v1-041
+      - pilot-v1-082
+      - pilot-v1-002
+      - pilot-v1-018
+      - pilot-v1-131
+      - pilot-v1-123
+      - pilot-v1-079
+      - pilot-v1-164
+      - pilot-v1-024
+      - pilot-v1-112
+      - pilot-v1-057
+      - pilot-v1-121
+      - pilot-v1-053
+      - pilot-v1-118
+      - pilot-v1-086
+      - pilot-v1-042
+      - pilot-v1-095
+      - pilot-v1-087
+      - pilot-v1-127
+      - pilot-v1-032
+      - pilot-v1-144
+      - pilot-v1-040
+      - pilot-v1-033
+      - pilot-v1-085
+      - pilot-v1-065
+      - pilot-v1-130
+      - pilot-v1-110
+      - pilot-v1-102
+      - pilot-v1-071
+      - pilot-v1-075
+      - pilot-v1-091
+      - pilot-v1-020
+      - pilot-v1-132
+      - pilot-v1-100
+      - pilot-v1-009
+      - pilot-v1-109
+      - pilot-v1-137
+      - pilot-v1-142
+      - pilot-v1-062
+      - pilot-v1-126
+      - pilot-v1-167
+      - pilot-v1-063
+      - pilot-v1-067
+      - pilot-v1-056
+      - pilot-v1-072
+      - pilot-v1-136
+      - pilot-v1-021
+      - pilot-v1-037
+      - pilot-v1-161
+      - pilot-v1-058
+      - pilot-v1-146
+      - pilot-v1-162
+      - pilot-v1-059
+      - pilot-v1-039
+      - pilot-v1-031
+      - pilot-v1-068
+      - pilot-v1-012
+      - pilot-v1-076
+      - pilot-v1-105
+      - pilot-v1-001
+      - pilot-v1-149
+      - pilot-v1-154
+      - pilot-v1-122
+      - pilot-v1-006
+      - pilot-v1-023
+      - pilot-v1-135
+      - pilot-v1-055
+      - pilot-v1-140
+      - pilot-v1-156
+      - pilot-v1-064
+      - pilot-v1-093
+      - pilot-v1-097
+      - pilot-v1-089
+      - pilot-v1-034
+      - pilot-v1-134
+      - pilot-v1-066
+      - pilot-v1-119
+      - pilot-v1-111
+      - pilot-v1-115
+      - pilot-v1-008
+      - pilot-v1-120
+      - pilot-v1-124
+      - pilot-v1-153
+      - pilot-v1-013
+      - pilot-v1-113
+      - pilot-v1-094
+      - pilot-v1-026
+      - pilot-v1-030
+      observations: 24000
+      query_sha256: 841b6af85379bfdea12158979f9e58ce98ccdeb53a93ed27dc43dcb6169506a2
+  program: voxel-encoder-pilot-v1
+  schema_version: 1
+  score_anchors:
+    boundary_f1:
+      ceiling: 1.0
+      ceiling_source: P0 exact supervised-oracle fixture v1
+      floor: 0.6666666666666666
+      floor_source: P0 analytic frequency/fixed-random/PCA control fixture v1
+      higher_is_better: true
+    clearance_nmae:
+      ceiling: 0.0
+      ceiling_source: P0 exact supervised-oracle fixture v1
+      floor: 0.1
+      floor_source: P0 analytic frequency/fixed-random/PCA control fixture v1
+      higher_is_better: false
+    geodesic_nmae:
+      ceiling: 0.0
+      ceiling_source: P0 exact supervised-oracle fixture v1
+      floor: 0.1
+      floor_source: P0 analytic frequency/fixed-random/PCA control fixture v1
+      higher_is_better: false
+    occupied_iou:
+      ceiling: 1.0
+      ceiling_source: P0 exact supervised-oracle fixture v1
+      floor: 0.5
+      floor_source: P0 analytic frequency/fixed-random/PCA control fixture v1
+      higher_is_better: true
+    reachability_auprc:
+      ceiling: 1.0
+      ceiling_source: P0 exact supervised-oracle fixture v1
+      floor: 0.75
+      floor_source: P0 analytic frequency/fixed-random/PCA control fixture v1
+      higher_is_better: true
+  seeds:
+    conditional_confirmation:
+    - 1
+    direction_finding:
+    - 0
+    fresh_confirmation:
+    - 2
+    - 3
+    wide_context:
+    - 4
+  specs:
+    commit_sha: f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d
+    files:
+    - projects/theseo-anysearch/python/perception-encoder-pilots.md
+    - projects/theseo-anysearch/python/perception-encoder-pretraining.md
+    - projects/theseo-anysearch/python/perception-encoders.md
+    repository: https://github.com/amadou-6e/specs
+  vetoes:
+    bootstrap_resamples: 10000
+    control_selectivity_min: 0.05
+    decisive_score_difference_min: 0.03
+    effective_rank_fraction_min: 0.25
+    embedding_necessity_margin_min: 0.05
+    false_open_rate_max: 0.05
+    false_open_regression_max: 0.02
+    near_dead_dimensions_fraction_max: 0.05

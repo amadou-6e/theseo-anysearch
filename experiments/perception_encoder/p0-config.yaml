@@ -1,0 +1,22 @@
+pilot: P0
+program: voxel-encoder-pilot-v1
+spec_commit: f64ea0b1b30ce07c28dfe2dc688a56d48a931c0d
+frozen_at: "2026-09-02T07:15:00Z"
+reference_accelerator: NVIDIA GeForce RTX 3060 Ti 8GB
+pool_seed: 90210
+p0_updates: 500
+per_pilot_hours:
+  P0: 1.0
+  P1: 4.0
+  P2: 4.0
+  P3: 1.0
+  P4: 8.0
+  P4D: 2.0
+  P5: 4.0
+  P6: 8.0
+  P7: 12.0
+  P8: 4.0
+total_comparative_hours: 48.0
+limitations:
+  - direction_finding_only
+  - synthetic_mesh_import_fixture_is_not_external_out_of_family_evidence

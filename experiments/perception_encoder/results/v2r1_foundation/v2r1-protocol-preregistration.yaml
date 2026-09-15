@@ -1,0 +1,414 @@
+envelope_version: 1
+identity_sha256: 1e847a26a386ade6e85c6c41692b3086388041f13aa8e90f067a3fafefd09bec
+kind: V2R1ProtocolPreregistration
+payload:
+  active_gate_components:
+  - occupied_iou
+  - boundary_f1
+  - clearance_nmae
+  - reachability_auprc
+  calibration_cap_hours: 2.0
+  calibration_run_id: voxel-encoder-pilot-v2r1-p0c-1
+  data_sensitivity_cap_hours: 2.0
+  data_sensitivity_run_id: voxel-encoder-pilot-v2r1-p0d-1
+  dataset_id: voxel-encoder-pilot-v2r1-dataset-1
+  fresh_draws:
+    P4:
+      assignment_sha256: 7d83e89ab1bcd3aefa2368911d0ac19a4ab3727b2d0c18f90afd9a14c6558513
+      pool: pilot_dev_arch
+      query_sha256: c93104ae2f894207108e7957c9eca75d810bccb78db4d1fe23f1f6e3c5790def
+      seed: 204
+    P6:
+      assignment_sha256: 80edde7be82a0e975cdf0407d274ffd10042ab62f7a825fd85be8c08dd6af64f
+      pool: pilot_dev_interaction
+      query_sha256: 3422de9088a2157c1bfa3c0de8b325b612324f24c0671f1bda51d75d1f0df950
+      seed: 206
+    P7:
+      assignment_sha256: 078af14bdc6daa7aa8f37df7d19f36990b255b1117b7693f392bf1857f077e7f
+      pool: pilot_confirm
+      query_sha256: b886aa2977ad5e3a5b123b041d4618a4d1179537ae81ffdbf05eeb8caf2e933b
+      seed: 207
+  frozen_at: '2026-09-03T14:15:00Z'
+  generator_seed: 3290
+  generator_version: procedural-voxel-generator-v2
+  metric_plans:
+    boundary_f1:
+      ceiling_method: bayes_error_knn
+      deferral_reason: null
+      floor_methods:
+      - frequency
+      - coordinates_only_ridge
+      - fixed_random_projection
+      higher_is_better: true
+      min_pvi_gain: 0.05
+      minimum_absolute_headroom: 0.1
+      minimum_relative_error_reduction: null
+      null_input: coordinates_only
+      status: active
+    clearance_nmae:
+      ceiling_method: knn_residual
+      deferral_reason: null
+      floor_methods:
+      - frequency
+      - coordinates_only_ridge
+      - fixed_random_projection
+      higher_is_better: false
+      min_pvi_gain: 0.05
+      minimum_absolute_headroom: null
+      minimum_relative_error_reduction: 0.2
+      null_input: coordinates_only
+      status: active
+    geodesic_nmae:
+      ceiling_method: knn_residual
+      deferral_reason: frequency NMAE is below 0.15 at pilot radii and the supervised
+        reference does not improve it; revisit at Stage 2 wide context
+      floor_methods:
+      - frequency
+      higher_is_better: false
+      min_pvi_gain: 0.05
+      minimum_absolute_headroom: null
+      minimum_relative_error_reduction: null
+      null_input: coordinates_only
+      status: deferred
+    occupied_iou:
+      ceiling_method: bayes_error_knn
+      deferral_reason: null
+      floor_methods:
+      - frequency
+      - coordinates_only_ridge
+      - fixed_random_projection
+      higher_is_better: true
+      min_pvi_gain: 0.05
+      minimum_absolute_headroom: 0.1
+      minimum_relative_error_reduction: null
+      null_input: coordinates_only
+      status: active
+    reachability_auprc:
+      ceiling_method: bayes_error_knn
+      deferral_reason: null
+      floor_methods:
+      - frequency
+      - coordinates_only_ridge
+      - fixed_random_projection
+      higher_is_better: true
+      min_pvi_gain: 0.05
+      minimum_absolute_headroom: 0.1
+      minimum_relative_error_reduction: null
+      null_input: coordinates_only
+      status: active
+  p0d_observation_density_multiplier: 4
+  p1_cap_hours: 4.0
+  pools:
+    pilot_calibration:
+      assignment_sha256: 92e7bda0087c823491ed7c275655ba66ebea76581784691eb9411c631e0ccfc5
+      geometry_ids:
+      - pilot-v2r1-119
+      - pilot-v2r1-207
+      - pilot-v2r1-067
+      - pilot-v2r1-044
+      - pilot-v2r1-096
+      - pilot-v2r1-028
+      - pilot-v2r1-129
+      - pilot-v2r1-109
+      - pilot-v2r1-101
+      - pilot-v2r1-190
+      - pilot-v2r1-170
+      - pilot-v2r1-030
+      - pilot-v2r1-191
+      - pilot-v2r1-039
+      - pilot-v2r1-199
+      - pilot-v2r1-068
+      - pilot-v2r1-000
+      - pilot-v2r1-148
+      - pilot-v2r1-057
+      - pilot-v2r1-025
+      - pilot-v2r1-005
+      - pilot-v2r1-106
+      - pilot-v2r1-182
+      - pilot-v2r1-198
+      observations: 6000
+      query_sha256: 6bd911080ef29551fdab95f8286b1a72891bd2f5a07e530e531579af3d4ae005
+    pilot_confirm:
+      assignment_sha256: 078af14bdc6daa7aa8f37df7d19f36990b255b1117b7693f392bf1857f077e7f
+      geometry_ids:
+      - pilot-v2r1-confirm-00
+      - pilot-v2r1-confirm-06
+      - pilot-v2r1-confirm-04
+      - pilot-v2r1-confirm-14
+      - pilot-v2r1-confirm-07
+      - pilot-v2r1-confirm-08
+      - pilot-v2r1-confirm-13
+      - pilot-v2r1-confirm-12
+      - pilot-v2r1-confirm-03
+      - pilot-v2r1-confirm-11
+      - pilot-v2r1-confirm-02
+      - pilot-v2r1-confirm-05
+      - pilot-v2r1-confirm-10
+      - pilot-v2r1-confirm-01
+      - pilot-v2r1-confirm-09
+      - pilot-v2r1-confirm-15
+      - pilot-v2r1-confirm-20
+      - pilot-v2r1-confirm-16
+      - pilot-v2r1-confirm-19
+      - pilot-v2r1-confirm-22
+      - pilot-v2r1-confirm-23
+      - pilot-v2r1-confirm-18
+      - pilot-v2r1-confirm-17
+      - pilot-v2r1-confirm-21
+      - pilot-v2r1-confirm-24
+      - pilot-v2r1-confirm-26
+      - pilot-v2r1-confirm-29
+      - pilot-v2r1-confirm-27
+      - pilot-v2r1-confirm-25
+      - pilot-v2r1-confirm-31
+      - pilot-v2r1-confirm-30
+      - pilot-v2r1-confirm-28
+      observations: 12000
+      query_sha256: b886aa2977ad5e3a5b123b041d4618a4d1179537ae81ffdbf05eeb8caf2e933b
+    pilot_dev_arch:
+      assignment_sha256: 7d83e89ab1bcd3aefa2368911d0ac19a4ab3727b2d0c18f90afd9a14c6558513
+      geometry_ids:
+      - pilot-v2r1-167
+      - pilot-v2r1-003
+      - pilot-v2r1-115
+      - pilot-v2r1-128
+      - pilot-v2r1-156
+      - pilot-v2r1-160
+      - pilot-v2r1-093
+      - pilot-v2r1-205
+      - pilot-v2r1-077
+      - pilot-v2r1-046
+      - pilot-v2r1-062
+      - pilot-v2r1-174
+      - pilot-v2r1-095
+      - pilot-v2r1-123
+      - pilot-v2r1-055
+      - pilot-v2r1-152
+      - pilot-v2r1-144
+      - pilot-v2r1-076
+      - pilot-v2r1-141
+      - pilot-v2r1-013
+      - pilot-v2r1-029
+      - pilot-v2r1-070
+      - pilot-v2r1-002
+      - pilot-v2r1-018
+      observations: 6000
+      query_sha256: c93104ae2f894207108e7957c9eca75d810bccb78db4d1fe23f1f6e3c5790def
+    pilot_dev_early:
+      assignment_sha256: 525ce18c4fd369fea04db9b81471da7c0497ddca267ebc67ef148098f5f90a9b
+      geometry_ids:
+      - pilot-v2r1-143
+      - pilot-v2r1-063
+      - pilot-v2r1-163
+      - pilot-v2r1-056
+      - pilot-v2r1-012
+      - pilot-v2r1-052
+      - pilot-v2r1-033
+      - pilot-v2r1-037
+      - pilot-v2r1-089
+      - pilot-v2r1-154
+      - pilot-v2r1-038
+      - pilot-v2r1-102
+      - pilot-v2r1-155
+      - pilot-v2r1-135
+      - pilot-v2r1-043
+      - pilot-v2r1-020
+      - pilot-v2r1-072
+      - pilot-v2r1-016
+      - pilot-v2r1-009
+      - pilot-v2r1-121
+      - pilot-v2r1-149
+      - pilot-v2r1-118
+      - pilot-v2r1-050
+      - pilot-v2r1-090
+      observations: 6000
+      query_sha256: bfe590eeb1fbf1386d68379aa46bfa06a57d2adc644906095670fe6b893894e3
+    pilot_dev_interaction:
+      assignment_sha256: 80edde7be82a0e975cdf0407d274ffd10042ab62f7a825fd85be8c08dd6af64f
+      geometry_ids:
+      - pilot-v2r1-107
+      - pilot-v2r1-051
+      - pilot-v2r1-031
+      - pilot-v2r1-140
+      - pilot-v2r1-132
+      - pilot-v2r1-064
+      - pilot-v2r1-117
+      - pilot-v2r1-169
+      - pilot-v2r1-209
+      - pilot-v2r1-214
+      - pilot-v2r1-014
+      - pilot-v2r1-126
+      - pilot-v2r1-131
+      - pilot-v2r1-087
+      - pilot-v2r1-151
+      - pilot-v2r1-104
+      - pilot-v2r1-048
+      - pilot-v2r1-112
+      - pilot-v2r1-021
+      - pilot-v2r1-061
+      - pilot-v2r1-017
+      - pilot-v2r1-142
+      - pilot-v2r1-194
+      - pilot-v2r1-162
+      observations: 6000
+      query_sha256: 3422de9088a2157c1bfa3c0de8b325b612324f24c0671f1bda51d75d1f0df950
+    pilot_diagnostic:
+      assignment_sha256: aed2f7ac1e07beacf9fdb8f841344b90536ef7936959f70944f90ac4b308c731
+      geometry_ids:
+      - pilot-v2r1-059
+      - pilot-v2r1-015
+      - pilot-v2r1-211
+      - pilot-v2r1-200
+      - pilot-v2r1-192
+      - pilot-v2r1-184
+      - pilot-v2r1-165
+      - pilot-v2r1-085
+      - pilot-v2r1-125
+      - pilot-v2r1-166
+      - pilot-v2r1-110
+      - pilot-v2r1-150
+      - pilot-v2r1-071
+      - pilot-v2r1-183
+      - pilot-v2r1-187
+      - pilot-v2r1-116
+      - pilot-v2r1-084
+      - pilot-v2r1-136
+      - pilot-v2r1-201
+      - pilot-v2r1-145
+      - pilot-v2r1-173
+      - pilot-v2r1-058
+      - pilot-v2r1-134
+      - pilot-v2r1-138
+      observations: 6000
+      query_sha256: 136466fd347c36d6f147362d0aa387115a459072310a46da1581b78b09c8af2c
+    pilot_train:
+      assignment_sha256: 6cabdcb4cfc60a67c864a7d3981591c83354f3c4e6ff8547d09d7273e87d283b
+      geometry_ids:
+      - pilot-v2r1-047
+      - pilot-v2r1-195
+      - pilot-v2r1-019
+      - pilot-v2r1-092
+      - pilot-v2r1-060
+      - pilot-v2r1-124
+      - pilot-v2r1-081
+      - pilot-v2r1-157
+      - pilot-v2r1-113
+      - pilot-v2r1-022
+      - pilot-v2r1-146
+      - pilot-v2r1-078
+      - pilot-v2r1-215
+      - pilot-v2r1-147
+      - pilot-v2r1-091
+      - pilot-v2r1-164
+      - pilot-v2r1-120
+      - pilot-v2r1-040
+      - pilot-v2r1-105
+      - pilot-v2r1-181
+      - pilot-v2r1-041
+      - pilot-v2r1-130
+      - pilot-v2r1-086
+      - pilot-v2r1-042
+      - pilot-v2r1-023
+      - pilot-v2r1-159
+      - pilot-v2r1-175
+      - pilot-v2r1-188
+      - pilot-v2r1-180
+      - pilot-v2r1-208
+      - pilot-v2r1-189
+      - pilot-v2r1-073
+      - pilot-v2r1-197
+      - pilot-v2r1-178
+      - pilot-v2r1-074
+      - pilot-v2r1-114
+      - pilot-v2r1-083
+      - pilot-v2r1-111
+      - pilot-v2r1-007
+      - pilot-v2r1-008
+      - pilot-v2r1-036
+      - pilot-v2r1-004
+      - pilot-v2r1-213
+      - pilot-v2r1-193
+      - pilot-v2r1-185
+      - pilot-v2r1-034
+      - pilot-v2r1-158
+      - pilot-v2r1-210
+      - pilot-v2r1-179
+      - pilot-v2r1-171
+      - pilot-v2r1-103
+      - pilot-v2r1-080
+      - pilot-v2r1-024
+      - pilot-v2r1-100
+      - pilot-v2r1-177
+      - pilot-v2r1-049
+      - pilot-v2r1-053
+      - pilot-v2r1-202
+      - pilot-v2r1-206
+      - pilot-v2r1-186
+      - pilot-v2r1-011
+      - pilot-v2r1-027
+      - pilot-v2r1-079
+      - pilot-v2r1-212
+      - pilot-v2r1-108
+      - pilot-v2r1-088
+      - pilot-v2r1-069
+      - pilot-v2r1-001
+      - pilot-v2r1-065
+      - pilot-v2r1-010
+      - pilot-v2r1-098
+      - pilot-v2r1-066
+      - pilot-v2r1-035
+      - pilot-v2r1-099
+      - pilot-v2r1-139
+      - pilot-v2r1-032
+      - pilot-v2r1-204
+      - pilot-v2r1-172
+      - pilot-v2r1-045
+      - pilot-v2r1-133
+      - pilot-v2r1-137
+      - pilot-v2r1-094
+      - pilot-v2r1-122
+      - pilot-v2r1-054
+      - pilot-v2r1-203
+      - pilot-v2r1-075
+      - pilot-v2r1-127
+      - pilot-v2r1-176
+      - pilot-v2r1-168
+      - pilot-v2r1-196
+      - pilot-v2r1-153
+      - pilot-v2r1-097
+      - pilot-v2r1-161
+      - pilot-v2r1-082
+      - pilot-v2r1-026
+      - pilot-v2r1-006
+      observations: 24000
+      query_sha256: ed8b0dc7f12e5417bc246e98e77d97cdf56a4624751fe7381e049189108cb013
+  preregistration_id: voxel-encoder-pilot-v2r1-preregistration-1
+  program: voxel-encoder-pilot-v2r1
+  query_artifacts:
+  - media_type: application/json
+    role: v2r1_query_plan
+    sha256: 63639cd0980cd6bcf386a64997652fdd0edfe8a6d8c81be6be908a3d085d7992
+    size_bytes: 4840
+    uri: experiments/perception_encoder/results/v2r1_foundation/v2r1-query-plan.json
+  reachability_false_open_margin: 0.02
+  replacement_p1_run_id: voxel-encoder-pilot-v2r1-p1-1
+  schema_version: 3
+  specs:
+    commit_sha: 0c9e3c633799f5d42b7a603e0845cac0bd494cda
+    files:
+    - projects/theseo-anysearch/python/perception-encoder-pilots.md
+    - projects/theseo-anysearch/python/perception-encoder-pretraining.md
+    - projects/theseo-anysearch/python/perception-encoders.md
+    repository: https://github.com/amadou-6e/specs
+  superseded_verdicts:
+  - evidence_report_sha256: a7a149f9235b38f9ff1f1a230ce791367cf528fc6705e0f987674f1a48d4ea43
+    evidence_run_id: voxel-encoder-pilot-v2-p0-calibration-1
+    fired_veto: false_open_rate_max
+    recorded_at: '2026-09-03T14:15:00Z'
+    replacement_run_id: voxel-encoder-pilot-v2r1-p1-1
+    superseded_decision: no_viable_direction
+    superseded_pilot: P1
+    superseded_program: voxel-encoder-pilot-v1
+    superseded_run_id: voxel-encoder-pilot-v1-p1-1
+    void_reason: P0C showed the absolute false-open veto and aggregate score were
+      structurally miscalibrated

@@ -1,0 +1,65 @@
+{
+  "batch1_latency_ms": {
+    "median": 13.981499671936035,
+    "p95": 14.767964363098145
+  },
+  "checks": [
+    {
+      "direct_rows_verified": 64,
+      "head_only_step": "passed",
+      "seed": 401
+    },
+    {
+      "direct_rows_verified": 64,
+      "head_only_step": "passed",
+      "seed": 402
+    },
+    {
+      "direct_rows_verified": 64,
+      "head_only_step": "passed",
+      "seed": 403
+    }
+  ],
+  "elapsed_seconds": 331.4529999999795,
+  "identity": {
+    "cap_seconds": 1800,
+    "contract": {
+      "default_seed": 401,
+      "dimension": 729,
+      "dtype": "float32",
+      "format": "compact-spatial-code-v1",
+      "head": "native_spatial_readout",
+      "input_side": 33,
+      "latent_centers": [
+        8,
+        24,
+        2
+      ],
+      "latent_shape": [
+        1,
+        9,
+        9,
+        9
+      ],
+      "normalization": "frozen_probe_channel_population_float64",
+      "promotion_eligible": false,
+      "seeds": [
+        401,
+        402,
+        403
+      ],
+      "status": "experimental",
+      "target_side": 17
+    },
+    "run_id": "compact-package-v1-run1",
+    "source_commit": "65e6f8f3480d3caca5046d5b03391f14cf343dd7",
+    "source_report": "f7d65863a81c3c905d24649d78a4d2d55ce747ccc0c89d361feb796d4bfc7c10",
+    "spec_commit": "1eedc6ca419b4f62f9bb320d1e983d65cb8999ca",
+    "validation": "first_and_last_32_development_rows_each_seed"
+  },
+  "manifest_payload_sha256": "2ddf188ecedff4699dba434fec05a851c5649119c07dcf30c9d9afd1292d4ed1",
+  "peak_allocated_bytes": 54901248,
+  "promotion_eligible": false,
+  "report_payload_sha256": "786c803a8c648b283c5136d6332c95ba7a88b7a6179a51847fa4850ede8bf8d1",
+  "status": "experimental_package_verified"
+}

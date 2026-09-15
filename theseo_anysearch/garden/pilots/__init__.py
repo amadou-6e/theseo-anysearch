@@ -7,6 +7,8 @@ from theseo_anysearch.garden.pilots.contracts import (
     PilotRunManifest,
     ResolvedPilotConfig,
     SpecsReference,
+    T3HealthGate,
+    V2FrozenPreregistration,
 )
 from theseo_anysearch.garden.pilots.io import (
     ContractIntegrityError,
@@ -25,6 +27,8 @@ __all__ = [
     "PilotRunManifest",
     "ResolvedPilotConfig",
     "SpecsReference",
+    "T3HealthGate",
+    "V2FrozenPreregistration",
     "contract_sha256",
     "read_contract",
     "write_contract",

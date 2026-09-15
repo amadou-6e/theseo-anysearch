@@ -32,7 +32,7 @@ def encoder_state_sha256(module: nn.Module) -> str:
         digest.update(
             json.dumps(header, sort_keys=True, separators=(",", ":")).encode("ascii")
         )
-        digest.update(value.view(torch.uint8).numpy().tobytes(order="C"))
+        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes(order="C"))
     return digest.hexdigest()
 
 

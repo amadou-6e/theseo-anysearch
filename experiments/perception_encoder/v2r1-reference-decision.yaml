@@ -1,0 +1,14 @@
+decision_id: voxel-encoder-pilot-v2r1-reference-decision-1
+source_package: F1
+retained: false
+implementation_status: skipped
+active_ceiling_methods:
+  occupied_iou: bayes_error_knn
+  boundary_f1: bayes_error_knn
+  clearance_nmae: knn_residual
+  reachability_auprc: bayes_error_knn
+deferred_metric: geodesic_nmae
+reason: >-
+  Every active revised P0C metric uses a model-free ceiling. No trained
+  reference remains in the gate, so the conditional F6 multi-task or
+  regularized-reference implementation is intentionally skipped.

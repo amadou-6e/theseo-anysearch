@@ -1,0 +1,142 @@
+{
+  "pilot_calibration": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "2e51a03909ee28f1e3bf9723b2c3facd9119be9f11f25e484589f06f75d40e70",
+      "pool": "pilot_calibration",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 10000,
+      "geometry_ids_sha256": "2e51a03909ee28f1e3bf9723b2c3facd9119be9f11f25e484589f06f75d40e70",
+      "pool": "pilot_calibration",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_confirm": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 40000,
+      "geometry_ids_sha256": "59f2908df80aa1117a560810d8d7361046b7c7cbabdcef49d67bfc326c8bddd2",
+      "pool": "pilot_confirm",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "59f2908df80aa1117a560810d8d7361046b7c7cbabdcef49d67bfc326c8bddd2",
+      "pool": "pilot_confirm",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_dev_arch": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "fdcfd04efb1b0a5f87ae98247adede06af755689f677ea5df2d0135f0a8f2f91",
+      "pool": "pilot_dev_arch",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 10000,
+      "geometry_ids_sha256": "fdcfd04efb1b0a5f87ae98247adede06af755689f677ea5df2d0135f0a8f2f91",
+      "pool": "pilot_dev_arch",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_dev_early": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "c94d4ef80a3330fb4ee6a5583366ff32532a88a0a993a5659c94b1c8b333868f",
+      "pool": "pilot_dev_early",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 10000,
+      "geometry_ids_sha256": "c94d4ef80a3330fb4ee6a5583366ff32532a88a0a993a5659c94b1c8b333868f",
+      "pool": "pilot_dev_early",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_dev_interaction": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "3fbc1497d635dd709c0d070c44afe571e7a8b6412f5770792c3f5f34c099c535",
+      "pool": "pilot_dev_interaction",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 10000,
+      "geometry_ids_sha256": "3fbc1497d635dd709c0d070c44afe571e7a8b6412f5770792c3f5f34c099c535",
+      "pool": "pilot_dev_interaction",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_diagnostic": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 20000,
+      "geometry_ids_sha256": "ffc4f8bc1a53a51a78a11abb60014fbc8a4b421017ee9a74032732662642c5d0",
+      "pool": "pilot_diagnostic",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 10000,
+      "geometry_ids_sha256": "ffc4f8bc1a53a51a78a11abb60014fbc8a4b421017ee9a74032732662642c5d0",
+      "pool": "pilot_diagnostic",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ],
+  "pilot_train": [
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 100000,
+      "geometry_ids_sha256": "3264514e42ab5e70fcbdf55870a36e776bf730e9f4b7c4ceed5ab5459f58b180",
+      "pool": "pilot_train",
+      "probe": "coordinate",
+      "revision": "heldout_occupancy_v1",
+      "seed": 3290
+    },
+    {
+      "assignment": "sha256_rank_round_robin_within_geometry_strata_v2r1",
+      "count": 50000,
+      "geometry_ids_sha256": "3264514e42ab5e70fcbdf55870a36e776bf730e9f4b7c4ceed5ab5459f58b180",
+      "pool": "pilot_train",
+      "probe": "pair",
+      "revision": "stratified_margin_boundary_v1",
+      "seed": 3291
+    }
+  ]
+}

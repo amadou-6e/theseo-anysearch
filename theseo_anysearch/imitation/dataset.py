@@ -23,6 +23,10 @@ from theseo_anysearch.imitation.models import (
     ImitationConfig,
 )
 from theseo_anysearch.worlds import world_contract
+from theseo_anysearch.environments.task_identity import (
+    configured_geometry_identity,
+    configured_task_contract,
+)
 
 
 def _configure_waypoint_curriculum(
@@ -111,23 +115,24 @@ def dataset_fingerprint(
     normalized_env.pop("grid_size", None)
     normalized_env.pop("extent", None)
     normalized_env["extent"] = normalized_world["extent"]
-    for path_key in ("stl_path", "waypoints_file"):
-        path_value = normalized_env.get(path_key)
-        if path_value:
-            normalized_env[path_key] = str(Path(str(path_value)).resolve())
+    # Source paths are machine-local plumbing. Geometry bytes and resolved task
+    # contents are fingerprinted separately below.
+    normalized_env.pop("stl_path", None)
+    normalized_env.pop("waypoints_file", None)
     geometry_pool = normalized_env.get("geometry_pool")
     if isinstance(geometry_pool, dict) and geometry_pool.get("pool_dir"):
         normalized_env["geometry_pool"] = {
             **geometry_pool,
-            "pool_dir": str(Path(str(geometry_pool["pool_dir"])).resolve()),
+            "pool_dir": None,
         }
 
     payload = {
-        # Version 6 adds the explicit finite-world coordinate contract.
-        "schema_version": 6,
+        # Version 7 adds path-independent accepted geometry/task semantics.
+        "schema_version": 7,
         "env": normalized_env,
         "world": normalized_world,
-        "geometry": _geometry_fingerprint(env_config),
+        "geometry": configured_geometry_identity(env_config),
+        "geometry_task": configured_task_contract(env_config),
         "generation": {
             "provider": imitation.generation.provider.model_dump(mode="json"),
             "episodes": imitation.generation.episodes,
@@ -146,28 +151,6 @@ def dataset_fingerprint(
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
-
-def _geometry_fingerprint(env_config: dict[str, Any]) -> str:
-    """Hash configured geometry contents rather than only their path names."""
-
-    digest = hashlib.sha256()
-    stl_path = env_config.get("stl_path")
-    if stl_path:
-        path = Path(str(stl_path))
-        if path.is_file():
-            digest.update(path.read_bytes())
-    pool = env_config.get("geometry_pool") or {}
-    pool_dir_value = pool.get("pool_dir") if isinstance(pool, dict) else None
-    if pool_dir_value:
-        pool_dir = Path(str(pool_dir_value))
-        if pool_dir.is_dir():
-            for path in sorted(pool_dir.rglob("*.npy")):
-                digest.update(str(path.relative_to(pool_dir)).encode("utf-8"))
-                digest.update(path.read_bytes())
-    digest.update(
-        json.dumps(env_config.get("geometry_boxes") or [], sort_keys=True).encode("utf-8")
-    )
-    return digest.hexdigest()
 
 def collect_demonstrations(
     env_config: dict[str, Any],
