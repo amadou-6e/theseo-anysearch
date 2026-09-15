@@ -62,6 +62,7 @@ class ProviderInfo:
     native_meters_per_voxel: float
     parameters: tuple[ProviderParameter, ...] = ()
     api_version: int = API_VERSION
+    resolution_parameter: str | None = None
 
     def __post_init__(self) -> None:
         if not _NAME.fullmatch(self.name):
@@ -73,6 +74,18 @@ class ProviderInfo:
         names = [parameter.name for parameter in self.parameters]
         if len(names) != len(set(names)):
             raise ValueError("duplicate provider parameters")
+        if self.resolution_parameter is not None:
+            parameter = next((p for p in self.parameters if p.name == self.resolution_parameter), None)
+            if parameter is None or parameter.kind != "number":
+                raise ValueError("resolution parameter must name a numeric provider parameter")
+
+    def output_resolution(self, parameters: dict[str, object]) -> float:
+        value = self.native_meters_per_voxel
+        if self.resolution_parameter is not None:
+            value = float(parameters[self.resolution_parameter])
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("output resolution must be positive and finite")
+        return value
 
 
 @dataclass(frozen=True)
