@@ -159,6 +159,15 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
                     }
                 )
         return {
+            "geometry_provider": (
+                self.geometry.provider.name if self.geometry.provider else None
+            ),
+            "geometry_provider_parameters": (
+                self.geometry.provider.parameters if self.geometry.provider else {}
+            ),
+            "geometry_sources": [
+                source.model_dump(mode="json") for source in self.geometry.sources
+            ],
             "stl_path": str(self.geometry__stl_path) if self.geometry__stl_path else None,
             "stl_paths": (
                 [str(path) for path in self.geometry__stl_paths] if self.geometry__stl_paths else None
@@ -172,9 +181,25 @@ class EnvConfig(NestedFieldAccessMixin, BaseModel):
             "scale_variants_per_map": self.geometry__scale_variants_per_map,
             "geometry_padding": self.geometry__padding,
             "geometry_pool": self.geometry__pool,
+            "geometry_validation": self.geometry.validation.model_dump(mode="json"),
             "compiled_world_path": (
                 str(self.geometry.compiled_world_path)
                 if self.geometry.compiled_world_path is not None
+                else None
+            ),
+            "compiled_world_catalog_path": (
+                str(self.geometry.compiled_world_catalog_path.resolve())
+                if self.geometry.compiled_world_catalog_path is not None
+                else None
+            ),
+            **(
+                {"world_identity_sha256": self.geometry.world_identity_sha256}
+                if self.geometry.world_identity_sha256 is not None
+                else {}
+            ),
+            "compiled_world_node_cache": (
+                str(self.geometry.node_cache)
+                if self.geometry.node_cache is not None
                 else None
             ),
             "world_maximum_decoded_bytes": self.geometry.maximum_decoded_bytes,

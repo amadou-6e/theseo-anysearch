@@ -170,6 +170,8 @@ def compiler_identity(
     sources: Sequence[WorldSource],
     extent: WorldExtent,
     config: WorldCompilerConfig,
+    *,
+    generate_candidates: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     """Return the content identity without embedding machine-local paths."""
 
@@ -191,6 +193,10 @@ def compiler_identity(
             "min_dense_component_source_voxels": MIN_DENSE_COMPONENT_SOURCE_VOXELS,
         },
     }
+    if not generate_candidates:
+        # Preserve existing identities for the default compiler behavior.
+        # Fixed-route packs may omit the potentially enormous surface index.
+        contract["candidate_index"] = "empty"
     return _sha256_bytes(_canonical_json(contract)), contract
 
 
@@ -713,12 +719,15 @@ def compile_world(
     config: WorldCompilerConfig | None = None,
     *,
     lock_timeout_seconds: float = 300.0,
+    generate_candidates: bool = True,
 ) -> CompiledWorld:
-    """Compile or reuse one content-addressed immutable world pack."""
+    """Compile or reuse a pack; fixed-route worlds may omit candidate records."""
 
     resolved_config = config or WorldCompilerConfig()
     source_list = tuple(sources)
-    identity, contract = compiler_identity(source_list, extent, resolved_config)
+    identity, contract = compiler_identity(
+        source_list, extent, resolved_config, generate_candidates=generate_candidates
+    )
     entry = cache_dir.joinpath(identity)
     with cache_key_lock(cache_dir, identity, lock_timeout_seconds, label="world pack"):
         if entry.exists():
@@ -779,7 +788,8 @@ def compile_world(
             write_candidate_index(
                 temporary,
                 identity,
-                _candidate_records(chunks, extent, resolved_config.chunk_shape),
+                _candidate_records(chunks, extent, resolved_config.chunk_shape)
+                if generate_candidates else (),
             )
             temporary.joinpath(COMPLETE_FILE).write_text(identity, encoding="ascii")
             validate_compiled_world(temporary)

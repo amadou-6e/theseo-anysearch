@@ -36,7 +36,14 @@ class OutputStore:
         return dest
 
     def read_json(self, rel_path: str) -> Any:
+        if rel_path.endswith(".json.zst"):
+            from .trajectory_storage import read_trajectory
+            return read_trajectory(self._root / rel_path)
         return json.loads((self._root / rel_path).read_text())
+
+    def write_trajectory(self, rel_path: str, data: dict) -> Path:
+        from .trajectory_storage import write_trajectory
+        return write_trajectory(self._root / rel_path, data)
 
     def exists(self, rel_path: str) -> bool:
         return (self._root / rel_path).exists()

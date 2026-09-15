@@ -103,6 +103,7 @@ class APPOTrainer(Trainer):
         )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
+            enabled=config.evaluation.enabled,
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
             env_config=env_config,

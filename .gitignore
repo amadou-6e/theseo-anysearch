@@ -60,6 +60,7 @@ ray_results/
 runtime/
 
 # IDE / editors
+AGENTS.md
 .vscode/
 .idea/
 .worktrees/

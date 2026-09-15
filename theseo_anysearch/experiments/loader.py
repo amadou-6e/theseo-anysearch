@@ -63,6 +63,23 @@ def load_experiment(path: Path) -> Union[ExperimentConfig, SweepConfig]:
     resolved = _resolve_typed_configs(raw)
     config = ExperimentConfig(**resolved)
 
+    if config.worlds is not None:
+        from theseo_anysearch.world_providers.selection import validate_selection
+
+        validate_selection(
+            config.worlds, path, config.env.geometry, config.env.waypoints_file
+        )
+
+        # Runtime paths are resolved relative to the YAML, not the process CWD.
+        geometry = config.env.geometry.model_copy(update={
+            "compiled_world_path": (yaml_dir / config.env.geometry.compiled_world_path).resolve(),
+        })
+        env = config.env.model_copy(update={
+            "geometry": geometry,
+            "waypoints_file": str((yaml_dir / config.env.waypoints_file).resolve()),
+        })
+        config = config.model_copy(update={"env": env})
+
     # Resolve output_dir relative to the YAML's parent
     has_output_dir = "output_dir" in raw.get("experiment", {})
     out = config.experiment.output_dir

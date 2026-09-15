@@ -202,8 +202,8 @@ class TrainResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     iteration: int
-    episode_reward_mean: float
-    episode_len_mean: float
+    episode_reward_mean: float | None
+    episode_len_mean: float | None
     episodes_total: int
     elapsed_s: float
     environment_steps_total: int = 0
@@ -221,12 +221,14 @@ class TrainResult(BaseModel):
     def standard_metrics(self) -> dict[str, float]:
         """Return the shared numeric metric contract for every reporter."""
         metrics = {
-            "train/task/return_mean": self.episode_reward_mean,
-            "train/task/episode_len_mean": self.episode_len_mean,
             "train/task/episodes_total": float(self.episodes_total),
             "performance/rllib_wall_time_s": self.elapsed_s,
             "performance/environment_steps_total": float(self.environment_steps_total),
         }
+        if self.episode_reward_mean is not None:
+            metrics["train/task/return_mean"] = self.episode_reward_mean
+        if self.episode_len_mean is not None:
+            metrics["train/task/episode_len_mean"] = self.episode_len_mean
         metrics.update({
             key: float(value)
             for key, value in self.extra.items()
@@ -244,15 +246,14 @@ class TrainResult(BaseModel):
     ) -> "TrainResult":
         """Build from the dict returned by ray.rllib.algorithms.Algorithm.train()."""
         parsed = RllibTrainResult.from_raw(rllib_result)
+        episode_reward_mean = parsed.parse_episode_return()
+        episode_len_mean = parsed.parse_episode_len()
+        if (episode_reward_mean is None) != (episode_len_mean is None):
+            raise ValueError(
+                "RLlib training result has only one of episode reward mean "
+                "and episode length mean"
+            )
         required_metrics = {
-            "episode reward mean": (
-                parsed.parse_episode_return(),
-                "env_runners.episode_return_mean or episode_reward_mean",
-            ),
-            "episode length mean": (
-                parsed.parse_episode_len(),
-                "env_runners.episode_len_mean or episode_len_mean",
-            ),
             "episode count": (
                 parsed.parse_episodes_total(),
                 "env_runners.num_episodes_lifetime or episodes_total",
@@ -275,8 +276,8 @@ class TrainResult(BaseModel):
 
         return cls(
             iteration=iteration,
-            episode_reward_mean=required_metrics["episode reward mean"][0],
-            episode_len_mean=required_metrics["episode length mean"][0],
+            episode_reward_mean=episode_reward_mean,
+            episode_len_mean=episode_len_mean,
             episodes_total=required_metrics["episode count"][0],
             elapsed_s=elapsed_s,
             environment_steps_total=required_metrics["environment step count"][0],

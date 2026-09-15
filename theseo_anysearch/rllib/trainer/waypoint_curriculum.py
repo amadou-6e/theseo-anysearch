@@ -10,9 +10,14 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseo_anysearch.models import WaypointCurriculumConfig
-from theseo_anysearch.rllib.trainer.waypoint_routes import WaypointRoute, sample_route
+from theseo_anysearch.rllib.trainer.waypoint_routes import (
+    WaypointRoute,
+    sample_fixed_route_variant,
+    sample_route,
+)
 from theseo_anysearch.worlds.extent import (
     WorldExtent,
+    contains_task_coordinate,
     maximum_euclidean,
     resolve_task_extent,
     task_center,
@@ -83,10 +88,11 @@ class WaypointCurriculum:
         if config.initial_start is None:
             raise ValueError("waypoint curriculum requires an initial start")
         self.config = config
+        self._seeded_catalog = bool(env_config and env_config.get("compiled_world_catalog_path"))
         self._initial_route: WaypointRoute | None = None
         if config.completion_mode == "continue_route":
             if env_config is None:
-                raise ValueError("continue_route curriculum requires environment settings")
+                raise ValueError("route curriculum requires environment settings")
             self._initial_route = self._sample_route(env_config, stage=0)
             self.state = WaypointCurriculumState(
                 start=self._initial_route.start,
@@ -101,10 +107,14 @@ class WaypointCurriculum:
     def stages(self) -> list[Any]:
         """Return the initial stage followed by every visited stage."""
         if self._initial_route is not None:
-            return [self._initial_route.model_dump(mode="python")] + [
+            stages = [self._initial_route.model_dump(mode="python")] + [
                 {"start": transition.start, "waypoints": transition.waypoints}
                 for transition in self.state.transitions
             ]
+            if self._seeded_catalog:
+                for index, stage in enumerate(stages):
+                    stage["seeded_catalog_stage"] = index
+            return stages
         initial = (self.config.initial_start, self.config.initial_goal)
         assert initial[0] is not None and initial[1] is not None
         return [(initial[0], initial[1])] + [
@@ -114,6 +124,8 @@ class WaypointCurriculum:
     @property
     def maximum_stage(self) -> int | None:
         """Return the last distinct configured difficulty stage, when bounded."""
+        if self.config.routes:
+            return len(self.config.routes) - 1
         maximum = self.config.difficulty.maximum_distance
         if maximum is None:
             return None
@@ -292,6 +304,38 @@ class WaypointCurriculum:
         seed: int | None = None,
     ) -> WaypointRoute:
         """Generate a route at a configured stage with an optional independent seed."""
+        if self.config.routes:
+            if not 0 <= stage < len(self.config.routes):
+                raise IndexError("fixed route stage is out of range")
+            catalog_path = env_config.get("compiled_world_catalog_path")
+            if catalog_path:
+                from theseo_anysearch.worlds.seeded_catalog import load_catalog
+
+                catalog = load_catalog(catalog_path)
+                return catalog.route_for_stage(
+                    stage, self.config.seed + stage if seed is None else seed,
+                    variation_radius=(self.config.fixed_route_variation_radius
+                                      if seed is not None else 0),
+                    action_mode=str(env_config.get("action_mode", "discrete_18")),
+                )
+            route = WaypointRoute.model_validate(
+                self.config.routes[stage].model_dump(mode="python")
+            )
+            extent = resolve_task_extent(env_config)
+            if any(
+                not contains_task_coordinate(extent, point)
+                for point in (route.start, *route.waypoints)
+            ):
+                raise ValueError("fixed route point is outside the task extent")
+            if seed is not None and self.config.fixed_route_variation_radius:
+                return sample_fixed_route_variant(
+                    route,
+                    radius=self.config.fixed_route_variation_radius,
+                    seed=seed,
+                    extent=extent,
+                    action_mode=str(env_config.get("action_mode", "discrete_26")),
+                )
+            return route
         self._require_empty_geometry(env_config)
         difficulty = self.config.difficulty
         assert difficulty.initial_distance is not None
@@ -325,6 +369,11 @@ class WaypointCurriculum:
     ) -> list[WaypointRoute]:
         """Return every configured segment-distance route stage."""
 
+        if self.config.routes:
+            return [
+                self._sample_route(env_config, stage)
+                for stage in range(len(self.config.routes))
+            ]
         if self.config.completion_mode != "continue_route":
             raise ValueError("all-stage collection requires continue_route mode")
         difficulty = self.config.difficulty

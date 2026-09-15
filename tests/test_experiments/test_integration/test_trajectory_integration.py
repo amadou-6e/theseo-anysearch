@@ -155,8 +155,8 @@ class TestTrajectoryWriterWithRealEpisode:
         writer = TrajectoryWriter(store, trajectory_every=1, best_trajectory=True)
         writer.record(real_episode)
         written = writer.on_iteration_end(1, 0.5, "test-exp", "abc12345")
-        assert "trajectories/iter_000001.json" in written
-        assert "trajectories/best.json" in written
+        assert "trajectories/iter_000001.json.zst" in written
+        assert "trajectories/best.json.zst" in written
 
     def test_written_json_has_real_steps(self, tmp_path, real_episode):
         import json
@@ -166,7 +166,7 @@ class TestTrajectoryWriterWithRealEpisode:
         writer = TrajectoryWriter(store, trajectory_every=1, best_trajectory=False)
         writer.record(real_episode)
         writer.on_iteration_end(1, 0.5, "test-exp", "abc12345")
-        data = json.loads(store.read_bytes("trajectories/iter_000001.json").decode())
+        data = store.read_json("trajectories/iter_000001.json.zst")
         assert len(data["episode"]["steps"]) == len(real_episode.steps)
         assert data["episode"]["total_reward"] == pytest.approx(real_episode.total_reward)
 
@@ -178,7 +178,7 @@ class TestTrajectoryWriterWithRealEpisode:
         writer = TrajectoryWriter(store, trajectory_every=1, best_trajectory=False)
         writer.record(real_episode)
         writer.on_iteration_end(1, 0.42, "round-trip", "xyz99")
-        loaded = TrajectoryWriter.load(store, "trajectories/iter_000001.json")
+        loaded = TrajectoryWriter.load(store, "trajectories/iter_000001.json.zst")
         assert loaded["experiment_name"] == "round-trip"
         assert loaded["run_id"] == "xyz99"
         assert loaded["episode_reward_mean"] == pytest.approx(0.42)

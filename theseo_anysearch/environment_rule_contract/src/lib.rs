@@ -123,6 +123,22 @@ impl EnvironmentRuleMetadata {
                 }
             }
         }
+        let dependencies: HashSet<_> = self
+            .dependencies
+            .iter()
+            .map(|reference| (reference.kind, reference.name.as_str()))
+            .collect();
+        if self
+            .conflicts
+            .iter()
+            .any(|reference| dependencies.contains(&(reference.kind, reference.name.as_str())))
+        {
+            return Err(format!(
+                "{}:{} cannot declare the same rule as both a dependency and a conflict",
+                kind_name(self.kind),
+                self.name
+            ));
+        }
         Ok(())
     }
 }
@@ -181,5 +197,15 @@ mod tests {
             .validate()
             .unwrap_err()
             .contains("cannot reference itself"));
+    }
+
+    #[test]
+    fn metadata_rejects_dependency_conflict_overlap() {
+        let mut metadata = metadata();
+        metadata.conflicts = vec![RuleReference::new(RuleKind::Predicate, "bounds")];
+        assert!(metadata
+            .validate()
+            .unwrap_err()
+            .contains("both a dependency and a conflict"));
     }
 }

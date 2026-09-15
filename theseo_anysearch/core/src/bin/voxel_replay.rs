@@ -13,9 +13,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
+use theseo_core::replay::storage::{find_trajectory, iteration_files, read_json};
 use theseo_core::replay::explain::NativeExplainUi;
 use theseo_core::replay::lod::{
     chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
@@ -23,16 +25,130 @@ use theseo_core::replay::lod::{
 };
 use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
-    agent_region, camera_relative, RegionalReplayFrame, RegionalReplaySource, ReplayMutation,
+    agent_region, agent_view_render_origin, camera_relative, RegionalReplayFrame,
+    RegionalReplaySource, RenderOrigin, ReplayMutation,
 };
 use theseo_core::replay::render_cache::{
     chunk_occupancy_revision, ChunkCoord, ChunkRenderCache, ExposedFace, FaceDirection,
     RenderCacheKey,
 };
-use theseo_core::voxel::world::{BoundedRegion, StorageCoord};
+use theseo_core::voxel::world::{
+    BoundedRegion, StorageCoord, WorldExtent,
+};
 
 const DEFAULT_VISUALIZATION_RADIUS: u32 = 16;
 const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const PLAYBACK_STEP_INTERVAL: Duration = Duration::from_millis(120);
+const REGIONAL_LOAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
+
+const SYSTEM_CHUNK_BUDGETS: ChunkBudgets = ChunkBudgets { visible: 256, detailed: 128 };
+
+fn scene_camera_input(ctx: &egui::Context, response: &egui::Response) -> (Vec2, f32) {
+    let drag = if response.dragged_by(egui::PointerButton::Primary) {
+        ctx.input(|input| input.pointer.delta())
+    } else {
+        Vec2::ZERO
+    };
+    let scroll = if response.hovered() {
+        ctx.input(|input| input.smooth_scroll_delta.y)
+    } else {
+        0.0
+    };
+    (drag, scroll)
+}
+
+#[cfg(test)]
+mod camera_input_tests {
+    use super::*;
+
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut f32)
+        -> (Rect, Rect, Vec2, f32)
+    {
+        let mut slider = Rect::NOTHING;
+        let mut scene = Rect::NOTHING;
+        let mut input = (Vec2::ZERO, 0.0);
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        }, |ctx| {
+            egui::SidePanel::left("controls").exact_width(260.0).show(ctx, |ui| {
+                slider = ui.add(Slider::new(value, 1.0..=64.0)).rect;
+            });
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                scene = response.rect;
+                input = scene_camera_input(ctx, &response);
+            });
+        });
+        (slider, scene, input.0, input.1)
+    }
+
+    fn press(position: Pos2) -> Vec<egui::Event> {
+        vec![egui::Event::PointerMoved(position), egui::Event::PointerButton {
+            pos: position, button: egui::PointerButton::Primary, pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    #[test]
+    fn sidebar_slider_drag_changes_value_without_orbiting() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, _, _, _) = frame(&ctx, vec![], &mut value);
+        let start = slider.left_center() + Vec2::new(20.0, 0.0);
+        frame(&ctx, press(start), &mut value);
+        let before = value;
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(start + Vec2::new(40.0, 0.0))], &mut value);
+        assert_ne!(value, before);
+        assert_eq!(drag, Vec2::ZERO);
+    }
+
+    #[test]
+    fn scene_drag_still_orbits() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (_, scene, _, _) = frame(&ctx, vec![], &mut value);
+        let start = scene.center();
+        frame(&ctx, press(start), &mut value);
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(start + Vec2::new(40.0, 0.0))], &mut value);
+        assert!(drag.x > 0.0);
+    }
+
+    #[test]
+    fn sidebar_drag_entering_scene_does_not_steal_camera_input() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, scene, _, _) = frame(&ctx, vec![], &mut value);
+        frame(&ctx, press(slider.left_center() + Vec2::new(20.0, 0.0)), &mut value);
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(scene.center())], &mut value);
+        assert_eq!(drag, Vec2::ZERO);
+    }
+
+    #[test]
+    fn sidebar_wheel_does_not_zoom_camera() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, _, _, _) = frame(&ctx, vec![], &mut value);
+        let (_, _, _, scroll) = frame(&ctx, vec![
+            egui::Event::PointerMoved(slider.center()),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 30.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ], &mut value);
+        assert_eq!(scroll, 0.0);
+    }
+
+    #[test]
+    fn chunk_budgets_are_system_maxima() {
+        assert_eq!(SYSTEM_CHUNK_BUDGETS.visible, 256);
+        assert_eq!(SYSTEM_CHUNK_BUDGETS.detailed, 128);
+    }
+}
 
 fn chunk_intersects_region(
     chunk: ChunkCoord,
@@ -61,7 +177,7 @@ fn chunk_intersects_region(
 // JSON data model — must match the Python TrajectoryWriter output
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 struct StepData {
     step: u32,
     // Single-agent fields
@@ -70,11 +186,11 @@ struct StepData {
     #[serde(default)]
     reward: f32,
     #[serde(default)]
-    cursor_x: u16,
+    cursor_x: u32,
     #[serde(default)]
-    cursor_y: u16,
+    cursor_y: u32,
     #[serde(default)]
-    cursor_z: u16,
+    cursor_z: u32,
     #[serde(default)]
     voxel_count: u32,
     #[serde(default)]
@@ -85,7 +201,7 @@ struct StepData {
     #[serde(default)]
     rewards: Vec<f32>,
     #[serde(default)]
-    cursors: Vec<[u16; 3]>,
+    cursors: Vec<[u32; 3]>,
     #[serde(default)]
     placed_per_agent: Vec<bool>,
     #[serde(default)]
@@ -126,14 +242,14 @@ struct EpisodeData {
     init_filled_file: Option<String>,
     steps: Vec<StepData>,
     #[serde(default)]
-    start_pos: Option<[u16; 3]>,
+    start_pos: Option<[u32; 3]>,
     #[serde(default)]
-    goal_pos: Option<[u16; 3]>,
+    goal_pos: Option<[u32; 3]>,
     // Multi-agent
     #[serde(default)]
-    start_positions: Vec<Option<[u16; 3]>>,
+    start_positions: Vec<Option<[u32; 3]>>,
     #[serde(default)]
-    goal_positions: Vec<Option<[u16; 3]>>,
+    goal_positions: Vec<Option<[u32; 3]>>,
 }
 
 fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
@@ -193,8 +309,8 @@ fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
 }
 
 fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
-    let json = std::fs::read_to_string(path).ok()?;
-    let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
+    let json = read_json(path).map_err(|e| eprintln!("Cannot read trajectory '{}': {e}", path.display())).ok()?;
+    let mut traj = serde_json::from_slice::<TrajectoryData>(&json).ok()?;
     traj.source_path = path.to_path_buf();
     if let Some(world) = &traj.world {
         let manifest_path = path.parent().unwrap_or(std::path::Path::new(".")).join(
@@ -270,6 +386,40 @@ fn default_obs_mode() -> String { "scalar".to_string() }
 fn default_agent_count() -> u32 { 1 }
 fn default_grid_size() -> u32 { 32 }
 
+fn trail_mode_active(compiled_world: bool, agent_count: u32, steps: &[StepData]) -> bool {
+    if compiled_world { return false; }
+    if agent_count > 1 {
+        // Older multi-agent trajectories infer placement from cursor movement.
+        steps.iter().any(|step| !step.cursors.is_empty())
+    } else {
+        steps.iter().any(|step| step.placed)
+    }
+}
+
+#[cfg(test)]
+mod trail_mode_tests {
+    use super::{trail_mode_active, StepData};
+
+    #[test]
+    fn compiled_world_never_offers_a_trail_control() {
+        let placed = StepData { placed: true, ..Default::default() };
+        assert!(!trail_mode_active(true, 1, &[placed]));
+    }
+
+    #[test]
+    fn legacy_single_agent_offers_trail_only_for_placed_voxels() {
+        assert!(!trail_mode_active(false, 1, &[StepData::default()]));
+        let placed = StepData { placed: true, ..Default::default() };
+        assert!(trail_mode_active(false, 1, &[placed]));
+    }
+
+    #[test]
+    fn legacy_multi_agent_cursor_history_activates_trail_mode() {
+        let placed = StepData { cursors: vec![[2, 3, 4]], ..Default::default() };
+        assert!(trail_mode_active(false, 2, &[placed]));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tune mode — one entry per trial, sorted by best reward descending
 // ---------------------------------------------------------------------------
@@ -340,9 +490,9 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
             if let Some(r) = reward_from_meta {
                 r
             } else {
-                let best_path = traj_dir.join("best.json");
-                std::fs::read_to_string(&best_path).ok()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                find_trajectory(&traj_dir, "best")
+                    .and_then(|best_path| read_json(&best_path).ok())
+                    .and_then(|s| serde_json::from_slice::<serde_json::Value>(&s).ok())
                     .and_then(|v| v["episode_reward_mean"].as_f64())
                     .map(|f| f as f32)
                     .unwrap_or(f32::NEG_INFINITY)
@@ -365,22 +515,9 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
 /// Load all iter_*.json files from a trial's trajectory dir, sorted by filename.
 /// Falls back to best.json if no iter files exist.
 fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(traj_dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-              .map(|e| e.path())
-              .filter(|p| {
-                  let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                  name.starts_with("iter_") && name.ends_with(".json")
-              })
-              .collect()
-        })
-        .unwrap_or_default();
-    files.sort();
-
+    let mut files = iteration_files(traj_dir);
     if files.is_empty() {
-        let best = traj_dir.join("best.json");
-        if best.exists() { files.push(best); }
+        if let Some(best) = find_trajectory(traj_dir, "best") { files.push(best); }
     }
 
     let mut trajs: Vec<TrajectoryData> = files.iter()
@@ -411,6 +548,23 @@ struct PendingRegion {
     receiver: Receiver<Result<LoadedRegion, String>>,
 }
 
+fn regional_playback_ready(
+    current: Option<RegionRequestKey>,
+    loaded: Option<RegionRequestKey>,
+    load_failed: bool,
+) -> bool {
+    // Camera revision changes only the view-dependent LOD request. The loaded
+    // occupancy still represents the same episode step and visibility box, so
+    // an orbit should refresh detail asynchronously without pausing playback.
+    load_failed
+        || current.is_none()
+        || matches!((current, loaded), (Some(current), Some(loaded))
+            if current.iteration == loaded.iteration
+                && current.step == loaded.step
+                && current.center == loaded.center
+                && current.radius == loaded.radius)
+}
+
 fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
     let mut resolved = HashMap::new();
     for replay_step in steps.iter().take(step.saturating_add(1)) {
@@ -431,7 +585,10 @@ fn replay_mutations_at(steps: &[StepData], step: usize) -> Vec<ReplayMutation> {
     mutations
 }
 
+/// Resolve the selected agent only for compiled-world regional rendering.
+/// Legacy in-memory trajectories intentionally use their original grid path.
 fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<StorageCoord> {
+    let world = trajectory.world.as_ref()?;
     let episode = &trajectory.episode;
     let selected = episode.steps.get(step);
     let coordinate = if trajectory.agent_count > 1 {
@@ -443,11 +600,186 @@ fn selected_agent_center(trajectory: &TrajectoryData, step: usize) -> Option<Sto
             .map(|value| [value.cursor_x, value.cursor_y, value.cursor_z])
             .or(episode.start_pos)
     }?;
-    Some(StorageCoord {
-        x: u32::from(coordinate[0]),
-        y: u32::from(coordinate[1]),
-        z: u32::from(coordinate[2]),
-    })
+    replay_position_to_storage(coordinate, world.extent)
+}
+
+fn replay_position_to_storage(coordinate: [u32; 3], extent: [u32; 3]) -> Option<StorageCoord> {
+    // VoxelEnv records the cursor in the legacy WorldState Coord convention.
+    // WorldState::storage uses those coordinates directly for compiled-world
+    // occupancy. Subtracting one here puts the replay cursor inside the wall
+    // it has just crossed, even though the live environment is one voxel past.
+    let storage = StorageCoord {
+        x: coordinate[0],
+        y: coordinate[1],
+        z: coordinate[2],
+    };
+    WorldExtent { x: extent[0], y: extent[1], z: extent[2] }
+        .contains_storage(storage)
+        .then_some(storage)
+}
+
+fn render_position(
+    coordinate: [u32; 3],
+    compiled_extent: Option<[u32; 3]>,
+) -> Option<StorageCoord> {
+    let Some(extent) = compiled_extent else {
+        return Some(StorageCoord {
+            x: coordinate[0],
+            y: coordinate[1],
+            z: coordinate[2],
+        });
+    };
+    replay_position_to_storage(coordinate, extent)
+}
+
+#[cfg(test)]
+mod regional_view_alignment_tests {
+    use super::{
+        agent_region, agent_view_render_origin, camera_relative, regional_playback_ready,
+        render_position, replay_position_to_storage, Camera, RegionRequestKey,
+    };
+    use theseo_core::replay::overview::OverviewMesh;
+    use theseo_core::voxel::world::{StorageCoord, WorldExtent};
+
+    const EXTENT: [u32; 3] = [128, 96, 64];
+
+    fn region_key(step: usize) -> RegionRequestKey {
+        RegionRequestKey {
+            iteration: 0,
+            step,
+            center: StorageCoord { x: 8, y: 9, z: 10 },
+            radius: 16,
+            camera_revision: 0,
+        }
+    }
+
+    #[test]
+    fn replay_positions_drive_storage_culling_and_an_agent_centered_view() {
+        let radius = 16;
+        let boundary_voxel = StorageCoord { x: 20, y: 20, z: 20 };
+        let storage_origin = StorageCoord { x: 1, y: 1, z: 1 };
+        assert_eq!(
+            replay_position_to_storage([1, 1, 1], EXTENT),
+            Some(storage_origin)
+        );
+        assert_eq!(
+            camera_relative(storage_origin, agent_view_render_origin(storage_origin, radius)),
+            (17.0, 17.0, 17.0)
+        );
+        let last_inside = replay_position_to_storage([4, 10, 14], EXTENT).unwrap();
+        let first_outside = replay_position_to_storage([3, 10, 15], EXTENT).unwrap();
+        let extent = WorldExtent { x: 128, y: 96, z: 64 };
+
+        assert!(agent_region(last_inside, radius, extent)
+            .unwrap()
+            .contains(boundary_voxel));
+        assert!(!agent_region(first_outside, radius, extent)
+            .unwrap()
+            .contains(boundary_voxel));
+
+        let inside_origin = agent_view_render_origin(last_inside, radius);
+        let outside_origin = agent_view_render_origin(first_outside, radius);
+        assert_eq!(
+            camera_relative(last_inside, inside_origin),
+            (17.0, 17.0, 17.0)
+        );
+        assert_eq!(
+            camera_relative(first_outside, outside_origin),
+            (17.0, 17.0, 17.0)
+        );
+        assert_eq!(camera_relative(boundary_voxel, inside_origin).0, 33.0);
+        assert_eq!(camera_relative(boundary_voxel, outside_origin).0, 34.0);
+
+        let camera = Camera {
+            yaw: 73.0_f32.to_radians(),
+            pitch: -41.0_f32.to_radians(),
+            ..Camera::default()
+        };
+        let overview = OverviewMesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            extent: EXTENT,
+        };
+        let overview_agent = overview.project_point(
+            [
+                f64::from(last_inside.x),
+                f64::from(last_inside.y),
+                f64::from(last_inside.z),
+            ],
+            camera.yaw,
+            camera.pitch,
+        );
+        let overview_voxel = overview.project_point(
+            [
+                f64::from(boundary_voxel.x),
+                f64::from(boundary_voxel.y),
+                f64::from(boundary_voxel.z),
+            ],
+            camera.yaw,
+            camera.pitch,
+        );
+        let local_agent = camera_relative(last_inside, inside_origin);
+        let local_voxel = camera_relative(boundary_voxel, inside_origin);
+        let projected_agent = camera.camera_space(local_agent.0, local_agent.1, local_agent.2);
+        let projected_voxel = camera.camera_space(local_voxel.0, local_voxel.1, local_voxel.2);
+        let overview_scale = EXTENT.into_iter().max().unwrap() as f32;
+
+        assert!((projected_voxel.0 - projected_agent.0
+            - (overview_voxel.x - overview_agent.x) * overview_scale)
+            .abs()
+            < 1e-4);
+        // The flat overview has an intentional depth lift; the perspective
+        // camera uses the unmodified camera-space vertical coordinate.
+        let (_, vertical_delta, _) = camera.camera_space(
+            local_voxel.0 - local_agent.0,
+            local_voxel.1 - local_agent.1,
+            local_voxel.2 - local_agent.2,
+        );
+        assert!((projected_voxel.1 - projected_agent.1 - vertical_delta).abs() < 1e-4);
+        assert!(overview_voxel.y.is_finite() && overview_agent.y.is_finite());
+    }
+
+    #[test]
+    fn marker_positions_preserve_storage_coordinates_above_u16() {
+        assert_eq!(
+            render_position([70_001, 2, 3], Some([100_000, 10, 10])),
+            Some(StorageCoord { x: 70_001, y: 2, z: 3 })
+        );
+    }
+
+    #[test]
+    fn cursor_is_one_storage_voxel_beyond_the_final_gate_after_crossing() {
+        let extent = [4096, 2048, 512];
+        assert_eq!(
+            replay_position_to_storage([3713, 1024, 256], extent),
+            Some(StorageCoord { x: 3713, y: 1024, z: 256 }),
+        );
+    }
+
+    #[test]
+    fn playback_waits_for_the_current_regional_frame_after_replay_wraps() {
+        let final_frame = region_key(11);
+        let replay_start = region_key(0);
+
+        assert!(!regional_playback_ready(
+            Some(replay_start),
+            Some(final_frame),
+            false,
+        ));
+        assert!(regional_playback_ready(
+            Some(replay_start),
+            Some(replay_start),
+            false,
+        ));
+        let mut rotated_frame = replay_start;
+        rotated_frame.camera_revision = 1;
+        assert!(
+            regional_playback_ready(Some(rotated_frame), Some(replay_start), false),
+            "camera-only LOD refreshes must not stall episode playback",
+        );
+        assert!(regional_playback_ready(None, None, false));
+        assert!(regional_playback_ready(Some(replay_start), None, true));
+    }
 }
 
 fn regional_sources(trajectories: &[TrajectoryData]) -> Vec<Option<RegionalReplaySource>> {
@@ -493,7 +825,6 @@ struct Camera {
     yaw:   f32,   // radians — rotates x/z plane
     pitch: f32,   // radians — tilts up/down
     zoom:  f32,   // scale multiplier (1.0 = default)
-    perspective: bool,
     field_of_view_degrees: f32,
 }
 
@@ -503,18 +834,8 @@ impl Camera {
             yaw: 45.0_f32.to_radians(),
             pitch: 30.0_f32.to_radians(),
             zoom: 1.0,
-            perspective: false,
             field_of_view_degrees: 45.0,
         }
-    }
-
-    /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
-    fn project(&self, x: f32, y: f32, z: f32) -> (f32, f32) {
-        let xr  = x * self.yaw.cos() - z * self.yaw.sin();
-        let zr  = x * self.yaw.sin() + z * self.yaw.cos();
-        let yr  = y * self.pitch.cos() - zr * self.pitch.sin();
-        let zr2 = y * self.pitch.sin() + zr * self.pitch.cos();
-        (xr, -(yr - zr2 * 0.05))
     }
 
     fn camera_space(&self, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
@@ -525,90 +846,47 @@ impl Camera {
         (xr, -yr, depth)
     }
 
-    /// Axis-aligned bounding box of the full grid in projected 2-D space.
+    /// Rotation-independent framing distance and center of the full grid.
     fn bounds(&self, grid_size: f32) -> Bounds {
         let lo = 0.5f32;
         let hi = grid_size + 0.5;
-        let mut min_x = f32::INFINITY;
-        let mut max_x = f32::NEG_INFINITY;
-        let mut min_y = f32::INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-        for &xf in &[lo, hi] {
-            for &yf in &[lo, hi] {
-                for &zf in &[lo, hi] {
-                    let (px, py) = self.project(xf, yf, zf);
-                    if px < min_x { min_x = px; }
-                    if px > max_x { max_x = px; }
-                    if py < min_y { min_y = py; }
-                    if py > max_y { max_y = py; }
-                }
-            }
-        }
-        let pw = (max_x - min_x) * 0.05;
-        let ph = (max_y - min_y) * 0.05;
         Bounds {
-            min_x: min_x - pw,
-            max_x: max_x + pw,
-            min_y: min_y - ph,
-            max_y: max_y + ph,
-            // A cube's largest possible orthographic projection is bounded by
-            // its 3-D diagonal. Keep this span independent of yaw and pitch so
-            // orbiting never changes the apparent zoom.
+            // Rotation-independent framing based on the cube's 3-D diagonal.
             uniform_span: grid_size * 3.0_f32.sqrt() * 1.1,
             world_center: (lo + hi) * 0.5,
         }
     }
 
-    fn screen_scale(&self, rect: Rect, bounds: &Bounds) -> f32 {
-        rect.width().min(rect.height()) / bounds.uniform_span.max(1.0) * self.zoom
-    }
-
-    /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
+    /// Map a 3-D coord to pixels using perspective projection.
     #[inline]
     fn to_screen(&self, x: f32, y: f32, z: f32, rect: Rect, b: &Bounds) -> Pos2 {
-        if self.perspective {
-            let (px, py, depth) = self.camera_space(
-                x - b.world_center,
-                y - b.world_center,
-                z - b.world_center,
-            );
-            let camera_distance = b.uniform_span.max(1.0);
-            let near_plane = camera_distance * 0.01;
-            let distance = (camera_distance - depth).max(near_plane);
-            let half_fov = (self.field_of_view_degrees.clamp(15.0, 100.0) * 0.5)
-                .to_radians();
-            let focal_pixels = rect.width().min(rect.height()) * 0.5
-                / half_fov.tan()
-                * self.zoom;
-            return Pos2::new(
-                rect.center().x + px / distance * focal_pixels,
-                rect.center().y + py / distance * focal_pixels,
-            );
-        }
-        let (px, py) = self.project(x, y, z);
-        let cx = rect.center().x;
-        let cy = rect.center().y;
-        let scale = self.screen_scale(rect, b);
+        let (px, py, depth) = self.camera_space(
+            x - b.world_center, y - b.world_center, z - b.world_center,
+        );
+        let camera_distance = b.uniform_span.max(1.0);
+        let near_plane = camera_distance * 0.01;
+        let distance = (camera_distance - depth).max(near_plane);
+        let half_fov = (self.field_of_view_degrees * 0.5).to_radians();
+        let focal_pixels = rect.width().min(rect.height()) * 0.5
+            / half_fov.tan() * self.zoom;
         Pos2::new(
-            cx + (px - (b.min_x + b.max_x) * 0.5) * scale,
-            cy + (py - (b.min_y + b.max_y) * 0.5) * scale,
+            rect.center().x + px / distance * focal_pixels,
+            rect.center().y + py / distance * focal_pixels,
         )
     }
+
 }
 
 struct Bounds {
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
     uniform_span: f32,
     world_center: f32,
 }
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{Bounds, Camera};
+    use super::{overview_inset_scale, Bounds, Camera};
     use eframe::egui::{Pos2, Rect, Vec2};
+    use theseo_core::replay::overview::OverviewMesh;
 
     fn test_camera() -> Camera {
         Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() }
@@ -618,10 +896,6 @@ mod camera_tests {
     fn screen_mapping_uses_one_scale_for_both_projected_axes() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -631,17 +905,13 @@ mod camera_tests {
         let horizontal = camera.to_screen(1.0, 0.0, 0.0, rect, &bounds);
         let vertical = camera.to_screen(0.0, -1.0, 0.0, rect, &bounds);
 
-        assert_eq!(horizontal.x - center.x, vertical.y - center.y);
+        assert!(((horizontal.x - center.x) - (vertical.y - center.y)).abs() < 1e-5);
     }
 
     #[test]
     fn projected_bounds_are_centered_when_the_viewport_aspect_differs() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -653,7 +923,7 @@ mod camera_tests {
     }
 
     #[test]
-    fn orbiting_does_not_change_the_screen_scale() {
+    fn orbiting_does_not_change_the_camera_distance() {
         let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() };
         let second = Camera {
             yaw: 67.0_f32.to_radians(),
@@ -661,14 +931,27 @@ mod camera_tests {
             zoom: 1.0,
             ..Camera::default()
         };
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(360.0, 200.0));
         let first_bounds = first.bounds(32.0);
         let second_bounds = second.bounds(32.0);
 
         assert_eq!(
-            first.screen_scale(rect, &first_bounds),
-            second.screen_scale(rect, &second_bounds),
+            first_bounds.uniform_span,
+            second_bounds.uniform_span,
         );
+    }
+
+    #[test]
+    fn default_camera_uses_perspective_without_a_toggle() {
+        let camera = Camera::default();
+        let bounds = camera.bounds(32.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0));
+        let center = bounds.world_center;
+        let width_at = |z| {
+            let first = camera.to_screen(center, center, z, rect, &bounds);
+            let second = camera.to_screen(center + 1.0, center, z, rect, &bounds);
+            (second - first).length()
+        };
+        assert!(width_at(center + 8.0) > width_at(center - 8.0));
     }
 
     #[test]
@@ -676,7 +959,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -695,7 +977,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -707,29 +988,229 @@ mod camera_tests {
 
         assert_eq!(horizontal.x - origin.x, vertical.y - origin.y);
     }
+
+    #[test]
+    fn overview_scale_fits_every_camera_rotation_without_refitting() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+        let extent = [512, 128, 64];
+        let empty = OverviewMesh { vertices: Vec::new(), indices: Vec::new(), extent };
+        let mesh = OverviewMesh {
+            vertices: empty.bounds_vertices(),
+            indices: Vec::new(),
+            extent,
+        };
+        let scale = overview_inset_scale(rect, extent);
+
+        for (yaw, pitch) in [(0.0_f32, 0.0_f32), (37.0, -21.0), (91.0, 42.0)] {
+            for point in mesh.project(yaw.to_radians(), pitch.to_radians()) {
+                assert!(point.x.abs() * scale <= rect.width() * 0.5);
+                assert!(point.y.abs() * scale <= rect.height() * 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn overview_scale_uses_normalized_world_extent() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+
+        let small = overview_inset_scale(rect, [128, 64, 32]);
+        let large = overview_inset_scale(rect, [1024, 512, 256]);
+
+        assert!((small - large).abs() < f32::EPSILON);
+    }
 }
 
 fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
 }
 
+fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
+    // Overview vertices are normalized by the largest world axis. The
+    // normalized diagonal bounds every camera rotation without zooming.
+    let maximum_extent = extent.into_iter().max().unwrap_or(1).max(1) as f32;
+    let diagonal = extent
+        .into_iter()
+        .map(|axis| (axis as f32 / maximum_extent).powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.001);
+    rect.width().min(rect.height()) / diagonal * 0.86
+}
+
+fn overview_rect(outer: Rect, size: f32) -> Rect {
+    let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+    let size = size.clamp(140.0_f32.min(available), available);
+    Rect::from_min_size(outer.right_bottom() - Vec2::splat(size + 12.0), Vec2::splat(size))
+}
+
+fn resize_overview(ui: &mut egui::Ui, outer: Rect, size: &mut f32) -> bool {
+    let rect = overview_rect(outer, *size);
+    let grip = Rect::from_min_size(rect.left_top(), Vec2::splat(20.0));
+    let response = ui.interact(grip, ui.id().with("overview_resize"), Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeNwSe)
+        .on_hover_text("Drag this corner to resize the overview");
+    let resizing = response.dragged_by(egui::PointerButton::Primary);
+    if resizing {
+        let delta = response.drag_delta();
+        let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+        *size = (rect.width() - (delta.x + delta.y) * 0.5)
+            .clamp(140.0_f32.min(available), available);
+    }
+    resizing
+}
+
+fn overview_controls(
+    ui: &mut egui::Ui, outer: Rect, size: f32,
+    expanded: &mut bool, _show_bounds: &mut bool,
+) -> bool {
+    if !*expanded {
+        let rect = Rect::from_min_size(
+            outer.right_bottom() - Vec2::new(132.0, 40.0), Vec2::new(120.0, 28.0),
+        );
+        let response = ui.put(rect, egui::Button::new("Show overview"));
+        if response.clicked() { *expanded = true; }
+        return response.is_pointer_button_down_on() || response.clicked();
+    }
+    let rect = overview_rect(outer, size);
+    let collapse = ui.put(
+        Rect::from_min_size(rect.right_top() + Vec2::new(-28.0, 4.0), Vec2::splat(24.0)),
+        egui::Button::new("−"),
+    ).on_hover_text("Collapse overview");
+    if collapse.clicked() { *expanded = false; }
+    collapse.is_pointer_button_down_on() || collapse.clicked()
+}
+
+#[cfg(test)]
+mod overview_resize_tests {
+    use super::*;
+
+    fn controls_frame(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool,
+        events: Vec<egui::Event>) -> Rect
+    {
+        let mut outer = Rect::NOTHING;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                overview_controls(ui, outer, 300.0, expanded, bounds);
+            });
+        });
+        outer
+    }
+
+    fn click_control(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool, pos: Pos2) {
+        controls_frame(ctx, expanded, bounds, vec![egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: true, modifiers: egui::Modifiers::NONE }]);
+        controls_frame(ctx, expanded, bounds, vec![
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: false, modifiers: egui::Modifiers::NONE }]);
+    }
+
+    #[test]
+    fn overview_can_collapse_and_expand_without_sidebar() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let collapse = overview_rect(outer, 300.0).right_top() + Vec2::new(-16.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, collapse);
+        assert!(!expanded);
+        controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let expand = outer.right_bottom() - Vec2::new(72.0, 26.0);
+        click_control(&ctx, &mut expanded, &mut bounds, expand);
+        assert!(expanded);
+        assert!(bounds);
+    }
+
+    #[test]
+    fn former_bounds_button_does_not_toggle_world_bounds() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let position = overview_rect(outer, 300.0).right_top() + Vec2::new(-64.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, position);
+        assert!(bounds);
+        assert!(expanded);
+    }
+
+    #[test]
+    fn overview_is_square_anchored_and_clamped_to_viewport() {
+        let outer = Rect::from_min_size(Pos2::new(30.0, 40.0), Vec2::new(800.0, 500.0));
+        for size in [1.0, 220.0, 10_000.0] {
+            let rect = overview_rect(outer, size);
+            assert_eq!(rect.width(), rect.height());
+            assert_eq!(rect.right_bottom(), outer.right_bottom() - Vec2::splat(12.0));
+            assert!(outer.contains_rect(rect));
+        }
+        assert_eq!(overview_rect(outer, 1.0).width(), 140.0);
+        assert_eq!(overview_rect(outer, 10_000.0).width(), 476.0);
+    }
+
+    #[test]
+    fn tiny_viewport_does_not_invert_resize_limits() {
+        let outer = Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0));
+        assert_eq!(overview_rect(outer, 220.0).width(), 76.0);
+    }
+
+    fn frame(ctx: &egui::Context, size: &mut f32, events: Vec<egui::Event>) -> (Rect, bool) {
+        let mut outer = Rect::NOTHING;
+        let mut resizing = false;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                resizing = resize_overview(ui, outer, size);
+            });
+        });
+        (outer, resizing)
+    }
+
+    #[test]
+    fn dragging_corner_expands_and_shrinks_without_orbit_input() {
+        for (delta, expected) in [(Vec2::splat(-30.0), 250.0), (Vec2::splat(30.0), 190.0)] {
+            let ctx = egui::Context::default();
+            let mut size = 220.0;
+            let (outer, _) = frame(&ctx, &mut size, vec![]);
+            let start = overview_rect(outer, size).left_top() + Vec2::splat(8.0);
+            frame(&ctx, &mut size, vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start, button: egui::PointerButton::Primary, pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            let (_, resizing) = frame(&ctx, &mut size, vec![egui::Event::PointerMoved(start + delta)]);
+            assert!(resizing, "resize must suppress camera orbit");
+            assert_eq!(size, expected);
+        }
+    }
+}
+
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
-    size: f32, show_bounds: bool,
+    size: f32, show_bounds: bool, agent_view: Option<(StorageCoord, u32)>,
 ) {
-    let inset_size = outer.width().min(outer.height()).min(size);
-    let rect = Rect::from_min_size(
-        outer.right_bottom() - Vec2::splat(inset_size + 12.0), Vec2::splat(inset_size),
-    );
+    let rect = overview_rect(outer, size);
     painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
     painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
+    for offset in [6.0, 11.0, 16.0] {
+        painter.line_segment([
+            rect.left_top() + Vec2::new(3.0, offset),
+            rect.left_top() + Vec2::new(offset, 3.0),
+        ], Stroke::new(1.5, Color32::from_gray(180)));
+    }
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
-    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
-    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
-    let scale = (rect.width() / (2.0 * maximum_x))
-        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let scale = overview_inset_scale(rect, mesh.extent);
     let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
         let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
         (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
@@ -749,16 +1230,49 @@ fn draw_overview_inset(
             );
         }
     }
-    painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
+    if let Some((center, radius)) = agent_view {
+        let radius = f64::from(radius) + 0.5;
+        let center = [
+            f64::from(center.x),
+            f64::from(center.y),
+            f64::from(center.z),
+        ];
+        let lo = center.map(|value| value - radius);
+        let hi = center.map(|value| value + radius);
+        let corners = [
+            [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
+            [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+            [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
+            [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]],
+        ];
+        let points = corners.map(|point| {
+            inset_position(
+                mesh.project_point(point, camera.yaw, camera.pitch),
+                rect,
+                scale,
+            )
+        });
+        let overlay_painter = painter.with_clip_rect(rect);
+        let stroke = Stroke::new(1.0, Color32::from_rgb(80, 255, 140));
+        for (a, b) in [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)] {
+            overlay_painter.line_segment([points[a], points[b]], stroke);
+        }
+        let agent = mesh.project_point(center, camera.yaw, camera.pitch);
+        overlay_painter.circle_filled(
+            inset_position(agent, rect, scale),
+            2.5,
+            Color32::from_rgb(255, 230, 0),
+        );
+    }
 }
 
 /// Back-to-front depth key for painter's algorithm.
 /// Voxels with lower value are further from camera and should be drawn first.
-fn depth_key(x: u16, y: u16, z: u16, origin: StorageCoord, cam: &Camera) -> f32 {
+fn depth_key(x: u32, y: u32, z: u32, origin: RenderOrigin, cam: &Camera) -> f32 {
     let (sy, cy) = (cam.yaw.sin(), cam.yaw.cos());
     let (sp, cp) = (cam.pitch.sin(), cam.pitch.cos());
     let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(x), y: u32::from(y), z: u32::from(z) },
+        StorageCoord { x, y, z },
         origin,
     );
     x * sy * cp + y * sp + z * cy * cp
@@ -851,15 +1365,15 @@ mod debug_face_color_tests {
 
 fn draw_voxel(
     painter: &egui::Painter,
-    cx: u16, cy: u16, cz: u16,
-    origin: StorageCoord,
+    cx: u32, cy: u32, cz: u32,
+    origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     base: Color32,
     outline: bool,
     debug_face_colors: bool,
 ) {
     let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+        StorageCoord { x: cx, y: cy, z: cz },
         origin,
     );
     let h = 0.5_f32;
@@ -935,7 +1449,7 @@ fn draw_voxel(
 fn draw_exposed_face(
     painter: &egui::Painter,
     face: ExposedFace,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect,
     cam: &Camera,
     bounds: &Bounds,
@@ -976,19 +1490,28 @@ fn draw_exposed_face(
             (i32::from(base.b()) + adjustment).clamp(0, 255) as u8,
         )
     };
-    painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
+    // Adjacent face quads otherwise leave anti-aliased seams through which an
+    // agent painted behind an opaque wall can faintly show. A same-color edge
+    // closes those seams without changing front/back depth ordering.
+    painter.add(Shape::convex_polygon(points.clone(), color, Stroke::new(1.5, color)));
+    // Restore a subtle voxel grid on top of the opaque backing, rather than
+    // using transparent anti-aliasing gaps as the grid line.
+    painter.add(Shape::closed_line(points, Stroke::new(0.35, Color32::from_gray(95))));
 }
 
-fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
-               origin: StorageCoord, rect: Rect, cam: &Camera, b: &Bounds) {
-    let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
-        origin,
+fn draw_cursor(painter: &egui::Painter, coordinate: StorageCoord,
+               origin: RenderOrigin, rect: Rect, cam: &Camera, b: &Bounds) {
+    let yellow = Color32::from_rgb(255, 230, 0);
+    // The agent is a solid voxel, not only a wireframe. Keep the outline as
+    // an emphasis layer so it remains distinct from placed voxels and goals.
+    draw_voxel(
+        painter, coordinate.x, coordinate.y, coordinate.z,
+        origin, rect, cam, b, yellow, true, false,
     );
+    let (x, y, z) = camera_relative(coordinate, origin);
     let h = 0.5_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
 
-    let yellow = Color32::from_rgb(255, 230, 0);
     let stroke = Stroke::new(1.5, yellow);
 
     let top: Vec<Pos2> = vec![
@@ -1011,11 +1534,156 @@ fn draw_cursor(painter: &egui::Painter, cx: u16, cy: u16, cz: u16,
     painter.circle_filled(cp, 3.0, yellow);
 }
 
+/// Deliberately distinct from the physical cursor: a faint fill and dashed
+/// edges locate it through a wall without making the wall disappear.
+fn draw_revealed_cursor(
+    painter: &egui::Painter, coordinate: StorageCoord,
+    origin: RenderOrigin, rect: Rect, cam: &Camera, bounds: &Bounds,
+) {
+    let (x, y, z) = camera_relative(coordinate, origin);
+    let h = 0.5_f32;
+    let corner = |dx: f32, dy: f32, dz: f32| {
+        cam.to_screen(x + dx, y + dy, z + dz, rect, bounds)
+    };
+    let hx = if cam.yaw.sin() > 0.0 { h } else { -h };
+    let hy = if cam.pitch.sin() > 0.0 { h } else { -h };
+    let hz = if cam.yaw.cos() > 0.0 { h } else { -h };
+    let tint = Color32::from_rgba_unmultiplied(255, 210, 0, 48);
+    for face in [
+        vec![corner(-h, hy, -h), corner(h, hy, -h), corner(h, hy, h), corner(-h, hy, h)],
+        vec![corner(hx, -h, -h), corner(hx, -h, h), corner(hx, h, h), corner(hx, h, -h)],
+        vec![corner(-h, -h, hz), corner(h, -h, hz), corner(h, h, hz), corner(-h, h, hz)],
+    ] {
+        painter.add(Shape::convex_polygon(face, tint, Stroke::NONE));
+    }
+    let stroke = Stroke::new(1.6, Color32::from_rgb(255, 225, 40));
+    let dash = |a: Pos2, b: Pos2| {
+        for part in 0..4 {
+            let start = part as f32 / 4.0;
+            let end = (part as f32 + 0.55) / 4.0;
+            painter.line_segment([a + (b - a) * start, a + (b - a) * end], stroke);
+        }
+    };
+    for (dx, dz) in [(-h, -h), (h, -h), (h, h), (-h, h)] {
+        dash(corner(dx, -h, dz), corner(dx, h, dz));
+    }
+    for &height in &[-h, h] {
+        let corners = [
+            corner(-h, height, -h), corner(h, height, -h),
+            corner(h, height, h), corner(-h, height, h),
+        ];
+        for index in 0..4 {
+            dash(corners[index], corners[(index + 1) % 4]);
+        }
+    }
+}
+
+/// A single back-to-front paint list prevents a wall behind the cursor from
+/// overpainting it merely because all geometry was drawn in a later batch.
+#[derive(Clone, Copy)]
+enum SceneDrawItem {
+    WorldVoxel(StorageCoord),
+    WorldFace(ExposedFace),
+    Trail(StorageCoord, Color32),
+    Marker(StorageCoord, Color32),
+    Cursor(StorageCoord),
+}
+
+impl SceneDrawItem {
+    fn coordinate(self) -> StorageCoord {
+        match self {
+            Self::WorldVoxel(coordinate)
+            | Self::Trail(coordinate, _)
+            | Self::Marker(coordinate, _)
+            | Self::Cursor(coordinate) => coordinate,
+            Self::WorldFace(face) => face.voxel,
+        }
+    }
+
+    fn depth(self, origin: RenderOrigin, cam: &Camera) -> f32 {
+        let coordinate = self.coordinate();
+        depth_key(coordinate.x, coordinate.y, coordinate.z, origin, cam)
+    }
+
+    fn draw(
+        self, painter: &egui::Painter, origin: RenderOrigin, rect: Rect,
+        cam: &Camera, bounds: &Bounds, world_color: Color32, debug_face_colors: bool,
+    ) {
+        match self {
+            Self::WorldVoxel(c) => draw_voxel(
+                painter, c.x, c.y, c.z, origin, rect, cam, bounds,
+                world_color, false, debug_face_colors,
+            ),
+            Self::WorldFace(face) => draw_exposed_face(
+                painter, face, origin, rect, cam, bounds,
+                world_color, debug_face_colors,
+            ),
+            Self::Trail(c, color) => draw_voxel(
+                painter, c.x, c.y, c.z, origin, rect, cam, bounds,
+                color, true, false,
+            ),
+            Self::Marker(c, color) => draw_marker(
+                painter, c, origin, rect, cam, bounds, color,
+            ),
+            Self::Cursor(c) => draw_cursor(painter, c, origin, rect, cam, bounds),
+        }
+    }
+}
+
+fn sort_scene_items(
+    items: &mut [SceneDrawItem], origin: RenderOrigin,
+    cam: &Camera,
+) {
+    // Stable ordering retains markers/cursors above geometry when their
+    // centers have equal depth; real front/back relationships still win.
+    items.sort_by(|left, right| {
+        left.depth(origin, cam)
+            .total_cmp(&right.depth(origin, cam))
+    });
+}
+
+#[cfg(test)]
+mod scene_visibility_tests {
+    use super::*;
+
+    fn point(x: u32) -> StorageCoord {
+        StorageCoord { x, y: 1024, z: 256 }
+    }
+
+    fn wall(x: u32) -> SceneDrawItem {
+        SceneDrawItem::WorldFace(ExposedFace {
+            voxel: point(x),
+            direction: FaceDirection::PositiveX,
+        })
+    }
+
+    #[test]
+    fn final_gate_wall_behind_agent_paints_first() {
+        let cam = Camera::default();
+        let origin = RenderOrigin::default();
+        let mut items = [SceneDrawItem::Cursor(point(3713)), wall(3712)];
+        sort_scene_items(&mut items, origin, &cam);
+        assert!(matches!(items[0], SceneDrawItem::WorldFace(_)));
+        assert!(matches!(items[1], SceneDrawItem::Cursor(_)));
+    }
+
+    #[test]
+    fn geometry_in_front_of_agent_still_occludes_it() {
+        let cam = Camera::default();
+        let origin = RenderOrigin::default();
+        let mut items = [wall(3714), SceneDrawItem::Cursor(point(3713))];
+        sort_scene_items(&mut items, origin, &cam);
+        assert!(matches!(items[0], SceneDrawItem::Cursor(_)));
+        assert!(matches!(items[1], SceneDrawItem::WorldFace(_)));
+    }
+
+}
+
 fn draw_coarse_chunk(
     painter: &egui::Painter,
     chunk: ChunkCoord,
     chunk_edge: u32,
-    origin: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect,
     cam: &Camera,
     bounds: &Bounds,
@@ -1039,16 +1707,25 @@ fn draw_coarse_chunk(
 
 fn draw_marker(
     painter: &egui::Painter,
-    cx: u16, cy: u16, cz: u16,
-    origin: StorageCoord,
+    coordinate: StorageCoord,
+    origin: RenderOrigin,
     rect: Rect, cam: &Camera, b: &Bounds,
     color: Color32,
 ) {
-    draw_voxel(painter, cx, cy, cz, origin, rect, cam, b, color, true, false);
-    let (x, y, z) = camera_relative(
-        StorageCoord { x: u32::from(cx), y: u32::from(cy), z: u32::from(cz) },
+    draw_voxel(
+        painter,
+        coordinate.x,
+        coordinate.y,
+        coordinate.z,
         origin,
+        rect,
+        cam,
+        b,
+        color,
+        true,
+        false,
     );
+    let (x, y, z) = camera_relative(coordinate, origin);
     let h = 0.4_f32;
     let corner = |dx: f32, dy: f32, dz: f32| cam.to_screen(x + dx, y + dy, z + dz, rect, b);
     let stroke = Stroke::new(2.0, Color32::WHITE);
@@ -1116,17 +1793,22 @@ struct VoxelReplayApp {
     /// All loaded trajectories, sorted by iteration number.
     trajectories: Vec<TrajectoryData>,
     /// Geometry voxel lists (unsorted — sorted per frame based on camera).
-    geo_voxels: Vec<Vec<(u16, u16, u16)>>,
+    geo_voxels: Vec<Vec<(u32, u32, u32)>>,
     /// Which trajectory (iteration) we are currently viewing.
     iter_idx: usize,
     /// Which step within the current trajectory.
     step_idx: usize,
     /// Whether auto-play is running (advances steps, then iterations).
     playing: bool,
+    /// Earliest time autoplay may advance again. This gates incidental
+    /// repaints as well as the repaint explicitly scheduled by playback.
+    next_play_advance_at: Option<Instant>,
     /// Camera: orbit with left-drag, zoom with scroll wheel.
     camera: Camera,
-    /// Whether geometry is drawn after agents and therefore occludes them.
-    occlude_agent: bool,
+    /// Independent path display; only offered when the trajectory has a trail.
+    show_trail: bool,
+    /// Explicit diagnostic overlay; never changes normal depth ordering.
+    reveal_hidden_agent: bool,
     /// Tune mode: all trials sorted best-first. Empty in file mode.
     tune_trials: Vec<TrialEntry>,
     /// Which trial is currently loaded (index into tune_trials).
@@ -1137,6 +1819,9 @@ struct VoxelReplayApp {
     regional_sources: Vec<Option<RegionalReplaySource>>,
     regional_frame: Option<(RegionRequestKey, RegionalReplayFrame)>,
     pending_region: Option<PendingRegion>,
+    /// Autoplay destination awaiting its matching regional frame. The visible
+    /// iteration and step remain unchanged until that frame is published.
+    pending_play_position: Option<(usize, usize)>,
     requested_region: Option<RegionRequestKey>,
     visualization_radius: u32,
     regional_error: Option<String>,
@@ -1145,7 +1830,6 @@ struct VoxelReplayApp {
     coarse_chunks: Vec<ChunkCoord>,
     considered_chunks: usize,
     detailed_chunks: usize,
-    chunk_budgets: ChunkBudgets,
     camera_revision: u64,
     overview_meshes: Vec<Result<OverviewMesh, String>>,
     show_overview: bool,
@@ -1179,18 +1863,22 @@ impl VoxelReplayApp {
     fn new(trajectories: Vec<TrajectoryData>, explain_ui: Option<NativeExplainUi>) -> Self {
         let explain_tab = explain_ui.as_ref().map(|ui| ui.observation_open).unwrap_or(false);
         let geo_voxels = trajectories.iter().map(|t| {
-            t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
+            t.episode.init_filled.iter().map(|c| {
+                (u32::from(c[0]), u32::from(c[1]), u32::from(c[2]))
+            }).collect()
         }).collect();
         let regional_sources = regional_sources(&trajectories);
         let overview_meshes = overview_meshes(&trajectories);
         Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            show_trail: true,
+            reveal_hidden_agent: false,
             trajectories,
             geo_voxels,
             iter_idx: 0,
             step_idx: 0,
             playing: false,
+            next_play_advance_at: None,
             tune_trials: Vec::new(),
             current_trial: 0,
             explain_ui,
@@ -1198,6 +1886,7 @@ impl VoxelReplayApp {
             regional_sources,
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1206,7 +1895,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
             overview_meshes,
             show_overview: true,
@@ -1219,12 +1907,14 @@ impl VoxelReplayApp {
     fn new_tune(trials: Vec<TrialEntry>) -> Self {
         let mut app = Self {
             camera: Camera::default(),
-            occlude_agent: true,
+            show_trail: true,
+            reveal_hidden_agent: false,
             trajectories: Vec::new(),
             geo_voxels: Vec::new(),
             iter_idx: 0,
             step_idx: 0,
             playing: false,
+            next_play_advance_at: None,
             tune_trials: trials,
             current_trial: 0,
             explain_ui: None,
@@ -1232,6 +1922,7 @@ impl VoxelReplayApp {
             regional_sources: Vec::new(),
             regional_frame: None,
             pending_region: None,
+            pending_play_position: None,
             requested_region: None,
             visualization_radius: DEFAULT_VISUALIZATION_RADIUS,
             regional_error: None,
@@ -1240,7 +1931,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
             overview_meshes: Vec::new(),
             show_overview: true,
@@ -1258,33 +1948,55 @@ impl VoxelReplayApp {
         self.iter_idx = 0;
         self.step_idx = 0;
         self.playing = false;
+        self.next_play_advance_at = None;
 
         let traj_dir = self.tune_trials[idx].trajectory_dir.clone();
         let trajs = load_trial_trajectories(&traj_dir);
         self.geo_voxels = trajs.iter().map(|t| {
-            t.episode.init_filled.iter().map(|c| (c[0], c[1], c[2])).collect()
+            t.episode.init_filled.iter().map(|c| {
+                (u32::from(c[0]), u32::from(c[1]), u32::from(c[2]))
+            }).collect()
         }).collect();
         self.regional_sources = regional_sources(&trajs);
         self.overview_meshes = overview_meshes(&trajs);
         self.trajectories = trajs;
         self.regional_frame = None;
         self.pending_region = None;
+        self.pending_play_position = None;
         self.requested_region = None;
         self.regional_error = None;
         self.regional_faces.clear();
         self.coarse_chunks.clear();
     }
 
-    fn current_region_key(&self) -> Option<RegionRequestKey> {
-        let trajectory = self.trajectories.get(self.iter_idx)?;
+    fn region_key(&self, iteration: usize, step: usize) -> Option<RegionRequestKey> {
+        let trajectory = self.trajectories.get(iteration)?;
         trajectory.world.as_ref()?;
         Some(RegionRequestKey {
-            iteration: self.iter_idx,
-            step: self.step_idx,
-            center: selected_agent_center(trajectory, self.step_idx)?,
+            iteration,
+            step,
+            center: selected_agent_center(trajectory, step)?,
             radius: self.visualization_radius,
             camera_revision: self.camera_revision,
         })
+    }
+
+    fn current_region_key(&self) -> Option<RegionRequestKey> {
+        self.region_key(self.iter_idx, self.step_idx)
+    }
+
+    fn desired_region_key(&self) -> Option<RegionRequestKey> {
+        let (iteration, step) = self
+            .pending_play_position
+            .unwrap_or((self.iter_idx, self.step_idx));
+        self.region_key(iteration, step)
+    }
+
+    fn stop_pending_playback(&mut self) {
+        if self.pending_play_position.take().is_some() {
+            self.playing = false;
+            self.next_play_advance_at = None;
+        }
     }
 
     fn cache_regional_faces(&mut self, key: RegionRequestKey, frame: &RegionalReplayFrame) {
@@ -1317,7 +2029,7 @@ impl VoxelReplayApp {
     }
 
     fn update_regional_geometry(&mut self, ctx: &egui::Context) {
-        let current_key = self.current_region_key();
+        let current_key = self.desired_region_key();
         if let Some(pending) = self.pending_region.take() {
             match pending.receiver.try_recv() {
                 Ok(Ok(loaded)) => {
@@ -1328,11 +2040,16 @@ impl VoxelReplayApp {
                         self.detailed_chunks = loaded.detailed;
                         self.regional_frame = Some((pending.key, loaded.frame));
                         self.regional_error = None;
+                        self.publish_pending_play_position(
+                            pending.key.iteration,
+                            pending.key.step,
+                        );
                     }
                 }
                 Ok(Err(error)) => {
                     if Some(pending.key) == current_key {
                         self.regional_error = Some(error);
+                        self.stop_pending_playback();
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -1341,7 +2058,11 @@ impl VoxelReplayApp {
                     return;
                 }
                 Err(TryRecvError::Disconnected) => {
-                    self.regional_error = Some("regional world loader disconnected".to_string());
+                    if Some(pending.key) == current_key {
+                        self.regional_error =
+                            Some("regional world loader disconnected".to_string());
+                        self.stop_pending_playback();
+                    }
                 }
             }
         }
@@ -1357,6 +2078,7 @@ impl VoxelReplayApp {
             .cloned()
         else {
             self.regional_error = Some("compiled world could not be opened".to_string());
+            self.stop_pending_playback();
             return;
         };
         let mutations = replay_mutations_at(
@@ -1402,7 +2124,7 @@ impl VoxelReplayApp {
                     ],
                     minimum_forward_dot: -0.5,
                 },
-                self.chunk_budgets,
+                SYSTEM_CHUNK_BUDGETS,
             );
             let selection = include_mandatory_chunks(selected, mandatory.iter().copied());
             let mut visible = selection.detailed.iter().chain(&selection.coarse)
@@ -1451,19 +2173,64 @@ impl VoxelReplayApp {
     fn n_iters(&self) -> usize { self.trajectories.len() }
     fn n_steps(&self) -> usize { self.trajectories[self.iter_idx].episode.steps.len() }
 
-    /// Advance one step during play.  Returns false when the run is fully finished.
-    fn play_advance(&mut self) -> bool {
-        let n = self.n_steps();
-        if self.step_idx + 1 < n {
-            self.step_idx += 1;
-            true
+    fn next_play_position(&self) -> Option<(usize, usize)> {
+        if self.step_idx + 1 < self.n_steps() {
+            Some((self.iter_idx, self.step_idx + 1))
         } else if self.iter_idx + 1 < self.n_iters() {
-            self.iter_idx += 1;
-            self.step_idx = 0;
-            true
+            Some((self.iter_idx + 1, 0))
         } else {
-            false
+            None
         }
+    }
+
+    fn stage_or_publish_play_position(&mut self, position: (usize, usize), regional: bool) {
+        if regional {
+            self.pending_play_position = Some(position);
+        } else {
+            (self.iter_idx, self.step_idx) = position;
+        }
+    }
+
+    fn publish_pending_play_position(&mut self, iteration: usize, step: usize) {
+        if self.pending_play_position == Some((iteration, step)) {
+            self.iter_idx = iteration;
+            self.step_idx = step;
+            self.pending_play_position = None;
+        }
+    }
+
+    /// Advance playback only after the current step has been presented for
+    /// the configured interval, and return when the UI should repaint next.
+    fn update_autoplay(&mut self, now: Instant, regional_ready: bool) -> Option<Duration> {
+        if !self.playing {
+            return None;
+        }
+        if self.pending_play_position.is_some() {
+            return Some(REGIONAL_LOAD_POLL_INTERVAL);
+        }
+        if !regional_ready {
+            self.next_play_advance_at = None;
+            return Some(REGIONAL_LOAD_POLL_INTERVAL);
+        }
+        let Some(deadline) = self.next_play_advance_at else {
+            self.next_play_advance_at = Some(now + PLAYBACK_STEP_INTERVAL);
+            return Some(PLAYBACK_STEP_INTERVAL);
+        };
+        if now < deadline {
+            return Some(deadline.duration_since(now));
+        }
+
+        let Some(next) = self.next_play_position() else {
+            self.playing = false;
+            self.next_play_advance_at = None;
+            // The controls were drawn before autoplay updated the state, so
+            // repaint once to replace the stale "Pause" label with replay.
+            return Some(Duration::ZERO);
+        };
+        let regional = self.trajectories[next.0].world.is_some();
+        self.stage_or_publish_play_position(next, regional);
+        self.next_play_advance_at = None;
+        Some(Duration::ZERO)
     }
 
     fn apply_events(&mut self, ev: UiEvents) {
@@ -1491,6 +2258,11 @@ impl VoxelReplayApp {
                 self.iter_idx = 0;
                 self.step_idx = 0;
             }
+            self.next_play_advance_at = None;
+        }
+        if !self.playing {
+            self.next_play_advance_at = None;
+            self.pending_play_position = None;
         }
     }
 }
@@ -1531,6 +2303,11 @@ impl eframe::App for VoxelReplayApp {
 
         // Pull out display values before closures so we can borrow immutably
         let is_multi = self.trajectories[iter_idx].agent_count > 1;
+        let has_trail_mode = trail_mode_active(
+            self.trajectories[iter_idx].world.is_some(),
+            self.trajectories[iter_idx].agent_count,
+            &self.trajectories[iter_idx].episode.steps,
+        );
         let traj_grid_size = self.trajectories[iter_idx].grid_size as f32;
         let (exp_name, run_id, obs_mode, traj_iter, mean_reward, ep_reward,
              steps_taken, max_steps, success, goal_pos, start_pos, step_rewards,
@@ -1578,9 +2355,9 @@ impl eframe::App for VoxelReplayApp {
             });
         });
 
-        let drag_delta = ctx.input(|i| i.pointer.delta());
-        let dragging = ctx.input(|i| i.pointer.primary_down());
-        let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+        let mut drag_delta = Vec2::ZERO;
+        let mut scroll_y = 0.0;
+        let mut resizing_overview = false;
 
         if self.explain_tab {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -1713,19 +2490,12 @@ impl eframe::App for VoxelReplayApp {
             if ui.button(play_label).clicked() { ev.toggle_play = true; }
             ui.label(egui::RichText::new("  Space key").small().weak());
             ui.label(egui::RichText::new("Plays through all iterations").small().weak());
-            ui.checkbox(&mut self.occlude_agent, "Geometry occludes agent and trail");
-            ui.separator();
-            ui.label(egui::RichText::new("Camera projection").strong());
-            ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
-            ui.add_enabled_ui(self.camera.perspective, |ui| {
-                ui.add(
-                    Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
-                        .suffix("°")
-                        .text("field of view"),
-                    );
-            });
+            if has_trail_mode {
+                ui.checkbox(&mut self.show_trail, "Show trail");
+            }
             ui.separator();
             ui.label(egui::RichText::new("Render diagnostics").strong());
+            ui.checkbox(&mut self.reveal_hidden_agent, "Reveal hidden agent (diagnostic)");
             ui.checkbox(&mut self.debug_face_colors, "Color faces by direction");
             if self.debug_face_colors {
                 for (direction, label) in [
@@ -1750,53 +2520,9 @@ impl eframe::App for VoxelReplayApp {
                 {
                     self.requested_region = None;
                 }
-                let budgets_changed = ui.add(Slider::new(&mut self.chunk_budgets.visible, 1..=256)
-                    .text("visible chunks")).changed()
-                    | ui.add(Slider::new(&mut self.chunk_budgets.detailed, 1..=128)
-                        .text("detailed chunks")).changed();
-                self.chunk_budgets.detailed = self.chunk_budgets.detailed
-                    .min(self.chunk_budgets.visible);
-                if budgets_changed {
-                    self.camera_revision = self.camera_revision.wrapping_add(1);
-                }
-                if self.pending_region.is_some() {
-                    ui.label(egui::RichText::new("Loading visible region...").weak());
-                }
                 if let Some(error) = &self.regional_error {
                     ui.colored_label(Color32::from_rgb(230, 100, 100), error);
                 }
-                if let Some((_, frame)) = &self.regional_frame {
-                    ui.label(format!("Visible voxels: {}", frame.occupied.len()));
-                    ui.label(format!("Exposed faces: {}", self.regional_faces.len()));
-                    ui.label(format!(
-                        "Chunks considered/detailed/coarse: {}/{}/{}",
-                        self.considered_chunks,
-                        self.detailed_chunks,
-                        self.coarse_chunks.len()
-                    ));
-                    ui.label(format!(
-                        "Mesh cache builds/hits: {}/{}",
-                        self.render_cache.builds(), self.render_cache.hits()
-                    ));
-                    ui.label(format!("Region load: {:.2} ms", frame.load_time.as_secs_f64() * 1_000.0));
-                    if let Some(metrics) = frame.cache_metrics {
-                        ui.label(format!(
-                            "Chunks: {} resident, {} pinned",
-                            metrics.resident_chunks, metrics.pinned_chunks
-                        ));
-                        ui.label(format!(
-                            "Pack reads: {}  hits/misses: {}/{}",
-                            metrics.pack_reads, metrics.cache_hits, metrics.cache_misses
-                        ));
-                    }
-                }
-                ui.separator();
-                ui.label(egui::RichText::new("Global overview").strong());
-                ui.checkbox(&mut self.show_overview, "Show overview");
-                ui.add_enabled_ui(self.show_overview, |ui| {
-                    ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
-                    ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
-                });
                 if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
                     ui.colored_label(Color32::from_rgb(220, 150, 80), error);
                 }
@@ -1865,22 +2591,23 @@ impl eframe::App for VoxelReplayApp {
              ep.goal_positions.clone(), ep.start_positions.clone())
         };
         let compiled_mode = self.trajectories[iter_idx].world.is_some();
-        let active_regional_frame = self.regional_frame.as_ref().map(|(_, frame)| frame);
-        let render_origin = active_regional_frame
-            .map(|frame| frame.render_origin)
-            .or_else(|| self.current_region_key().map(|key| StorageCoord {
-                x: key.center.x.saturating_sub(key.radius),
-                y: key.center.y.saturating_sub(key.radius),
-                z: key.center.z.saturating_sub(key.radius),
-            }))
-            .unwrap_or(StorageCoord { x: 0, y: 0, z: 0 });
-        let regional_grid_size = active_regional_frame.map(|frame| {
-            let size_x = frame.region.maximum_exclusive.x - frame.region.minimum.x;
-            let size_y = frame.region.maximum_exclusive.y - frame.region.minimum.y;
-            let size_z = frame.region.maximum_exclusive.z - frame.region.minimum.z;
-            size_x.max(size_y).max(size_z) as f32
-        });
-        let display_grid_size = regional_grid_size
+        let compiled_extent = self.trajectories[iter_idx]
+            .world
+            .as_ref()
+            .map(|world| world.extent);
+        let active_regional = self.regional_frame.as_ref();
+        let active_regional_frame = active_regional.map(|(_, frame)| frame);
+        let active_region_key = active_regional
+            .map(|(key, _)| *key)
+            .or_else(|| self.current_region_key());
+        // The storage load region is clamped at world boundaries. Rendering
+        // uses the unclamped, logical agent view so the green box stays
+        // centered and describes the exact culling boundary.
+        let render_origin = active_region_key
+            .map(|key| agent_view_render_origin(key.center, key.radius))
+            .unwrap_or_default();
+        let display_grid_size = active_region_key
+            .map(|key| key.radius.saturating_mul(2).saturating_add(1) as f32)
             .or_else(|| compiled_mode.then_some((self.visualization_radius * 2 + 1) as f32))
             .unwrap_or(traj_grid_size);
         let geo_list = if compiled_mode {
@@ -1888,11 +2615,8 @@ impl eframe::App for VoxelReplayApp {
                 .map(|frame| {
                     frame.occupied.iter()
                         .filter(|coordinate| frame.region.contains(**coordinate))
-                        .filter_map(|coordinate| Some((
-                            u16::try_from(coordinate.x).ok()?,
-                            u16::try_from(coordinate.y).ok()?,
-                            u16::try_from(coordinate.z).ok()?,
-                        ))).collect::<Vec<_>>()
+                        .map(|coordinate| (coordinate.x, coordinate.y, coordinate.z))
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         } else {
@@ -1903,6 +2627,10 @@ impl eframe::App for VoxelReplayApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+            if self.show_overview && matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview = resize_overview(ui, resp.rect, &mut self.overview_size);
+            }
+            (drag_delta, scroll_y) = scene_camera_input(ctx, &resp);
             let rect = resp.rect.shrink(20.0);
             painter.rect_filled(resp.rect, 0.0, Color32::from_rgb(12, 14, 20));
 
@@ -1920,7 +2648,7 @@ impl eframe::App for VoxelReplayApp {
             // Rear edges render beneath voxels and are occluded by filled space.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, false);
             // Build geometry set for agent-fill collision check (fast HashSet lookup).
-            let geometry: HashSet<(u16, u16, u16)> = geo_list.iter().copied().collect();
+            let geometry: HashSet<(u32, u32, u32)> = geo_list.iter().copied().collect();
 
             let geo_color = Color32::from_rgb(120, 120, 130);
             if compiled_mode {
@@ -1963,60 +2691,21 @@ impl eframe::App for VoxelReplayApp {
 
             let trail_end = (step_idx + 1).min(render_steps.len());
 
-            // Sort geometry back-to-front.
-            let mut geo_sorted: Vec<(u16, u16, u16)> = geo_list.iter().copied().collect();
-            geo_sorted.sort_by(|a, b| {
-                depth_key(a.0, a.1, a.2, render_origin, cam)
-                    .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                    .unwrap()
-            });
-            let mut face_sorted = self.regional_faces.iter().copied()
-                .filter(|face| {
-                    active_regional_frame.map_or(
-                        true,
-                        |frame| frame.region.contains(face.voxel),
-                    )
-                })
-                .collect::<Vec<_>>();
-            face_sorted.sort_by(|a, b| {
-                let a = a.voxel;
-                let b = b.voxel;
-                depth_key(a.x as u16, a.y as u16, a.z as u16, render_origin, cam)
-                    .partial_cmp(&depth_key(b.x as u16, b.y as u16, b.z as u16, render_origin, cam))
-                    .unwrap()
-            });
-            if !self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(
-                            &painter,
-                            face,
-                            render_origin,
-                            rect,
-                            cam,
-                            &b,
-                            geo_color,
-                            self.debug_face_colors,
-                        );
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(
-                            &painter,
-                            x,
-                            y,
-                            z,
-                            render_origin,
-                            rect,
-                            cam,
-                            &b,
-                            geo_color,
-                            false,
-                            self.debug_face_colors,
-                        );
-                    }
-                }
-            }
+            let mut scene_items: Vec<SceneDrawItem> = if compiled_mode {
+                self.regional_faces.iter().copied()
+                    .filter(|face| {
+                        active_regional_frame.map_or(
+                            true,
+                            |frame| frame.region.contains(face.voxel),
+                        )
+                    })
+                    .map(SceneDrawItem::WorldFace)
+                    .collect()
+            } else {
+                geo_list.iter().map(|&(x, y, z)| {
+                    SceneDrawItem::WorldVoxel(StorageCoord { x, y, z })
+                }).collect()
+            };
 
             if is_multi {
                 // ---- Multi-agent: per-agent colored trails and cursors ----
@@ -2027,8 +2716,8 @@ impl eframe::App for VoxelReplayApp {
 
                 for ai in 0..n_agents {
                     let trail_color = agent_trail_colors[ai % agent_trail_colors.len()];
-                    let mut trail: HashSet<(u16, u16, u16)> = HashSet::new();
-                    for i in 0..if compiled_mode { 0 } else { trail_end } {
+                    let mut trail: HashSet<(u32, u32, u32)> = HashSet::new();
+                    for i in 0..if has_trail_mode && self.show_trail { trail_end } else { 0 } {
                         let s = &render_steps[i];
                         if ai < s.cursors.len() {
                             let c = s.cursors[ai];
@@ -2043,137 +2732,135 @@ impl eframe::App for VoxelReplayApp {
                             }
                         }
                     }
-                    let mut trail_list: Vec<(u16, u16, u16)> = trail.into_iter().collect();
-                    trail_list.sort_by(|a, b| {
-                        depth_key(a.0, a.1, a.2, render_origin, cam)
-                            .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                            .unwrap()
-                    });
-                    for &(x, y, z) in &trail_list {
-                        draw_voxel(
-                            &painter,
-                            x,
-                            y,
-                            z,
-                            render_origin,
-                            rect,
-                            cam,
-                            &b,
-                            trail_color,
-                            true,
-                            false,
-                        );
+                    for (x, y, z) in trail {
+                        scene_items.push(SceneDrawItem::Trail(
+                            StorageCoord { x, y, z }, trail_color,
+                        ));
                     }
                 }
-                // Draw each agent's current cursor.
+                // Start and goal markers share the same depth ordering.
+                for (ai, start_opt) in render_start_positions.iter().enumerate() {
+                    if let Some(position) = start_opt
+                        .and_then(|position| render_position(position, compiled_extent))
+                    {
+                        let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
+                        scene_items.push(SceneDrawItem::Marker(position, col));
+                    }
+                }
+                for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
+                    if let Some(position) = goal_opt
+                        .and_then(|position| render_position(position, compiled_extent))
+                    {
+                        let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
+                        scene_items.push(SceneDrawItem::Marker(position, col));
+                    }
+                }
+                // Draw the active cursor last if it shares an exact cell with
+                // a start/goal marker.
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
                     for ai in 0..s.cursors.len() {
-                        let c = s.cursors[ai];
-                        draw_cursor(&painter, c[0], c[1], c[2], render_origin, rect, cam, &b);
-                    }
-                }
-                // Draw start markers (agent color darkened).
-                for (ai, start_opt) in render_start_positions.iter().enumerate() {
-                    if let Some([sx, sy, sz]) = start_opt {
-                        let col = tint_dark(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *sx, *sy, *sz, render_origin, rect, cam, &b, col);
-                    }
-                }
-                // Draw goal markers (agent color lightened).
-                for (ai, goal_opt) in render_goal_positions.iter().enumerate() {
-                    if let Some([gx, gy, gz]) = goal_opt {
-                        let col = tint_light(agent_trail_colors[ai % agent_trail_colors.len()]);
-                        draw_marker(&painter, *gx, *gy, *gz, render_origin, rect, cam, &b, col);
+                        if let Some(c) = render_position(s.cursors[ai], compiled_extent) {
+                            scene_items.push(SceneDrawItem::Cursor(c));
+                        }
                     }
                 }
             } else {
                 // ---- Single-agent path ----
                 let agent_color = agent_trail_colors[0];
-                let mut agent_filled: HashSet<(u16, u16, u16)> = HashSet::new();
-                for i in 0..if compiled_mode { 0 } else { trail_end } {
+                let mut agent_filled: HashSet<(u32, u32, u32)> = HashSet::new();
+                for i in 0..if has_trail_mode && self.show_trail { trail_end } else { 0 } {
                     let s = &render_steps[i];
                     if s.placed && !geometry.contains(&(s.cursor_x, s.cursor_y, s.cursor_z)) {
                         agent_filled.insert((s.cursor_x, s.cursor_y, s.cursor_z));
                     }
                 }
-                let mut agent_list: Vec<(u16, u16, u16)> = agent_filled.into_iter().collect();
-                agent_list.sort_by(|a, b| {
-                    depth_key(a.0, a.1, a.2, render_origin, cam)
-                        .partial_cmp(&depth_key(b.0, b.1, b.2, render_origin, cam))
-                        .unwrap()
-                });
-                for &(x, y, z) in &agent_list {
-                    draw_voxel(
-                        &painter,
-                        x,
-                        y,
-                        z,
-                        render_origin,
-                        rect,
-                        cam,
-                        &b,
-                        agent_color,
-                        true,
-                        false,
-                    );
+                for (x, y, z) in agent_filled {
+                    scene_items.push(SceneDrawItem::Trail(
+                        StorageCoord { x, y, z }, agent_color,
+                    ));
                 }
 
-                if let Some([sx, sy, sz]) = render_start {
-                    draw_marker(&painter, sx, sy, sz, render_origin, rect, cam, &b, tint_dark(agent_trail_colors[0]));
+                if let Some(position) = render_start
+                    .and_then(|position| render_position(position, compiled_extent))
+                {
+                    scene_items.push(SceneDrawItem::Marker(
+                        position, tint_dark(agent_trail_colors[0]),
+                    ));
                 }
-                if let Some([gx, gy, gz]) = render_goal {
-                    draw_marker(&painter, gx, gy, gz, render_origin, rect, cam, &b, tint_light(agent_trail_colors[0]));
+                if let Some(position) = render_goal
+                    .and_then(|position| render_position(position, compiled_extent))
+                {
+                    scene_items.push(SceneDrawItem::Marker(
+                        position, tint_light(agent_trail_colors[0]),
+                    ));
                 }
                 if step_idx < render_steps.len() {
                     let s = &render_steps[step_idx];
-                    draw_cursor(&painter, s.cursor_x, s.cursor_y, s.cursor_z, render_origin, rect, cam, &b);
+                    if let Some(position) = render_position(
+                        [s.cursor_x, s.cursor_y, s.cursor_z],
+                        compiled_extent,
+                    ) {
+                        scene_items.push(SceneDrawItem::Cursor(position));
+                    }
                 }
             }
 
-            if self.occlude_agent {
-                if compiled_mode {
-                    for &face in &face_sorted {
-                        draw_exposed_face(
-                            &painter,
-                            face,
-                            render_origin,
-                            rect,
-                            cam,
-                            &b,
-                            geo_color,
-                            self.debug_face_colors,
-                        );
-                    }
-                } else {
-                    for &(x, y, z) in &geo_sorted {
-                        draw_voxel(
-                            &painter,
-                            x,
-                            y,
-                            z,
-                            render_origin,
-                            rect,
-                            cam,
-                            &b,
-                            geo_color,
-                            false,
-                            self.debug_face_colors,
-                        );
-                    }
-                }
+            sort_scene_items(&mut scene_items, render_origin, cam);
+            for item in scene_items {
+                item.draw(
+                    &painter, render_origin, rect, cam, &b,
+                    geo_color, self.debug_face_colors,
+                );
             }
 
             // Camera-facing and silhouette edges remain visible above the scene.
             draw_grid_bounds_layer(&painter, rect, cam, &b, display_grid_size, true);
+
+            if self.reveal_hidden_agent {
+                if step_idx < render_steps.len() {
+                    let step = &render_steps[step_idx];
+                    if is_multi {
+                        for &cursor in &step.cursors {
+                            if let Some(position) = render_position(cursor, compiled_extent) {
+                                draw_revealed_cursor(&painter, position, render_origin, rect, cam, &b);
+                            }
+                        }
+                    } else if let Some(position) = render_position(
+                        [step.cursor_x, step.cursor_y, step.cursor_z], compiled_extent,
+                    ) {
+                        draw_revealed_cursor(&painter, position, render_origin, rect, cam, &b);
+                    }
+                }
+                let badge = Rect::from_min_size(
+                    resp.rect.left_top() + Vec2::new(8.0, 8.0),
+                    Vec2::new(238.0, 25.0),
+                );
+                painter.rect_filled(badge, 4.0, Color32::from_rgb(45, 33, 8));
+                painter.text(
+                    badge.left_top() + Vec2::new(7.0, 5.0),
+                    egui::Align2::LEFT_TOP,
+                    "DIAGNOSTIC: AGENT REVEAL",
+                    egui::FontId::proportional(13.0),
+                    Color32::from_rgb(255, 220, 80),
+                );
+            }
 
             if self.show_overview {
                 if let Some(Ok(mesh)) = self.overview_meshes.get(iter_idx) {
                     draw_overview_inset(
                         &painter, resp.rect, mesh, cam,
                         self.overview_size, self.show_overview_bounds,
+                        active_region_key.map(|key| (key.center, key.radius)),
                     );
                 }
+            }
+
+            if matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview |= overview_controls(
+                    ui, resp.rect, self.overview_size,
+                    &mut self.show_overview, &mut self.show_overview_bounds,
+                );
             }
 
             let agent_label = if is_multi {
@@ -2187,7 +2874,7 @@ impl eframe::App for VoxelReplayApp {
                 format!(
                     "iter {}/{}  |  {} geo  |  step {}/{}  {}",
                     iter_idx + 1, n_iters,
-                    geo_sorted.len(),
+                    geo_list.len(),
                     step_idx, n_steps.saturating_sub(1),
                     agent_label,
                 ),
@@ -2229,7 +2916,7 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Camera orbit (left-drag) + zoom (scroll) + reset (R) ----------
-        if dragging {
+        if drag_delta != Vec2::ZERO && !resizing_overview {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
@@ -2243,12 +2930,133 @@ impl eframe::App for VoxelReplayApp {
             self.camera = Camera::default();
         }
 
-        // ---- Auto-play: advance one step per frame --------------------------
+        // ---- Auto-play: advance one step per presentation interval ---------
         if self.playing {
-            let still_going = self.play_advance();
-            if !still_going { self.playing = false; }
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+            let current_region = self.desired_region_key();
+            let loaded_region = self.regional_frame.as_ref().map(|(key, _)| *key);
+            let ready = regional_playback_ready(
+                current_region,
+                loaded_region,
+                self.regional_error.is_some(),
+            );
+            // request_repaint_after schedules a future frame but does not
+            // throttle frames caused by input, regional loading, or the OS.
+            // The explicit deadline prevents those repaints from skipping
+            // over steps and starts only once the regional view is ready.
+            if let Some(delay) = self.update_autoplay(Instant::now(), ready) {
+                ctx.request_repaint_after(delay);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod autoplay_timing_tests {
+    use super::*;
+
+    fn trajectory_with_steps(count: usize) -> TrajectoryData {
+        serde_json::from_value(serde_json::json!({
+            "experiment_name": "autoplay-fixture",
+            "run_id": "fixture",
+            "iteration": 0,
+            "episode_reward_mean": 0.0,
+            "max_steps": count,
+            "episode": {
+                "total_reward": 0.0,
+                "steps_taken": count,
+                "success": false,
+                "steps": (0..count)
+                    .map(|step| serde_json::json!({"step": step}))
+                    .collect::<Vec<_>>()
+            }
+        }))
+        .expect("fixture trajectory should deserialize")
+    }
+
+    #[test]
+    fn incidental_repaints_do_not_advance_before_the_step_deadline() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(app.step_idx, 0);
+
+        let early = started + Duration::from_millis(40);
+        assert_eq!(
+            app.update_autoplay(early, true),
+            Some(Duration::from_millis(80))
+        );
+        assert_eq!(app.step_idx, 0, "an early repaint must hold the current step");
+
+        assert_eq!(
+            app.update_autoplay(started + PLAYBACK_STEP_INTERVAL, true),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(app.step_idx, 1);
+    }
+
+    #[test]
+    fn playback_interval_starts_after_the_regional_view_is_ready() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, false),
+            Some(REGIONAL_LOAD_POLL_INTERVAL)
+        );
+        assert_eq!(app.next_play_advance_at, None);
+
+        let loaded_at = started + Duration::from_secs(2);
+        assert_eq!(
+            app.update_autoplay(loaded_at, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(
+            app.next_play_advance_at,
+            Some(loaded_at + PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(app.step_idx, 0);
+    }
+
+    #[test]
+    fn regional_autoplay_publishes_step_only_with_matching_frame() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+
+        app.stage_or_publish_play_position((0, 1), true);
+        assert_eq!(app.step_idx, 0, "the old step remains visible while loading");
+        assert_eq!(app.pending_play_position, Some((0, 1)));
+
+        app.publish_pending_play_position(0, 0);
+        assert_eq!(app.step_idx, 0, "an unrelated frame cannot publish the step");
+        assert_eq!(app.pending_play_position, Some((0, 1)));
+
+        app.publish_pending_play_position(0, 1);
+        assert_eq!(app.step_idx, 1);
+        assert_eq!(app.pending_play_position, None);
+    }
+
+    #[test]
+    fn stopping_at_the_final_step_requests_a_controls_repaint() {
+        let mut app = VoxelReplayApp::new(vec![trajectory_with_steps(4)], None);
+        let started = Instant::now();
+        app.step_idx = 3;
+        app.playing = true;
+
+        assert_eq!(
+            app.update_autoplay(started, true),
+            Some(PLAYBACK_STEP_INTERVAL)
+        );
+        assert_eq!(
+            app.update_autoplay(started + PLAYBACK_STEP_INTERVAL, true),
+            Some(Duration::ZERO)
+        );
+        assert!(!app.playing);
+        assert_eq!(app.next_play_advance_at, None);
     }
 }
 

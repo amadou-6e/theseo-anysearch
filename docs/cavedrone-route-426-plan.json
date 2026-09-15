@@ -1,0 +1,13 @@
+{
+  "governing_spec_sha": "1dc8397ce7a8d4d9ac5def3e2ea0cdc472a2489b",
+  "dataset_id": "cavedrone-route-426-six-seed-preparation-v1",
+  "imports": [
+    {"export": "runtime/output/cavedrone-route-426-seed-1", "source_root": "runtime/research-assets/cave-drone", "partition": "train"},
+    {"export": "runtime/output/cavedrone-route-426-seed-2", "source_root": "runtime/research-assets/cave-drone", "partition": "train"},
+    {"export": "runtime/output/cavedrone-route-426-seed-3", "source_root": "runtime/research-assets/cave-drone", "partition": "calibration"},
+    {"export": "runtime/output/cavedrone-route-426-seed-4", "source_root": "runtime/research-assets/cave-drone", "partition": "calibration"},
+    {"export": "runtime/output/cavedrone-route-426-seed-5", "source_root": "runtime/research-assets/cave-drone", "partition": "test"},
+    {"export": "runtime/output/cavedrone-route-426-seed-6", "source_root": "runtime/research-assets/cave-drone", "partition": "test"}
+  ],
+  "test_topology_families": []
+}

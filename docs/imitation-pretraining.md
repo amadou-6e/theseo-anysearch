@@ -20,10 +20,12 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
   `dijkstra`, `weighted_astar`, and `replanning_astar`.
 - `generation.provider.parameters.weight` configures `weighted_astar` and is
   not accepted by the other built-in providers.
-- A waypoint curriculum with `completion_mode: continue_route` generates
-  demonstrations via the native shortest-path planner directly and does not
-  invoke `generation.provider` at all, so a custom generation provider
-  configured alongside such a curriculum never actually runs.
+- A waypoint curriculum with `completion_mode: continue_route` uses direct
+  shortest actions only when no geometry is configured. With compiled worlds,
+  STL, boxes, or a geometry pool, collection invokes `generation.provider`;
+  `astar` plans each static waypoint segment once, while `replanning_astar`
+  replans every step. For compiled worlds A* first checks whether an optimal
+  direct path is clear, then searches around obstacles when it is not.
 - `generation.episodes` is the required number of accepted demonstrations.
 - `generation.max_attempts` bounds failed or unsolved collection attempts.
 - `generation.require_success` discards episodes that do not reach the goal.
@@ -46,6 +48,11 @@ Enable it with a top-level `imitation` block. `training.algorithm` remains
   Successful episodes are collected against an exact per-stage quota, so
   rejected generation-provider rollouts cannot silently underrepresent a
   difficult stage.
+  Explicit fixed-route curricula may opt into `fixed_route_variation_radius`
+  to sample seeded, length-preserving final-waypoint variants at each stage.
+  The collector applies the same unique-route and per-stage quotas to those
+  variants; without variation, one fixed route per stage limits collection
+  to one accepted demonstration per stage.
 - `sampling.provider` selects the batch-sampling provider used during
   pretraining. It defaults to `uniform_transition`, which samples individual
   demonstration transitions uniformly at random. `uniform_episode` shuffles

@@ -22,7 +22,18 @@ def build_route_evaluation_suite(
     episode_count: int,
     seed_start: int,
 ) -> list[tuple[int, WaypointRoute]]:
-    """Build a stable set of distinct routes without consuming training randomness."""
+    """Build stable evaluation routes, repeating an explicitly fixed stage."""
+    if curriculum.config.routes and not curriculum.config.fixed_route_variation_radius:
+        # These stages intentionally contain one frozen route each. Repeat it
+        # with independent environment seeds instead of seeking nonexistent
+        # distinct routes.
+        return [
+            (
+                seed_start + index,
+                curriculum.route_for_stage(env_config, stage_index),
+            )
+            for index in range(episode_count)
+        ]
     routes: list[tuple[int, WaypointRoute]] = []
     signatures: set[tuple[Any, ...]] = set()
     candidate_seed = seed_start
@@ -140,7 +151,8 @@ class CurriculumController:
                             algorithm,
                             route_env,
                             1,
-                            seed=stage_seed + episode_index,
+                            seed=(route_seed if route_env.get("compiled_world_catalog_path")
+                                  else stage_seed + episode_index),
                             multi_agent=False,
                             num_envs_per_env_runner=(
                                 self.evaluation.num_envs_per_env_runner

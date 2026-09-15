@@ -25,6 +25,7 @@ from theseo_anysearch.experiments.trajectory import (
     VoxelMutationData,
     WorldArtifactReference,
     _build_payload,
+    _environment_voxel_count,
     _overlay_delta,
     collect_eval_episode,
 )
@@ -65,6 +66,24 @@ def _make_writer(tmp_path: Path, trajectory_every: int = 5,
     return writer, store
 
 
+def test_compiled_world_voxel_count_uses_overlay_without_full_enumeration() -> None:
+    class RustEnv:
+        def overlay_mutations(self):
+            return [
+                (10, 10, 10, True, 2, False, 0.0),
+                (11, 10, 10, True, 1, True, 1.0),
+            ]
+
+        def filled_voxels(self):
+            raise AssertionError("compiled base must not be enumerated")
+
+    class Env:
+        _config = {"compiled_world_path": "pack"}
+        _rust_env = RustEnv()
+
+    assert _environment_voxel_count(Env()) == 1
+
+
 # ---------------------------------------------------------------------------
 # No-write cases
 # ---------------------------------------------------------------------------
@@ -87,7 +106,7 @@ class TestNoWrite:
         writer.record(_make_episode())
         result = writer.on_iteration_end(3, 0.5, "exp", "run1")
         assert result == []
-        assert not store.exists("trajectories/iter_000003.json")
+        assert not store.exists("trajectories/iter_000003.json.zst")
 
 
 # ---------------------------------------------------------------------------
@@ -100,32 +119,32 @@ class TestPeriodicSave:
         writer, store = _make_writer(tmp_path, trajectory_every=10, best_trajectory=False)
         writer.record(_make_episode())
         result = writer.on_iteration_end(1, 0.5, "exp", "run1")
-        assert "trajectories/iter_000001.json" in result
-        assert store.exists("trajectories/iter_000001.json")
+        assert "trajectories/iter_000001.json.zst" in result
+        assert store.exists("trajectories/iter_000001.json.zst")
 
     def test_writes_at_interval(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=5, best_trajectory=False)
         writer.record(_make_episode())
         result = writer.on_iteration_end(5, 0.5, "exp", "run1")
-        assert "trajectories/iter_000005.json" in result
-        assert store.exists("trajectories/iter_000005.json")
+        assert "trajectories/iter_000005.json.zst" in result
+        assert store.exists("trajectories/iter_000005.json.zst")
 
     def test_writes_at_multiple_intervals(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=5, best_trajectory=False)
         for iteration in [5, 10, 15]:
             writer.record(_make_episode())
             writer.on_iteration_end(iteration, 0.5, "exp", "run1")
-        assert store.exists("trajectories/iter_000005.json")
-        assert store.exists("trajectories/iter_000010.json")
-        assert store.exists("trajectories/iter_000015.json")
+        assert store.exists("trajectories/iter_000005.json.zst")
+        assert store.exists("trajectories/iter_000010.json.zst")
+        assert store.exists("trajectories/iter_000015.json.zst")
 
     def test_skips_non_interval(self, tmp_path):
         writer, store = _make_writer(tmp_path, trajectory_every=10, best_trajectory=False)
         for it in [2, 3, 9]:
             writer.record(_make_episode())
             writer.on_iteration_end(it, 0.5, "exp", "run1")
-        assert not store.exists("trajectories/iter_000002.json")
-        assert not store.exists("trajectories/iter_000009.json")
+        assert not store.exists("trajectories/iter_000002.json.zst")
+        assert not store.exists("trajectories/iter_000009.json.zst")
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +157,8 @@ class TestBestSave:
         writer, store = _make_writer(tmp_path, trajectory_every=0, best_trajectory=True)
         writer.record(_make_episode())
         result = writer.on_iteration_end(1, 0.8, "exp", "run1")
-        assert "trajectories/best.json" in result
-        assert store.exists("trajectories/best.json")
+        assert "trajectories/best.json.zst" in result
+        assert store.exists("trajectories/best.json.zst")
         assert store.exists("trajectories/best_meta.json")
 
     def test_best_meta_json_correct(self, tmp_path):
@@ -165,7 +184,7 @@ class TestBestSave:
         writer.on_iteration_end(1, 0.9, "exp", "run1")
         writer.record(_make_episode())
         result = writer.on_iteration_end(2, 0.3, "exp", "run1")
-        assert "trajectories/best.json" not in result
+        assert "trajectories/best.json.zst" not in result
         # meta still points to iteration 1
         meta = store.read_json("trajectories/best_meta.json")
         assert meta["iteration"] == 1
@@ -176,7 +195,7 @@ class TestBestSave:
         writer.on_iteration_end(1, 0.5, "exp", "run1")
         writer.record(_make_episode())
         result = writer.on_iteration_end(2, 0.5, "exp", "run1")
-        assert "trajectories/best.json" not in result
+        assert "trajectories/best.json.zst" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +210,7 @@ class TestEpisodeSelection:
         writer.record(_make_episode(total_reward=1.5))
         writer.record(_make_episode(total_reward=0.7))
         writer.on_iteration_end(1, 0.5, "exp", "run1")
-        data = json.loads(store.read_bytes("trajectories/iter_000001.json"))
+        data = store.read_json("trajectories/iter_000001.json.zst")
         assert data["episode"]["total_reward"] == pytest.approx(1.5)
 
     def test_buffer_cleared_after_on_iteration_end(self, tmp_path):
@@ -255,7 +274,7 @@ class TestPayload:
         ep = _make_episode(total_reward=0.77, n_steps=2)
         writer.record(ep)
         writer.on_iteration_end(1, 0.77, "round-trip", "xyz9")
-        data = TrajectoryWriter.load(store, "trajectories/iter_000001.json")
+        data = TrajectoryWriter.load(store, "trajectories/iter_000001.json.zst")
         assert data["episode"]["total_reward"] == pytest.approx(0.77)
         assert data["experiment_name"] == "round-trip"
         assert data["run_id"] == "xyz9"
@@ -297,7 +316,7 @@ class TestPayload:
         writer.record(episode)
         writer.on_iteration_end(1, 1.0, "large", "run")
 
-        payload = store.read_json("trajectories/iter_000001.json")
+        payload = store.read_json("trajectories/iter_000001.json.zst")
         assert payload["schema_version"] == 2
         assert payload["world"]["identity_sha256"] == identity
         assert payload["world"]["extent"] == [60_000, 40_000, 20_000]
@@ -373,7 +392,7 @@ class TestPayload:
         writer.record(episode)
         writer.on_iteration_end(1, 0.75, "multi", "run")
 
-        payload = store.read_json("trajectories/iter_000001.json")
+        payload = store.read_json("trajectories/iter_000001.json.zst")
         assert payload["world"]["identity_sha256"] == identity
         assert payload["episode"]["steps"][0]["mutations"][0]["coordinate"] == [
             2,

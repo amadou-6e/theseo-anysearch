@@ -22,7 +22,12 @@ from theseo_anysearch.imitation.models import (
     DemonstrationManifest,
     ImitationConfig,
 )
+from theseo_anysearch.rllib.trainer.waypoint_routes import route_distance
 from theseo_anysearch.worlds import world_contract
+from theseo_anysearch.environments.task_identity import (
+    configured_geometry_identity,
+    configured_task_contract,
+)
 
 
 def _configure_waypoint_curriculum(
@@ -56,10 +61,24 @@ def _configure_waypoint_curriculum(
 def _route_action_plan(
     env: VoxelEnv, env_config: dict[str, Any]
 ) -> list[int | tuple[int, int, int]] | None:
-    """Return a fast empty-grid plan for an active waypoint route."""
+    """Return direct actions only when a route has no configured geometry."""
 
     raw_curriculum = env_config.get("waypoint_curriculum") or {}
     if raw_curriculum.get("completion_mode") != "continue_route":
+        return None
+    if any(
+        env_config.get(key)
+        for key in (
+            "compiled_world_path",
+            "compiled_world_catalog_path",
+            "stl_path",
+            "stl_paths",
+            "geometry_boxes",
+            "geometry_pool",
+        )
+    ):
+        # The direct shortest_actions teacher ignores obstacles. Defer to the
+        # configured heuristic generation provider for populated worlds.
         return None
     raw_goal = env._rust_env.goal_pos()
     if raw_goal is None:
@@ -108,26 +127,29 @@ def dataset_fingerprint(
     # Tune trial's rollout seed offset cannot affect collected examples.
     normalized_env.pop("seed", None)
     normalized_world = world_contract(env_config)
+    normalized_env.pop("compiled_world_catalog_path", None)
     normalized_env.pop("grid_size", None)
     normalized_env.pop("extent", None)
     normalized_env["extent"] = normalized_world["extent"]
-    for path_key in ("stl_path", "waypoints_file"):
-        path_value = normalized_env.get(path_key)
-        if path_value:
-            normalized_env[path_key] = str(Path(str(path_value)).resolve())
+    # Source paths are machine-local plumbing. Geometry bytes and resolved task
+    # contents are fingerprinted separately below.
+    normalized_env.pop("stl_path", None)
+    normalized_env.pop("waypoints_file", None)
     geometry_pool = normalized_env.get("geometry_pool")
     if isinstance(geometry_pool, dict) and geometry_pool.get("pool_dir"):
         normalized_env["geometry_pool"] = {
             **geometry_pool,
-            "pool_dir": str(Path(str(geometry_pool["pool_dir"])).resolve()),
+            "pool_dir": None,
         }
 
     payload = {
-        # Version 6 adds the explicit finite-world coordinate contract.
-        "schema_version": 6,
+        # Version 7 adds path-independent geometry/task semantics and
+        # distinguishes obstacle-aware teachers from direct-action teachers.
+        "schema_version": 7,
         "env": normalized_env,
         "world": normalized_world,
-        "geometry": _geometry_fingerprint(env_config),
+        "geometry": configured_geometry_identity(env_config),
+        "geometry_task": configured_task_contract(env_config),
         "generation": {
             "provider": imitation.generation.provider.model_dump(mode="json"),
             "episodes": imitation.generation.episodes,
@@ -146,28 +168,6 @@ def dataset_fingerprint(
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
-
-def _geometry_fingerprint(env_config: dict[str, Any]) -> str:
-    """Hash configured geometry contents rather than only their path names."""
-
-    digest = hashlib.sha256()
-    stl_path = env_config.get("stl_path")
-    if stl_path:
-        path = Path(str(stl_path))
-        if path.is_file():
-            digest.update(path.read_bytes())
-    pool = env_config.get("geometry_pool") or {}
-    pool_dir_value = pool.get("pool_dir") if isinstance(pool, dict) else None
-    if pool_dir_value:
-        pool_dir = Path(str(pool_dir_value))
-        if pool_dir.is_dir():
-            for path in sorted(pool_dir.rglob("*.npy")):
-                digest.update(str(path.relative_to(pool_dir)).encode("utf-8"))
-                digest.update(path.read_bytes())
-    digest.update(
-        json.dumps(env_config.get("geometry_boxes") or [], sort_keys=True).encode("utf-8")
-    )
-    return digest.hexdigest()
 
 def collect_demonstrations(
     env_config: dict[str, Any],
@@ -205,6 +205,7 @@ def collect_demonstrations(
     actions: list[int | tuple[int, int, int]] = []
     episode_ids: list[int] = []
     accepted_seeds: list[int] = []
+    accepted_world_identities: list[str] = []
     teacher_successes = 0
     attempts = 0
     used_routes: set[tuple[Any, ...]] = set()
@@ -246,9 +247,13 @@ def collect_demonstrations(
                     "could not generate a unique waypoint route for demonstration collection"
                 )
             env.set_waypoint_curriculum(
-                [route.model_dump(mode="python")],
+                ([{"seeded_catalog_stage": stage_index}]
+                 if env_config.get("compiled_world_catalog_path")
+                 else [route.model_dump(mode="python")]),
                 [1.0],
             )
+            if env_config.get("compiled_world_catalog_path"):
+                seed = route_seed
         observation, _ = env.reset(seed=seed)
         success = False
         episode_observations: list[np.ndarray] = []
@@ -292,12 +297,26 @@ def collect_demonstrations(
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             success = False
 
+        if (
+            success
+            and route_curriculum is not None
+            and route_curriculum.config.routes
+            and len(episode_actions)
+            != route_distance(route, str(env_config.get("action_mode", "discrete_26")))
+        ):
+            # These fixed-stage variants are labeled by exact planned action
+            # count. A geometry detour that changes it belongs to another
+            # stage, even if the goal was reachable within max_steps.
+            success = False
+
         if success or not imitation.generation.require_success:
             episode_id = len(accepted_seeds)
             observations.extend(episode_observations)
             actions.extend(episode_actions)
             episode_ids.extend([episode_id] * len(episode_actions))
             accepted_seeds.append(seed)
+            if env_config.get("compiled_world_catalog_path"):
+                accepted_world_identities.append(env._active_world_identity)
             teacher_successes += int(success)
             if route_curriculum is not None:
                 stage_episode_counts[stage_index] += 1
@@ -356,6 +375,8 @@ def collect_demonstrations(
         source_origin=tuple(normalized_world["source_origin"]),
         world_extent=tuple(normalized_world["extent"]),
         world_identity_sha256=normalized_world["identity_sha256"],
+        world_catalog_sha256=normalized_world.get("catalog_identity_sha256"),
+        episode_world_identities=(accepted_world_identities or None),
         generation_provider_name=imitation.generation.provider.name,
         generation_provider_parameters=imitation.generation.provider.parameters,
         requested_episodes=imitation.generation.episodes,
@@ -440,7 +461,7 @@ def load_compatible_dataset(
 def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, Any]:
     """Recover the explicit world contract persisted beside a dataset."""
 
-    return {
+    contract = {
         "schema_version": manifest.world_schema_version,
         "coordinate_type": manifest.coordinate_type,
         "storage_coordinate_convention": manifest.storage_coordinate_convention,
@@ -450,3 +471,6 @@ def demonstration_world_contract(manifest: DemonstrationManifest) -> dict[str, A
         "extent": list(manifest.world_extent),
         "identity_sha256": manifest.world_identity_sha256,
     }
+    if manifest.world_catalog_sha256 is not None:
+        contract["catalog_identity_sha256"] = manifest.world_catalog_sha256
+    return contract

@@ -109,14 +109,33 @@ class TestTrainResult:
     @pytest.mark.parametrize(
         ("field", "payload"),
         [
-            ("episode reward mean", {**LEGACY_RESULT, "episode_reward_mean": None}),
-            ("episode length mean", {**LEGACY_RESULT, "episode_len_mean": None}),
             ("episode count", {**LEGACY_RESULT, "episodes_total": None}),
             ("environment step count", {**LEGACY_RESULT, "timesteps_total": None}),
         ],
     )
     def test_missing_required_metric_raises(self, field, payload):
         with pytest.raises(ValueError, match=field):
+            TrainResult.from_rllib(1, payload, 0.1)
+
+    def test_missing_episode_metrics_are_not_fabricated(self):
+        result = TrainResult.from_rllib(1, {
+            "env_runners": {
+                "num_episodes_lifetime": 0,
+                "num_env_steps_sampled_lifetime": 1024,
+            }
+        }, 0.1)
+
+        assert result.episode_reward_mean is None
+        assert result.episode_len_mean is None
+        assert result.episodes_total == 0
+        assert result.environment_steps_total == 1024
+        assert "train/task/return_mean" not in result.standard_metrics()
+        assert "train/task/episode_len_mean" not in result.standard_metrics()
+
+    @pytest.mark.parametrize("field", ["episode_reward_mean", "episode_len_mean"])
+    def test_partially_missing_episode_metrics_raise(self, field):
+        payload = {**self.LEGACY_RESULT, field: None}
+        with pytest.raises(ValueError, match="only one"):
             TrainResult.from_rllib(1, payload, 0.1)
 
     @pytest.mark.parametrize(
@@ -304,6 +323,14 @@ def make_trainer(trainer_settings: Any, rewards: list[float] | None = None) -> P
     return t
 
 
+def test_disabled_regular_evaluation_does_not_invoke_coordinator(trainer_settings):
+    trainer_settings.evaluation.enabled = False
+    trainer = make_trainer(trainer_settings)
+    with patch.object(EvaluationCoordinator, "evaluate", side_effect=AssertionError("regular evaluation ran")):
+        results = trainer.train()
+    assert len(results) == trainer_settings.training.iterations
+
+
 # ---------------------------------------------------------------------------
 # 1. Execution: train() runs the correct number of iterations
 # ---------------------------------------------------------------------------
@@ -394,8 +421,9 @@ class TestExecution:
         summary = json.loads(
             output_dir.joinpath("evaluation", "iter_000001.json").read_text()
         )
-        replay = json.loads(
-            output_dir.joinpath("trajectories", "iter_000001.json").read_text()
+        from theseo_anysearch.experiments.trajectory_storage import read_trajectory
+        replay = read_trajectory(
+            output_dir.joinpath("trajectories", "iter_000001.json.zst")
         )
         best_meta = json.loads(
             output_dir.joinpath("trajectories", "best_meta.json").read_text()
@@ -571,6 +599,14 @@ class TestOutputSanity:
         assert state["world_contract"]["extent"] == [32, 32, 32]
         assert len(state["world_fingerprint"]) == 64
 
+    def test_state_json_has_geometry_task_compatibility_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state = json.loads((ckpt / "state.json").read_text())
+        assert state["geometry_task_contract"]["action_mode"] == "discrete_26"
+        assert len(state["geometry_task_fingerprint"]) == 64
+
     def test_latest_json_written_after_checkpoint(self, trainer_settings: Any):
         t = make_trainer(trainer_settings)
         t._algo = FakeAlgo()
@@ -645,6 +681,19 @@ class TestRestore:
 
         t2 = make_trainer(trainer_settings)
         with pytest.raises(ValueError, match="Checkpoint world contract mismatch"):
+            t2.restore(ckpt)
+
+    def test_restore_rejects_incompatible_geometry_task_contract(self, trainer_settings: Any):
+        t = make_trainer(trainer_settings)
+        t._algo = FakeAlgo()
+        ckpt = t.checkpoint()
+        state_path = ckpt / "state.json"
+        state = json.loads(state_path.read_text())
+        state["geometry_task_contract"]["action_mode"] = "discrete_18"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        t2 = make_trainer(trainer_settings)
+        with pytest.raises(ValueError, match="Checkpoint geometry/task contract mismatch"):
             t2.restore(ckpt)
 
     def test_restore_builds_algo_if_none(self, trainer_settings: Any):
@@ -818,7 +867,7 @@ class TestTrainingEarlyStop:
         assert trainer._output_dir.joinpath("early_stop.json").exists()
         assert trainer._output_dir.joinpath("checkpoints", "iter_000002").exists()
         assert trainer._output_dir.joinpath(
-            "trajectories", "iter_000002.json"
+            "trajectories", "iter_000002.json.zst"
         ).exists()
         payload = json.loads(
             trainer._output_dir.joinpath("early_stop.json").read_text()

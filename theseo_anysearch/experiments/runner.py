@@ -355,9 +355,11 @@ class ExperimentRunner:
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
         from theseo_anysearch.environment_rules import preflight_environment_rules
         from theseo_anysearch.imitation.preflight import preflight_imitation_providers
+        from theseo_anysearch.experiments.custom_geometry import preflight_geometry_provider
 
         preflight_environment_rules(config, config_path)
         preflight_imitation_providers(config.imitation, config_path)
+        preflight_geometry_provider(config.env.geometry, config.env, config_path)
         self._config = config
         self._config_path = config_path
 
@@ -608,6 +610,17 @@ class ExperimentRunner:
                     else None
                 ),
             )
+            from theseo_anysearch.experiments.custom_geometry import copy_geometry_source
+
+            copy_geometry_source(
+                self._config_path,
+                run_dir,
+                (
+                    self._config.env.geometry.provider.name
+                    if self._config.env.geometry.provider
+                    else None
+                ),
+            )
             from theseo_anysearch.experiments.custom_imitation import (
                 copy_generation_source,
             )
@@ -787,11 +800,11 @@ class ExperimentRunner:
             for path in store.list_dirs("checkpoints")
             if "iter_" in path
         )
-        trajectory_iterations = sorted(
-            int(Path(path).stem.split("iter_")[-1])
+        trajectory_iterations = sorted({
+            int(Path(path.removesuffix(".zst")).stem.split("iter_")[-1])
             for path in store.list("trajectories")
-            if path.endswith(".json") and "iter_" in path
-        )
+            if path.endswith((".json", ".json.zst")) and "iter_" in path
+        })
         render_files = sorted(store.list("renders"))
 
         config_data: dict[str, Any] = {}
@@ -878,11 +891,11 @@ class ExperimentRunner:
             for path in store.list_dirs("checkpoints")
             if "iter_" in path
         )
-        trajectory_iterations = sorted(
-            int(Path(path).stem.split("iter_")[-1])
+        trajectory_iterations = sorted({
+            int(Path(path.removesuffix(".zst")).stem.split("iter_")[-1])
             for path in store.list("trajectories")
-            if path.endswith(".json") and "iter_" in path
-        )
+            if path.endswith((".json", ".json.zst")) and "iter_" in path
+        })
         early_stop = store.read_json("early_stop.json") if store.exists("early_stop.json") else {}
         update: dict[str, Any] = {
             "status": status,
