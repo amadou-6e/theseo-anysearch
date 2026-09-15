@@ -6,6 +6,27 @@ fn make_env(max_steps: u32) -> VoxelEnv {
 }
 
 #[test]
+fn rejected_active_goal_does_not_mutate_episode_state() {
+    let mut env = VoxelEnv::new(WorldState::new(), 10).with_extent([8, 8, 8]);
+    env.set_waypoints_with_segment_length((1, 1, 1), (2, 2, 2), 4);
+    env.reset(0);
+    let previous = (
+        env.active_goal,
+        env.segment_steps,
+        env.segment_length,
+        env.prev_goal_dist_l2,
+    );
+
+    let result = env.set_active_goal_with_segment_length((u16::MAX, 1, 1), 9);
+
+    assert!(result.is_err());
+    assert_eq!(env.active_goal, previous.0);
+    assert_eq!(env.segment_steps, previous.1);
+    assert_eq!(env.segment_length, previous.2);
+    assert_eq!(env.prev_goal_dist_l2, previous.3);
+}
+
+#[test]
 fn non_cubic_extent_masks_each_axis_independently() {
     let mut env = VoxelEnv::new(WorldState::new(), 10)
         .with_extent([5, 3, 2])

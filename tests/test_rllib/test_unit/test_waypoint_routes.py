@@ -49,6 +49,24 @@ def route_environment() -> dict[str, object]:
     }
 
 
+def test_disabled_continue_route_does_not_require_route_fields():
+    config = WaypointCurriculumConfig.model_validate({
+        "enabled": False,
+        "completion_mode": "continue_route",
+    })
+
+    assert config.route_length is None
+
+
+def test_enabled_continue_route_still_requires_route_fields():
+    with pytest.raises(ValueError, match="continue_route requires route_length"):
+        WaypointCurriculumConfig.model_validate({
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [16, 16, 16],
+        })
+
+
 def test_route_length_modes_resolve_exactly():
     assert WaypointRouteLengthConfig(mode="fixed", distance=150).resolve(200) == 150
     assert WaypointRouteLengthConfig(mode="fraction", fraction=0.75).resolve(200) == 150

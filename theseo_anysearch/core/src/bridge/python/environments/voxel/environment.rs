@@ -446,11 +446,12 @@ impl PyVoxelEnv {
         &mut self,
         goal: (u16, u16, u16),
         segment_length: Option<u32>,
-    ) -> PyVoxelObservation {
+    ) -> PyResult<PyVoxelObservation> {
         let observation = self
             .inner
-            .set_active_goal_with_segment_length(goal, segment_length.unwrap_or(0));
-        self.to_py_observation(observation)
+            .set_active_goal_with_segment_length(goal, segment_length.unwrap_or(0))
+            .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+        Ok(self.to_py_observation(observation))
     }
 
     /// Clear fixed waypoints so random selection resumes.
@@ -739,6 +740,14 @@ mod tests {
             residency_radius: 3,
             pending_prefetch: None,
         }
+    }
+
+    #[test]
+    fn set_goal_exposes_out_of_bounds_placement_failure() {
+        let mut env = env_at_cursor((1, 1, 1));
+
+        assert!(env.set_goal((u16::MAX, 1, 1), Some(4)).is_err());
+        assert_eq!(env.goal_pos(), None);
     }
 
     fn env_with_block(cursor: (u16, u16, u16), coord: Coord) -> PyVoxelEnv {
