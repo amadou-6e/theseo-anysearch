@@ -22,7 +22,7 @@ use theseo_core::replay::lod::{
     chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
     CameraChunkView, ChunkBudgets,
 };
-use theseo_core::replay::overview::{project_orthographic, OverviewMesh, ProjectedVertex};
+use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
     agent_region, agent_view_render_origin, camera_relative, RegionalReplayFrame,
     RegionalReplaySource, RenderOrigin, ReplayMutation,
@@ -623,18 +623,23 @@ mod regional_view_alignment_tests {
         );
         let local_agent = camera_relative(last_inside, inside_origin);
         let local_voxel = camera_relative(boundary_voxel, inside_origin);
-        let projected_agent = camera.project(local_agent.0, local_agent.1, local_agent.2);
-        let projected_voxel = camera.project(local_voxel.0, local_voxel.1, local_voxel.2);
+        let projected_agent = camera.camera_space(local_agent.0, local_agent.1, local_agent.2);
+        let projected_voxel = camera.camera_space(local_voxel.0, local_voxel.1, local_voxel.2);
         let overview_scale = EXTENT.into_iter().max().unwrap() as f32;
 
         assert!((projected_voxel.0 - projected_agent.0
             - (overview_voxel.x - overview_agent.x) * overview_scale)
             .abs()
             < 1e-4);
-        assert!((projected_voxel.1 - projected_agent.1
-            - (overview_voxel.y - overview_agent.y) * overview_scale)
-            .abs()
-            < 1e-4);
+        // The flat overview has an intentional depth lift; the perspective
+        // camera uses the unmodified camera-space vertical coordinate.
+        let (_, vertical_delta, _) = camera.camera_space(
+            local_voxel.0 - local_agent.0,
+            local_voxel.1 - local_agent.1,
+            local_voxel.2 - local_agent.2,
+        );
+        assert!((projected_voxel.1 - projected_agent.1 - vertical_delta).abs() < 1e-4);
+        assert!(overview_voxel.y.is_finite() && overview_agent.y.is_finite());
     }
 
     #[test]
@@ -723,7 +728,6 @@ struct Camera {
     yaw:   f32,   // radians — rotates x/z plane
     pitch: f32,   // radians — tilts up/down
     zoom:  f32,   // scale multiplier (1.0 = default)
-    perspective: bool,
     field_of_view_degrees: f32,
 }
 
@@ -733,19 +737,8 @@ impl Camera {
             yaw: 45.0_f32.to_radians(),
             pitch: 30.0_f32.to_radians(),
             zoom: 1.0,
-            perspective: false,
             field_of_view_degrees: 45.0,
         }
-    }
-
-    /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
-    fn project(&self, x: f32, y: f32, z: f32) -> (f32, f32) {
-        let projected = project_orthographic(
-            [f64::from(x), f64::from(y), f64::from(z)],
-            self.yaw,
-            self.pitch,
-        );
-        (projected.x, projected.y)
     }
 
     fn camera_space(&self, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
@@ -756,82 +749,38 @@ impl Camera {
         (xr, -yr, depth)
     }
 
-    /// Axis-aligned bounding box of the full grid in projected 2-D space.
+    /// Rotation-independent framing distance and center of the full grid.
     fn bounds(&self, grid_size: f32) -> Bounds {
         let lo = 0.5f32;
         let hi = grid_size + 0.5;
-        let mut min_x = f32::INFINITY;
-        let mut max_x = f32::NEG_INFINITY;
-        let mut min_y = f32::INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-        for &xf in &[lo, hi] {
-            for &yf in &[lo, hi] {
-                for &zf in &[lo, hi] {
-                    let (px, py) = self.project(xf, yf, zf);
-                    if px < min_x { min_x = px; }
-                    if px > max_x { max_x = px; }
-                    if py < min_y { min_y = py; }
-                    if py > max_y { max_y = py; }
-                }
-            }
-        }
-        let pw = (max_x - min_x) * 0.05;
-        let ph = (max_y - min_y) * 0.05;
         Bounds {
-            min_x: min_x - pw,
-            max_x: max_x + pw,
-            min_y: min_y - ph,
-            max_y: max_y + ph,
-            // A cube's largest possible orthographic projection is bounded by
-            // its 3-D diagonal. Keep this span independent of yaw and pitch so
-            // orbiting never changes the apparent zoom.
+            // Rotation-independent framing based on the cube's 3-D diagonal.
             uniform_span: grid_size * 3.0_f32.sqrt() * 1.1,
             world_center: (lo + hi) * 0.5,
         }
     }
 
-    fn screen_scale(&self, rect: Rect, bounds: &Bounds) -> f32 {
-        rect.width().min(rect.height()) / bounds.uniform_span.max(1.0) * self.zoom
-    }
-
-    /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
+    /// Map a 3-D coord to pixels using perspective projection.
     #[inline]
     fn to_screen(&self, x: f32, y: f32, z: f32, rect: Rect, b: &Bounds) -> Pos2 {
-        if self.perspective {
-            let (px, py, depth) = self.camera_space(
-                x - b.world_center,
-                y - b.world_center,
-                z - b.world_center,
-            );
-            let camera_distance = b.uniform_span.max(1.0);
-            let near_plane = camera_distance * 0.01;
-            let distance = (camera_distance - depth).max(near_plane);
-            let half_fov = (self.field_of_view_degrees.clamp(15.0, 100.0) * 0.5)
-                .to_radians();
-            let focal_pixels = rect.width().min(rect.height()) * 0.5
-                / half_fov.tan()
-                * self.zoom;
-            return Pos2::new(
-                rect.center().x + px / distance * focal_pixels,
-                rect.center().y + py / distance * focal_pixels,
-            );
-        }
-        let (px, py) = self.project(x, y, z);
-        let cx = rect.center().x;
-        let cy = rect.center().y;
-        let scale = self.screen_scale(rect, b);
+        let (px, py, depth) = self.camera_space(
+            x - b.world_center, y - b.world_center, z - b.world_center,
+        );
+        let camera_distance = b.uniform_span.max(1.0);
+        let near_plane = camera_distance * 0.01;
+        let distance = (camera_distance - depth).max(near_plane);
+        let half_fov = (self.field_of_view_degrees * 0.5).to_radians();
+        let focal_pixels = rect.width().min(rect.height()) * 0.5
+            / half_fov.tan() * self.zoom;
         Pos2::new(
-            cx + (px - (b.min_x + b.max_x) * 0.5) * scale,
-            cy + (py - (b.min_y + b.max_y) * 0.5) * scale,
+            rect.center().x + px / distance * focal_pixels,
+            rect.center().y + py / distance * focal_pixels,
         )
     }
+
 }
 
 struct Bounds {
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
     uniform_span: f32,
     world_center: f32,
 }
@@ -849,10 +798,6 @@ mod camera_tests {
     fn screen_mapping_uses_one_scale_for_both_projected_axes() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -862,17 +807,13 @@ mod camera_tests {
         let horizontal = camera.to_screen(1.0, 0.0, 0.0, rect, &bounds);
         let vertical = camera.to_screen(0.0, -1.0, 0.0, rect, &bounds);
 
-        assert_eq!(horizontal.x - center.x, vertical.y - center.y);
+        assert!(((horizontal.x - center.x) - (vertical.y - center.y)).abs() < 1e-5);
     }
 
     #[test]
     fn projected_bounds_are_centered_when_the_viewport_aspect_differs() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -884,7 +825,7 @@ mod camera_tests {
     }
 
     #[test]
-    fn orbiting_does_not_change_the_screen_scale() {
+    fn orbiting_does_not_change_the_camera_distance() {
         let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() };
         let second = Camera {
             yaw: 67.0_f32.to_radians(),
@@ -892,14 +833,27 @@ mod camera_tests {
             zoom: 1.0,
             ..Camera::default()
         };
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(360.0, 200.0));
         let first_bounds = first.bounds(32.0);
         let second_bounds = second.bounds(32.0);
 
         assert_eq!(
-            first.screen_scale(rect, &first_bounds),
-            second.screen_scale(rect, &second_bounds),
+            first_bounds.uniform_span,
+            second_bounds.uniform_span,
         );
+    }
+
+    #[test]
+    fn default_camera_uses_perspective_without_a_toggle() {
+        let camera = Camera::default();
+        let bounds = camera.bounds(32.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0));
+        let center = bounds.world_center;
+        let width_at = |z| {
+            let first = camera.to_screen(center, center, z, rect, &bounds);
+            let second = camera.to_screen(center + 1.0, center, z, rect, &bounds);
+            (second - first).length()
+        };
+        assert!(width_at(center + 8.0) > width_at(center - 8.0));
     }
 
     #[test]
@@ -907,7 +861,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -926,7 +879,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -2196,16 +2148,6 @@ impl eframe::App for VoxelReplayApp {
             if has_trail_mode {
                 ui.checkbox(&mut self.show_trail, "Show trail");
             }
-            ui.separator();
-            ui.label(egui::RichText::new("Camera projection").strong());
-            ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
-            ui.add_enabled_ui(self.camera.perspective, |ui| {
-                ui.add(
-                    Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
-                        .suffix("°")
-                        .text("field of view"),
-                    );
-            });
             ui.separator();
             ui.label(egui::RichText::new("Render diagnostics").strong());
             ui.checkbox(&mut self.reveal_hidden_agent, "Reveal hidden agent (diagnostic)");
