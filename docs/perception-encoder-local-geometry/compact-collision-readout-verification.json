@@ -1,0 +1,11 @@
+{
+  "artifacts_verified": 314,
+  "elapsed_seconds": 128.9529999999795,
+  "encoder_batches_replayed": 684,
+  "heads_verified": 21,
+  "native_decoders_verified": 3,
+  "prediction_groups_replayed": 111,
+  "queries_replayed": 116736,
+  "report_payload_sha256": "1a2ff1ff8e87667720a00d3b6d6f55db69dcadba7fd0e709112baca1a0cdb921",
+  "verified": true
+}

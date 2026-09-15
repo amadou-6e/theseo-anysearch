@@ -107,7 +107,9 @@ def paths(gid, occupancy, hidden, count=32):
     return np.stack(result), np.stack(valid)
 
 
-def collision_data(counts=None):
+def collision_data(counts=None, *, program="compact-collision-transfer-v1"):
+    if not isinstance(program, str) or not program or not all(c.isalnum() or c == "-" for c in program):
+        raise ValueError("nonempty alphanumeric dataset program required")
     counts = COUNTS if counts is None else counts
     result = {}; seen = set()
     for split, count in counts.items():
@@ -116,7 +118,7 @@ def collision_data(counts=None):
                                 "ids", "parents", "families", "densities")}
         for i in range(count):
             family = families[(i // 3) % len(families)]; fraction = (.08, .16, .28)[i % 3]
-            gid = f"compact-collision-transfer-v1-{split}-{i:04d}"
+            gid = f"{program}-{split}-{i:04d}"
             parent = scene(gid, family, fraction); digest = hashlib.sha256(parent.tobytes()).hexdigest()
             if digest in seen: raise ValueError("duplicate collision parent")
             seen.add(digest)

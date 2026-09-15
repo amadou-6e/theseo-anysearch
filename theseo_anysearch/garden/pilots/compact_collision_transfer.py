@@ -56,7 +56,8 @@ def values(memo, split, kind, seed):
     return torch.zeros_like(result) if kind == "null" else result
 
 
-def fit(c, model, name, grids, row, seed):
+def fit(c, model, name, grids, row, seed, *, plan=None):
+    plan = PLAN if plan is None else plan
     optimizer = torch.optim.AdamW(model.parameters(), lr=.001, weight_decay=.01)
     rng = torch.Generator().manual_seed(seed + 40000); first = 0; elapsed = 0.; curve = []
     if name in c.progress["stages"]:
@@ -64,23 +65,23 @@ def fit(c, model, name, grids, row, seed):
         if saved["state"] != state: raise ValueError("checkpoint state mismatch")
         model.load_state_dict(saved["model"])
         if common.package.encoder_state_sha256(model) != state["model_state_sha256"]: raise ValueError("head hash mismatch")
-        if state["steps"] == PLAN["steps"]: return model
+        if state["steps"] == plan["steps"]: return model
         optimizer.load_state_dict(saved["optimizer"]); rng.set_state(saved["rng"])
         first, elapsed, curve = state["steps"], state["fit_seconds"], state["curve"]
-    cutoff = c.phase(name, PLAN["fit_cap_seconds"]); start = time.monotonic()
-    cutoff = min(cutoff, start + PLAN["fit_cap_seconds"] - elapsed)
+    cutoff = c.phase(name, plan["fit_cap_seconds"]); start = time.monotonic()
+    cutoff = min(cutoff, start + plan["fit_cap_seconds"] - elapsed)
     gpu = grids.cuda(); model.train(); torch.cuda.reset_peak_memory_stats()
-    for step in range(first + 1, PLAN["steps"] + 1):
+    for step in range(first + 1, plan["steps"] + 1):
         common.replication.d.check_deadline(cutoff)
-        rate = common.prior.nonlinear.learning_rate({"steps": PLAN["steps"], "lr": .001}, step)
+        rate = common.prior.nonlinear.learning_rate({"steps": plan["steps"], "lr": .001}, step)
         for group in optimizer.param_groups: group["lr"] = rate
-        ids = torch.randint(len(grids), (PLAN["batch_geometry"],), generator=rng)
-        path_ids = torch.randint(32, (len(ids), PLAN["paths_per_geometry"]), generator=rng)
+        ids = torch.randint(len(grids), (plan["batch_geometry"],), generator=rng)
+        path_ids = torch.randint(32, (len(ids), plan["paths_per_geometry"]), generator=rng)
         selected = ids[:, None].expand_as(path_ids)
         paths = row["paths"][selected, path_ids].reshape(-1, 9, 3).cuda()
         valid = row["valid"][selected, path_ids].reshape(-1, 9).cuda()
         labels = row["labels"][selected, path_ids].flatten().float().cuda()
-        geometry_indices = torch.arange(len(ids), device="cuda").repeat_interleave(PLAN["paths_per_geometry"])
+        geometry_indices = torch.arange(len(ids), device="cuda").repeat_interleave(plan["paths_per_geometry"])
         logits = model(gpu[ids.cuda()], paths, valid, geometry_indices)
         loss = F.binary_cross_entropy_with_logits(logits, labels)
         if not torch.isfinite(loss): raise FloatingPointError("nonfinite collision loss")
