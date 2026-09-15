@@ -110,7 +110,7 @@ def generate_world(name: str, *, seed: int, output: Path, parameters: dict[str, 
     if not isinstance(summary, GenerationSummary):
         raise ValueError("provider must return a GenerationSummary")
     bundle = load_bundle(output)
-    if bundle.world.frame.meters_per_voxel != provider.info.native_meters_per_voxel:
+    if bundle.world.frame.meters_per_voxel != provider.info.output_resolution(resolved):
         raise ValueError("provider output resolution disagrees with its declared native resolution")
     previews = render_previews(bundle)
     report = {
