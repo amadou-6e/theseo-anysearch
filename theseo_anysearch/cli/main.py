@@ -20,6 +20,7 @@ from typing import Any, Optional
 import typer
 
 from theseo_anysearch.cli.commands import experiment as experiment_cmd
+from theseo_anysearch.cli.commands import execution as execution_cmd
 from theseo_anysearch.cli.commands import garden as garden_cmd
 from theseo_anysearch.cli.commands import geometry as geometry_cmd
 from theseo_anysearch.cli.commands import mlflow_ui as mlflow_cmd
@@ -34,6 +35,8 @@ app = typer.Typer(
     help="Theseo AnySearch — train and tune Rust-backed RL environments.",
     no_args_is_help=True,
 )
+app.command("clone")(execution_cmd.clone)
+app.command("apply")(execution_cmd.apply)
 
 
 @app.command()
