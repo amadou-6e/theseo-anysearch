@@ -1,5 +1,10 @@
 # CaveDroneSim route witness and compact preparation (#426)
 
+Develop promotion (#452) includes the standalone exporter and route checker.
+The compact preparation command below belongs to the historical encoder study
+on `exp/perception-encoder`, not to the develop CLI; its experimental encoder
+dependencies are intentionally not promoted. Existing evidence is unchanged.
+
 Status: CPU-only source export and dataset preparation, **not** model training,
 an encoder result, a native flight task, or a cross-family transfer test.
 Governing roadmap:

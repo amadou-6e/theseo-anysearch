@@ -162,6 +162,31 @@ class EvaluationCoordinator:
             else EpisodeRunMetrics.from_voxel_episodes
         )
         metrics = metrics_factory(episodes)
+        if not _is_multi:
+            from theseo_anysearch.environments.task_identity import (
+                AcceptedTaskManifest,
+                build_evaluation_suite,
+                publish_or_load_evaluation_suite,
+            )
+
+            accepted_tasks = [
+                AcceptedTaskManifest.model_validate(episode.accepted_task)
+                for episode in episodes
+                if getattr(episode, "accepted_task", None) is not None
+            ]
+            if accepted_tasks:
+                suite = publish_or_load_evaluation_suite(
+                    Path(self._output_dir, "evaluation", "suite.json"),
+                    build_evaluation_suite(accepted_tasks),
+                )
+                result = result.model_copy(
+                    update={
+                        "extra": {
+                            **result.extra,
+                            "evaluation_suite_identity": suite.identity_sha256,
+                        }
+                    }
+                )
 
         episode_rewards = [
             sum(episode.total_rewards) if _is_multi else episode.total_reward
@@ -350,6 +375,11 @@ class EvaluationCoordinator:
                         ),
                         "total_reward": float(episode_rewards[episode_index]),
                         "steps": len(episode.steps),
+                        "accepted_task_identity": (
+                            (getattr(episode, "accepted_task", None) or {}).get(
+                                "identity_sha256"
+                            )
+                        ),
                     }
                     for episode_index, episode in enumerate(episodes)
                 ],

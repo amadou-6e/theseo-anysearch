@@ -1,5 +1,15 @@
 # External compact routing dataset preparation (#415)
 
+## Develop Promotion Scope (#452)
+
+This is retained historical encoder-study evidence, not a develop command
+reference. The compact feature evaluator and preparation CLI remain on
+`exp/perception-encoder`; they depend on its experimental encoder package.
+Only the standalone routing contracts, exporters, route witnesses, provider
+interface and shared collision checker are promoted here. See the original
+[study implementation](https://github.com/amadou-6e/theseo-anysearch/tree/65a17a5/theseo_anysearch/garden)
+for the commands below. Frozen study identities are unchanged.
+
 Status: implementation and synthetic-fixture validation only. This is not a
 training run, evaluation score, or claim that an external source is cleared for
 training. Governing roadmap:
