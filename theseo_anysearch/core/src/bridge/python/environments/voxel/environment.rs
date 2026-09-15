@@ -317,6 +317,33 @@ impl PyVoxelEnv {
             .map_err(PyValueError::new_err)
     }
 
+    /// Invoke a native geometry-v1 provider against a scoped, read-only world.
+    pub fn generate_native_geometry_v1(
+        &self,
+        library_path: String,
+        provider_name: String,
+        seed: u64,
+        attempt: u32,
+        parameters_json: String,
+        task_json: String,
+    ) -> PyResult<String> {
+        use crate::voxel::geometries::{GeometryInvocationV1, NativeGeometryV1};
+        let extension = NativeGeometryV1::load(Path::new(&library_path), &provider_name)
+            .map_err(PyValueError::new_err)?;
+        extension
+            .invoke_deterministic(
+                self.inner.world(),
+                &GeometryInvocationV1 {
+                    seed,
+                    attempt,
+                    extent: self.inner.world().extent(),
+                    parameters_json: &parameters_json,
+                    task_json: &task_json,
+                },
+            )
+            .map_err(PyValueError::new_err)
+    }
+
     /// Step the environment.
     /// Action space: Discrete(26) â€” all 26 neighbors in {-1,0,1}Â³ \ {origin},
     /// enumerated as (dx,dy,dz) with dz inner loop, skip (0,0,0) at index 13.

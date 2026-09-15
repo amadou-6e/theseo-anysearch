@@ -16,6 +16,7 @@ from tests.test_environments.test_integration._voxel_validity_support import (
     make_radial_test_env,
 )
 from theseo_anysearch.heuristic import (
+    PlannerBudgetExceeded,
     VoxelAStarOracle,
     VoxelDijkstraHeuristic,
     VoxelReplanningAStarHeuristic,
@@ -76,6 +77,19 @@ def test_astar_reports_unsolvable_geometry(tmp_path):
 
     with pytest.raises(nx.NetworkXNoPath):
         VoxelAStarOracle(env).plan()
+
+
+def test_astar_honors_search_node_budget(tmp_path):
+    env = make_radial_test_env(
+        tmp_path,
+        start=(1, 1, 1),
+        goal=(8, 8, 8),
+        reward_overrides={"trail_mode": False},
+    )
+    env.reset(seed=0)
+
+    with pytest.raises(PlannerBudgetExceeded, match="1-node"):
+        VoxelAStarOracle(env, maximum_search_nodes=1).plan()
 
 def test_dijkstra_matches_astar_shortest_path_length(tmp_path):
     env = make_radial_test_env(

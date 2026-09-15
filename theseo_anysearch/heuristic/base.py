@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import heapq
-import itertools
-import math
 from typing import Any, Iterable
 
 import networkx as nx
@@ -17,13 +14,18 @@ from theseo_anysearch.heuristic.models import (
     VoxelOracleReplay,
     VoxelPosition,
 )
+from theseo_anysearch.heuristic.search import PlannerBudgetExceeded, astar_path
 from theseo_anysearch.worlds.extent import contains_task_coordinate, resolve_extent
+
+
+class PlannerBudgetExceeded(RuntimeError):
+    """Raised when a bounded heuristic search exceeds its node budget."""
 
 
 class BaseVoxelHeuristic(ABC):
     """Provide environment translation, graph construction, and plan replay."""
 
-    def __init__(self, env: VoxelEnv) -> None:
+    def __init__(self, env: VoxelEnv, *, maximum_search_nodes: int | None = None) -> None:
         self.env = env
         self.extent = resolve_extent(env._config)
         self.grid_size = max(self.extent)
@@ -43,6 +45,7 @@ class BaseVoxelHeuristic(ABC):
         }
         self._last_search_nodes = 0
         self._last_search_edges = 0
+        self.maximum_search_nodes = maximum_search_nodes
 
     def plan(self) -> VoxelOraclePlan:
         """Build a plan from the environment's current state."""
@@ -141,42 +144,25 @@ class BaseVoxelHeuristic(ABC):
     ) -> list[VoxelPosition]:
         """Search the regional world lazily without materializing its volume."""
 
-        frontier: list[tuple[float, int, VoxelPosition]] = [(0.0, 0, start)]
-        serial = itertools.count(1)
-        cost = {start: 0.0}
-        parent: dict[VoxelPosition, VoxelPosition] = {}
-        closed: set[VoxelPosition] = set()
-        edges = 0
-        while frontier:
-            _, _, current = heapq.heappop(frontier)
-            if current in closed:
-                continue
-            closed.add(current)
-            if current == goal:
-                break
-            for dx, dy, dz in self.directions:
-                neighbor = (current[0] + dx, current[1] + dy, current[2] + dz)
-                if not contains_task_coordinate(self.extent, neighbor):
-                    continue
-                edges += 1
-                if neighbor != goal and self.env._rust_env.world_occupied(neighbor):
-                    continue
-                next_cost = cost[current] + 1.0
-                if next_cost >= cost.get(neighbor, math.inf):
-                    continue
-                cost[neighbor] = next_cost
-                parent[neighbor] = current
-                priority = next_cost + heuristic_weight * self._chebyshev(neighbor, goal)
-                heapq.heappush(frontier, (priority, next(serial), neighbor))
-        self._last_search_nodes = len(closed)
-        self._last_search_edges = edges
-        if goal not in closed:
+        try:
+            result = astar_path(
+                start,
+                goal,
+                extent=self.extent,
+                directions=self.directions,
+                occupied=self.env._rust_env.world_occupied,
+                maximum_search_nodes=self.maximum_search_nodes,
+                heuristic_weight=heuristic_weight,
+            )
+        except PlannerBudgetExceeded as exc:
+            self._last_search_nodes = exc.graph_nodes
+            self._last_search_edges = exc.graph_edges
+            raise
+        if result is None:
             raise nx.NetworkXNoPath(f"No path between {start} and {goal}")
-        path = [goal]
-        while path[-1] != start:
-            path.append(parent[path[-1]])
-        path.reverse()
-        return path
+        self._last_search_nodes = result.graph_nodes
+        self._last_search_edges = result.graph_edges
+        return list(result.path)
 
     @staticmethod
     def _chebyshev(left: VoxelPosition, right: VoxelPosition) -> float:
@@ -195,4 +181,4 @@ class BaseVoxelHeuristic(ABC):
         return int(x), int(y), int(z)
 
 
-__all__ = ["BaseVoxelHeuristic"]
+__all__ = ["BaseVoxelHeuristic", "PlannerBudgetExceeded"]

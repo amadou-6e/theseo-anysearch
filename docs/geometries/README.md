@@ -1,5 +1,48 @@
 # Geometry configuration
 
+## Validate and inspect without training
+
+The geometry commands resolve experiments without starting Ray:
+
+```console
+anysearch geometry inspect experiments/train/example/experiment.yaml
+anysearch geometry validate experiments/train/example/experiment.yaml --json
+anysearch geometry sample experiments/train/example/experiment.yaml --count 20 --seed 42 --output geometry-samples.json
+```
+
+Reports distinguish geometry validity, task feasibility, training suitability,
+and evaluation suitability. Fixed boxes use `geometry.sources` with `type:
+boxes`; geometry pools are sampled deterministically from the command seed; and
+compiled worlds are inspected through their manifest and chunk counts without
+expanding occupied voxels into a Python list.
+
+```yaml
+# Fixed boxes
+env:
+  geometry:
+    grid_size: 32
+    sources:
+      - type: boxes
+        boxes: [[12, 1, 1, 13, 20, 20]]
+```
+
+```yaml
+# Pool augmentation
+env:
+  geometry:
+    grid_size: 32
+    pool:
+      pool_dir: runtime/geometry-pool
+```
+
+```yaml
+# Bounded-memory compiled-world inspection
+env:
+  geometry:
+    extent: [60000, 40000, 20000]
+    compiled_world_path: runtime/worlds/example
+```
+
 Geometry sources and voxelization settings belong under `env.geometry`.
 
 ```yaml
@@ -33,6 +76,19 @@ A precomputed pool can be configured as follows:
 env:
   geometry:
     grid_size: 64
+    validation:
+      enabled: true
+      maximum_attempts: 16
+      maximum_search_nodes: 100000
+      recovery_margin_steps: 8
+      clearance_radius: 4
+      difficulty_bands:
+        - name: direct
+          detour_ratio: {maximum: 1.0}
+        - name: obstacle_detour
+          detour_ratio: {minimum: 1.01}
+          direction_changes: {minimum: 2}
+      accepted_difficulty_bands: [obstacle_detour]
     pool:
       pool_dir: runtime/geometry_pools/highres
       augmentation:
@@ -41,9 +97,70 @@ env:
           box_min_size: [2, 2, 2]
           box_max_size: [20, 20, 20]
           prob: 1.0
+        feasibility:
+          enabled: true
+          maximum_attempts: 16
+          maximum_search_nodes: 100000
+          recovery_margin_steps: 8
 ```
 
+Opt-in `geometry.validation` applies the same structural and task-feasibility
+contracts to fixed boxes, fixed STL geometry, pools, and augmented pools. It
+rejects samples whose selected start
+or goal is occupied, whose task has no A* path using the configured action
+mode, or whose shortest path plus `recovery_margin_steps` exceeds
+`max_steps`. `maximum_attempts` and `maximum_search_nodes` are mandatory,
+positive bounds. Exhausting either budget fails explicitly; it never falls
+back to an unaugmented or easier geometry. Reset info reports the attempt
+count, categorized rejection counts, and accepted shortest-path length under
+`geometry_feasibility`.
+
+The earlier `geometry.pool.augmentation.feasibility` location remains accepted
+for compatibility, but new configurations should use `geometry.validation`.
+
+Validation runs after waypoint-curriculum sampling, so the active curriculum
+segment is checked against the final augmented geometry. For multi-waypoint
+routes, this gate covers the active segment; whole-route feasibility is a
+separate concern.
+
+The accepted A* path also produces deterministic routing descriptors: empty-grid
+direct distance, shortest-path length, detour ratio, direction changes, vertical
+displacement, and expansion count. Clearance statistics are included only when
+`clearance_radius` is set and use bounded face-direction queries. Named bands
+are conjunctions of inclusive descriptor ranges; configurations with empty or
+contradictory ranges fail during settings validation. The matched band and raw
+descriptors are written to reset diagnostics and single-agent trajectory
+artifacts. They do not alter curriculum advancement.
+
 Legacy fields such as `env.stl_path`, `env.grid_size`, and `env.geometry_pool` remain loadable during migration. Do not combine them with `env.geometry` in the same configuration.
+
+## Composing small-world geometry
+
+New small in-memory worlds should use ordered typed sources. Sources use set-union
+semantics; duplicate occupied voxels are emitted once and subtraction is not
+supported in this first version.
+
+```yaml
+env:
+  geometry:
+    grid_size: 64
+    sources:
+      - type: stl
+        path: assets/room.stl
+        scale: 1.0
+        padding: 2
+      - type: boxes
+        boxes:
+          - [20, 20, 1, 24, 24, 12]
+```
+
+Legacy `stl_path` and `boxes` remain supported and are translated into this
+canonical proposal. Mixing legacy source fields with `sources` is rejected.
+`stl_paths` remains reserved for preprocessing/pool creation and does not become
+a runtime source. Compiled worlds cannot yet be transformed or combined with
+small-world sources; use a separately compiled artifact instead. Legacy source
+fields are deprecated in documentation now, will warn in a later release, and
+will only be removed in a separately announced breaking release.
 
 ## Large finite and non-cubic worlds
 

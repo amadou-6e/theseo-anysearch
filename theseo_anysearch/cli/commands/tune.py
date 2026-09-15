@@ -242,9 +242,13 @@ _KNOWN_PPO_PARAMS: frozenset[str] = frozenset({
 })
 _KNOWN_MODEL_PARAMS: frozenset[str] = frozenset({
     "num_layers", "encoder_depth", "layer_size",
-    "use_position_encoding",  # TODO: not yet wired — see VoxelEncoderConfig
 })
 _KNOWN_TUNE_PARAMS: frozenset[str] = _KNOWN_PPO_PARAMS | _KNOWN_MODEL_PARAMS
+_INACTIVE_TUNE_PARAMS: dict[str, str] = {
+    "use_position_encoding": (
+        "is accepted by the model schema but is not yet consumed by any model"
+    ),
+}
 
 
 def _validate_tune_config(
@@ -256,22 +260,30 @@ def _validate_tune_config(
 
     Does not raise — caller prints the warnings and decides whether to abort.
     """
-    import torch
-
     issues: list[str] = []
     all_provided = set(base_config) | set(search_space)
 
-    unknown = all_provided - _KNOWN_TUNE_PARAMS
+    inactive = all_provided & _INACTIVE_TUNE_PARAMS.keys()
+    for parameter in sorted(inactive):
+        issues.append(
+            f"Inactive param {parameter!r} {_INACTIVE_TUNE_PARAMS[parameter]}; "
+            "it will not change trial behavior."
+        )
+
+    unknown = all_provided - _KNOWN_TUNE_PARAMS - _INACTIVE_TUNE_PARAMS.keys()
     if unknown:
         issues.append(
             f"Unrecognised params (will be ignored by trainable): {sorted(unknown)}"
         )
 
-    if num_gpus > 0 and torch.cuda.device_count() == 0:
-        issues.append(
-            f"num_gpus={num_gpus} requested but torch.cuda.device_count()=0. "
-            "Install CUDA-enabled torch or set training.num_gpus: 0 in your YAML."
-        )
+    if num_gpus > 0:
+        import torch
+
+        if torch.cuda.device_count() == 0:
+            issues.append(
+                f"num_gpus={num_gpus} requested but torch.cuda.device_count()=0. "
+                "Install CUDA-enabled torch or set training.num_gpus: 0 in your YAML."
+            )
 
     return issues
 
