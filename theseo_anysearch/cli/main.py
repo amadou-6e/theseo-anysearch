@@ -597,7 +597,8 @@ def _summarise_run_dir(path: Path) -> str:
         n = sum(1 for _ in (path / "checkpoints").iterdir())
         parts.append(f"{n} checkpoint(s)")
     if (path / "trajectories").exists():
-        n = sum(1 for _ in (path / "trajectories").glob("*.json"))
+        from theseo_anysearch.experiments.trajectory_storage import list_trajectories
+        n = len(list_trajectories(path / "trajectories"))
         parts.append(f"{n} trajectory file(s)")
     if (path / "renders").exists():
         n = sum(1 for _ in (path / "renders").iterdir())

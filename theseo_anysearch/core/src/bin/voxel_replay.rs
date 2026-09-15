@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, Sense, Shape, Slider, Stroke, Vec2};
 use serde::Deserialize;
+use theseo_core::replay::storage::{find_trajectory, iteration_files, read_json};
 use theseo_core::replay::explain::NativeExplainUi;
 use theseo_core::replay::lod::{
     chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
@@ -308,8 +309,8 @@ fn parse_npy_uint16_2d_3cols(bytes: &[u8]) -> Result<Vec<[u16; 3]>, String> {
 }
 
 fn load_trajectory(path: &std::path::Path) -> Option<TrajectoryData> {
-    let json = std::fs::read_to_string(path).ok()?;
-    let mut traj = serde_json::from_str::<TrajectoryData>(&json).ok()?;
+    let json = read_json(path).map_err(|e| eprintln!("Cannot read trajectory '{}': {e}", path.display())).ok()?;
+    let mut traj = serde_json::from_slice::<TrajectoryData>(&json).ok()?;
     traj.source_path = path.to_path_buf();
     if let Some(world) = &traj.world {
         let manifest_path = path.parent().unwrap_or(std::path::Path::new(".")).join(
@@ -489,9 +490,9 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
             if let Some(r) = reward_from_meta {
                 r
             } else {
-                let best_path = traj_dir.join("best.json");
-                std::fs::read_to_string(&best_path).ok()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                find_trajectory(&traj_dir, "best")
+                    .and_then(|best_path| read_json(&best_path).ok())
+                    .and_then(|s| serde_json::from_slice::<serde_json::Value>(&s).ok())
                     .and_then(|v| v["episode_reward_mean"].as_f64())
                     .map(|f| f as f32)
                     .unwrap_or(f32::NEG_INFINITY)
@@ -514,22 +515,9 @@ fn scan_tune_dir(dir: &std::path::Path) -> Vec<TrialEntry> {
 /// Load all iter_*.json files from a trial's trajectory dir, sorted by filename.
 /// Falls back to best.json if no iter files exist.
 fn load_trial_trajectories(traj_dir: &std::path::Path) -> Vec<TrajectoryData> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(traj_dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-              .map(|e| e.path())
-              .filter(|p| {
-                  let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                  name.starts_with("iter_") && name.ends_with(".json")
-              })
-              .collect()
-        })
-        .unwrap_or_default();
-    files.sort();
-
+    let mut files = iteration_files(traj_dir);
     if files.is_empty() {
-        let best = traj_dir.join("best.json");
-        if best.exists() { files.push(best); }
+        if let Some(best) = find_trajectory(traj_dir, "best") { files.push(best); }
     }
 
     let mut trajs: Vec<TrajectoryData> = files.iter()

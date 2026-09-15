@@ -25,6 +25,7 @@ dependencies = [
   "tensorboard>=2.17",
   "fsspec>=2024.2",
   "protobuf>=4.25",
+  "zstandard>=0.25,<1",
 ]
 
 [project.optional-dependencies]

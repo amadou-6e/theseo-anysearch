@@ -23,6 +23,10 @@ import click
 import typer
 from typer.core import TyperGroup
 
+from theseo_anysearch.experiments.trajectory_storage import (
+    find_trajectory, list_trajectories as discover_trajectories, trajectory_stem,
+)
+
 
 class _SoftGroup(TyperGroup):
     """TyperGroup that treats unknown subcommand names as positional args.
@@ -106,41 +110,43 @@ def _supports_native_explain(run_dir: Path) -> bool:
 
 
 def _find_trajectory(run_dir: Path, iteration: int) -> Path:
-    """Return the trajectory JSON path for a specific iteration."""
+    """Return the trajectory JSON (.json or .json.zst) path for a specific iteration."""
     traj_dir = run_dir / "trajectories"
     if not traj_dir.exists():
         raise FileNotFoundError(
             f"No trajectories directory in {run_dir}. "
             "Re-run the experiment with trajectory_every > 0."
         )
-    p = traj_dir / f"iter_{iteration:06d}.json"
-    if not p.exists():
-        available = sorted(traj_dir.glob("iter_*.json"))
+    try:
+        p = find_trajectory(traj_dir, f"iter_{iteration:06d}")
+    except FileNotFoundError:
+        available = discover_trajectories(traj_dir, "iter_*")
         hint = (
-            ", ".join(f.stem.split("iter_")[-1] for f in available)
+            ", ".join(trajectory_stem(f).split("iter_")[-1] for f in available)
             if available
             else "none"
         )
         raise FileNotFoundError(
-            f"iter_{iteration:06d}.json not found. Available: {hint}"
+            f"Iteration {iteration:06d} not found. Available: {hint}"
         )
     return p
 
 
 def _all_iter_trajectories(run_dir: Path) -> list[Path]:
-    """Return all iter_*.json files sorted by iteration."""
+    """Return legacy/compressed snapshots once, sorted by iteration."""
     traj_dir = run_dir / "trajectories"
     if not traj_dir.exists():
         raise FileNotFoundError(
             f"No trajectories directory in {run_dir}. "
             "Re-run the experiment with trajectory_every > 0."
         )
-    files = sorted(traj_dir.glob("iter_*.json"))
+    files = discover_trajectories(traj_dir, "iter_*")
     if not files:
         # Fall back to best.json if no periodic snapshots exist
-        best = traj_dir / "best.json"
-        if best.exists():
-            return [best]
+        try:
+            return [find_trajectory(traj_dir, "best")]
+        except FileNotFoundError:
+            pass
         raise FileNotFoundError(f"No trajectory files found in {traj_dir}.")
     return files
 
@@ -170,7 +176,7 @@ def _replay_sweep_dir(sweep_dir: Path) -> None:
 @app.callback(invoke_without_command=True)
 def replay(
     ctx: typer.Context,
-    best: bool = typer.Option(False, "--best", help="Open best.json only."),
+    best: bool = typer.Option(False, "--best", help="Open the best saved trajectory only."),
     iteration: Optional[int] = typer.Option(
         None, "--iter", "-i", help="Open a specific iteration snapshot."
     ),
@@ -323,9 +329,10 @@ def replay(
     binary = _find_binary()
 
     if best:
-        p = traj_dir / "best.json"
-        if not p.exists():
-            typer.echo(f"best.json not found in {traj_dir}.", err=True)
+        try:
+            p = find_trajectory(traj_dir, "best")
+        except FileNotFoundError:
+            typer.echo(f"Best trajectory not found in {traj_dir}.", err=True)
             raise typer.Exit(1)
         typer.echo(f"Replaying best trajectory: {p}")
         files = [p]
@@ -348,14 +355,14 @@ def replay(
 
 
 # ---------------------------------------------------------------------------
-# replay file  (open any trajectory JSON by path)
+# replay file  (open any trajectory JSON (.json or .json.zst) by path)
 # ---------------------------------------------------------------------------
 
 @app.command()
 def file(
-    path: Path = typer.Argument(..., help="Path to a trajectory JSON file."),
+    path: Path = typer.Argument(..., help="Path to a trajectory JSON (.json or .json.zst) file."),
 ) -> None:
-    """Open an arbitrary trajectory JSON file in the eframe viewer."""
+    """Open an arbitrary trajectory JSON (.json or .json.zst) file in the eframe viewer."""
     if not path.exists():
         typer.echo(f"File not found: {path}", err=True)
         raise typer.Exit(1)
@@ -435,8 +442,11 @@ def list_trajectories(
         typer.echo("No trajectories directory found.")
         raise typer.Exit(1)
 
-    periodic = sorted(traj_dir.glob("iter_*.json"))
-    best_path = traj_dir / "best.json"
+    periodic = discover_trajectories(traj_dir, "iter_*")
+    try:
+        best_path = find_trajectory(traj_dir, "best")
+    except FileNotFoundError:
+        best_path = traj_dir / "best.json.zst"
     meta_path = traj_dir / "best_meta.json"
 
     typer.echo(f"Run: {run_id}  ({run_dir})")
@@ -450,4 +460,4 @@ def list_trajectories(
             import json as _json
             m = _json.loads(meta_path.read_text())
             meta = f"  (iter {m.get('iteration','?')}, reward {m.get('episode_reward_mean', '?'):.3f})"
-        typer.echo(f"Best: best.json{meta}")
+        typer.echo(f"Best: {best_path.name}{meta}")

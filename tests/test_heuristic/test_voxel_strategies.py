@@ -200,7 +200,7 @@ def test_heuristic_trajectory_is_replayer_compatible(tmp_path):
     )
     payload = store.read_json(relative_path)
 
-    assert relative_path == "trajectories/heuristic_weighted_astar.json"
+    assert relative_path == "trajectories/heuristic_weighted_astar.json.zst"
     assert payload["heuristic"] == {"type": "weighted_astar", "weight": 2.0}
     assert payload["episode"]["success"] is True
     assert payload["episode"]["steps_taken"] == 1

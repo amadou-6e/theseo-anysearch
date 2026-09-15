@@ -800,11 +800,11 @@ class ExperimentRunner:
             for path in store.list_dirs("checkpoints")
             if "iter_" in path
         )
-        trajectory_iterations = sorted(
-            int(Path(path).stem.split("iter_")[-1])
+        trajectory_iterations = sorted({
+            int(Path(path.removesuffix(".zst")).stem.split("iter_")[-1])
             for path in store.list("trajectories")
-            if path.endswith(".json") and "iter_" in path
-        )
+            if path.endswith((".json", ".json.zst")) and "iter_" in path
+        })
         render_files = sorted(store.list("renders"))
 
         config_data: dict[str, Any] = {}
@@ -891,11 +891,11 @@ class ExperimentRunner:
             for path in store.list_dirs("checkpoints")
             if "iter_" in path
         )
-        trajectory_iterations = sorted(
-            int(Path(path).stem.split("iter_")[-1])
+        trajectory_iterations = sorted({
+            int(Path(path.removesuffix(".zst")).stem.split("iter_")[-1])
             for path in store.list("trajectories")
-            if path.endswith(".json") and "iter_" in path
-        )
+            if path.endswith((".json", ".json.zst")) and "iter_" in path
+        })
         early_stop = store.read_json("early_stop.json") if store.exists("early_stop.json") else {}
         update: dict[str, Any] = {
             "status": status,

@@ -8,6 +8,8 @@ Module-scoped shared fixtures keep algorithm builds to 3 (run + resume + repeat)
 """
 from __future__ import annotations
 
+from theseo_anysearch.experiments.trajectory_storage import read_trajectory
+
 import json
 import re
 import textwrap
@@ -184,18 +186,18 @@ class TestTrajectoryOutput:
         traj_dir = run_dir / "trajectories"
         assert traj_dir.is_dir(), "trajectories/ directory not created"
         # trajectory_every=1 → file for every iteration
-        assert (traj_dir / "iter_000001.json").exists()
-        assert (traj_dir / "iter_000002.json").exists()
+        assert (traj_dir / "iter_000001.json.zst").exists()
+        assert (traj_dir / "iter_000002.json.zst").exists()
 
     def test_best_trajectory_written(self, run_info, experiment_config):
         run_dir = experiment_config.run_output_dir / run_info.run_id
-        assert (run_dir / "trajectories" / "best.json").exists()
+        assert (run_dir / "trajectories" / "best.json.zst").exists()
         assert (run_dir / "trajectories" / "best_meta.json").exists()
 
     def test_periodic_json_valid(self, run_info, experiment_config):
         run_dir = experiment_config.run_output_dir / run_info.run_id
-        path = run_dir / "trajectories" / "iter_000001.json"
-        data = json.loads(path.read_text())
+        path = run_dir / "trajectories" / "iter_000001.json.zst"
+        data = read_trajectory(path)
         for key in ("experiment_name", "run_id", "iteration", "episode_reward_mean",
                     "grid_size", "agent_count", "max_steps", "obs_mode", "episode"):
             assert key in data, f"missing key: {key}"
@@ -204,7 +206,7 @@ class TestTrajectoryOutput:
 
     def test_best_json_episode_has_steps(self, run_info, experiment_config):
         run_dir = experiment_config.run_output_dir / run_info.run_id
-        data = json.loads((run_dir / "trajectories" / "best.json").read_text())
+        data = read_trajectory(run_dir / "trajectories" / "best.json.zst")
         ep = data["episode"]
         assert isinstance(ep["steps"], list)
         assert len(ep["steps"]) > 0
