@@ -10,7 +10,7 @@ import tarfile
 import xml.etree.ElementTree as ET
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 from scipy import ndimage
@@ -143,7 +143,27 @@ class SdfArchives:
             path = source_root / name
             if verify_hashes and _sha_file(path) != expected:
                 raise ValueError(f"source archive hash differs from pinned {name}")
-            self.archives[name] = tarfile.open(path, "r:xz")
+            archive = tarfile.open(path, "r:xz")
+            try:
+                seen = set()
+                total = 0
+                for index, member in enumerate(archive):
+                    member_path = PurePosixPath(member.name)
+                    if (index >= 512 or member.name in seen or member_path.is_absolute()
+                            or "\\" in member.name or ":" in member.name
+                            or ".." in member_path.parts
+                            or member.name.rstrip("/") != member_path.as_posix()
+                            or not (member.isfile() or member.isdir())):
+                        raise ValueError("unsafe or excessive archive members")
+                    seen.add(member.name)
+                    total += member.size
+                    if member.size > 2 * 1024 * 1024 or total > 32 * 1024 * 1024:
+                        raise ValueError("archive decompressed size limit exceeded")
+            except Exception:
+                archive.close()
+                self.close()
+                raise
+            self.archives[name] = archive
         self.used_members: dict[str, str] = {}
 
     def close(self) -> None:
@@ -242,9 +262,13 @@ def read_source_collisions(source_root: Path, *, verify_hashes: bool = True) -> 
 
 
 def _extent(voxel_m: float) -> tuple[int, int, int]:
+    if not math.isfinite(voxel_m) or not 0.25 <= voxel_m <= 0.5:
+        raise ValueError("voxel size must be between 0.25 and 0.5 m")
     counts = np.asarray(EXTENT_M) / voxel_m
     if not math.isfinite(voxel_m) or voxel_m <= 0 or not np.allclose(counts, np.rint(counts), atol=1e-9):
         raise ValueError("voxel size must divide fixed metric bounds")
+    if np.prod(np.rint(counts)) > 5_000_000:
+        raise ValueError("voxel count exceeds resource limit")
     return tuple(int(v) for v in np.rint(counts))
 
 

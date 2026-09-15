@@ -16,6 +16,8 @@ from theseo_anysearch.environments.gazebo_maze_export import (
     rasterize,
     read_source_collisions,
     replay_route,
+    _extent,
+    SdfArchives,
 )
 
 
@@ -123,3 +125,21 @@ def test_replay_rejects_body_collision_and_diagonal_hop():
         replay_route(((91, 92, 2), (92, 92, 2)), (wall,), voxel_m=0.5, radius_m=0.25)
     with pytest.raises(ValueError, match="non-axis-adjacent"):
         replay_route(((91, 92, 2), (92, 93, 3)), (), voxel_m=0.5, radius_m=0.25)
+
+
+@pytest.mark.parametrize("value", [0, float("nan"), 0.1, 0.3, 1])
+def test_resolution_limits_before_allocation(value):
+    with pytest.raises(ValueError):
+        _extent(value)
+
+
+@pytest.mark.parametrize("name,kind", [("../escape", tarfile.REGTYPE),
+    ("/absolute", tarfile.REGTYPE), ("link", tarfile.SYMTYPE),
+    ("hardlink", tarfile.LNKTYPE), ("device", tarfile.CHRTYPE)])
+def test_unsafe_archive_members_rejected(tmp_path, name, kind):
+    with tarfile.open(tmp_path / "3d_maze.tar.xz", "w:xz") as archive:
+        member = tarfile.TarInfo(name)
+        member.type = kind
+        archive.addfile(member)
+    with pytest.raises(ValueError, match="unsafe"):
+        SdfArchives(tmp_path, verify_hashes=False)
