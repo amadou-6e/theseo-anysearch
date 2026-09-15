@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, clone, validate
+from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, clone, make_portable, validate
 
 
 def fixture(tmp_path: Path):
@@ -66,3 +66,26 @@ def test_missing_parent_provenance_fails(tmp_path):
     checkpoint.mkdir(parents=True)
     with pytest.raises(FileNotFoundError, match="experiment.yaml"):
         clone(checkpoint, "evaluation")
+
+
+def test_portable_bundle_relocates_and_verifies(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    bundle = tmp_path / "bundle"
+    portable = make_portable(recipe, bundle)
+    portable.save(bundle / "recipe.yaml")
+    moved = tmp_path / "moved"
+    bundle.rename(moved)
+    loaded = ExecutionRecipe.load(moved / "recipe.yaml")
+    assert validate(loaded, base=moved)["valid"]
+    assert not Path(loaded.checkpoint.path).is_absolute()
+    (moved / loaded.experiment.path).write_text("tampered")
+    with pytest.raises(ValueError, match="tampered"):
+        validate(loaded, base=moved)
+
+
+def test_source_revision_is_detected(tmp_path):
+    checkpoint = fixture(tmp_path)
+    (checkpoint.parent.parent / "provenance.json").write_text(json.dumps({"source_commit": "abc123"}))
+    recipe = clone(checkpoint, "evaluation")
+    assert recipe.provenance["source_revision"] == "abc123"
+    assert recipe.provenance_gaps == []

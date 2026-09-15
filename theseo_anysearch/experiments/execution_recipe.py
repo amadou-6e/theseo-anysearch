@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -49,6 +50,7 @@ class ExecutionRecipe(BaseModel):
     extension_bindings: list[str] = Field(default_factory=list)
     overrides: Overrides = Field(default_factory=Overrides)
     provenance_gaps: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,19 +86,45 @@ def clone(checkpoint: Path, scope: str) -> ExecutionRecipe:
         for role, path in (("extension_manifest", ext_dir / "extension.json"),
                            ("extension_binary", ext_dir / manifest["library"])):
             extension.append(Artifact(role=role, path=str(path.resolve()), sha256=_sha(path)))
-    gaps = ["source revision is not recorded in this run"]
+    provenance = {"python": sys.version.split()[0], "platform": platform.platform()}
+    for name in ("provenance.json", "source.json", "run.json"):
+        path = run / name
+        if path.is_file():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for key in ("source_commit", "git_sha", "commit_sha"):
+                if payload.get(key): provenance["source_revision"] = str(payload[key])
+    gaps = [] if provenance.get("source_revision") else ["source revision is not recorded in this run"]
     return ExecutionRecipe(scope=scope, source_run=str(run.resolve()),
         checkpoint=Artifact(role="rllib_checkpoint", path=str(checkpoint), sha256=_sha(checkpoint)),
         experiment=Artifact(role="resolved_experiment", path=str(config_path.resolve()), sha256=_sha(config_path)),
         checkpoint_state=json.loads(state_path.read_text(encoding="utf-8")), policy_contract=contract,
-        extension=extension, extension_bindings=bindings, provenance_gaps=gaps)
+        extension=extension, extension_bindings=bindings, provenance_gaps=gaps, provenance=provenance)
 
 
-def validate(recipe: ExecutionRecipe, world: Path | None = None) -> dict[str, Any]:
+def make_portable(recipe: ExecutionRecipe, directory: Path) -> ExecutionRecipe:
+    """Copy immutable inputs into a new, self-verifying relocatable bundle."""
+    directory = directory.resolve()
+    if directory.exists() and any(directory.iterdir()):
+        raise FileExistsError(f"bundle directory is not empty: {directory}")
+    artifacts = directory / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for index, artifact in enumerate([recipe.checkpoint, recipe.experiment, *recipe.extension]):
+        source = Path(artifact.path)
+        target = artifacts / f"{index:02d}-{artifact.role}"
+        if source.is_dir(): shutil.copytree(source, target)
+        else: shutil.copy2(source, target)
+        copied.append(Artifact(role=artifact.role, path=target.relative_to(directory).as_posix(), sha256=_sha(target)))
+    return recipe.model_copy(update={"checkpoint": copied[0], "experiment": copied[1],
+                                     "extension": copied[2:]})
+
+
+def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | None = None) -> dict[str, Any]:
     artifacts = [recipe.checkpoint, recipe.experiment, *recipe.extension]
     verified = []
     for artifact in artifacts:
         path = Path(artifact.path)
+        if not path.is_absolute(): path = (base or Path.cwd()) / path
         if not path.exists():
             raise FileNotFoundError(f"missing {artifact.role}: {path}")
         if _sha(path) != artifact.sha256:
