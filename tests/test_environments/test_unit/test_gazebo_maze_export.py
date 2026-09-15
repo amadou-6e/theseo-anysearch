@@ -98,7 +98,7 @@ def test_rotated_box_and_cylinder_conservatively_rasterize():
     )
     occupied = rasterize(collisions)
     assert occupied.dtype == np.uint8
-    assert occupied.shape == (184, 184, 18)
+    assert occupied.shape == (184, 18, 184)
     strata = collision_parity_census(occupied, collisions, voxel_m=0.5)
     assert set(strata) == {"random_centers", "interiors", "surfaces", "openings", "borders", "diagonals"}
     assert all(row["source_hit_voxel_free"] == 0 for row in strata.values())
@@ -113,7 +113,7 @@ def test_roof_closes_over_wall_and_planar_control_remains():
     with pytest.raises(ValueError, match="vertical bypass"):
         over_wall_census(np.ones_like(passable, dtype=bool), (wall,), voxel_m=0.5)
     # A route on one side of the barrier is available at fixed altitude.
-    start, goal = (78, 82, 2), (82, 82, 2)
+    start, goal = (78, 2, 82), (82, 2, 82)
     route = _route(~passable, start, goal, planar=True)
     assert route is not None
     replay_route(route, (wall, roof), voxel_m=0.5, radius_m=0.25)
@@ -122,9 +122,17 @@ def test_roof_closes_over_wall_and_planar_control_remains():
 def test_replay_rejects_body_collision_and_diagonal_hop():
     wall = Collision("wall", "box", (0, 0, 1.25), np.eye(3), size_m=(0.2, 4, 2))
     with pytest.raises(ValueError, match="collides"):
-        replay_route(((91, 92, 2), (92, 92, 2)), (wall,), voxel_m=0.5, radius_m=0.25)
+        replay_route(((91, 2, 92), (92, 2, 92)), (wall,), voxel_m=0.5, radius_m=0.25)
     with pytest.raises(ValueError, match="non-axis-adjacent"):
-        replay_route(((91, 92, 2), (92, 93, 3)), (), voxel_m=0.5, radius_m=0.25)
+        replay_route(((91, 2, 92), (92, 3, 93)), (), voxel_m=0.5, radius_m=0.25)
+
+
+def test_gazebo_z_up_maps_to_renderer_y_up():
+    from theseo_anysearch.environments.gazebo_maze_export import _cell, voxel_center
+    source = (7.25, -37.25, 1.25)
+    storage = _cell(source, 0.5)
+    assert storage == (106, 2, 17)
+    assert voxel_center(storage, 0.5) == pytest.approx(source)
 
 
 @pytest.mark.parametrize("value", [0, float("nan"), 0.1, 0.3, 1])

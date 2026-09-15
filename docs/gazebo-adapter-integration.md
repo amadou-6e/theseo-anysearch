@@ -1,7 +1,7 @@
 # Gazebo adapter integration (#466)
 
 Governing successor spec:
-`amadou-6e/specs@d54d03501a9fc5b6f8be126c4ac6e8439c84882c`
+`amadou-6e/specs@d98320117af66e3189d2b1b83b8f49897e91cfd2`
 (`projects/theseo-anysearch/gazebo-world-provider.md`, specs PR #98).
 Explicit owner authorization permits stacked implementation before review;
 neither specification nor implementation is merged automatically.
@@ -16,3 +16,9 @@ Offline adapter suite: 15 passed. Includes transform composition, missing
 dependencies, pinned hash rejection, conservative primitive rasterization,
 roof closure, source replay, invalid resolution and archive attack cases.
 Disposition: retain shared infrastructure; no training or package publication.
+
+Native Gazebo inspection exposed and #477 records a blocking pre-review defect:
+Gazebo is source-Z-up while the replayer is storage-Y-up. Storage now maps to
+source `(x,z,y)` through `GridFrame`; rasterization, source parity, planar
+routing, roof census and altitude metrics use that same mapping. Pre-fix packs
+and their identities are invalid viewer evidence and are superseded.

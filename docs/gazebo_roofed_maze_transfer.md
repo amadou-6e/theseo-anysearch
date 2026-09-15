@@ -37,7 +37,8 @@ python -m theseo_anysearch.environments.gazebo_maze_export `
 ```
 
 The source directory must hold both pinned archives; output must not exist.
-Storage is zero-based, `(x,y,z)`, right-handed and in source meters. Bounds
+Storage is zero-based and maps to source `(x,z,y)`: storage Y is Gazebo Z-up,
+matching the native replayer's Y-up convention. Bounds
 are `[-46,46] x [-46,46] x [0,9]` m at `0.5` m per voxel. The source world
 remains open above; its finite crop is **not** a bounded flight task. The
 separate roof has a collision underside at `z=8.0` m and thickness `1.0` m,
@@ -45,7 +46,9 @@ touching the source's 8 m main walls. A spherical body radius of `0.25` m is
 used for query clearance and continuous swept-segment replay. Outside the
 roofed world bounds is forbidden to the body.
 
-The exact generated identities were:
+The identities below came from the superseded pre-fix `(source x,y,z)` storage
+run and are retained only as negative audit evidence. They must not be used or
+reproduced; corrected identities are generated under #477.
 
 | Record | SHA-256 |
 | --- | --- |
