@@ -16,10 +16,13 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def cached_sources(cache: Path, *, base_url: str, hashes: dict[str, str], offline: bool = False) -> Path:
+def cached_sources(cache: Path, *, base_url: str, hashes: dict[str, str], offline: bool = False,
+                   max_file_bytes: int = MAX_FILE_BYTES) -> Path:
     """Publish only complete verified manifests; never repair corrupt caches silently."""
     if not base_url.startswith("https://") or not hashes:
         raise ValueError("source manifest requires HTTPS and nonempty hashes")
+    if type(max_file_bytes) is not int or not 0 < max_file_bytes <= 4 * 1024 * 1024:
+        raise ValueError("source file limit must be positive and at most 4 MiB")
     for name, digest in hashes.items():
         path = PurePosixPath(name)
         if path.is_absolute() or any(part in {"..", "."} for part in path.parts) or "\\" in name or ":" in name:
@@ -35,7 +38,7 @@ def cached_sources(cache: Path, *, base_url: str, hashes: dict[str, str], offlin
             path = root / name
             if not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
                 raise ValueError("source cache is incomplete or escapes its root")
-            if path.stat().st_size > MAX_FILE_BYTES or _digest(path) != digest:
+            if path.stat().st_size > max_file_bytes or _digest(path) != digest:
                 raise ValueError("source cache hash mismatch")
 
     if target.exists():
@@ -50,8 +53,8 @@ def cached_sources(cache: Path, *, base_url: str, hashes: dict[str, str], offlin
             with urlopen(base_url.rstrip("/") + "/" + name, timeout=20) as response:
                 if not response.geturl().startswith("https://"):
                     raise ValueError("source download redirected away from HTTPS")
-                data = response.read(MAX_FILE_BYTES + 1)
-            if len(data) > MAX_FILE_BYTES or hashlib.sha256(data).hexdigest() != digest:
+                data = response.read(max_file_bytes + 1)
+            if len(data) > max_file_bytes or hashlib.sha256(data).hexdigest() != digest:
                 raise ValueError("source download size or hash mismatch")
             path = temporary / name
             path.parent.mkdir(parents=True, exist_ok=True)
