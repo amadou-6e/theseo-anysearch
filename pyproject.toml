@@ -47,6 +47,7 @@ include = ["theseo_anysearch*"]
 
 [tool.setuptools.package-data]
 theseo_anysearch = [
+  "environments/cave_drone_bridge.cpp",
   "world_providers/catalog.json",
   "extension_sdk/Cargo.toml",
   "extension_sdk/Cargo.lock",

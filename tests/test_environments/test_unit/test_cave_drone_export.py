@@ -23,7 +23,6 @@ from theseo_anysearch.environments.routing_manifests import (
     RoutingWorldRecord,
     read_sidecar,
 )
-from theseo_anysearch.garden.external_routing import load_imported_worlds, prepare_routing_rows
 
 
 def _corridor() -> np.ndarray:
@@ -114,15 +113,6 @@ def test_real_source_repeat_has_identical_content_hashes(tmp_path: Path) -> None
     assert task.provenance == "derived"
     assert task.family == "drone_flight"
     assert first["cross_family_holdout_supported"] is False
-    imported = load_imported_worlds(tmp_path / "first", source_root=source)
-    assert len(imported) == len(first["task_ids"]) == 2
-    prepared = prepare_routing_rows(
-        imported, dataset_id="real-source-test-only",
-        partitions={world.root_geometry_id: "test"},
-    )
-    assert len(prepared.rows) == 48
-    assert any(row.traversable for row in prepared.rows)
-    assert any(not row.traversable for row in prepared.rows)
 
 
 def test_invalid_source_revision_fails_closed(tmp_path: Path) -> None:

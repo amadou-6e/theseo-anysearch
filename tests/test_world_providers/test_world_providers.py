@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,24 @@ from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
 from theseo_anysearch.world_providers.service import generate_world, load_verified_world
 from theseo_anysearch.world_providers import api as provider_api
 from theseo_anysearch.world_providers import service as provider_service
+
+
+def test_world_cli_and_loader_do_not_require_optional_torch() -> None:
+    code = """
+import sys
+class NoTorch:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'torch' or fullname.startswith('torch.'):
+            raise ImportError('optional Torch must not be imported')
+sys.meta_path.insert(0, NoTorch())
+from theseo_anysearch.cli.main import app
+from theseo_anysearch.experiments.loader import load_experiment
+assert 'torch' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture(autouse=True)
