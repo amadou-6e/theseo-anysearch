@@ -7,6 +7,7 @@ from experiments.perception_encoder.p3_profile import (
     ProfileCell,
     _pyramid_strides,
     decide,
+    _failed_cell,
 )
 
 
@@ -34,6 +35,26 @@ def test_pyramid_levels_cover_each_profiled_radius() -> None:
     assert _pyramid_strides(8) == (1,)
     assert _pyramid_strides(16) == (1, 2)
     assert _pyramid_strides(32) == (1, 2, 4)
+
+
+def test_all_failed_profiles_stop_without_resource_ratio() -> None:
+    cells = [_failed_cell(candidate, radius, RuntimeError("out of memory"))
+             for candidate in CANDIDATES for radius in RADII]
+    decision = decide(cells)
+    assert decision["retained"] == []
+    assert decision["parameter_match_ratio"] is None
+    assert decision["decision"] == "no_viable_direction"
+    assert decision["next_pilot"] is None
+
+
+def test_failed_reference_cannot_certify_other_candidates() -> None:
+    cells = [_cell(candidate, radius) for candidate in CANDIDATES for radius in RADII]
+    index = next(i for i, cell in enumerate(cells)
+                 if cell.candidate == "current_dense" and cell.radius == 32)
+    cells[index] = _failed_cell("current_dense", 32, RuntimeError("out of memory"))
+    decision = decide(cells)
+    assert decision["retained"] == []
+    assert decision["rejected"]["dense_residual"] == ["resource_reference_unavailable"]
 
 
 def test_decision_retains_complete_dense_profiles_and_reports_sparse_unavailable() -> None:

@@ -267,12 +267,13 @@ def decide(cells: list[ProfileCell]) -> dict[str, object]:
     complete_cells = [cell for cell in cells if cell.status == "completed"]
     parameter_ratio = max(cell.parameters for cell in complete_cells) / min(
         cell.parameters for cell in complete_cells
-    )
+    ) if complete_cells else None
     reference_radius_32 = next(
         cell
         for cell in cells
         if cell.candidate == "current_dense" and cell.radius == 32
     )
+    reference_available = reference_radius_32.status == "completed"
     for candidate, candidate_cells in by_candidate.items():
         if len(candidate_cells) != len(RADII) or any(
             cell.status != "completed" for cell in candidate_cells
@@ -280,6 +281,9 @@ def decide(cells: list[ProfileCell]) -> dict[str, object]:
             rejected[candidate] = ["incomplete_or_failed_profile"]
             continue
         radius_32 = next(cell for cell in candidate_cells if cell.radius == 32)
+        if not reference_available:
+            rejected[candidate] = ["resource_reference_unavailable"]
+            continue
         exceeds_both = (
             radius_32.peak_training_allocated_bytes
             > 1.5 * reference_radius_32.peak_training_allocated_bytes
@@ -299,14 +303,14 @@ def decide(cells: list[ProfileCell]) -> dict[str, object]:
     sparse = pilot_backbone_capabilities()["sparse_residual"]
     rejected["sparse_residual"] = [sparse.reason or "optional_backend_unavailable"]
     return {
-        "decision": "tie",
+        "decision": "tie" if retained else "no_viable_direction",
         "retained": retained[:5],
         "retained_reasons": retained_reasons,
         "rejected": rejected,
         "parameter_match_ratio": parameter_ratio,
-        "parameter_match_within_10_percent": parameter_ratio <= 1.10,
+        "parameter_match_within_10_percent": parameter_ratio is not None and parameter_ratio <= 1.10,
         "quality_claim": False,
-        "next_pilot": "P4",
+        "next_pilot": "P4" if retained else None,
     }
 
 
@@ -333,6 +337,8 @@ def _failed_cell(candidate: str, radius: int, error: Exception) -> ProfileCell:
 
 
 def run(output: Path, *, warmup: int, measured: int, training_steps: int) -> dict[str, object]:
+    if warmup < 0 or measured < 1 or training_steps < 1:
+        raise ValueError("warmup must be nonnegative; measured and training steps must be positive")
     if not torch.cuda.is_available():
         raise RuntimeError("P3 requires the declared CUDA reference accelerator")
     device = torch.device("cuda:0")
