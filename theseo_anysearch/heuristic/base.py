@@ -159,7 +159,6 @@ class BaseVoxelHeuristic(ABC):
             self._last_search_edges = exc.graph_edges
             raise
         if result is None:
-        if result is None:
             raise nx.NetworkXNoPath(f"No path between {start} and {goal}")
         self._last_search_nodes = result.graph_nodes
         self._last_search_edges = result.graph_edges
