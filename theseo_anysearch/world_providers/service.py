@@ -110,8 +110,14 @@ def generate_world(name: str, *, seed: int, output: Path, parameters: dict[str, 
     if not isinstance(summary, GenerationSummary):
         raise ValueError("provider must return a GenerationSummary")
     bundle = load_bundle(output)
+    for member in bundle.split.members:
+        bundle.source.rights.require_allowed(
+            "training" if member.partition == "train" else "evaluation"
+        )
     if bundle.world.frame.meters_per_voxel != provider.info.output_resolution(resolved):
         raise ValueError("provider output resolution disagrees with its declared native resolution")
+    if provider.info.native_extent is not None and bundle.world.extent.as_tuple() != provider.info.native_extent:
+        raise ValueError("provider output extent disagrees with its declared native extent")
     previews = render_previews(bundle)
     report = {
         "schema_version": 1,
@@ -120,6 +126,8 @@ def generate_world(name: str, *, seed: int, output: Path, parameters: dict[str, 
         "provider_version": provider.info.version,
         "parameters": {"seed": seed, **resolved},
         "rejected_task_strata": list(summary.rejected_task_strata),
+        "limitations": list(summary.limitations),
+        "topology_family": bundle.world.topology_family,
         "world_identity_sha256": bundle.world.identity_sha256,
         "dataset_identity_sha256": bundle.dataset_identity_sha256,
         "files": _file_hashes(bundle.root, bundle),

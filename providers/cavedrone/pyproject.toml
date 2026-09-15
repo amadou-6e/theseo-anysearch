@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "theseo-anysearch-cavedrone"
+version = "0.1.0"
+description = "Optional pinned CaveDroneSim voxel-world provider for theseo-anysearch"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["theseo-anysearch>=0.1.0,<0.2"]
+
+[project.entry-points."theseo_anysearch.world_providers"]
+cavedrone = "anysearch_cavedrone_provider:Provider"
+
+[tool.setuptools.packages.find]
+include = ["anysearch_cavedrone_provider*"]
