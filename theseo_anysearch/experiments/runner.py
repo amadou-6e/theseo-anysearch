@@ -355,9 +355,11 @@ class ExperimentRunner:
     def __init__(self, config: ExperimentConfig, config_path: Path | None = None) -> None:
         from theseo_anysearch.environment_rules import preflight_environment_rules
         from theseo_anysearch.imitation.preflight import preflight_imitation_providers
+        from theseo_anysearch.experiments.custom_geometry import preflight_geometry_provider
 
         preflight_environment_rules(config, config_path)
         preflight_imitation_providers(config.imitation, config_path)
+        preflight_geometry_provider(config.env.geometry, config.env, config_path)
         self._config = config
         self._config_path = config_path
 
@@ -605,6 +607,17 @@ class ExperimentRunner:
                 (
                     self._config.env.scenarios.provider.name
                     if self._config.env.scenarios.provider
+                    else None
+                ),
+            )
+            from theseo_anysearch.experiments.custom_geometry import copy_geometry_source
+
+            copy_geometry_source(
+                self._config_path,
+                run_dir,
+                (
+                    self._config.env.geometry.provider.name
+                    if self._config.env.geometry.provider
                     else None
                 ),
             )

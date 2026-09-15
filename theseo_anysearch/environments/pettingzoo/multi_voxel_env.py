@@ -102,6 +102,18 @@ class MultiVoxelEnv(RustParallelEnv):
     ray_env_id = "MultiVoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        shared_validation = config.get("geometry_validation") or {}
+        pool_validation = (
+            (((config.get("geometry_pool") or {}).get("augmentation") or {}).get("feasibility"))
+            or {}
+        )
+        if shared_validation.get("enabled", False) or (
+            pool_validation and pool_validation.get("enabled", True)
+        ):
+            raise NotImplementedError(
+                "geometry task-feasibility validation currently supports only "
+                "single-agent VoxelEnv; joint multi-agent planning is not implemented"
+            )
         from theseo_anysearch.worlds.residency import (
             has_compiled_world_episode_source,
         )
@@ -147,6 +159,14 @@ class MultiVoxelEnv(RustParallelEnv):
 
         if config.get("compiled_world_path") is not None:
             geometry = []
+        elif config.get("geometry_sources"):
+            from theseo_anysearch.environments.geometry_sources import (
+                resolve_geometry_sources,
+            )
+
+            geometry = resolve_geometry_sources(
+                config, grid_size=grid_size, load_stl=_load_stl_geometry
+            )
         elif config.get("stl_path"):
             scale = float(config.get("scale", 1.0))
             padding = int(config.get("geometry_padding", 2))
