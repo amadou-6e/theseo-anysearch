@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cavedrone = ["theseo-anysearch-cavedrone>=0.1.0,<0.2.0"]
 aerialgym = ["theseo-anysearch-aerialgym>=0.1.0,<0.2.0"]
 cloud-azure = ["adlfs>=2024.2"]
 cloud-gcs = ["gcsfs>=2024.2"]
