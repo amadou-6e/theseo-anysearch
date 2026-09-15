@@ -40,6 +40,115 @@ const VIEWER_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const PLAYBACK_STEP_INTERVAL: Duration = Duration::from_millis(120);
 const REGIONAL_LOAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
+const SYSTEM_CHUNK_BUDGETS: ChunkBudgets = ChunkBudgets { visible: 256, detailed: 128 };
+
+fn scene_camera_input(ctx: &egui::Context, response: &egui::Response) -> (Vec2, f32) {
+    let drag = if response.dragged_by(egui::PointerButton::Primary) {
+        ctx.input(|input| input.pointer.delta())
+    } else {
+        Vec2::ZERO
+    };
+    let scroll = if response.hovered() {
+        ctx.input(|input| input.smooth_scroll_delta.y)
+    } else {
+        0.0
+    };
+    (drag, scroll)
+}
+
+#[cfg(test)]
+mod camera_input_tests {
+    use super::*;
+
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut f32)
+        -> (Rect, Rect, Vec2, f32)
+    {
+        let mut slider = Rect::NOTHING;
+        let mut scene = Rect::NOTHING;
+        let mut input = (Vec2::ZERO, 0.0);
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        }, |ctx| {
+            egui::SidePanel::left("controls").exact_width(260.0).show(ctx, |ui| {
+                slider = ui.add(Slider::new(value, 1.0..=64.0)).rect;
+            });
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                scene = response.rect;
+                input = scene_camera_input(ctx, &response);
+            });
+        });
+        (slider, scene, input.0, input.1)
+    }
+
+    fn press(position: Pos2) -> Vec<egui::Event> {
+        vec![egui::Event::PointerMoved(position), egui::Event::PointerButton {
+            pos: position, button: egui::PointerButton::Primary, pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    #[test]
+    fn sidebar_slider_drag_changes_value_without_orbiting() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, _, _, _) = frame(&ctx, vec![], &mut value);
+        let start = slider.left_center() + Vec2::new(20.0, 0.0);
+        frame(&ctx, press(start), &mut value);
+        let before = value;
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(start + Vec2::new(40.0, 0.0))], &mut value);
+        assert_ne!(value, before);
+        assert_eq!(drag, Vec2::ZERO);
+    }
+
+    #[test]
+    fn scene_drag_still_orbits() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (_, scene, _, _) = frame(&ctx, vec![], &mut value);
+        let start = scene.center();
+        frame(&ctx, press(start), &mut value);
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(start + Vec2::new(40.0, 0.0))], &mut value);
+        assert!(drag.x > 0.0);
+    }
+
+    #[test]
+    fn sidebar_drag_entering_scene_does_not_steal_camera_input() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, scene, _, _) = frame(&ctx, vec![], &mut value);
+        frame(&ctx, press(slider.left_center() + Vec2::new(20.0, 0.0)), &mut value);
+        let (_, _, drag, _) = frame(&ctx,
+            vec![egui::Event::PointerMoved(scene.center())], &mut value);
+        assert_eq!(drag, Vec2::ZERO);
+    }
+
+    #[test]
+    fn sidebar_wheel_does_not_zoom_camera() {
+        let ctx = egui::Context::default();
+        let mut value = 16.0;
+        let (slider, _, _, _) = frame(&ctx, vec![], &mut value);
+        let (_, _, _, scroll) = frame(&ctx, vec![
+            egui::Event::PointerMoved(slider.center()),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 30.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ], &mut value);
+        assert_eq!(scroll, 0.0);
+    }
+
+    #[test]
+    fn chunk_budgets_are_system_maxima() {
+        assert_eq!(SYSTEM_CHUNK_BUDGETS.visible, 256);
+        assert_eq!(SYSTEM_CHUNK_BUDGETS.detailed, 128);
+    }
+}
+
 fn chunk_intersects_region(
     chunk: ChunkCoord,
     chunk_edge: u32,
@@ -1530,7 +1639,6 @@ struct VoxelReplayApp {
     coarse_chunks: Vec<ChunkCoord>,
     considered_chunks: usize,
     detailed_chunks: usize,
-    chunk_budgets: ChunkBudgets,
     camera_revision: u64,
     overview_meshes: Vec<Result<OverviewMesh, String>>,
     show_overview: bool,
@@ -1595,7 +1703,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
             overview_meshes,
             show_overview: true,
@@ -1631,7 +1738,6 @@ impl VoxelReplayApp {
             coarse_chunks: Vec::new(),
             considered_chunks: 0,
             detailed_chunks: 0,
-            chunk_budgets: ChunkBudgets { visible: 64, detailed: 24 },
             camera_revision: 0,
             overview_meshes: Vec::new(),
             show_overview: true,
@@ -1796,7 +1902,7 @@ impl VoxelReplayApp {
                     ],
                     minimum_forward_dot: -0.5,
                 },
-                self.chunk_budgets,
+                SYSTEM_CHUNK_BUDGETS,
             );
             let selection = include_mandatory_chunks(selected, mandatory.iter().copied());
             let mut visible = selection.detailed.iter().chain(&selection.coarse)
@@ -2010,9 +2116,8 @@ impl eframe::App for VoxelReplayApp {
             });
         });
 
-        let drag_delta = ctx.input(|i| i.pointer.delta());
-        let dragging = ctx.input(|i| i.pointer.primary_down());
-        let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+        let mut drag_delta = Vec2::ZERO;
+        let mut scroll_y = 0.0;
 
         if self.explain_tab {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -2175,45 +2280,8 @@ impl eframe::App for VoxelReplayApp {
                 {
                     self.requested_region = None;
                 }
-                let budgets_changed = ui.add(Slider::new(&mut self.chunk_budgets.visible, 1..=256)
-                    .text("visible chunks")).changed()
-                    | ui.add(Slider::new(&mut self.chunk_budgets.detailed, 1..=128)
-                        .text("detailed chunks")).changed();
-                self.chunk_budgets.detailed = self.chunk_budgets.detailed
-                    .min(self.chunk_budgets.visible);
-                if budgets_changed {
-                    self.camera_revision = self.camera_revision.wrapping_add(1);
-                }
-                if self.pending_region.is_some() {
-                    ui.label(egui::RichText::new("Loading visible region...").weak());
-                }
                 if let Some(error) = &self.regional_error {
                     ui.colored_label(Color32::from_rgb(230, 100, 100), error);
-                }
-                if let Some((_, frame)) = &self.regional_frame {
-                    ui.label(format!("Visible voxels: {}", frame.occupied.len()));
-                    ui.label(format!("Exposed faces: {}", self.regional_faces.len()));
-                    ui.label(format!(
-                        "Chunks considered/detailed/coarse: {}/{}/{}",
-                        self.considered_chunks,
-                        self.detailed_chunks,
-                        self.coarse_chunks.len()
-                    ));
-                    ui.label(format!(
-                        "Mesh cache builds/hits: {}/{}",
-                        self.render_cache.builds(), self.render_cache.hits()
-                    ));
-                    ui.label(format!("Region load: {:.2} ms", frame.load_time.as_secs_f64() * 1_000.0));
-                    if let Some(metrics) = frame.cache_metrics {
-                        ui.label(format!(
-                            "Chunks: {} resident, {} pinned",
-                            metrics.resident_chunks, metrics.pinned_chunks
-                        ));
-                        ui.label(format!(
-                            "Pack reads: {}  hits/misses: {}/{}",
-                            metrics.pack_reads, metrics.cache_hits, metrics.cache_misses
-                        ));
-                    }
                 }
                 ui.separator();
                 ui.label(egui::RichText::new("Global overview").strong());
@@ -2326,6 +2394,7 @@ impl eframe::App for VoxelReplayApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+            (drag_delta, scroll_y) = scene_camera_input(ctx, &resp);
             let rect = resp.rect.shrink(20.0);
             painter.rect_filled(resp.rect, 0.0, Color32::from_rgb(12, 14, 20));
 
@@ -2604,7 +2673,7 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Camera orbit (left-drag) + zoom (scroll) + reset (R) ----------
-        if dragging {
+        if drag_delta != Vec2::ZERO {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
