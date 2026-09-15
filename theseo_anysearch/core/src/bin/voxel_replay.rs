@@ -944,16 +944,101 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
 }
 
+fn overview_rect(outer: Rect, size: f32) -> Rect {
+    let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+    let size = size.clamp(140.0_f32.min(available), available);
+    Rect::from_min_size(outer.right_bottom() - Vec2::splat(size + 12.0), Vec2::splat(size))
+}
+
+fn resize_overview(ui: &mut egui::Ui, outer: Rect, size: &mut f32) -> bool {
+    let rect = overview_rect(outer, *size);
+    let grip = Rect::from_min_size(rect.left_top(), Vec2::splat(20.0));
+    let response = ui.interact(grip, ui.id().with("overview_resize"), Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeNwSe)
+        .on_hover_text("Drag this corner to resize the overview");
+    let resizing = response.dragged_by(egui::PointerButton::Primary);
+    if resizing {
+        let delta = response.drag_delta();
+        let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+        *size = (rect.width() - (delta.x + delta.y) * 0.5)
+            .clamp(140.0_f32.min(available), available);
+    }
+    resizing
+}
+
+#[cfg(test)]
+mod overview_resize_tests {
+    use super::*;
+
+    #[test]
+    fn overview_is_square_anchored_and_clamped_to_viewport() {
+        let outer = Rect::from_min_size(Pos2::new(30.0, 40.0), Vec2::new(800.0, 500.0));
+        for size in [1.0, 220.0, 10_000.0] {
+            let rect = overview_rect(outer, size);
+            assert_eq!(rect.width(), rect.height());
+            assert_eq!(rect.right_bottom(), outer.right_bottom() - Vec2::splat(12.0));
+            assert!(outer.contains_rect(rect));
+        }
+        assert_eq!(overview_rect(outer, 1.0).width(), 140.0);
+        assert_eq!(overview_rect(outer, 10_000.0).width(), 476.0);
+    }
+
+    #[test]
+    fn tiny_viewport_does_not_invert_resize_limits() {
+        let outer = Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0));
+        assert_eq!(overview_rect(outer, 220.0).width(), 76.0);
+    }
+
+    fn frame(ctx: &egui::Context, size: &mut f32, events: Vec<egui::Event>) -> (Rect, bool) {
+        let mut outer = Rect::NOTHING;
+        let mut resizing = false;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                resizing = resize_overview(ui, outer, size);
+            });
+        });
+        (outer, resizing)
+    }
+
+    #[test]
+    fn dragging_corner_expands_and_shrinks_without_orbit_input() {
+        for (delta, expected) in [(Vec2::splat(-30.0), 250.0), (Vec2::splat(30.0), 190.0)] {
+            let ctx = egui::Context::default();
+            let mut size = 220.0;
+            let (outer, _) = frame(&ctx, &mut size, vec![]);
+            let start = overview_rect(outer, size).left_top() + Vec2::splat(8.0);
+            frame(&ctx, &mut size, vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start, button: egui::PointerButton::Primary, pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            let (_, resizing) = frame(&ctx, &mut size, vec![egui::Event::PointerMoved(start + delta)]);
+            assert!(resizing, "resize must suppress camera orbit");
+            assert_eq!(size, expected);
+        }
+    }
+}
+
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool, agent_view: Option<(StorageCoord, u32)>,
 ) {
-    let inset_size = outer.width().min(outer.height()).min(size);
-    let rect = Rect::from_min_size(
-        outer.right_bottom() - Vec2::splat(inset_size + 12.0), Vec2::splat(inset_size),
-    );
+    let rect = overview_rect(outer, size);
     painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
     painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
+    for offset in [6.0, 11.0, 16.0] {
+        painter.line_segment([
+            rect.left_top() + Vec2::new(3.0, offset),
+            rect.left_top() + Vec2::new(offset, 3.0),
+        ], Stroke::new(1.5, Color32::from_gray(180)));
+    }
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
@@ -2061,6 +2146,7 @@ impl eframe::App for VoxelReplayApp {
         let drag_delta = ctx.input(|i| i.pointer.delta());
         let dragging = ctx.input(|i| i.pointer.primary_down());
         let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+        let mut resizing_overview = false;
 
         if self.explain_tab {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -2277,7 +2363,6 @@ impl eframe::App for VoxelReplayApp {
                 ui.label(egui::RichText::new("Global overview").strong());
                 ui.checkbox(&mut self.show_overview, "Show overview");
                 ui.add_enabled_ui(self.show_overview, |ui| {
-                    ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
                     ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
                 });
                 if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
@@ -2384,6 +2469,9 @@ impl eframe::App for VoxelReplayApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+            if self.show_overview && matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview = resize_overview(ui, resp.rect, &mut self.overview_size);
+            }
             let rect = resp.rect.shrink(20.0);
             painter.rect_filled(resp.rect, 0.0, Color32::from_rgb(12, 14, 20));
 
@@ -2662,7 +2750,7 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Camera orbit (left-drag) + zoom (scroll) + reset (R) ----------
-        if dragging {
+        if dragging && !resizing_overview {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
