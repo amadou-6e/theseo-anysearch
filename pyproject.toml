@@ -28,6 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+storage-benchmark = ["zstandard>=0.25,<1"]
 cloud-azure = ["adlfs>=2024.2"]
 cloud-gcs = ["gcsfs>=2024.2"]
 cloud-s3 = ["s3fs>=2024.2"]

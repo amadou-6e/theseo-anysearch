@@ -1,0 +1,37 @@
+// Benchmark schema only. Field presence distinguishes missing from default.
+syntax = "proto3";
+package trajectory_bench;
+message Coord { repeated uint32 values = 1; }
+message Mutation {
+  bool occupied = 1;
+  uint32 kind = 2;
+  bool active = 3;
+  double reward_weight = 4;
+  repeated uint32 coordinate = 5;
+  uint32 presence = 15;
+  bytes extras_json = 16;
+}
+message Step {
+  sint64 step = 1;
+  sint32 action = 2;
+  double reward = 3;
+  bool done = 4;
+  uint32 cursor_x = 5;
+  uint32 cursor_y = 6;
+  uint32 cursor_z = 7;
+  uint64 voxel_count = 8;
+  bool placed = 9;
+  uint32 presence = 15;
+  bytes extras_json = 16;
+  repeated Mutation mutations = 20;
+  repeated sint32 actions = 21;
+  repeated double rewards = 22;
+  repeated Coord cursors = 23;
+  repeated bool placed_per_agent = 24;
+  repeated bool dones = 25;
+}
+message Trajectory {
+  bytes metadata_json = 1;
+  repeated Step steps = 2;
+  uint32 version = 3;
+}
