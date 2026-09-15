@@ -152,6 +152,36 @@ tuning/*
 
 ```{toctree}
 :maxdepth: 1
+:caption: Worlds and providers
+
+world_pack_format
+world_providers
+routing_dataset_contract
+geometry_runtime_promotion_452
+aerial_gym_compact_export
+aerialgym_provider_validation
+cave_drone_holdout
+cavedrone_route_witness
+gazebo-adapter-integration
+gazebo_roofed_maze_transfer
+external_routing_compact_dataset
+plant01-g1-diagnostic
+live-visualization-protocol
+trajectory-storage
+world_backend_benchmarks
+world_backend_initial_results
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Benchmarks
+:glob:
+
+benchmarks/*
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Reference
 
 imitation-pretraining
