@@ -151,7 +151,8 @@ class CurriculumController:
                             algorithm,
                             route_env,
                             1,
-                            seed=stage_seed + episode_index,
+                            seed=(route_seed if route_env.get("compiled_world_catalog_path")
+                                  else stage_seed + episode_index),
                             multi_agent=False,
                             num_envs_per_env_runner=(
                                 self.evaluation.num_envs_per_env_runner

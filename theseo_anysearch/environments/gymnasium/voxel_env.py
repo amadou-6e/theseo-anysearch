@@ -53,6 +53,23 @@ class VoxelEnv(RustGymnasiumEnv):
     ray_env_id = "VoxelEnv-v0"
 
     def __init__(self, config: dict) -> None:
+        self._world_catalog = None
+        catalog_path = config.get("compiled_world_catalog_path")
+        if catalog_path is not None:
+            from theseo_anysearch.worlds.seeded_catalog import load_catalog
+
+            self._world_catalog = load_catalog(catalog_path)
+            first = self._world_catalog.variants[0]
+            config = dict(config)
+            if config.get("compiled_world_path") not in (None, str(first.root)):
+                raise ValueError("compiled_world_path must match the first catalog variant")
+            config["compiled_world_path"] = str(first.root)
+            config["world_identity_sha256"] = first.identity_sha256
+        self._active_world_identity = (
+            self._world_catalog.variants[0].identity_sha256
+            if self._world_catalog is not None else None
+        )
+        self._episode_layout_seed: int | None = None
         from theseo_anysearch.worlds.residency import (
             has_compiled_world_episode_source,
         )
@@ -482,6 +499,8 @@ class VoxelEnv(RustGymnasiumEnv):
         self._last_accepted_task_manifest = None
         if self._geometry_provider is not None:
             self._install_generated_geometry(seed)
+        if self._world_catalog is not None:
+            self._activate_catalog_world(seed)
         if self._geo_pool is not None:
             from theseo_anysearch.environments.geometry_pool import GeometryPool, paste_boxes
             configured_feasibility = self._validation_config
@@ -785,6 +804,29 @@ class VoxelEnv(RustGymnasiumEnv):
                 config.get("accepted_difficulty_bands", ())
             ),
         )
+    def _activate_catalog_world(self, seed: int | None) -> None:
+        """Select geometry before route sampling and the native episode reset."""
+        assert self._world_catalog is not None
+        resolved_seed = (
+            int(seed) if seed is not None
+            else int(self._obs_rng.integers(0, 2**31 - 1))
+        )
+        variant = self._world_catalog.for_seed(resolved_seed)
+        if variant.identity_sha256 != self._active_world_identity:
+            from theseo_anysearch.worlds.residency import resolve_worker_world
+
+            node_cache = self._config.get("compiled_world_node_cache")
+            compiled = resolve_worker_world(
+                variant.root, Path(node_cache) if node_cache else None
+            )
+            self._rust_env.set_compiled_world(
+                str(compiled.root),
+                int(self._config.get("world_maximum_decoded_bytes", 256 * 1024 * 1024)),
+            )
+            self._active_world_identity = variant.identity_sha256
+        self._episode_layout_seed = resolved_seed
+        self._config["compiled_world_path"] = str(variant.root)
+        self._config["world_identity_sha256"] = variant.identity_sha256
 
     def _apply_scenario(self, seed: int | None) -> None:
         """Invoke the configured reset hook and install its validated route."""
@@ -999,6 +1041,17 @@ class VoxelEnv(RustGymnasiumEnv):
             )
         )
         selected = self._curriculum_stages[index]
+        if isinstance(selected, dict) and "seeded_catalog_stage" in selected:
+            if self._world_catalog is None or self._episode_layout_seed is None:
+                raise ValueError("seeded catalog stage requires an active world variant")
+            curriculum = self._config.get("waypoint_curriculum") or {}
+            route = self._world_catalog.route_for_stage(
+                int(selected["seeded_catalog_stage"]), self._episode_layout_seed,
+                variation_radius=int(curriculum.get("fixed_route_variation_radius", 0)),
+                action_mode=str(self._config.get("action_mode", "discrete_18")),
+            )
+            self._activate_route(route.model_dump(mode="python"))
+            return
         if isinstance(selected, dict) and "waypoints" in selected:
             self._activate_route(selected)
             return
@@ -1034,6 +1087,10 @@ class VoxelEnv(RustGymnasiumEnv):
             "task_version": self._task.version,
             "initial_goal_distance": distance,
         }
+        if self._world_catalog is not None:
+            info["world_identity_sha256"] = self._active_world_identity
+            info["world_catalog_sha256"] = self._world_catalog.identity_sha256
+            info["world_layout_seed"] = self._episode_layout_seed
         if self._previous_scenario is not None:
             info["scenario"] = dict(self._previous_scenario)
         if self._last_feasibility_diagnostics is not None:

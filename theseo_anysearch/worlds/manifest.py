@@ -153,7 +153,12 @@ def world_contract(env_config: dict[str, Any]) -> dict[str, Any]:
     raw_origin = env_config.get("source_origin", (0, 0, 0))
     if not isinstance(raw_origin, (tuple, list)) or len(raw_origin) != 3:
         raise ValueError("source_origin must contain exactly three axes")
-    return {
+    catalog_identity = None
+    if env_config.get("compiled_world_catalog_path"):
+        from theseo_anysearch.worlds.seeded_catalog import load_catalog
+
+        catalog_identity = load_catalog(env_config["compiled_world_catalog_path"]).identity_sha256
+    contract = {
         "schema_version": WORLD_SCHEMA_VERSION,
         "coordinate_type": COORDINATE_TYPE,
         "storage_coordinate_convention": STORAGE_COORDINATE_CONVENTION,
@@ -163,6 +168,9 @@ def world_contract(env_config: dict[str, Any]) -> dict[str, Any]:
         "extent": list(extent.as_tuple()),
         "identity_sha256": env_config.get("world_identity_sha256"),
     }
+    if catalog_identity is not None:
+        contract["catalog_identity_sha256"] = catalog_identity
+    return contract
 
 
 def world_contract_fingerprint(contract: dict[str, Any]) -> str:

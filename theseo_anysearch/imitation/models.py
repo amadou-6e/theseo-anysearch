@@ -159,6 +159,8 @@ class DemonstrationManifest(BaseModel):
     source_origin: tuple[int, int, int] = (0, 0, 0)
     world_extent: tuple[int, int, int] = (32, 32, 32)
     world_identity_sha256: str | None = None
+    world_catalog_sha256: str | None = None
+    episode_world_identities: list[str] | None = None
     generation_provider_name: str
     generation_provider_parameters: dict[str, JsonValue]
     requested_episodes: int

@@ -46,16 +46,20 @@ PORTAL_WALLS = (
 PORTAL_CENTER = (1024, 256)
 
 
-def portal_bounds(side: int) -> tuple[int, int, int, int]:
+def portal_bounds(
+    side: int, center: tuple[int, int] = PORTAL_CENTER,
+) -> tuple[int, int, int, int]:
     """Inclusive YZ bounds of a centered square aperture."""
-    y0 = PORTAL_CENTER[0] - side // 2
-    z0 = PORTAL_CENTER[1] - side // 2
+    y0 = center[0] - side // 2
+    z0 = center[1] - side // 2
     return y0, y0 + side - 1, z0, z0 + side - 1
 
 
-def wall_sources(x: int, side: int) -> tuple[BoxSource, ...]:
+def wall_sources(
+    x: int, side: int, center: tuple[int, int] = PORTAL_CENTER,
+) -> tuple[BoxSource, ...]:
     """Tile a whole YZ plane with four boxes, leaving one exact aperture."""
-    y0, y1, z0, z1 = portal_bounds(side)
+    y0, y1, z0, z1 = portal_bounds(side, center)
     return (
         BoxSource((x, 0, 0), (x, y0 - 1, EXTENT[2] - 1)),
         BoxSource((x, y1 + 1, 0), (x, EXTENT[1] - 1, EXTENT[2] - 1)),
