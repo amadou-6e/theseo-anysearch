@@ -387,6 +387,7 @@ def sync_rllib_evaluation_weights(algorithm: Any) -> None:
 def configure_rllib_evaluation(
     rllib_config: Any,
     *,
+    enabled: bool = True,
     num_env_runners: int,
     parallel_to_training: bool = False,
     frequency: int = 1,
@@ -397,6 +398,13 @@ def configure_rllib_evaluation(
     num_envs_per_env_runner: int = 1,
 ) -> Any:
     """Attach the dedicated RLlib evaluation EnvRunner pool to an algorithm config."""
+    if not enabled:
+        return rllib_config.evaluation(
+            evaluation_interval=None,
+            evaluation_num_env_runners=0,
+            evaluation_parallel_to_training=False,
+            custom_evaluation_function=None,
+        )
     custom_function = AnySearchEvaluationFunction(
         env_config=env_config or {},
         episodes=episodes,

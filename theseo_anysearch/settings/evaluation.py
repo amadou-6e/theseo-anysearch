@@ -26,6 +26,8 @@ class EvaluationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    enabled: bool = Field(default=True, description="Enable regular evaluation batches; curriculum retention is configured independently.")
+
     frequency: int = Field(default=1, ge=1, description="Run evaluation every N training iterations.")
     episodes: int = Field(default=1, ge=1, description="Number of deterministic evaluation episodes.")
     seed: int = Field(42, description="Base seed for deterministic evaluation episodes.")
@@ -48,6 +50,8 @@ class EvaluationConfig(BaseModel):
     @model_validator(mode="after")
     def validate_parallel_evaluation_workers(self) -> "EvaluationConfig":
         """Require dedicated actors when evaluation overlaps training."""
+        if not self.enabled and self.parallel_to_training:
+            raise ValueError("disabled regular evaluation cannot run parallel_to_training")
         if self.parallel_to_training and self.num_env_runners < 1:
             raise ValueError(
                 "evaluation.parallel_to_training requires "

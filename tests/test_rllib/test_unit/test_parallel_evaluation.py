@@ -248,6 +248,15 @@ class _FakeRllibConfig:
         return self
 
 
+def test_disabled_regular_evaluation_has_no_scheduler_or_callback() -> None:
+    config = _FakeRllibConfig()
+    assert configure_rllib_evaluation(config, enabled=False, num_env_runners=8) is config
+    assert config.options["evaluation_interval"] is None
+    assert config.options["evaluation_num_env_runners"] == 0
+    assert config.options["custom_evaluation_function"] is None
+    assert config.options["evaluation_parallel_to_training"] is False
+
+
 def test_rllib_evaluation_configuration_creates_dedicated_workers() -> None:
     config = _FakeRllibConfig()
 
