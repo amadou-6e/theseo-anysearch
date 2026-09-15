@@ -303,7 +303,7 @@ class Trainer(BaseTrainer):
                 )
                 if self._curriculum is not None:
                     result.extra.update(self._curriculum.stage_metric())
-                evaluation_due = self._iteration % evaluation.frequency == 0
+                evaluation_due = evaluation.enabled and self._iteration % evaluation.frequency == 0
                 rllib_evaluation_episodes = getattr(
                     self._algo,
                     "_anysearch_evaluation_episodes",
@@ -316,6 +316,8 @@ class Trainer(BaseTrainer):
                     )
                 if rllib_evaluation_episodes is not None:
                     delattr(self._algo, "_anysearch_evaluation_episodes")
+                if not evaluation.enabled:
+                    rllib_evaluation_episodes = None
 
                 _is_last_iter = self._iteration == training.iterations
                 _checkpointed_for_best = False

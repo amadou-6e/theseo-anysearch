@@ -316,6 +316,7 @@ class PPOTrainer(Trainer):
         )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
+            enabled=config.evaluation.enabled,
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
             frequency=config.evaluation.frequency,
@@ -456,6 +457,7 @@ class MultiAgentVoxelPPOTrainer(Trainer):
         rllib_config = configure_rllib_evaluation(
             rllib_config,
             num_env_runners=config.evaluation.num_env_runners,
+            enabled=config.evaluation.enabled,
             parallel_to_training=config.evaluation.parallel_to_training,
             frequency=config.evaluation.frequency,
             env_config=_evaluation_env_config(config, env_config),

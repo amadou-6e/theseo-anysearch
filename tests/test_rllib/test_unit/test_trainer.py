@@ -323,6 +323,14 @@ def make_trainer(trainer_settings: Any, rewards: list[float] | None = None) -> P
     return t
 
 
+def test_disabled_regular_evaluation_does_not_invoke_coordinator(trainer_settings):
+    trainer_settings.evaluation.enabled = False
+    trainer = make_trainer(trainer_settings)
+    with patch.object(EvaluationCoordinator, "evaluate", side_effect=AssertionError("regular evaluation ran")):
+        results = trainer.train()
+    assert len(results) == trainer_settings.training.iterations
+
+
 # ---------------------------------------------------------------------------
 # 1. Execution: train() runs the correct number of iterations
 # ---------------------------------------------------------------------------
