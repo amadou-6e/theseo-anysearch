@@ -75,6 +75,14 @@ class WaypointRouteLengthConfig(BaseModel):
         return max(1, int(max_steps * self.fraction))
 
 
+class FixedWaypointRouteConfig(BaseModel):
+    """One explicit route in a reproducible, geometry-aware curriculum."""
+
+    model_config = ConfigDict(extra="forbid")
+    start: tuple[int, int, int]
+    waypoints: tuple[tuple[int, int, int], ...] = Field(min_length=1)
+
+
 class WaypointCurriculumConfig(BaseModel):
     """Curriculum of reproducible start/goal stages or waypoint routes."""
 
@@ -84,6 +92,8 @@ class WaypointCurriculumConfig(BaseModel):
     initial_start: tuple[int, int, int] | None = None
     initial_goal: tuple[int, int, int] | None = None
     route_length: WaypointRouteLengthConfig | None = None
+    routes: tuple[FixedWaypointRouteConfig, ...] = ()
+    fixed_route_variation_radius: int = Field(default=0, ge=0, le=16)
     seed: int = 42
     difficulty: WaypointDifficultyConfig = Field(default_factory=WaypointDifficultyConfig)
     training_sampling: WaypointTrainingSamplingConfig = Field(default_factory=WaypointTrainingSamplingConfig)
@@ -91,6 +101,20 @@ class WaypointCurriculumConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_initial_pair(self) -> "WaypointCurriculumConfig":
+        if self.routes:
+            if self.completion_mode != "continue_route":
+                raise ValueError("fixed routes require completion_mode: continue_route")
+            if self.route_length is not None:
+                raise ValueError("fixed routes cannot also set route_length")
+            if self.enabled and (self.initial_start is None or self.initial_goal is None):
+                raise ValueError("enabled fixed routes require initial_start and initial_goal")
+            if self.initial_start is not None and self.initial_start != self.routes[0].start:
+                raise ValueError("initial_start must match the first fixed route")
+            if self.initial_goal is not None and self.initial_goal != self.routes[0].waypoints[0]:
+                raise ValueError("initial_goal must match the first fixed waypoint")
+            return self
+        if self.fixed_route_variation_radius:
+            raise ValueError("fixed_route_variation_radius requires fixed routes")
         if self.enabled and self.completion_mode == "terminate_episode" and (
             self.initial_start is None or self.initial_goal is None
         ):

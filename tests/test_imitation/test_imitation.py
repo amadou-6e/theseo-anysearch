@@ -10,6 +10,7 @@ import torch
 from pydantic import ValidationError
 from ray.rllib.core.columns import Columns
 
+from theseo_anysearch.environments.action_spaces import shortest_actions
 from theseo_anysearch.imitation.dataset import (
     DemonstrationDataset,
     collect_demonstrations,
@@ -26,6 +27,8 @@ from theseo_anysearch.imitation.pretraining import (
     _supervised_metrics,
     behavior_clone_policy,
 )
+from theseo_anysearch.worlds.compiler import BoxSource, compile_world
+from theseo_anysearch.worlds.manifest import WorldExtent
 from theseo_anysearch.worlds import world_contract
 
 
@@ -460,6 +463,50 @@ def test_route_collection_uses_fast_native_action_plan(action_mode: str) -> None
     assert dataset.manifest.action_nvec == (
         [3, 3, 3] if action_mode == "vector_3" else None
     )
+
+
+def test_compiled_route_collection_uses_astar_across_waypoints(tmp_path) -> None:
+    compiled = compile_world(
+        [BoxSource(minimum=(3, 4, 4), maximum_inclusive=(3, 4, 4))],
+        WorldExtent(x=8, y=8, z=8),
+        tmp_path,
+        generate_candidates=False,
+    )
+    env_config = {
+        "extent": [8, 8, 8],
+        "compiled_world_path": str(compiled.root),
+        "world_identity_sha256": compiled.manifest.identity_sha256,
+        "max_steps": 10,
+        "agent_count": 1,
+        "obs_mode": "box",
+        "box_radius": 1,
+        "action_mode": "discrete_18",
+        "trail_mode": False,
+        "waypoint_curriculum": {
+            "enabled": True,
+            "completion_mode": "continue_route",
+            "initial_start": [1, 4, 4],
+            "initial_goal": [5, 4, 4],
+            "routes": [{"start": [1, 4, 4], "waypoints": [[5, 4, 4], [7, 4, 4]]}],
+        },
+    }
+    config = ImitationConfig(
+        enabled=True,
+        generation={"provider": "astar", "episodes": 2, "max_attempts": 2},
+        collection={"seed_start": 10, "validation_fraction": 0.5},
+    )
+
+    dataset = collect_demonstrations(env_config, config)
+
+    assert dataset.manifest.successful_episodes == 2
+    assert dataset.manifest.training_samples == 6
+    assert dataset.manifest.validation_samples == 6
+    assert dataset.manifest.world_identity_sha256 == compiled.manifest.identity_sha256
+    direct = (
+        *shortest_actions((1, 4, 4), (5, 4, 4), "discrete_18"),
+        *shortest_actions((5, 4, 4), (7, 4, 4), "discrete_18"),
+    )
+    assert tuple(dataset.train_actions) != direct
 
 
 def test_all_stage_collection_requires_enabled_curriculum() -> None:

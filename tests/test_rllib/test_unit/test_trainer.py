@@ -109,14 +109,33 @@ class TestTrainResult:
     @pytest.mark.parametrize(
         ("field", "payload"),
         [
-            ("episode reward mean", {**LEGACY_RESULT, "episode_reward_mean": None}),
-            ("episode length mean", {**LEGACY_RESULT, "episode_len_mean": None}),
             ("episode count", {**LEGACY_RESULT, "episodes_total": None}),
             ("environment step count", {**LEGACY_RESULT, "timesteps_total": None}),
         ],
     )
     def test_missing_required_metric_raises(self, field, payload):
         with pytest.raises(ValueError, match=field):
+            TrainResult.from_rllib(1, payload, 0.1)
+
+    def test_missing_episode_metrics_are_not_fabricated(self):
+        result = TrainResult.from_rllib(1, {
+            "env_runners": {
+                "num_episodes_lifetime": 0,
+                "num_env_steps_sampled_lifetime": 1024,
+            }
+        }, 0.1)
+
+        assert result.episode_reward_mean is None
+        assert result.episode_len_mean is None
+        assert result.episodes_total == 0
+        assert result.environment_steps_total == 1024
+        assert "train/task/return_mean" not in result.standard_metrics()
+        assert "train/task/episode_len_mean" not in result.standard_metrics()
+
+    @pytest.mark.parametrize("field", ["episode_reward_mean", "episode_len_mean"])
+    def test_partially_missing_episode_metrics_raise(self, field):
+        payload = {**self.LEGACY_RESULT, field: None}
+        with pytest.raises(ValueError, match="only one"):
             TrainResult.from_rllib(1, payload, 0.1)
 
     @pytest.mark.parametrize(
