@@ -202,6 +202,32 @@ def _storage(point_m: tuple[float, float, float], voxel_m: float) -> tuple[int, 
     return tuple(int(item) for item in value)  # type: ignore[return-value]
 
 
+def _voxel_cube_clearance(occupancy: np.ndarray, radius_voxels: float) -> np.ndarray:
+    """Conservative separable dilation covering a sphere throughout a voxel cell."""
+    width = math.ceil(radius_voxels) + 1
+    blocked = occupancy.astype(bool)
+    for axis in range(3):
+        expanded = blocked.copy()
+        for offset in range(1, width + 1):
+            if offset >= blocked.shape[axis]:
+                expanded[:] = True
+                break
+            low = [slice(None)] * 3
+            high = [slice(None)] * 3
+            low[axis] = slice(None, -offset)
+            high[axis] = slice(offset, None)
+            expanded[tuple(low)] |= blocked[tuple(high)]
+            expanded[tuple(high)] |= blocked[tuple(low)]
+        blocked = expanded
+    for axis in range(3):
+        edge = [slice(None)] * 3
+        edge[axis] = slice(None, width)
+        blocked[tuple(edge)] = True
+        edge[axis] = slice(-width, None)
+        blocked[tuple(edge)] = True
+    return blocked
+
+
 def _shortest_route(
     blocked: np.ndarray,
     start: tuple[int, int, int],
@@ -314,6 +340,10 @@ def export_scene(
     layout: str,
     voxel_m: float = 0.25,
     body_radius_m: float = 0.25,
+    source_hashes: dict[str, str] | None = None,
+    rights: RightsRecord | None = None,
+    partition: str = "test",
+    voxel_cube_routes: bool = False,
 ) -> dict:
     """Write one immutable world, derived task, and provenance bundle."""
 
@@ -321,9 +351,18 @@ def export_scene(
         raise FileExistsError(output)
     if not math.isfinite(body_radius_m) or body_radius_m < 0:
         raise ValueError("body radius must be finite and nonnegative")
+    if partition not in {"train", "calibration", "test"}:
+        raise ValueError("invalid partition")
     instances = scene_instances(seed, layout)
     paths = sorted(set(CONFIG) | {item.urdf for item in instances})
-    _verify_git_revision(source_root, revision, paths)
+    if source_hashes is None:
+        _verify_git_revision(source_root, revision, paths)
+    else:
+        if set(source_hashes) != set(paths) | {"LICENSE"}:
+            raise ValueError("cached source manifest does not match the required scene files")
+        paths = sorted(source_hashes)
+        for name in paths:
+            verify_artifact(source_root, ArtifactRef(relative_path=name, sha256=source_hashes[name]))
     source_files = tuple(
         SourceFile(
             relative_path=name,
@@ -337,7 +376,7 @@ def export_scene(
         source_url="https://github.com/ntnu-arl/aerial_gym_simulator",
         revision=revision,
         files=source_files,
-        rights=RightsRecord(),
+        rights=rights or RightsRecord(),
     )
     for item in source.files:
         verify_artifact(source_root, item)
@@ -364,6 +403,8 @@ def export_scene(
         for box in boxes
     )
     blocked = rasterize_boxes(clearance_boxes, voxel_m).astype(bool)
+    if voxel_cube_routes:
+        blocked |= _voxel_cube_clearance(occupancy, body_radius_m / voxel_m)
     route = _shortest_route(blocked, start, goal)
     planar_route = _shortest_route(blocked, start, goal, planar=True)
     distance = None if route is None else len(route) - 1
@@ -399,6 +440,7 @@ def export_scene(
             "body_radius_m": body_radius_m,
             "rasterization": "conservative_local_aabb_v1",
             "scene_instances_sha256": scene_sha,
+            **({"route_clearance": "conservative_voxel_cube_dilation_v1"} if voxel_cube_routes else {}),
         },
         output_occupancy_sha256=occupancy_sha,
     )
@@ -448,7 +490,7 @@ def export_scene(
                 world_identity_sha256=world.identity_sha256,
                 root_geometry_id=world.root_geometry_id,
                 topology_family=world.topology_family,
-                partition="test",
+                partition=partition,
             ),
         ),
     )
