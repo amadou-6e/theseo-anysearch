@@ -17,11 +17,32 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from theseo_anysearch.rllib.trainer.reporting.tensorboard import _TensorBoardRunWriter
+from theseo_anysearch.rllib.trainer.results import TrainResult
+
+
+def test_missing_episode_metrics_are_not_logged_as_zeros():
+    writer = object.__new__(_TensorBoardRunWriter)
+    writer._writer = MagicMock()
+    result = TrainResult(
+        iteration=1,
+        episode_reward_mean=None,
+        episode_len_mean=None,
+        episodes_total=0,
+        elapsed_s=0.1,
+        environment_steps_total=1024,
+    )
+
+    writer.log_iteration(result)
+
+    logged_tags = [call.args[0] for call in writer._writer.add_scalar.call_args_list]
+    assert "train/task/return_mean" not in logged_tags
+    assert "train/task/episode_len_mean" not in logged_tags
+    assert "train/task/episodes_total" in logged_tags
 
 
 class TestTensorBoardImportMissing:

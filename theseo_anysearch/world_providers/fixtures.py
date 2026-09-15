@@ -38,6 +38,7 @@ class FixtureBoxesProvider:
         version="1",
         description="Deterministic 12-cube box-and-detour fixture (infrastructure test)",
         native_meters_per_voxel=1.0,
+        native_extent=(12, 12, 12),
         parameters=(ProviderParameter("wall-height", "integer", default=3, minimum=1, maximum=5),),
     )
 

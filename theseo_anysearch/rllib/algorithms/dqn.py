@@ -185,6 +185,7 @@ class DQNTrainer(Trainer):
         )
         rllib_config = configure_rllib_evaluation(
             rllib_config,
+            enabled=config.evaluation.enabled,
             num_env_runners=config.evaluation.num_env_runners,
             parallel_to_training=config.evaluation.parallel_to_training,
             frequency=config.evaluation.frequency,

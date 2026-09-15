@@ -52,6 +52,8 @@ class AlgorithmEnvCompatibilityMixin:
     def _validate_algorithm_env_compatibility(self):
         """Reject unsupported algorithm and agent-count combinations."""
         threshold = self.training.early_stop.min_goal_finishes
+        if not self.evaluation.enabled and self.training.early_stop.enabled:
+            raise ValueError("training.early_stop requires regular evaluation.enabled")
         if threshold is not None and threshold > self.evaluation.episodes:
             raise ValueError(
                 "training.early_stop.min_goal_finishes cannot exceed evaluation.episodes"

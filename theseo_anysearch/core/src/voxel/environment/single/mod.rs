@@ -1,6 +1,6 @@
 use crate::voxel::rewards::RewardConfig;
 use crate::voxel::world::{
-    Block, Coord, World, WorldRead, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START,
+    Block, Coord, World, WorldError, WorldRead, WorldState, BLOCK_KIND_GOAL, BLOCK_KIND_START,
 };
 
 use crate::environments::{Environment, StepResult};
@@ -288,20 +288,20 @@ impl VoxelEnv {
         &mut self,
         goal: Coord,
         segment_length: u32,
-    ) -> VoxelObservation {
-        self.active_goal = Some(goal);
-        self.segment_steps = 0;
-        self.segment_length = segment_length;
-        self.prev_goal_dist_l2 = l2(self.cursor, goal);
-        let _ = self.world.set_block(
+    ) -> Result<VoxelObservation, WorldError> {
+        self.world.set_block(
             goal,
             Block {
                 kind: BLOCK_KIND_GOAL,
                 active: false,
                 reward_weight: 0.0,
             },
-        );
-        self.observation()
+        )?;
+        self.active_goal = Some(goal);
+        self.segment_steps = 0;
+        self.segment_length = segment_length;
+        self.prev_goal_dist_l2 = l2(self.cursor, goal);
+        Ok(self.observation())
     }
 
     pub fn observation(&self) -> VoxelObservation {

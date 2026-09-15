@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "theseo-anysearch-gazebo"
+version = "0.1.0"
+description = "Cached source-pinned Gazebo SDF maze voxel-world provider"
+requires-python = ">=3.10"
+dependencies = ["theseo-anysearch>=0.1.0,<0.2.0"]
+
+[project.entry-points."theseo_anysearch.world_providers"]
+gazebo = "anysearch_gazebo:Provider"
+
+[tool.setuptools.packages.find]
+where = ["src"]

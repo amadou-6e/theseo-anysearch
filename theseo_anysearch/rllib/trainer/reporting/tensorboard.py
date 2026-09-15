@@ -78,16 +78,18 @@ class _TensorBoardRunWriter:
         if self._writer is None:
             return
 
-        self._writer.add_scalar(
-            "train/task/return_mean",
-            result.episode_reward_mean,
-            result.iteration,
-        )
-        self._writer.add_scalar(
-            "train/task/episode_len_mean",
-            result.episode_len_mean,
-            result.iteration,
-        )
+        if result.episode_reward_mean is not None:
+            self._writer.add_scalar(
+                "train/task/return_mean",
+                result.episode_reward_mean,
+                result.iteration,
+            )
+        if result.episode_len_mean is not None:
+            self._writer.add_scalar(
+                "train/task/episode_len_mean",
+                result.episode_len_mean,
+                result.iteration,
+            )
         self._writer.add_scalar(
             "train/task/episodes_total",
             result.episodes_total,

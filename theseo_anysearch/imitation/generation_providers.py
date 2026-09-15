@@ -97,6 +97,7 @@ def _generate_heuristic_episode(
             action_plan = None
         else:
             action_plan = list(teacher.plan().action_indices)
+        planned_goal = env._rust_env.goal_pos()
 
         step_index = 0
         while True:
@@ -107,7 +108,17 @@ def _generate_heuristic_episode(
                 action = current_plan.action_indices[0]
             else:
                 if step_index >= len(action_plan):
-                    break
+                    # A continue_route environment advances its active goal at
+                    # each waypoint. Plan the next static segment once rather
+                    # than stopping after the first waypoint.
+                    next_goal = env._rust_env.goal_pos()
+                    if next_goal is None or next_goal == planned_goal:
+                        break
+                    planned_goal = next_goal
+                    action_plan = list(teacher.plan().action_indices)
+                    step_index = 0
+                    if not action_plan:
+                        break
                 action = action_plan[step_index]
 
             observations.append(observation)
