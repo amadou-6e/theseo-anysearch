@@ -20,7 +20,7 @@ from theseo_anysearch.world_providers.api import GenerationSummary, ProviderInfo
 from theseo_anysearch.world_providers.bundle import load_bundle
 from theseo_anysearch.world_providers.source_cache import cached_sources
 
-SPEC_SHA = "d54d03501a9fc5b6f8be126c4ac6e8439c84882c"
+SPEC_SHA = "d98320117af66e3189d2b1b83b8f49897e91cfd2"
 SOURCE_HASHES = {
     **ARCHIVES,
     "LICENSE": "be970277b34c9fffa57b5a08d718bfc6a981308258be6b6f43badafc48444d32",

@@ -1,6 +1,6 @@
 # Cached Gazebo provider validation (#467)
 
-Governing spec: `amadou-6e/specs@d54d03501a9fc5b6f8be126c4ac6e8439c84882c`
+Governing spec: `amadou-6e/specs@d98320117af66e3189d2b1b83b8f49897e91cfd2`
 (`gazebo-world-provider.md`, specs PR #98). Branch `feat/467` stacks on
 `feat/466@91de03e` / PR #470. Owner explicitly authorized unmerged stacking;
 this does not authorize merging. Disposition: retain shared infrastructure.
@@ -41,8 +41,8 @@ the provider does not extend the older audit into a training/redistribution gran
 
 | Installed run | Extent | World identity |
 | --- | --- | --- |
-| Seed 42, 0.5 m | 184 x 184 x 18 | `5c22c8cd1569e97128cddf42e8f5bfce10a694addf8c2baad7bdd1882c30b176` |
-| Seed 42, 0.25 m, offline | 368 x 368 x 36 | `8b6d35615c55737a372670bf09969fcdf7a80d09bb57ba5d89c8d928455a33b8` |
+| Seed 42, 0.5 m | 184 x 18 x 184 | `875cfc89373e6bedba3cbac5edc0c97c6392e706e3393d5d3876f0f453da91d8` |
+| Seed 42, 0.25 m, offline | 368 x 36 x 368 | `b9d282140017e732b9c8bdd7e8b830f7a5eca3eac4df9d47971007774ad71f62` |
 
 Both runs verified three derived tasks, rejected the disconnected `west_to_east`
 query and rendered six PNGs. Two accepted queries require altitude changes;
@@ -51,8 +51,8 @@ cells over main-wall columns. The 0.5 m XY PNG was visually inspected.
 The shared loader independently replays every witness against voxel cubes;
 the exporter separately replays against source primitives and roof.
 
-Ignored outputs: `runtime/output/gazebo467-installed-050` and
-`runtime/output/gazebo467-installed-025`; previews live under each `previews/`.
+Corrected ignored outputs: `runtime/output/gazebo477-corrected-050` and
+`runtime/output/gazebo477-corrected-025`; previews live under each `previews/`.
 Source cache and wheels also remain under ignored `runtime/output` directories.
 Original open-top world/conversion/occupancy and original split are preserved
 as supplemental artifacts. Provider converter `2-provider` has its own immutable
@@ -61,7 +61,8 @@ Seed rotates accepted task ordering only; it never changes the geometry identity
 
 ## Validation and limits
 
-Full provider plus Gazebo adapter suite: 59 passed (one existing Typer
+Corrected focused provider plus Gazebo adapter suite: 31 passed. The prior
+full provider plus adapter suite had 59 passing tests (one existing Typer
 deprecation warning). Offline fixtures cover cache download/reuse/tamper,
 explicit 4 MiB archive limit versus unchanged 2 MiB default, unsafe/duplicate/
 oversized archive members, SDF transform composition, independent collision
@@ -74,6 +75,10 @@ This pre-existing shared provider-group compatibility defect is tracked in
 theseo-anysearch#471; child-command help tests do not cover the root exception
 boundary. Generation and verification succeed. Do not report installed help
 as clean until #471 is fixed.
+
+The earlier `184 x 184 x 18` and `368 x 368 x 36` packs were invalid because
+they mapped Gazebo Z-up onto renderer depth. They are superseded by #477 and
+excluded from evidence. Correct packs map storage axes to source `(x,z,y)`.
 
 `worlds add` is currently training-only. This evaluation/test-split provider
 must reject training attachment without modifying the YAML; successful training
