@@ -462,7 +462,8 @@ def over_wall_census(passable: np.ndarray, collisions: tuple[Collision, ...], *,
     }
 
 
-def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M, body_radius_m: float = BODY_RADIUS_M) -> dict:
+def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M,
+                body_radius_m: float = BODY_RADIUS_M, compile_packs: bool = True) -> dict:
     if output_dir.exists():
         raise FileExistsError("output directory already exists")
     if not math.isfinite(body_radius_m) or body_radius_m <= 0 or body_radius_m >= 0.5:
@@ -480,7 +481,7 @@ def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M
     packs = {
         "open-top": compile_world([NpySource(open_path)], extent, output_dir / "world-packs"),
         "roofed": compile_world([NpySource(roof_path)], extent, output_dir / "world-packs"),
-    }
+    } if compile_packs else {}
     source = SourceRecord(
         source_id="engcang-gazebo-maps-easy-maze-3d",
         source_url="https://github.com/engcang/gazebo_maps",
