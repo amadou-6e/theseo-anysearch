@@ -84,6 +84,25 @@ policy settings but should remain at terminal stage 10.
 
 ## Reproduction
 
+### Revised future task: curriculum-only evaluation (#442)
+
+The next curriculum task removes the separate regular evaluation batch. Keep
+the three-route checks over all visited stages every five iterations, with the
+existing retention and advancement thresholds. With the implementation tracked
+in [#442](https://github.com/amadou-6e/theseo-anysearch/issues/442), use
+`evaluation.enabled: false` and retain
+`evaluation.waypoint_curriculum.enabled: true`. Do not enable evaluation-dependent
+training early stopping in this mode. The existing regular replay writer then
+receives no episodes; curriculum replay saving requires a separate reporting fix.
+
+This is a revised task, not a historical reproduction. The two archived YAML
+files and metrics below remain unchanged. Unlike the large-world run `5034f160`,
+this historical run evaluated 96-step routes in its regular batch, not two-step
+routes. Only use the new switch once #442 has been selectively promoted to
+`develop`; this archive PR does not introduce unsupported configuration fields.
+
+### Historical reproduction
+
 Run the current configuration from the repository root:
 
 ```powershell
