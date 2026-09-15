@@ -6,6 +6,7 @@ from usage.benchmarks.trajectory_storage.benchmark import synthetic
 from usage.benchmarks.trajectory_storage.codecs import (
     FORMATS, OFFSET, RECORD, decode_step, encode_step, read, write,
 )
+from usage.benchmarks.trajectory_storage.inspect import inspect
 
 
 @pytest.mark.parametrize("kind", FORMATS)
@@ -53,6 +54,13 @@ def test_binary_rejects_out_of_bounds_events(tmp_path):
 
 def test_fixed_record_has_explicit_portable_width():
     assert RECORD.size == 44
+
+
+def test_inspect_specific_step_and_export(tmp_path):
+    payload = synthetic(count=3)
+    write(tmp_path, "binary", payload)
+    assert inspect(tmp_path, "binary", 2) == payload["episode"]["steps"][2]
+    assert inspect(tmp_path, "binary") == payload
 
 
 @pytest.mark.parametrize("kind", FORMATS)

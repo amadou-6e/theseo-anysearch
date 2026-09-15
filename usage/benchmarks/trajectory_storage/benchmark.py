@@ -113,8 +113,13 @@ def synthetic(count=4096, agents=1, mutation_every=0):
         steps.append(value)
     return {"schema_version": 2, "experiment_name": "synthetic-storage-benchmark",
             "run_id": "not-a-training-run", "agent_count": agents,
-            "world": {"identity_sha256": "synthetic-no-world-pack"},
-            "episode": {"steps": steps, "steps_taken": count, "success": True}}
+            "iteration": 1, "episode_reward_mean": 0.0, "max_steps": count,
+            "grid_size": 80000, "obs_mode": "box",
+            "world": {"identity_sha256": "synthetic-no-world-pack", "schema_version": 1,
+                      "coordinate_type": "uint32", "extent": [80000, 2048, 512],
+                      "manifest_path": "synthetic-no-world-pack/manifest.json"},
+            "episode": {"steps": steps, "steps_taken": count, "success": True,
+                        "total_reward": 0.0}}
 
 
 def run(args):

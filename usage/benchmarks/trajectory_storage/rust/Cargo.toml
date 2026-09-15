@@ -1,0 +1,16 @@
+[package]
+name = "trajectory-storage-probe"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+eframe = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+protobuf = "3.7"
+zstd = "0.13"
+theseo-core = { path = "../../../../theseo_anysearch/core" }
+
+[build-dependencies]
+protobuf-codegen = "3.7"
