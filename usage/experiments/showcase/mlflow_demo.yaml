@@ -1,0 +1,34 @@
+description: >
+  Demonstrates local PPO training with the default SQLite-backed MLflow tracking setup. It provides a small run for checking that parameters and metrics appear in MLflow.
+
+experiment:
+  name: mlflow-demo
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+
+  geometry:
+    stl_path: usage/geometries/cube.stl
+    scale: 40.0
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  checkpoint_interval: 5
+  trajectory_every: 0
+  video_every: 999
+
+algorithm_config:
+  lr: 3.0e-4
+  train_batch_size: 200
+  num_sgd_iter: 1
+
+model_config:
+  hidden_sizes: [64, 64]
+
+# tracking_uri omitted → defaults to sqlite:///runtime/experiments/mlflow.db
+mlflow: {}

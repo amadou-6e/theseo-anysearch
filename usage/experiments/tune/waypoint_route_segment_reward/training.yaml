@@ -1,0 +1,105 @@
+description: >
+  Runs one fixed-parameter PPO curriculum training job on an obstacle-free grid
+  using inverse-success stage sampling and segmented route episodes. A native
+  sparse reward gives each reached segment a fresh additive countdown budget.
+
+experiment:
+  name: ppo-empty-grid-discrete18-segment-reward-initial1-steps96
+  output_dir: runtime/train
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+  seed: 42
+  trail_mode: true
+
+  task:
+    max_consecutive_collisions: 10
+
+  geometry:
+    grid_size: 32
+    boxes: []
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_18
+
+  rewards:
+    custom:
+      name: segment_countdown_goal
+      parameters:
+        additional_budget: 10.0
+        minimum_reward: 1.0
+
+  waypoint_curriculum:
+    enabled: true
+    completion_mode: continue_route
+    initial_start: [16, 16, 16]
+    seed: 42
+    route_length:
+      mode: fixed
+      distance: 96
+    difficulty:
+      mode: segment_distance
+      initial_distance: 1
+      distance_increment: 2
+      maximum_distance: 20
+      sampling_attempts: 512
+    training_sampling:
+      strategy: inverse_success
+      minimum_weight: 0.1
+      power: 1.0
+      unevaluated_success_rate: 0.0
+
+training:
+  algorithm: ppo
+  model: fcnet
+  runner: local
+  iterations: 100
+  checkpoint_interval: 10
+  require_gpu: true
+  num_gpus: 0.3333333333333333
+  num_env_runners: 3
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 0
+
+evaluation:
+  episodes: 10
+  seed: 142
+  min_success_rate: 0.8
+  num_env_runners: 0
+  num_envs_per_env_runner: 4
+  waypoint_curriculum:
+    enabled: true
+    frequency: 5
+    stages: all
+    episodes: 3
+    min_success_rate: 0.8
+    min_per_stage_success_rate: 0.67
+    advance:
+      mode: success
+      successes_required: 1
+
+algorithm_config:
+  lr: 0.00022330606666898814
+  train_batch_size: 4096
+  gamma: 0.9528847957241926
+  clip_param: 0.10943957247666965
+  kl_coeff: 0.1124007029997417
+  num_sgd_iter: 5
+  minibatch_size: 256
+  lambda_: 0.9423692880503198
+
+model_config:
+  hidden_sizes: [128, 128, 128, 128]
+  activation: relu
+
+mlflow:
+  tracking_uri: sqlite:///runtime/experiments/mlflow.db

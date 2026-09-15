@@ -1,0 +1,34 @@
+description: >
+  Demonstrates shared-policy PPO with three agents navigating and laying trails around a central obstacle. It produces a checkpoint and multi-agent replay data in a single iteration.
+
+experiment:
+  name: multi-agent-demo
+
+env:
+  agent_count: 3
+  max_steps: 96
+  trail_mode: true
+
+  geometry:
+    boxes:
+      - [10, 10, 10, 22, 22, 22]   # 13³ box obstacle
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
+    collision_cost: 0.0
+
+training:
+  algorithm: multi_agent_voxel_ppo
+  iterations: 1
+  checkpoint_interval: 1
+  trajectory_every: 1
+  best_trajectory: true
+  output_dir: ../../../runtime/experiments
+
+algorithm_config:
+  lr: 0.0003
+  gamma: 0.99
+  train_batch_size: 400
+  num_sgd_iter: 4

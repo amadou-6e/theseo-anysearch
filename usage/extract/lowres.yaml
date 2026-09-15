@@ -1,0 +1,13 @@
+extract:
+  pool_dir: runtime/geometry_pools/lowres
+  target_per_source: 20
+  scale_range: [20.0, 80.0]   # grid_size derived: int(scale_max) + 2*padding + 1 = 85
+  rotate: true
+  workers: 4
+  min_fill_pct: 5.0
+  min_free_pct: 10.0
+  connectivity_check: true
+  sources:
+    - usage/geometries/stepped_terrain.stl
+    - usage/geometries/pipe_junction.stl
+    - usage/geometries/cube.stl

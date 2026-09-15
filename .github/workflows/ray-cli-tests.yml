@@ -1,0 +1,74 @@
+name: Ray CLI Test Suite
+
+on:
+  pull_request:
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ray-cli-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ray-cli-tests:
+    name: Ray CLI tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      TERMINAL_WIDTH: 240
+      _TYPER_FORCE_DISABLE_TERMINAL: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: theseo_anysearch/core
+
+      - name: Create test environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install --editable ".[dev,torch-cpu]" maturin
+
+      - name: Build and install Rust bindings
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m maturin build --release `
+            --manifest-path theseo_anysearch/core/Cargo.toml `
+            --out dist
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          .\.venv\Scripts\python.exe -m pip install $wheel.FullName
+
+      - name: Run modern Ray CLI tests
+        run: >-
+          .\.venv\Scripts\python.exe -m pytest
+          tests/test_cli/test_integration/test_cli_commands.py
+          -m ray -q --durations=20
+          --junitxml=runtime/test_timings/cli-ray.xml
+
+      - name: Upload timing report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ray-cli-test-timings
+          path: runtime/test_timings/cli-ray.xml
+          if-no-files-found: warn
+          retention-days: 14

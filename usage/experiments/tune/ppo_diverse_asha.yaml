@@ -1,0 +1,67 @@
+description: >
+  Uses ASHA to tune PPO across augmented high-resolution geometry-pool samples. It searches for optimization and model settings that generalize across diverse obstacle layouts.
+
+experiment:
+  name: ppo-diverse-asha
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 4
+  max_steps: 192
+
+  geometry:
+    grid_size: 64
+
+    pool:
+      pool_dir: runtime/geometry_pools/highres   # built with: anysearch extract usage/extract/highres.yaml
+      augmentation:
+        paste_boxes:
+          num_boxes: [2, 12]
+          box_min_size: [2, 2, 2]
+          box_max_size: [20, 20, 20]
+          prob: 1.0
+
+  observation:
+    mode: box
+    box_radius: 2
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.1
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 300
+  checkpoint_interval: 50
+  trajectory_every: 20
+
+algorithm_config:
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+
+model_config:
+  hidden_sizes: [256, 256]
+  activation: relu
+
+tune_config:
+  scheduler: asha
+  num_samples: 30
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 4
+  checkpoint_frequency: 10
+  asha_config:
+    max_t: 300
+    grace_period: 30
+    reduction_factor: 3
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [2048, 4096, 8192]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+
+mlflow: {}
