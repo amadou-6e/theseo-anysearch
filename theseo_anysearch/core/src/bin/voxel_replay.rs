@@ -966,9 +966,90 @@ fn resize_overview(ui: &mut egui::Ui, outer: Rect, size: &mut f32) -> bool {
     resizing
 }
 
+fn overview_controls(
+    ui: &mut egui::Ui, outer: Rect, size: f32,
+    expanded: &mut bool, show_bounds: &mut bool,
+) -> bool {
+    if !*expanded {
+        let rect = Rect::from_min_size(
+            outer.right_bottom() - Vec2::new(132.0, 40.0), Vec2::new(120.0, 28.0),
+        );
+        let response = ui.put(rect, egui::Button::new("Show overview"));
+        if response.clicked() { *expanded = true; }
+        return response.is_pointer_button_down_on() || response.clicked();
+    }
+    let rect = overview_rect(outer, size);
+    let collapse = ui.put(
+        Rect::from_min_size(rect.right_top() + Vec2::new(-28.0, 4.0), Vec2::splat(24.0)),
+        egui::Button::new("−"),
+    ).on_hover_text("Collapse overview");
+    let bounds = ui.put(
+        Rect::from_min_size(rect.right_top() + Vec2::new(-96.0, 4.0), Vec2::new(64.0, 24.0)),
+        egui::Button::new("Bounds").selected(*show_bounds),
+    ).on_hover_text("Show or hide world bounds");
+    if collapse.clicked() { *expanded = false; }
+    if bounds.clicked() { *show_bounds = !*show_bounds; }
+    collapse.is_pointer_button_down_on() || collapse.clicked()
+        || bounds.is_pointer_button_down_on() || bounds.clicked()
+}
+
 #[cfg(test)]
 mod overview_resize_tests {
     use super::*;
+
+    fn controls_frame(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool,
+        events: Vec<egui::Event>) -> Rect
+    {
+        let mut outer = Rect::NOTHING;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                overview_controls(ui, outer, 300.0, expanded, bounds);
+            });
+        });
+        outer
+    }
+
+    fn click_control(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool, pos: Pos2) {
+        controls_frame(ctx, expanded, bounds, vec![egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: true, modifiers: egui::Modifiers::NONE }]);
+        controls_frame(ctx, expanded, bounds, vec![
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: false, modifiers: egui::Modifiers::NONE }]);
+    }
+
+    #[test]
+    fn overview_can_collapse_and_expand_without_sidebar() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let collapse = overview_rect(outer, 300.0).right_top() + Vec2::new(-16.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, collapse);
+        assert!(!expanded);
+        controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let expand = outer.right_bottom() - Vec2::new(72.0, 26.0);
+        click_control(&ctx, &mut expanded, &mut bounds, expand);
+        assert!(expanded);
+        assert!(bounds);
+    }
+
+    #[test]
+    fn world_bounds_toggle_is_on_overview() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let position = overview_rect(outer, 300.0).right_top() + Vec2::new(-64.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, position);
+        assert!(!bounds);
+        assert!(expanded);
+    }
 
     #[test]
     fn overview_is_square_anchored_and_clamped_to_viewport() {
@@ -2359,12 +2440,6 @@ impl eframe::App for VoxelReplayApp {
                         ));
                     }
                 }
-                ui.separator();
-                ui.label(egui::RichText::new("Global overview").strong());
-                ui.checkbox(&mut self.show_overview, "Show overview");
-                ui.add_enabled_ui(self.show_overview, |ui| {
-                    ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
-                });
                 if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
                     ui.colored_label(Color32::from_rgb(220, 150, 80), error);
                 }
@@ -2695,6 +2770,13 @@ impl eframe::App for VoxelReplayApp {
                         active_region_key.map(|key| (key.center, key.radius)),
                     );
                 }
+            }
+
+            if matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview |= overview_controls(
+                    ui, resp.rect, self.overview_size,
+                    &mut self.show_overview, &mut self.show_overview_bounds,
+                );
             }
 
             let agent_label = if is_multi {
