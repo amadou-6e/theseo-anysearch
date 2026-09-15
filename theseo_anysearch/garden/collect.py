@@ -346,10 +346,12 @@ class TrainingRunCollector:
 
     def _extract_from_trajectories(self, run_dir: Path, progress_cb) -> np.ndarray:
         traj_dir = run_dir / "trajectories"
-        json_files = sorted(traj_dir.glob("*.json")) if traj_dir.exists() else []
+        from theseo_anysearch.experiments.trajectory_storage import list_trajectories, read_trajectory
+        json_files = list_trajectories(traj_dir) if traj_dir.exists() else []
         if not json_files:
             # Walk subdirectories (tune runs have trial subdirs)
-            json_files = sorted(run_dir.rglob("trajectories/*.json"))
+            json_files = [path for directory in sorted(run_dir.rglob("trajectories"))
+                          if directory.is_dir() for path in list_trajectories(directory)]
 
         n = 2 * self.box_radius + 1
         all_grids: list[np.ndarray] = []
@@ -358,7 +360,7 @@ class TrainingRunCollector:
             if jf.stem.endswith("_meta"):
                 continue
             try:
-                data = json.loads(jf.read_text())
+                data = read_trajectory(jf)
                 ep = data.get("episode", data)
                 steps = ep.get("steps", [])
                 for step in steps:

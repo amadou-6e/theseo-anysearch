@@ -394,8 +394,9 @@ class TestExecution:
         summary = json.loads(
             output_dir.joinpath("evaluation", "iter_000001.json").read_text()
         )
-        replay = json.loads(
-            output_dir.joinpath("trajectories", "iter_000001.json").read_text()
+        from theseo_anysearch.experiments.trajectory_storage import read_trajectory
+        replay = read_trajectory(
+            output_dir.joinpath("trajectories", "iter_000001.json.zst")
         )
         best_meta = json.loads(
             output_dir.joinpath("trajectories", "best_meta.json").read_text()
@@ -839,7 +840,7 @@ class TestTrainingEarlyStop:
         assert trainer._output_dir.joinpath("early_stop.json").exists()
         assert trainer._output_dir.joinpath("checkpoints", "iter_000002").exists()
         assert trainer._output_dir.joinpath(
-            "trajectories", "iter_000002.json"
+            "trajectories", "iter_000002.json.zst"
         ).exists()
         payload = json.loads(
             trainer._output_dir.joinpath("early_stop.json").read_text()

@@ -206,8 +206,9 @@ class TestReplaySeedHandling:
 
         assert env.reset_seeds == [999]
 
+    @pytest.mark.parametrize("compressed", [False, True])
     def test_nested_trajectory_envelope_and_npy_geometry_are_loaded(
-        self, tmp_path: Path
+        self, tmp_path: Path, compressed: bool
     ) -> None:
         env = _FakeVoxelEnv(cursor=(0, 0, 0))
         service = _make_service(tmp_path, env)
@@ -229,6 +230,11 @@ class TestReplaySeedHandling:
             ),
             encoding="utf-8",
         )
+
+        if compressed:
+            from theseo_anysearch.experiments.trajectory_storage import write_trajectory
+            document = json.loads(trajectory.read_text(encoding="utf-8"))
+            trajectory = write_trajectory(tmp_path / "trace.json.zst", document)
 
         with pytest.raises(ValueError, match="contains no steps"):
             service._replay_trajectory(trajectory, seed=1)

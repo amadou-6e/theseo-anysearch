@@ -735,7 +735,7 @@ def write_heuristic_trajectory(
 ) -> str:
     """Write a replayer-compatible heuristic reference trajectory."""
 
-    json_path = f"trajectories/heuristic_{heuristic_type}.json"
+    json_path = f"trajectories/heuristic_{heuristic_type}.json.zst"
     init_filled_file = _prepare_geometry_artifact(store, json_path, episode)
     payload = _build_payload(
         episode,
@@ -750,7 +750,7 @@ def write_heuristic_trajectory(
         ),
     )
     payload["heuristic"] = {"type": heuristic_type, "weight": weight}
-    store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+    store.write_trajectory(json_path, payload)
     return json_path
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1015,7 @@ class MultiTrajectoryWriter:
                 else None
             ),
         )
-        self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+        self._store.write_trajectory(json_path, payload)
 
     def on_iteration_end(
         self,
@@ -1036,19 +1036,19 @@ class MultiTrajectoryWriter:
             or iteration == 1
             or (self._trajectory_every and iteration % self._trajectory_every == 0)
         ):
-            path = f"trajectories/iter_{iteration:06d}.json"
+            path = f"trajectories/iter_{iteration:06d}.json.zst"
             self._write_snapshot(path, best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             written.append(path)
 
         if self._best_trajectory and episode_reward_mean > self._best_reward:
             self._best_reward = episode_reward_mean
-            self._write_snapshot("trajectories/best.json", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
+            self._write_snapshot("trajectories/best.json.zst", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             self._store.write_json(
                 "trajectories/best_meta.json",
                 {"iteration": iteration, "episode_reward_mean": episode_reward_mean},
             )
-            if "trajectories/best.json" not in written:
-                written.append("trajectories/best.json")
+            if "trajectories/best.json.zst" not in written:
+                written.append("trajectories/best.json.zst")
         return written
 
 
@@ -1190,7 +1190,7 @@ class TrajectoryWriter:
                 else None
             ),
         )
-        self._store.write_bytes(json_path, json.dumps(payload, indent=2).encode())
+        self._store.write_trajectory(json_path, payload)
 
     def on_iteration_end(
         self,
@@ -1219,26 +1219,26 @@ class TrajectoryWriter:
             or iteration == 1
             or (self._trajectory_every and iteration % self._trajectory_every == 0)
         ):
-            path = f"trajectories/iter_{iteration:06d}.json"
+            path = f"trajectories/iter_{iteration:06d}.json.zst"
             self._write_snapshot(path, best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             written.append(path)
 
         if self._best_trajectory and episode_reward_mean > self._best_reward:
             self._best_reward = episode_reward_mean
-            self._write_snapshot("trajectories/best.json", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
+            self._write_snapshot("trajectories/best.json.zst", best_ep, iteration, episode_reward_mean, experiment_name, run_id)
             self._store.write_json(
                 "trajectories/best_meta.json",
                 {"iteration": iteration, "episode_reward_mean": episode_reward_mean},
             )
-            if "trajectories/best.json" not in written:
-                written.append("trajectories/best.json")
+            if "trajectories/best.json.zst" not in written:
+                written.append("trajectories/best.json.zst")
 
         return written
 
     @staticmethod
     def load(store: "OutputStore", rel_path: str) -> dict:
         """Deserialise a trajectory JSON file to a plain dict."""
-        return json.loads(store.read_bytes(rel_path).decode())
+        return store.read_json(rel_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1375,7 +1375,7 @@ def _prepare_geometry_artifact(
 
 
 def _init_filled_sidecar_path(json_path: str) -> str:
-    return json_path.removesuffix(".json") + "_init_filled.npy"
+    return json_path.removesuffix(".zst").removesuffix(".json") + "_init_filled.npy"
 
 
 def _write_init_filled_sidecar(

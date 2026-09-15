@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+from theseo_anysearch.experiments.trajectory_storage import find_trajectory, list_trajectories, read_trajectory
+
 import numpy as np
 import yaml
 
@@ -75,16 +77,14 @@ def resolve_trajectory(run_dir: Path, selector: str) -> Path:
         return candidate.resolve()
     directory = run_dir.joinpath("trajectories")
     if selector == "best":
-        candidate = directory.joinpath("best.json")
+        candidate = find_trajectory(directory, "best")
     elif selector == "latest":
-        choices = sorted(directory.glob("iter_*.json"))
+        choices = list_trajectories(directory, "iter_*")
         if not choices:
             raise ValueError(f"no iteration trajectories found under {directory}")
         candidate = choices[-1]
     else:
-        candidate = directory.joinpath(
-            selector if selector.endswith(".json") else f"{selector}.json"
-        )
+        candidate = find_trajectory(directory, selector)
     if not candidate.is_file():
         raise FileNotFoundError(f"trajectory not found: {candidate}")
     return candidate.resolve()
@@ -412,7 +412,7 @@ class PolicyExplanationService:
     ) -> ObservationTrace:
         """Rebuild pre-action observations and fail at the first replay mismatch."""
 
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = read_trajectory(path)
         payload = document.get("episode", document)
         if not isinstance(payload, dict):
             raise ValueError(f"trajectory {path} has an invalid episode payload")

@@ -103,4 +103,4 @@ class TrajectoryReporter:
             run_id,
             force=force,
         )
-        return "trajectories/best.json" in written
+        return "trajectories/best.json.zst" in written
