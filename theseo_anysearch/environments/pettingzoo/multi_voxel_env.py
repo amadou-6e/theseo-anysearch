@@ -114,6 +114,16 @@ class MultiVoxelEnv(RustParallelEnv):
                 "geometry task-feasibility validation currently supports only "
                 "single-agent VoxelEnv; joint multi-agent planning is not implemented"
             )
+        from theseo_anysearch.worlds.residency import (
+            has_compiled_world_episode_source,
+        )
+
+        if config.get("compiled_world_path") and not has_compiled_world_episode_source(config):
+            raise ValueError(
+                "compiled-world navigation requires waypoints, an enabled waypoint "
+                "curriculum, or a scenario provider; the compiled pack is not "
+                "enumerated to synthesize episodes"
+            )
         self._obs_rng = np.random.default_rng(config.get("seed", 42))
         pool_config = (config.get("geometry_pool") or {})
         if pool_config.get("pool_dir"):
@@ -210,9 +220,12 @@ class MultiVoxelEnv(RustParallelEnv):
         compiled_world_path = config.get("compiled_world_path")
         if compiled_world_path is not None:
             from pathlib import Path
-            from theseo_anysearch.worlds.compiler import validate_compiled_world
+            from theseo_anysearch.worlds.residency import resolve_worker_world
 
-            compiled = validate_compiled_world(Path(compiled_world_path).resolve())
+            node_cache = config.get("compiled_world_node_cache")
+            compiled = resolve_worker_world(
+                Path(compiled_world_path), Path(node_cache) if node_cache else None
+            )
             pack_extent = compiled.manifest.extent.as_tuple()
             if pack_extent != extent:
                 raise ValueError(

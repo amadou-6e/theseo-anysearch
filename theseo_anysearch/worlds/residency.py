@@ -34,6 +34,20 @@ class WorldResidencySettings:
             raise ValueError("lock_timeout_seconds must be positive")
 
 
+def has_compiled_world_episode_source(config: dict) -> bool:
+    """Return whether runtime config can initialize a bounded navigation episode."""
+
+    return any(
+        (
+            config.get("waypoints_file"),
+            config.get("waypoints"),
+            config.get("waypoint_route"),
+            (config.get("waypoint_curriculum") or {}).get("enabled"),
+            config.get("scenario_provider"),
+        )
+    )
+
+
 def stage_compiled_world(
     world: CompiledWorld,
     node_cache: Path,
@@ -83,3 +97,12 @@ def stage_compiled_world(
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
+
+
+def resolve_worker_world(source: Path, node_cache: Path | None = None) -> CompiledWorld:
+    """Validate a shared pack and optionally stage it into a worker-local cache."""
+
+    world = validate_compiled_world(source.resolve())
+    if node_cache is None:
+        return world
+    return stage_compiled_world(world, node_cache.resolve())
