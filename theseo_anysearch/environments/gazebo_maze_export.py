@@ -47,6 +47,7 @@ VOXEL_M = 0.5
 BODY_RADIUS_M = 0.25
 ROOF_UNDERSIDE_M = 8.0
 ROOF_THICKNESS_M = 1.0
+STORAGE_AXES_IN_SOURCE = ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0))
 QUERY_POINTS_M = (
     ("corner_to_corner", (-37.25, -37.25, 1.25), (37.25, 37.25, 1.25)),
     ("west_to_east", (-37.25, 7.25, 1.25), (37.25, 7.25, 1.25)),
@@ -269,15 +270,17 @@ def _extent(voxel_m: float) -> tuple[int, int, int]:
         raise ValueError("voxel size must divide fixed metric bounds")
     if np.prod(np.rint(counts)) > 5_000_000:
         raise ValueError("voxel count exceeds resource limit")
-    return tuple(int(v) for v in np.rint(counts))
+    return tuple(int(v) for v in np.rint(counts)[[0, 2, 1]])
 
 
 def voxel_center(cell: tuple[int, int, int], voxel_m: float) -> np.ndarray:
-    return np.asarray(ORIGIN) + (np.asarray(cell) + 0.5) * voxel_m
+    storage = np.asarray(cell)
+    return np.asarray(ORIGIN) + (storage[..., [0, 2, 1]] + 0.5) * voxel_m
 
 
 def _cell(point_m: tuple[float, float, float], voxel_m: float) -> tuple[int, int, int]:
-    cell = np.rint((np.asarray(point_m) - np.asarray(ORIGIN)) / voxel_m - 0.5).astype(int)
+    source_cell = np.rint((np.asarray(point_m) - np.asarray(ORIGIN)) / voxel_m - 0.5).astype(int)
+    cell = source_cell[[0, 2, 1]]
     if np.any(cell < 0) or np.any(cell >= _extent(voxel_m)):
         raise ValueError("fixed query lies outside world bounds")
     return tuple(int(v) for v in cell)
@@ -285,8 +288,8 @@ def _cell(point_m: tuple[float, float, float], voxel_m: float) -> tuple[int, int
 
 def rasterize(collisions: tuple[Collision, ...], *, voxel_m: float = VOXEL_M) -> np.ndarray:
     """Mark every cell whose volume could intersect a source collision primitive."""
-    shape = _extent(voxel_m)
-    grid = np.zeros(shape, dtype=np.uint8)
+    source_shape = tuple(int(round(length / voxel_m)) for length in EXTENT_M)
+    grid = np.zeros(source_shape, dtype=np.uint8)
     origin = np.asarray(ORIGIN)
     for collision in collisions:
         if collision.kind == "box":
@@ -297,7 +300,7 @@ def rasterize(collisions: tuple[Collision, ...], *, voxel_m: float = VOXEL_M) ->
             margin = np.sum(np.abs(collision.rotation), axis=0) * voxel_m / 2
         center = np.asarray(collision.center_m)
         lo = np.maximum(0, np.floor((center - broad - voxel_m - origin) / voxel_m).astype(int))
-        hi = np.minimum(np.asarray(shape) - 1, np.ceil((center + broad + voxel_m - origin) / voxel_m).astype(int))
+        hi = np.minimum(np.asarray(source_shape) - 1, np.ceil((center + broad + voxel_m - origin) / voxel_m).astype(int))
         if np.any(lo > hi):
             continue
         indices = np.indices(tuple(hi - lo + 1)).reshape(3, -1).T + lo
@@ -310,7 +313,7 @@ def rasterize(collisions: tuple[Collision, ...], *, voxel_m: float = VOXEL_M) ->
                 np.abs(local[:, 2]) <= collision.length_m / 2 + margin[2] + 1e-10
             )
         grid[tuple(indices[hit].T)] = 1
-    return grid
+    return np.transpose(grid, (0, 2, 1))
 
 
 def _clearance_mask(occupied: np.ndarray, radius_m: float, voxel_m: float) -> tuple[np.ndarray, np.ndarray]:
@@ -338,7 +341,7 @@ def _route(blocked: np.ndarray, start: tuple[int, int, int], goal: tuple[int, in
                 result.append(cell)
                 cell = parents[cell]
             return tuple(reversed(result))
-        for axis in range(2 if planar else 3):
+        for axis in ((0, 2) if planar else (0, 1, 2)):
             for delta in (-1, 1):
                 neighbor = list(cell)
                 neighbor[axis] += delta
@@ -389,7 +392,7 @@ def collision_parity_census(
     rng = np.random.default_rng(417)
     random_cells = rng.integers(0, np.asarray(occupied.shape), size=(10000, 3))
     samples: dict[str, list[np.ndarray]] = {
-        "random_centers": [lower + (random_cells + 0.5) * voxel_m],
+        "random_centers": [voxel_center(random_cells, voxel_m)],
         "interiors": [], "surfaces": [], "openings": [], "borders": [], "diagonals": [],
     }
     for collision in collisions:
@@ -420,7 +423,8 @@ def collision_parity_census(
         points = np.concatenate([np.asarray(part).reshape(-1, 3) for part in parts])
         inside = np.all((points >= lower) & (points < upper), axis=1)
         points = points[inside]
-        cells = np.floor((points - lower) / voxel_m).astype(int)
+        source_cells = np.floor((points - lower) / voxel_m).astype(int)
+        cells = source_cells[:, [0, 2, 1]]
         source_hits = np.zeros(len(points), dtype=bool)
         for collision in collisions:
             source_hits |= collision.contains(points)
@@ -437,12 +441,13 @@ def collision_parity_census(
 
 def over_wall_census(passable: np.ndarray, collisions: tuple[Collision, ...], *, voxel_m: float) -> dict[str, int]:
     """Check all voxel columns under 8 m source walls for a vertical bypass."""
-    xy = np.indices(passable.shape[:2]).reshape(2, -1).T
+    horizontal = np.indices((passable.shape[0], passable.shape[2])).reshape(2, -1).T
     points = np.column_stack((
-        np.asarray(ORIGIN[:2]) + (xy + 0.5) * voxel_m,
-        np.full(len(xy), 4.0),
+        ORIGIN[0] + (horizontal[:, 0] + 0.5) * voxel_m,
+        ORIGIN[1] + (horizontal[:, 1] + 0.5) * voxel_m,
+        np.full(len(horizontal), 4.0),
     ))
-    covered = np.zeros(len(xy), dtype=bool)
+    covered = np.zeros(len(horizontal), dtype=bool)
     wall_count = 0
     for collision in collisions:
         if collision.kind != "box" or collision.size_m[2] != 8.0:
@@ -452,7 +457,8 @@ def over_wall_census(passable: np.ndarray, collisions: tuple[Collision, ...], *,
             continue
         wall_count += 1
         covered |= collision.contains(points)
-    valid = int(np.count_nonzero(passable.reshape(-1, passable.shape[2])[covered]))
+    vertical_columns = passable.transpose(0, 2, 1).reshape(-1, passable.shape[1])
+    valid = int(np.count_nonzero(vertical_columns[covered]))
     if wall_count == 0 or valid:
         raise ValueError("roof permits a body-valid vertical bypass over a main wall")
     return {
@@ -506,7 +512,8 @@ def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M
             conversion_identity_sha256=conversion.identity_sha256,
             occupancy_sha256=conversion.output_occupancy_sha256,
             extent=extent,
-            frame=GridFrame(source_origin_m=ORIGIN, meters_per_voxel=voxel_m),
+            frame=GridFrame(source_origin_m=ORIGIN, storage_axes_in_source=STORAGE_AXES_IN_SOURCE,
+                            meters_per_voxel=voxel_m),
             root_geometry_id=f"gazebo-easy-maze-{UPSTREAM_SHA[:12]}",
             topology_family="gazebo-easy-maze-sdf",
             site_id="gazebo-easy-maze-3d",
@@ -531,7 +538,7 @@ def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M
             rejections.append({"query": name, "reason": "no_body_valid_6_axis_route"})
             continue
         replay_route(route, roofed_collisions, voxel_m=voxel_m, radius_m=body_radius_m)
-        planar = _route(blocked, start, goal, planar=True) if start[2] == goal[2] else None
+        planar = _route(blocked, start, goal, planar=True) if start[1] == goal[1] else None
         if planar is not None:
             replay_route(planar, roofed_collisions, voxel_m=voxel_m, radius_m=body_radius_m)
         task = RoutingTaskRecord(
@@ -565,7 +572,7 @@ def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M
             "goal_source_m": tuple(float(v) for v in voxel_center(goal, voxel_m)),
             "route_length_m": reference.cost,
             "route_cells": len(route), "planar_route_exists": planar is not None,
-            "altitude_range_m": (max(cell[2] for cell in route) - min(cell[2] for cell in route)) * voxel_m,
+            "altitude_range_m": (max(cell[1] for cell in route) - min(cell[1] for cell in route)) * voxel_m,
             "minimum_grid_clearance_m": float(min(clearance[cell] for cell in route)),
             "straight_distance_m": float(np.linalg.norm(voxel_center(goal, voxel_m) - voxel_center(start, voxel_m))),
         })
@@ -591,7 +598,7 @@ def export_maze(source_root: Path, output_dir: Path, *, voxel_m: float = VOXEL_M
         "source_collision_classes": {kind: sum(c.kind == kind for c in source_collisions) for kind in ("box", "cylinder")},
         "source_light_includes": ["sun_2"],
         "bounds_min_m": ORIGIN, "extent_m": EXTENT_M, "meters_per_voxel": voxel_m,
-        "storage_axes_in_source": "x,y,z right-handed; zero-based cell centers",
+        "storage_axes_in_source": "storage x,y,z map to source x,z,y; renderer Y-up; zero-based cell centers",
         "outside_map_policy": "occupied for finite-radius routes; open-top crop is not a bounded flight task",
         "roof_underside_m": ROOF_UNDERSIDE_M, "roof_thickness_m": ROOF_THICKNESS_M,
         "body_radius_m": body_radius_m,
