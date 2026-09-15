@@ -968,7 +968,7 @@ fn resize_overview(ui: &mut egui::Ui, outer: Rect, size: &mut f32) -> bool {
 
 fn overview_controls(
     ui: &mut egui::Ui, outer: Rect, size: f32,
-    expanded: &mut bool, show_bounds: &mut bool,
+    expanded: &mut bool, _show_bounds: &mut bool,
 ) -> bool {
     if !*expanded {
         let rect = Rect::from_min_size(
@@ -983,14 +983,8 @@ fn overview_controls(
         Rect::from_min_size(rect.right_top() + Vec2::new(-28.0, 4.0), Vec2::splat(24.0)),
         egui::Button::new("−"),
     ).on_hover_text("Collapse overview");
-    let bounds = ui.put(
-        Rect::from_min_size(rect.right_top() + Vec2::new(-96.0, 4.0), Vec2::new(64.0, 24.0)),
-        egui::Button::new("Bounds").selected(*show_bounds),
-    ).on_hover_text("Show or hide world bounds");
     if collapse.clicked() { *expanded = false; }
-    if bounds.clicked() { *show_bounds = !*show_bounds; }
     collapse.is_pointer_button_down_on() || collapse.clicked()
-        || bounds.is_pointer_button_down_on() || bounds.clicked()
 }
 
 #[cfg(test)]
@@ -1040,14 +1034,14 @@ mod overview_resize_tests {
     }
 
     #[test]
-    fn world_bounds_toggle_is_on_overview() {
+    fn former_bounds_button_does_not_toggle_world_bounds() {
         let ctx = egui::Context::default();
         let mut expanded = true;
         let mut bounds = true;
         let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
         let position = overview_rect(outer, 300.0).right_top() + Vec2::new(-64.0, 16.0);
         click_control(&ctx, &mut expanded, &mut bounds, position);
-        assert!(!bounds);
+        assert!(bounds);
         assert!(expanded);
     }
 
@@ -1180,7 +1174,6 @@ fn draw_overview_inset(
             Color32::from_rgb(255, 230, 0),
         );
     }
-    painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
 }
 
 /// Back-to-front depth key for painter's algorithm.
