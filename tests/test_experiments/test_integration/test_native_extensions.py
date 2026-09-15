@@ -78,6 +78,38 @@ def test_compile_load_execute_in_core_and_archive_native_extension(tmp_path: Pat
     assert json.loads(archived.read_text())["source_sha256"]
 
 
+def test_compile_records_action_rule_metadata(tmp_path: Path) -> None:
+    source = Path("usage", "experiments", "showcase", "native_extension", "extension")
+    experiment = tmp_path.joinpath("action_metadata")
+    shutil.copytree(source, experiment.joinpath("extension"))
+    experiment.joinpath("experiment.yaml").write_text(
+        "experiment: {}\nenv:\n  action:\n"
+        "    predicates: [valid_action, bounds, unoccupied, avoid_repeated_collision]\n"
+        "    outcomes: [cursor_movement, mark_destination]\n"
+        "  rewards:\n    custom: native_collision\n",
+        encoding="utf-8",
+    )
+
+    manifest = json.loads(
+        compile_native_extension(experiment).read_text(encoding="utf-8")
+    )
+    metadata = {
+        (item["kind"], item["name"]): item for item in manifest["rule_metadata"]
+    }
+
+    assert manifest["rule_metadata_schema_version"] == 1
+    assert {
+        ("reward", "native_collision"),
+        ("predicate", "avoid_repeated_collision"),
+        ("outcome", "mark_destination"),
+        ("training_metrics", "training_metrics"),
+        ("evaluation_metrics", "evaluation_metrics"),
+    } <= metadata.keys()
+    assert metadata[("predicate", "avoid_repeated_collision")][
+        "environment_families"
+    ] == ["voxel"]
+
+
 def test_consecutive_collision_termination_is_owned_by_rust(tmp_path: Path) -> None:
     env = make_radial_test_env(
         tmp_path,
