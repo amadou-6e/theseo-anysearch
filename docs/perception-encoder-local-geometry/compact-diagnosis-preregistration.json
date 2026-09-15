@@ -1,0 +1,28 @@
+{
+  "identity_sha256": "483c4af70e49fdc0c37ba1a552e3011d574cefe5939e6c32d01122b07ec61628",
+  "payload": {
+    "checkpoints": {
+      "trial-000-step-2048.pt": "e0df7f090b3bed5b03875321a07da4642b1795e8abdd131cf055d7b19204be84",
+      "trial-000-step-512.pt": "6f20ac8d9bf522fced39179fdd86562cac2ee3b9a1d11be035541163c64ae7bd",
+      "trial-000-step-8192.pt": "e2a068fc1d62ba8091494f28aa6d2c2d3dec812e6e39bf6f30a458543dc617ca",
+      "trial-004-step-2048.pt": "78d949076927813e62d81496d263214f028ced6477f16525b5336a332c9ef6e8",
+      "trial-004-step-512.pt": "cda7acddacb4fedc0ad3679c3f10621d2824d5eec6d3d8be047fe05ce99ac3fb",
+      "trial-004-step-8192.pt": "641dd24829adde846e175e010fc17fc155ccd614130f83433b77ed8d91ce9618"
+    },
+    "plan": {
+      "cap_seconds": 900,
+      "run_id": "compact-search-diagnosis-v1-run1",
+      "rungs": [
+        512,
+        2048,
+        8192
+      ],
+      "search_report_sha256": "572e8910c6d1934f59662a9b79312f0a08e482fb91dfe2d832f08a6bca8048a6",
+      "verification_reserve_seconds": 120
+    },
+    "registration_sha256": "2d00e9424e3615f9ab3aadc4eb1b372fd6af828c4971664788130189c8219d39",
+    "source_commit": "91de70a77e69be71fa665e0797521afa827faf1c",
+    "spec_commit": "2a17aa8e0f5a92e36e3d5bb4aad1d926dc000792",
+    "spec_path": "projects/theseo-anysearch/python/perception-encoder-compact-diagnosis.md"
+  }
+}
