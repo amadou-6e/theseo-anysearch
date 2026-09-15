@@ -884,8 +884,9 @@ struct Bounds {
 
 #[cfg(test)]
 mod camera_tests {
-    use super::{Bounds, Camera};
+    use super::{overview_inset_scale, Bounds, Camera};
     use eframe::egui::{Pos2, Rect, Vec2};
+    use theseo_core::replay::overview::OverviewMesh;
 
     fn test_camera() -> Camera {
         Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() }
@@ -987,10 +988,53 @@ mod camera_tests {
 
         assert_eq!(horizontal.x - origin.x, vertical.y - origin.y);
     }
+
+    #[test]
+    fn overview_scale_fits_every_camera_rotation_without_refitting() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+        let extent = [512, 128, 64];
+        let empty = OverviewMesh { vertices: Vec::new(), indices: Vec::new(), extent };
+        let mesh = OverviewMesh {
+            vertices: empty.bounds_vertices(),
+            indices: Vec::new(),
+            extent,
+        };
+        let scale = overview_inset_scale(rect, extent);
+
+        for (yaw, pitch) in [(0.0_f32, 0.0_f32), (37.0, -21.0), (91.0, 42.0)] {
+            for point in mesh.project(yaw.to_radians(), pitch.to_radians()) {
+                assert!(point.x.abs() * scale <= rect.width() * 0.5);
+                assert!(point.y.abs() * scale <= rect.height() * 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn overview_scale_uses_normalized_world_extent() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(280.0, 220.0));
+
+        let small = overview_inset_scale(rect, [128, 64, 32]);
+        let large = overview_inset_scale(rect, [1024, 512, 256]);
+
+        assert!((small - large).abs() < f32::EPSILON);
+    }
 }
 
 fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
+}
+
+fn overview_inset_scale(rect: Rect, extent: [u32; 3]) -> f32 {
+    // Overview vertices are normalized by the largest world axis. The
+    // normalized diagonal bounds every camera rotation without zooming.
+    let maximum_extent = extent.into_iter().max().unwrap_or(1).max(1) as f32;
+    let diagonal = extent
+        .into_iter()
+        .map(|axis| (axis as f32 / maximum_extent).powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.001);
+    rect.width().min(rect.height()) / diagonal * 0.86
 }
 
 fn overview_rect(outer: Rect, size: f32) -> Rect {
@@ -1166,10 +1210,7 @@ fn draw_overview_inset(
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
-    let maximum_x = bounds_points.iter().map(|point| point.x.abs()).fold(0.0, f32::max).max(0.001);
-    let maximum_y = bounds_points.iter().map(|point| point.y.abs()).fold(0.0, f32::max).max(0.001);
-    let scale = (rect.width() / (2.0 * maximum_x))
-        .min(rect.height() / (2.0 * maximum_y)) * 0.86;
+    let scale = overview_inset_scale(rect, mesh.extent);
     let mut triangles = mesh.indices.chunks_exact(3).map(|indices| {
         let points = [projected[indices[0] as usize], projected[indices[1] as usize], projected[indices[2] as usize]];
         (points.iter().map(|point| point.depth).sum::<f32>() / 3.0, points)
