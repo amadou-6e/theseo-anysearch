@@ -26,6 +26,7 @@ dependencies = [
   "fsspec>=2024.2",
   "protobuf>=4.25",
   "zstandard>=0.25,<1",
+  "ifcopenshell>=0.8,<0.9",
 ]
 
 [project.optional-dependencies]
