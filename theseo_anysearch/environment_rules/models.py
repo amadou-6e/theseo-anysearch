@@ -39,7 +39,7 @@ class EnvironmentRuleMetadata(BaseModel):
     version: int = Field(default=1, ge=1)
     source: Literal["built_in", "python", "native"] = "built_in"
     environment_families: frozenset[EnvironmentFamily] = Field(
-        default_factory=lambda: frozenset({"voxel"})
+        default_factory=lambda: frozenset({"voxel"}), min_length=1
     )
     dependencies: tuple[RuleReference, ...] = ()
     conflicts: tuple[RuleReference, ...] = ()
