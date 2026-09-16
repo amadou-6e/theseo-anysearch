@@ -57,3 +57,24 @@ def test_invalid_download_never_published(tmp_path):
         with pytest.raises(ValueError, match="hash mismatch"):
             cached_sources(cache, base_url="https://example.org", hashes={"box": "0" * 64})
     assert list(cache.iterdir()) == []
+
+
+@pytest.mark.parametrize("limit", [32 * 1024 * 1024, 8 * 1024 * 1024])
+def test_max_file_bytes_up_to_32_mib_is_accepted(tmp_path, limit):
+    data = b"a"
+    hashes = {"large.ifc": hashlib.sha256(data).hexdigest()}
+    response = Mock()
+    response.read.return_value = data
+    response.geturl.return_value = "https://example.org/large.ifc"
+    response.__enter__ = Mock(return_value=response)
+    response.__exit__ = Mock(return_value=False)
+    with patch("theseo_anysearch.world_providers.source_cache.urlopen", return_value=response):
+        root = cached_sources(tmp_path / str(limit), base_url="https://example.org",
+                              hashes=hashes, max_file_bytes=limit)
+    assert (root / "large.ifc").read_bytes() == data
+
+
+def test_max_file_bytes_above_32_mib_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="at most 32 MiB"):
+        cached_sources(tmp_path, base_url="https://example.org", hashes={"a": "0" * 64},
+                       max_file_bytes=32 * 1024 * 1024 + 1)

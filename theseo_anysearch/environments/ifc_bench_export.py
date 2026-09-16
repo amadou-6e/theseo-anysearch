@@ -73,7 +73,7 @@ from theseo_anysearch.worlds.manifest import WorldExtent
 SOURCE_ID = "ifc-bench-west-riverside-hospital"
 SOURCE_URL = "https://huggingface.co/datasets/sylvainHellin/ifc-bench"
 SOURCE_REVISION = "e1c4b0025ac42acf50f792e46a0ab33f4382e90e"  # tag v2.0.1
-GOVERNING_SPEC_SHA = "f5e701b23c9c52a01f48ca7b76ed7be89a62268a"
+GOVERNING_SPEC_SHA = "adcf97b3312d2cd4d1fd3cf9be85441559d2c5f9"  # ifc-bench-mep-provider.md
 GENERATOR_FAMILY = "ifc_bench_west_riverside_hospital_mep_v1"
 
 ALLOWED_SCHEMAS = ("IFC2X3", "IFC4")
@@ -551,22 +551,35 @@ def verify_route_against_solids(
                 )
 
 
+MAX_CANDIDATE_TASKS = 6
+
+
 def select_task_endpoints(
     elements: tuple[object, ...],
-    graph: dict[int, set[int]],
-    centers: dict[int, np.ndarray],
-) -> tuple[tuple[int, int] | None, list[str]]:
-    """Pick the farthest-apart pair of leaf elements in the largest component."""
+    graph: dict[str, set[str]],
+    centers: dict[str, np.ndarray],
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Candidate leaf-to-leaf pairs in the largest connected component.
+
+    Each leaf is paired with its single farthest other leaf, pairs are
+    deduplicated (a-b and b-a are the same candidate) and returned
+    farthest-first, capped at MAX_CANDIDATE_TASKS. A provider layer rotates
+    this fixed roster by seed (matching the Gazebo provider's
+    accepted-query rotation); it does not alter which pairs are accepted.
+    With exactly two leaves (the common case for a short, mostly-linear
+    run) this always returns exactly one candidate, the same pair the
+    original single-task selection returned.
+    """
 
     if not graph:
-        return None, ["no_extracted_elements"]
-    visited: set[int] = set()
-    components: list[set[int]] = []
+        return [], ["no_extracted_elements"]
+    visited: set[str] = set()
+    components: list[set[str]] = []
     for node in graph:
         if node in visited:
             continue
         stack = [node]
-        component: set[int] = set()
+        component: set[str] = set()
         while stack:
             current = stack.pop()
             if current in component:
@@ -577,22 +590,37 @@ def select_task_endpoints(
         components.append(component)
     largest = max(components, key=len)
     if len(largest) < 2:
-        return None, ["largest_connected_component_has_fewer_than_two_elements"]
-    leaves = [node for node in largest if len(graph[node]) <= 1] or list(largest)
-    best_pair = None
-    best_distance = -1.0
-    for i, a in enumerate(leaves):
-        for b in leaves[i + 1 :]:
-            distance = float(np.linalg.norm(centers[a] - centers[b]))
-            if distance > best_distance:
-                best_distance = distance
-                best_pair = (a, b)
+        return [], ["largest_connected_component_has_fewer_than_two_elements"]
+    # largest/graph[node] are sets, and Python's string hashing is
+    # randomized per process (PYTHONHASHSEED), so iterating them directly
+    # would make candidate order -- and therefore which task a given seed
+    # selects -- nondeterministic across processes. Sort every GlobalId
+    # sequence explicitly so the same input always yields the same roster.
+    leaves = sorted(node for node in largest if len(graph[node]) <= 1) or sorted(largest)
+    pairs: dict[frozenset[str], float] = {}
+    for leaf in leaves:
+        farthest = max(
+            sorted(other for other in leaves if other != leaf),
+            key=lambda other: float(np.linalg.norm(centers[leaf] - centers[other])),
+            default=None,
+        )
+        if farthest is not None:
+            key = frozenset({leaf, farthest})
+            pairs[key] = float(np.linalg.norm(centers[leaf] - centers[farthest]))
+    # Explicit secondary key: with leaves already sorted, dict insertion
+    # order is already deterministic, but breaking distance ties on the
+    # pair's own sorted identity makes that determinism self-evident here
+    # rather than resting on insertion-order-preservation reasoning.
+    ordered = sorted(
+        pairs.items(), key=lambda item: (-item[1], tuple(sorted(item[0])))
+    )[:MAX_CANDIDATE_TASKS]
+    candidates = [tuple(sorted(key)) for key, _ in ordered]
     rejections = []
     if len(components) > 1:
         rejections.append(
             f"{len(components) - 1} disconnected component(s) excluded from task selection"
         )
-    return best_pair, rejections
+    return candidates, rejections
 
 
 def _filter_by_storey(
@@ -778,11 +806,15 @@ def export_discipline(
         site_id=SOURCE_ID,
     )
 
-    endpoint_pair, rejections = select_task_endpoints(elements, graph, centers)
+    candidate_pairs, rejections = select_task_endpoints(elements, graph, centers)
     tasks: list[RoutingTaskRecord] = []
     references: list[RoutingReferenceRecord] = []
     route_rows: list[dict] = []
-    if endpoint_pair is not None:
+    family = "single_pipe" if discipline == "plumbing" else "coupled_pipes"
+    passable = clearance_mask(
+        occupied, body_radius_m=resolved_body_radius_m, meters_per_voxel=meters_per_voxel
+    )
+    for pair_index, endpoint_pair in enumerate(candidate_pairs):
         start_center = _leaf_endpoint_m(
             endpoint_pair[0], graph=graph, aabbs=aabbs, centers=centers,
             meters_per_voxel=meters_per_voxel, body_radius_m=resolved_body_radius_m,
@@ -797,7 +829,6 @@ def export_discipline(
         goal = _source_to_storage_cell(
             goal_center, origin_m=origin_m, meters_per_voxel=meters_per_voxel
         )
-        family = "single_pipe" if discipline == "plumbing" else "coupled_pipes"
         task = RoutingTaskRecord(
             world_identity_sha256=world.identity_sha256,
             provenance="derived",
@@ -807,67 +838,67 @@ def export_discipline(
             movement_model="6-axis voxel-center route; swept sphere checked against occupied cubes",
             body_radius_m=resolved_body_radius_m,
             derivation_reason=(
-                "Farthest-apart leaf pair in the largest connected MEP network component; "
-                "not a native IFC-Bench-labeled query"
+                "One of up to MAX_CANDIDATE_TASKS farthest-apart leaf pairs in the "
+                "largest connected MEP network component; not a native "
+                "IFC-Bench-labeled query"
             ),
         )
         in_bounds = all(0 <= start[axis] < extent[axis] for axis in range(3)) and all(
             0 <= goal[axis] < extent[axis] for axis in range(3)
         )
-        passable = clearance_mask(
-            occupied, body_radius_m=resolved_body_radius_m, meters_per_voxel=meters_per_voxel
-        )
         if not in_bounds:
-            rejections.append("selected_endpoints_fall_outside_the_padded_world_extent")
-        elif occupied[start] or occupied[goal]:
-            rejections.append("selected_endpoints_fall_inside_conservative_occupancy")
-        elif not passable[start] or not passable[goal]:
-            rejections.append("selected_endpoints_fail_body_radius_clearance")
-        else:
-            validate_task_endpoints(task, world, occupied)
-            route = shortest_six_axis_route(passable, start, goal)
-            if route is None:
-                rejections.append("no_six_axis_route_between_selected_endpoints")
-            else:
-                replay_six_axis_route(
-                    occupied, route,
-                    body_radius_m=resolved_body_radius_m,
-                    meters_per_voxel=meters_per_voxel,
-                )
-                verify_route_against_solids(
-                    route, aabbs=aabbs, origin_m=origin_m,
-                    meters_per_voxel=meters_per_voxel, body_radius_m=resolved_body_radius_m,
-                )
-                route_path = output_dir / "route.json"
-                route_path.write_text(
-                    json.dumps(route, separators=(",", ":")), encoding="utf-8"
-                )
-                reference = RoutingReferenceRecord(
-                    task_identity_sha256=task.identity_sha256,
-                    claim="independently_validated",
-                    route_artifact=ArtifactRef(
-                        relative_path=route_path.name, sha256=_sha256(route_path)
-                    ),
-                    cost=(len(route) - 1) * meters_per_voxel,
-                    verification_evidence=(
-                        "Every six-axis centerline segment independently replayed twice: "
-                        "as a swept sphere against this discipline's quantized occupied "
-                        "voxel cubes, and as a continuous-space segment against every "
-                        "extracted element's own AABB inflated by the body radius; not "
-                        "checked against the exact triangulated solid or against "
-                        "unextracted structural, architectural, mechanical, fire or "
-                        "sprinkler IFC content for the same building"
-                    ),
-                )
-                tasks.append(task)
-                references.append(reference)
-                route_rows.append({
-                    "family": family,
-                    "task_identity_sha256": task.identity_sha256,
-                    "reference_identity_sha256": reference.identity_sha256,
-                    "route_steps": len(route) - 1,
-                    "route_cost_m": reference.cost,
-                })
+            rejections.append(f"candidate_{pair_index}_endpoints_fall_outside_the_padded_world_extent")
+            continue
+        if occupied[start] or occupied[goal]:
+            rejections.append(f"candidate_{pair_index}_endpoints_fall_inside_conservative_occupancy")
+            continue
+        if not passable[start] or not passable[goal]:
+            rejections.append(f"candidate_{pair_index}_endpoints_fail_body_radius_clearance")
+            continue
+        validate_task_endpoints(task, world, occupied)
+        route = shortest_six_axis_route(passable, start, goal)
+        if route is None:
+            rejections.append(f"candidate_{pair_index}_no_six_axis_route_between_selected_endpoints")
+            continue
+        replay_six_axis_route(
+            occupied, route,
+            body_radius_m=resolved_body_radius_m,
+            meters_per_voxel=meters_per_voxel,
+        )
+        verify_route_against_solids(
+            route, aabbs=aabbs, origin_m=origin_m,
+            meters_per_voxel=meters_per_voxel, body_radius_m=resolved_body_radius_m,
+        )
+        route_path = output_dir / f"route-{len(tasks):02d}.json"
+        route_path.write_text(
+            json.dumps(route, separators=(",", ":")), encoding="utf-8"
+        )
+        reference = RoutingReferenceRecord(
+            task_identity_sha256=task.identity_sha256,
+            claim="independently_validated",
+            route_artifact=ArtifactRef(
+                relative_path=route_path.name, sha256=_sha256(route_path)
+            ),
+            cost=(len(route) - 1) * meters_per_voxel,
+            verification_evidence=(
+                "Every six-axis centerline segment independently replayed twice: "
+                "as a swept sphere against this discipline's quantized occupied "
+                "voxel cubes, and as a continuous-space segment against every "
+                "extracted element's own AABB inflated by the body radius; not "
+                "checked against the exact triangulated solid or against "
+                "unextracted structural, architectural, mechanical, fire or "
+                "sprinkler IFC content for the same building"
+            ),
+        )
+        tasks.append(task)
+        references.append(reference)
+        route_rows.append({
+            "family": family,
+            "task_identity_sha256": task.identity_sha256,
+            "reference_identity_sha256": reference.identity_sha256,
+            "route_steps": len(route) - 1,
+            "route_cost_m": reference.cost,
+        })
 
     split = RoutingSplitRecord(
         dataset_id=f"{SOURCE_ID}-{discipline}-v1",

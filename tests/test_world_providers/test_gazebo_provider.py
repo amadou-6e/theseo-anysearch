@@ -67,7 +67,7 @@ def test_large_archive_cache_download_and_offline_reuse(tmp_path):
         cached_sources(tmp_path, base_url="https://example.org", hashes=hashes, offline=True, max_file_bytes=4 * 1024 * 1024)
 
 
-@pytest.mark.parametrize("limit", [0, -1, 8 * 1024 * 1024, True])
+@pytest.mark.parametrize("limit", [0, -1, 64 * 1024 * 1024, True])
 def test_invalid_cache_limit(tmp_path, limit):
     with pytest.raises(ValueError):
         cached_sources(tmp_path, base_url="https://example.org", hashes={"a": "0" * 64}, max_file_bytes=limit)
