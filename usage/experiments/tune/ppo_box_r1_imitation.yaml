@@ -1,0 +1,100 @@
+description: >
+  Compares radius-1 box PPO learning with the historical stepped-terrain
+  baseline after heuristic behavior-cloning pretraining. Start and goal are
+  sampled from different surface cells on every reset; the geometry remains
+  fixed. All four trials run for 40 iterations so time-to-first-success can be
+  compared without scheduler pruning.
+
+experiment:
+  name: ppo-box-r1-imitation
+  output_dir: runtime/tune
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 200
+  trail_mode: true
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    grid_size: 32
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_26
+
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    collision_cost: 0.0
+    distance_shaping: 0.2
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  model: voxel_encoder
+  runner: local
+  iterations: 40
+  checkpoint_interval: 40
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 999
+  num_env_runners: 8
+
+imitation:
+  enabled: true
+  strategy: pretrain_then_rl
+  generation:
+    provider: astar
+    episodes: 64
+    max_attempts: 128
+    require_success: true
+  sampling:
+    provider: uniform_transition
+  collection:
+    seed_start: 1000
+    validation_fraction: 0.1
+    reuse_dataset: true
+    dataset_dir: runtime/tune/datasets/box_r1_astar_64
+  pretraining:
+    epochs: 20
+    batch_size: 128
+    learning_rate: 0.0003
+    label_smoothing: 0.0
+    early_stopping_patience: 3
+  handoff:
+    initialize_encoder: true
+    initialize_policy: true
+    initialize_value_head: false
+  cache:
+    enabled: true
+    # Tune resolves a shared experiment-level directory automatically when null.
+    directory: null
+    refresh: false
+    lock_timeout_seconds: 1800
+
+tune_config:
+  scheduler: random
+  num_samples: 4
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 1
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [512, 1024, 2048, 4096]}
+      gamma:            {uniform: [0.95, 0.999]}
+      clip_param:       {uniform: [0.1, 0.3]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+      num_sgd_iter:     {choice: [5, 10, 20, 30]}
+      lambda_:          {uniform: [0.9, 1.0]}
+    model_config:
+      num_layers:       {choice: [1, 2, 3, 4]}
+      layer_size:       {choice: [64, 128, 256, 512]}
+
+mlflow:
+  tracking_uri: sqlite:///experiments/mlflow.db
