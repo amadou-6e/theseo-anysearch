@@ -104,6 +104,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-local-tests
+      - name: Install optional ifcbench extra
+        run: python -m pip install --editable ".[ifcbench]"
       - run: >-
           python -m pytest
           tests/test_environments/test_unit

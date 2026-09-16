@@ -221,7 +221,7 @@ def test_connectivity_links_only_extracted_elements(tmp_path):
     ifc_path = source_root / DISCIPLINE_FILES["plumbing"]
     ifc_file = open_verified_ifc(ifc_path)
     elements, _ = extract_elements(ifc_file, discipline="plumbing")
-    graph, boundary_edges = build_connectivity(elements)
+    graph, boundary_edges = build_connectivity(ifc_file, elements)
     assert boundary_edges == 0
     by_name = {element.Name: element.GlobalId for element in elements}
     assert graph[by_name["segA"]] == {by_name["elbow"]}
@@ -284,7 +284,7 @@ def test_select_task_endpoints_picks_farthest_leaves(tmp_path):
     source_root = _build_ifc(tmp_path, kind="plumbing")
     ifc_file = open_verified_ifc(source_root / DISCIPLINE_FILES["plumbing"])
     elements, _ = extract_elements(ifc_file, discipline="plumbing")
-    graph, _ = build_connectivity(elements)
+    graph, _ = build_connectivity(ifc_file, elements)
     settings = ifcopenshell.geom.settings()
     settings.set("use-world-coords", True)
     centers = {}
@@ -408,3 +408,104 @@ def test_export_discipline_electrical_uses_cable_carrier_types(tmp_path):
     assert len(report["task_ids"]) == 1
     task = read_sidecar(output / "task-00.json", RoutingTaskRecord)
     assert task.family == "coupled_pipes"
+
+
+def test_storey_names_restricts_extraction_to_the_named_storey(tmp_path):
+    """Ground holds segA/elbow; Upper holds segB only (see _build_ifc)."""
+
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    output = tmp_path / "out"
+    report = export_discipline(
+        source_root, output, discipline="plumbing", partition="test",
+        verify_hashes=False, storey_names=("Ground",),
+    )
+    assert report["extracted_element_count"] == 2
+    assert report["storey_names"] == ["Ground"]
+    # elbow's connection to segB (on Upper) is dropped, not silently ignored;
+    # connect_port wires both port-pair directions, so one logical connection
+    # is two IfcRelConnectsPorts relationships.
+    assert report["boundary_connections_excluded"] == 2
+    # segA and elbow are still connected to each other within Ground alone,
+    # so a task is still produced from just this storey's network.
+    assert report["rejected_task_strata"] == []
+    assert len(report["task_ids"]) == 1
+
+
+def test_storey_names_rejects_a_storey_with_no_extracted_elements(tmp_path):
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    with pytest.raises(ValueError, match="no extracted elements"):
+        export_discipline(
+            source_root, tmp_path / "out", discipline="plumbing", partition="test",
+            verify_hashes=False, storey_names=("Nonexistent Level",),
+        )
+
+
+def test_crop_bounds_m_filters_elements_and_fixes_world_bounds(tmp_path):
+    """A box covering only segA's run excludes elbow and segB."""
+
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    output = tmp_path / "out"
+    report = export_discipline(
+        source_root, output, discipline="plumbing", partition="test", verify_hashes=False,
+        crop_bounds_m=((1.0, 1.9, 0.9), (2.0, 2.1, 1.1)),
+    )
+    assert report["extracted_element_count"] == 1
+    assert report["crop_bounds_m"] == ((1.0, 1.9, 0.9), (2.0, 2.1, 1.1))
+    world = read_sidecar(output / "world.json", RoutingWorldRecord)
+    # source_origin_m is anchored to the requested box's low corner (allowing
+    # for margin), not to the identity (0, 0, 0) origin a data-derived bound
+    # from segA's own much larger true AABB (low x=0.0) would produce.
+    assert world.frame.source_origin_m[0] != pytest.approx(0.0, abs=1e-6)
+
+
+def test_crop_bounds_m_rejects_an_inverted_box(tmp_path):
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    with pytest.raises(ValueError, match="min < max"):
+        export_discipline(
+            source_root, tmp_path / "out", discipline="plumbing", partition="test",
+            verify_hashes=False,
+            crop_bounds_m=((1.0, 1.0, 1.0), (0.0, 0.0, 0.0)),
+        )
+
+
+def test_crop_bounds_m_rejects_an_empty_box(tmp_path):
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    with pytest.raises(ValueError, match="no extracted elements"):
+        export_discipline(
+            source_root, tmp_path / "out", discipline="plumbing", partition="test",
+            verify_hashes=False,
+            crop_bounds_m=((500.0, 500.0, 500.0), (501.0, 501.0, 501.0)),
+        )
+
+
+def test_verify_route_against_solids_passes_a_clear_route():
+    from theseo_anysearch.environments.ifc_bench_export import verify_route_against_solids
+
+    aabbs = {"wall": (np.array([5.0, 5.0, 5.0]), np.array([6.0, 6.0, 6.0]))}
+    route = ((0, 0, 0), (1, 0, 0), (2, 0, 0))
+    verify_route_against_solids(
+        route, aabbs=aabbs, origin_m=np.zeros(3),
+        meters_per_voxel=0.1, body_radius_m=0.02,
+    )
+
+
+def test_verify_route_against_solids_independently_catches_a_collision_the_voxel_check_missed():
+    """This is the second, continuous-space check's whole reason to exist:
+
+    catch a route that a coarse voxel-grid replay could pass but that
+    actually clips a real element's AABB once the discrete cells are mapped
+    back to their true continuous-space centers.
+    """
+
+    from theseo_anysearch.environments.ifc_bench_export import verify_route_against_solids
+
+    # A storage cell of (5, 0, 0) maps (via the [0,2,1] permutation) to source
+    # index (5, 0, 0) -> source-space center (0.55, 0.05, 0.05) at mpv=0.1,
+    # origin (0,0,0) -- placed squarely inside this AABB.
+    aabbs = {"pipe": (np.array([0.5, 0.0, 0.0]), np.array([0.6, 0.1, 0.1]))}
+    route = ((4, 0, 0), (5, 0, 0), (6, 0, 0))
+    with pytest.raises(ValueError, match="collides with an extracted element"):
+        verify_route_against_solids(
+            route, aabbs=aabbs, origin_m=np.zeros(3),
+            meters_per_voxel=0.1, body_radius_m=0.02,
+        )

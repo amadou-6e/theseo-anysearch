@@ -16,14 +16,17 @@ performs no network access; callers supply an already checked-out local
 source directory.
 
 Known scope limitation, confirmed against the real, pinned
-west_riverside_hospital plumbing file: the whole building spans roughly
-85 x 33 x 65 m, and its smallest declared pipe radius (~6.35 mm) drives
+west_riverside_hospital files: the whole building spans roughly 85 x 33 x
+65 m, and the smallest declared pipe/cable-carrier cross-section drives
 ``meters_per_voxel`` down to this module's 0.01 m floor, so a single-shot
-whole-building conversion needs on the order of 1.8e11 voxels -- far past
+whole-building conversion needs on the order of 1e11 voxels -- far past
 ``MAX_VOXELS`` -- and ``export_discipline`` correctly refuses it rather than
-silently coarsening or truncating. Converting a real building end to end
-requires cropping to one storey, riser or room before calling this adapter;
-that spatial-crop step is not implemented here.
+silently coarsening or truncating. ``export_discipline``'s ``storey_names``
+and ``crop_bounds_m`` parameters narrow the converted region to make a real
+conversion tractable; both were exercised against the real, hash-verified
+plumbing and electrical files (not committed, not required for this
+module's own offline test suite) and produced complete, independently
+verified single_pipe/coupled_pipes bundles with real routes.
 """
 
 from __future__ import annotations
@@ -33,14 +36,16 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING
 
-import ifcopenshell
-import ifcopenshell.geom
-import ifcopenshell.util.placement as ifc_placement
-import ifcopenshell.util.system as ifc_system
-import ifcopenshell.util.unit as ifc_unit
 import numpy as np
 from scipy import ndimage
+
+if TYPE_CHECKING:
+    # Only for type checkers/linters; never imported at runtime (see _ifc()).
+    import ifcopenshell
+    import ifcopenshell.geom
 
 from theseo_anysearch.environments.routing_manifests import (
     ArtifactRef,
@@ -98,6 +103,32 @@ MAX_VOXEL_SIZE_M = 0.20
 MAX_VOXELS = 5_000_000
 DEFAULT_BODY_RADIUS_M = 0.02
 ELEVATION_TOLERANCE_M = 0.05
+
+
+def _ifc() -> ModuleType:
+    """Import ifcopenshell lazily so the core package install stays dependency-free.
+
+    ifcopenshell is a large, IFC-specific binary dependency with no other use
+    in this framework; it lives in the optional 'ifcbench' extra rather than
+    core ``dependencies``, matching how the separate Gazebo/Aerial Gym
+    provider wheels keep their dependencies out of every install. Every
+    function in this module that needs ifcopenshell calls this first instead
+    of relying on a module-level import.
+    """
+
+    try:
+        import ifcopenshell
+        import ifcopenshell.geom
+        import ifcopenshell.util.element
+        import ifcopenshell.util.placement
+        import ifcopenshell.util.system
+        import ifcopenshell.util.unit
+    except ImportError as exc:
+        raise ImportError(
+            "theseo_anysearch.environments.ifc_bench_export requires the "
+            'optional "ifcbench" extra: pip install "theseo-anysearch[ifcbench]"'
+        ) from exc
+    return ifcopenshell
 
 
 def _sha256(path: Path) -> str:
@@ -177,11 +208,11 @@ def open_verified_ifc(path: Path) -> ifcopenshell.file:
     """Open only after bounding the schema and entity count of trusted local bytes."""
 
     _check_step_header(path)
-    return ifcopenshell.open(str(path))
+    return _ifc().open(str(path))
 
 
 def _length_scale_to_m(ifc_file: ifcopenshell.file) -> float:
-    scale = ifc_unit.calculate_unit_scale(ifc_file)
+    scale = _ifc().util.unit.calculate_unit_scale(ifc_file)
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError("IFC file declares a non-finite or non-positive length unit scale")
     return float(scale)
@@ -202,6 +233,7 @@ def confirm_z_up(ifc_file: ifcopenshell.file, *, scale: float) -> None:
     elevation means greater Z, i.e. that Z is genuinely the vertical axis.
     """
 
+    placement_util = _ifc().util.placement
     storeys = ifc_file.by_type("IfcBuildingStorey")
     if len(storeys) < 2:
         raise ValueError(
@@ -212,7 +244,7 @@ def confirm_z_up(ifc_file: ifcopenshell.file, *, scale: float) -> None:
     for storey in storeys:
         if storey.Elevation is None or storey.ObjectPlacement is None:
             raise ValueError(f"storey {storey.Name!r} lacks elevation or placement evidence")
-        matrix = ifc_placement.get_local_placement(storey.ObjectPlacement)
+        matrix = placement_util.get_local_placement(storey.ObjectPlacement)
         resolved.append((storey.Name, float(storey.Elevation) * scale, float(matrix[2, 3]) * scale))
     reference_name, reference_elevation, reference_z = resolved[0]
     for name, elevation_m, placement_z_m in resolved[1:]:
@@ -250,33 +282,60 @@ def extract_elements(
 
 
 def build_connectivity(
-    elements: tuple[object, ...]
+    ifc_file: ifcopenshell.file, elements: tuple[object, ...]
 ) -> tuple[dict[str, set[str]], int]:
     """Map extracted-element GlobalIds to connected extracted-element GlobalIds.
 
-    Connections that reach an element outside the extracted set (an
-    unextracted fixture or terminal) are dropped from the graph and reported
-    separately; they are not proof of a dead end in the real network.
+    Resolves IfcRelConnectsPortToElement and IfcRelConnectsPorts directly
+    rather than through ifcopenshell.util.system.get_connected_to/
+    get_port_element: on real West Riverside Hospital data those utilities
+    silently return no connections at all for every element, even though the
+    file's own IfcRelConnectsPortToElement/IfcRelConnectsPorts relationships
+    (confirmed present and well-formed by direct inspection) fully describe
+    the network. Connections that reach an element outside the extracted set
+    (an unextracted fixture or terminal) are dropped from the graph and
+    reported separately; they are not proof of a dead end in the real
+    network.
     """
 
     by_id = {element.GlobalId: element for element in elements}
     graph: dict[str, set[str]] = {element.GlobalId: set() for element in elements}
+
+    # IFC4 files preferentially use IfcRelConnectsPortToElement; some
+    # authoring tools/schema versions (and this repo's own ifcopenshell.api
+    # fixture builder) instead nest a port under its owning element via
+    # IfcRelNests. Both are valid per-schema, so both are resolved here.
+    port_owner: dict[int, str] = {}
+    for rel in ifc_file.by_type("IfcRelConnectsPortToElement"):
+        owner = getattr(rel.RelatedElement, "GlobalId", None)
+        if owner is not None:
+            port_owner[rel.RelatingPort.id()] = owner
+    for rel in ifc_file.by_type("IfcRelNests"):
+        owner = getattr(rel.RelatingObject, "GlobalId", None)
+        if owner is None:
+            continue
+        for related in rel.RelatedObjects:
+            if related.is_a("IfcPort"):
+                port_owner[related.id()] = owner
+
     boundary_edges = 0
-    for element in elements:
-        for neighbor in ifc_system.get_connected_to(element) + ifc_system.get_connected_from(
-            element
-        ):
-            neighbor_id = getattr(neighbor, "GlobalId", None)
-            if neighbor_id in by_id:
-                graph[element.GlobalId].add(neighbor_id)
-                graph[neighbor_id].add(element.GlobalId)
-            else:
-                boundary_edges += 1
+    for rel in ifc_file.by_type("IfcRelConnectsPorts"):
+        owner_a = port_owner.get(rel.RelatingPort.id())
+        owner_b = port_owner.get(rel.RelatedPort.id())
+        if owner_a is None or owner_b is None:
+            continue
+        a_in, b_in = owner_a in by_id, owner_b in by_id
+        if a_in and b_in:
+            if owner_a != owner_b:
+                graph[owner_a].add(owner_b)
+                graph[owner_b].add(owner_a)
+        elif a_in or b_in:
+            boundary_edges += 1
     return graph, boundary_edges
 
 
 def _world_aabb_m(
-    element: object, *, settings: "ifcopenshell.geom.settings"
+    element: object, *, settings: ifcopenshell.geom.settings
 ) -> tuple[np.ndarray, np.ndarray]:
     """World-space AABB in meters.
 
@@ -288,7 +347,7 @@ def _world_aabb_m(
     read directly off an entity, which IS in the file's native unit.
     """
 
-    shape = ifcopenshell.geom.create_shape(settings, element)
+    shape = _ifc().geom.create_shape(settings, element)
     verts = np.asarray(shape.geometry.verts, dtype=np.float64).reshape(-1, 3)
     if not verts.size:
         raise ValueError(f"element {element.GlobalId} has no triangulated geometry")
@@ -418,6 +477,80 @@ def clearance_mask(
     return (occupied == 0) & (clearance_m > body_radius_m)
 
 
+def _storage_cell_to_source_m(
+    cell: tuple[int, int, int], *, origin_m: np.ndarray, meters_per_voxel: float
+) -> np.ndarray:
+    """Inverse of _source_to_storage_cell: a storage cell's own center, in source meters."""
+
+    storage = np.asarray(cell, dtype=np.float64)
+    source_index = storage[[0, 2, 1]]  # the permutation is its own inverse
+    return origin_m + (source_index + 0.5) * meters_per_voxel
+
+
+def _segment_intersects_aabb(
+    start_m: np.ndarray, end_m: np.ndarray, low_m: np.ndarray, high_m: np.ndarray
+) -> bool:
+    """Slab-method segment/AABB intersection test."""
+
+    t_min, t_max = 0.0, 1.0
+    direction = end_m - start_m
+    for axis in range(3):
+        if abs(direction[axis]) < 1e-12:
+            if start_m[axis] < low_m[axis] or start_m[axis] > high_m[axis]:
+                return False
+            continue
+        inverse = 1.0 / direction[axis]
+        t1 = (low_m[axis] - start_m[axis]) * inverse
+        t2 = (high_m[axis] - start_m[axis]) * inverse
+        t1, t2 = min(t1, t2), max(t1, t2)
+        t_min = max(t_min, t1)
+        t_max = min(t_max, t2)
+        if t_min > t_max:
+            return False
+    return True
+
+
+def verify_route_against_solids(
+    route: tuple[tuple[int, int, int], ...],
+    *,
+    aabbs: dict[str, tuple[np.ndarray, np.ndarray]],
+    origin_m: np.ndarray,
+    meters_per_voxel: float,
+    body_radius_m: float,
+) -> None:
+    """Independently check a route against extracted-element solids, in continuous
+    source-space coordinates, separately from the voxel-grid check
+    replay_six_axis_route/clearance_mask perform.
+
+    That voxel-grid check only proves the route is clear of the conservative,
+    quantized occupancy this module derives from each element's AABB; it
+    cannot by itself catch a quantization error in that derivation. This
+    check instead tests every route segment as a continuous line against
+    every extracted element's own AABB (inflated by body_radius_m, a
+    conservative superset of the true sphere-box Minkowski sum, since it
+    keeps square corners rather than the true rounded offset), independent
+    of voxel-grid resolution. A route feasible in the voxel grid is still not
+    thereby proof of clearance against the exact triangulated solid or
+    against unextracted structural/architectural/mechanical/fire/sprinkler
+    IFC content for the same building.
+    """
+
+    points = [
+        _storage_cell_to_source_m(cell, origin_m=origin_m, meters_per_voxel=meters_per_voxel)
+        for cell in route
+    ]
+    inflated = [
+        (low - body_radius_m, high + body_radius_m) for low, high in aabbs.values()
+    ]
+    for start_m, end_m in zip(points, points[1:]):
+        for low_m, high_m in inflated:
+            if _segment_intersects_aabb(start_m, end_m, low_m, high_m):
+                raise ValueError(
+                    "route collides with an extracted element's solid in continuous "
+                    "source-space coordinates, independent of voxel-grid quantization"
+                )
+
+
 def select_task_endpoints(
     elements: tuple[object, ...],
     graph: dict[int, set[int]],
@@ -462,6 +595,23 @@ def select_task_endpoints(
     return best_pair, rejections
 
 
+def _filter_by_storey(
+    elements: tuple[object, ...], *, storey_names: tuple[str, ...]
+) -> tuple[object, ...]:
+    """Keep only elements whose spatial container is one of the named storeys."""
+
+    get_container = _ifc().util.element.get_container
+    kept = tuple(
+        element
+        for element in elements
+        if (container := get_container(element)) is not None
+        and getattr(container, "Name", None) in storey_names
+    )
+    if not kept:
+        raise ValueError(f"no extracted elements are contained in storeys {storey_names!r}")
+    return kept
+
+
 def export_discipline(
     source_root: Path,
     output_dir: Path,
@@ -470,8 +620,26 @@ def export_discipline(
     partition: str,
     body_radius_m: float | None = None,
     verify_hashes: bool = True,
+    storey_names: tuple[str, ...] | None = None,
+    crop_bounds_m: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None,
 ) -> dict:
-    """Export one discipline's connected MEP network as a routing bundle."""
+    """Export one discipline's connected MEP network as a routing bundle.
+
+    A real West Riverside Hospital discipline spans roughly 85 x 33 x 65 m
+    (see the module docstring); at this module's pipe-appropriate voxel
+    floor that is far past MAX_VOXELS, so a real conversion is intractable
+    without narrowing scope first. ``storey_names`` restricts extraction to
+    elements IFC itself places in the named storey(s) (via
+    ifcopenshell.util.element.get_container); ``crop_bounds_m`` further
+    restricts to elements whose world-space AABB center falls in a
+    ``(min_corner, max_corner)`` source-meters box, and -- unlike
+    ``storey_names`` alone -- also fixes the exported world's origin and
+    extent to that box directly, so the voxel grid size is deterministic
+    and under the caller's control regardless of how the filtered elements
+    happen to be distributed within it. Either, both, or neither may be
+    given; the default (neither) preserves whole-file behavior for small
+    fixtures where it fits within the voxel cap.
+    """
 
     if discipline not in DISCIPLINE_TYPES:
         raise ValueError(f"unknown discipline: {discipline!r}")
@@ -479,6 +647,11 @@ def export_discipline(
         raise ValueError("partition must be train, calibration or test")
     if output_dir.exists():
         raise FileExistsError("output directory already exists")
+    if crop_bounds_m is not None:
+        crop_low = np.asarray(crop_bounds_m[0], dtype=np.float64)
+        crop_high = np.asarray(crop_bounds_m[1], dtype=np.float64)
+        if crop_low.shape != (3,) or crop_high.shape != (3,) or np.any(crop_low >= crop_high):
+            raise ValueError("crop_bounds_m must be a (min_corner, max_corner) box with min < max")
 
     source = verify_upstream(source_root, discipline=discipline, verify_hashes=verify_hashes)
     source.rights.require_allowed("training" if partition == "train" else "evaluation")
@@ -489,9 +662,10 @@ def export_discipline(
     confirm_z_up(ifc_file, scale=scale)
 
     elements, fallback_used = extract_elements(ifc_file, discipline=discipline)
-    graph, boundary_edges = build_connectivity(elements)
+    if storey_names is not None:
+        elements = _filter_by_storey(elements, storey_names=storey_names)
 
-    settings = ifcopenshell.geom.settings()
+    settings = _ifc().geom.settings()
     settings.set("use-world-coords", True)
     aabbs: dict[int, tuple[np.ndarray, np.ndarray]] = {}
     for element in elements:
@@ -500,8 +674,25 @@ def export_discipline(
         key: (low + high) / 2.0 for key, (low, high) in aabbs.items()
     }
 
-    all_low = np.min([low for low, _ in aabbs.values()], axis=0)
-    all_high = np.max([high for _, high in aabbs.values()], axis=0)
+    if crop_bounds_m is not None:
+        elements = tuple(
+            element
+            for element in elements
+            if np.all(centers[element.GlobalId] >= crop_low)
+            and np.all(centers[element.GlobalId] <= crop_high)
+        )
+        if not elements:
+            raise ValueError(f"no extracted elements have a center inside crop_bounds_m {crop_bounds_m!r}")
+        aabbs = {element.GlobalId: aabbs[element.GlobalId] for element in elements}
+        centers = {element.GlobalId: centers[element.GlobalId] for element in elements}
+
+    graph, boundary_edges = build_connectivity(ifc_file, elements)
+
+    if crop_bounds_m is not None:
+        all_low, all_high = crop_low, crop_high
+    else:
+        all_low = np.min([low for low, _ in aabbs.values()], axis=0)
+        all_high = np.max([high for _, high in aabbs.values()], axis=0)
 
     smallest_radius_m = _smallest_cross_section_m(elements, scale=scale)
     meters_per_voxel = min(
@@ -518,7 +709,19 @@ def export_discipline(
     # the world's own padded boundary by the same margin clearance_mask
     # requires from any occupied cell, not just from the leaf's own solid.
     endpoint_step_m = resolved_body_radius_m + 3.0 * meters_per_voxel
-    margin = np.array([max(meters_per_voxel * 2, endpoint_step_m * 2.0)] * 3)
+    margin_floor_m = max(meters_per_voxel * 2, endpoint_step_m * 2.0)
+    if crop_bounds_m is not None:
+        # all_low/all_high are the user's requested box here, not derived
+        # from these elements' own AABBs (unlike the whole-file case, where
+        # margin_floor_m alone is already proven sufficient by construction).
+        # A kept element's center can be inside the box while its AABB --
+        # and the endpoint stepped out from its far tip -- extends beyond
+        # it, so the margin must also cover the largest such element.
+        max_half_extent_m = max(
+            (float(np.max(high - low)) / 2.0 for low, high in aabbs.values()), default=0.0
+        )
+        margin_floor_m = max(margin_floor_m, max_half_extent_m + endpoint_step_m)
+    margin = np.array([margin_floor_m] * 3)
     origin_m = all_low - margin
     span = (all_high + margin) - origin_m
     source_extent = tuple(int(math.ceil(value / meters_per_voxel)) + 1 for value in span)
@@ -541,6 +744,12 @@ def export_discipline(
     np.save(occupancy_path, occupied, allow_pickle=False)
     occupancy_sha = _sha256(occupancy_path)
 
+    scope_id = "whole-building"
+    if storey_names is not None:
+        scope_id = "storeys-" + "-".join(sorted(storey_names))
+    if crop_bounds_m is not None:
+        scope_id += "-crop-" + "-".join(f"{value:.3f}" for value in (*crop_low, *crop_high))
+
     conversion = ConversionRecord(
         source_content_identity_sha256=source.content_identity_sha256,
         converter_name="ifcopenshell-mep-extraction",
@@ -549,6 +758,8 @@ def export_discipline(
             "discipline": discipline,
             "fallback_used": fallback_used,
             "meters_per_voxel": meters_per_voxel,
+            "storey_names": ",".join(sorted(storey_names)) if storey_names else "",
+            "crop_bounds_m": repr(crop_bounds_m) if crop_bounds_m is not None else "",
         },
         output_occupancy_sha256=occupancy_sha,
     )
@@ -562,7 +773,7 @@ def export_discipline(
             storage_axes_in_source=STORAGE_AXES_IN_SOURCE,
             meters_per_voxel=meters_per_voxel,
         ),
-        root_geometry_id=f"{SOURCE_ID}-{discipline}",
+        root_geometry_id=f"{SOURCE_ID}-{discipline}-{scope_id}",
         topology_family=GENERATOR_FAMILY,
         site_id=SOURCE_ID,
     )
@@ -623,6 +834,10 @@ def export_discipline(
                     body_radius_m=resolved_body_radius_m,
                     meters_per_voxel=meters_per_voxel,
                 )
+                verify_route_against_solids(
+                    route, aabbs=aabbs, origin_m=origin_m,
+                    meters_per_voxel=meters_per_voxel, body_radius_m=resolved_body_radius_m,
+                )
                 route_path = output_dir / "route.json"
                 route_path.write_text(
                     json.dumps(route, separators=(",", ":")), encoding="utf-8"
@@ -635,10 +850,13 @@ def export_discipline(
                     ),
                     cost=(len(route) - 1) * meters_per_voxel,
                     verification_evidence=(
-                        "Every six-axis centerline segment replayed as a swept sphere "
-                        "against this discipline's extracted-solid occupied voxel cubes "
-                        "only; not checked against unextracted structural, architectural, "
-                        "mechanical, fire or sprinkler IFC content for the same building"
+                        "Every six-axis centerline segment independently replayed twice: "
+                        "as a swept sphere against this discipline's quantized occupied "
+                        "voxel cubes, and as a continuous-space segment against every "
+                        "extracted element's own AABB inflated by the body radius; not "
+                        "checked against the exact triangulated solid or against "
+                        "unextracted structural, architectural, mechanical, fire or "
+                        "sprinkler IFC content for the same building"
                     ),
                 )
                 tasks.append(task)
@@ -682,6 +900,8 @@ def export_discipline(
         "fallback_used": fallback_used,
         "extracted_element_count": len(elements),
         "boundary_connections_excluded": boundary_edges,
+        "storey_names": sorted(storey_names) if storey_names else None,
+        "crop_bounds_m": crop_bounds_m,
         "source_identity_sha256": source.content_identity_sha256,
         "world_identity_sha256": world.identity_sha256,
         "dataset_identity_sha256": dataset_sha,
@@ -697,7 +917,11 @@ def export_discipline(
         "cross_family_holdout_supported": False,
         "non_mep_clearance_checked": False,
         "observation_status": "not_exported; full truth is not sensor-visible input",
-        "route_claim": "swept-sphere voxel-cube replay against this discipline's solids only",
+        "route_claim": (
+            "independently replayed as a swept-sphere voxel-cube check and as a "
+            "continuous-space AABB check, both against this discipline's extracted "
+            "solids only"
+        ),
     }
     (output_dir / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -712,11 +936,27 @@ def main() -> None:
     parser.add_argument("--discipline", choices=("plumbing", "electrical"), required=True)
     parser.add_argument("--partition", choices=("train", "calibration", "test"), required=True)
     parser.add_argument("--body-radius-m", type=float, default=None)
+    parser.add_argument(
+        "--storey-name", action="append", default=None,
+        help="Restrict extraction to this IfcBuildingStorey name; repeatable.",
+    )
+    parser.add_argument(
+        "--crop-bounds-m", type=float, nargs=6, default=None,
+        metavar=("MIN_X", "MIN_Y", "MIN_Z", "MAX_X", "MAX_Y", "MAX_Z"),
+        help="Restrict extraction and the exported world to this source-meters box.",
+    )
     args = parser.parse_args()
+    crop_bounds_m = (
+        (tuple(args.crop_bounds_m[:3]), tuple(args.crop_bounds_m[3:]))
+        if args.crop_bounds_m is not None
+        else None
+    )
     report = export_discipline(
         args.source, args.output,
         discipline=args.discipline, partition=args.partition,
         body_radius_m=args.body_radius_m,
+        storey_names=tuple(args.storey_name) if args.storey_name else None,
+        crop_bounds_m=crop_bounds_m,
     )
     print(json.dumps(report, sort_keys=True))
 

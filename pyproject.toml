@@ -26,13 +26,13 @@ dependencies = [
   "fsspec>=2024.2",
   "protobuf>=4.25",
   "zstandard>=0.25,<1",
-  "ifcopenshell>=0.8,<0.9",
 ]
 
 [project.optional-dependencies]
 cavedrone = ["theseo-anysearch-cavedrone>=0.1.0,<0.2.0"]
 gazebo = ["theseo-anysearch-gazebo>=0.1.0,<0.2.0"]
 aerialgym = ["theseo-anysearch-aerialgym>=0.1.0,<0.2.0"]
+ifcbench = ["ifcopenshell>=0.8,<0.9"]
 cloud-azure = ["adlfs>=2024.2"]
 cloud-gcs = ["gcsfs>=2024.2"]
 cloud-s3 = ["s3fs>=2024.2"]
