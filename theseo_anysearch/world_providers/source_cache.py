@@ -21,8 +21,8 @@ def cached_sources(cache: Path, *, base_url: str, hashes: dict[str, str], offlin
     """Publish only complete verified manifests; never repair corrupt caches silently."""
     if not base_url.startswith("https://") or not hashes:
         raise ValueError("source manifest requires HTTPS and nonempty hashes")
-    if type(max_file_bytes) is not int or not 0 < max_file_bytes <= 4 * 1024 * 1024:
-        raise ValueError("source file limit must be positive and at most 4 MiB")
+    if type(max_file_bytes) is not int or not 0 < max_file_bytes <= 32 * 1024 * 1024:
+        raise ValueError("source file limit must be positive and at most 32 MiB")
     for name, digest in hashes.items():
         path = PurePosixPath(name)
         if path.is_absolute() or any(part in {"..", "."} for part in path.parts) or "\\" in name or ":" in name:

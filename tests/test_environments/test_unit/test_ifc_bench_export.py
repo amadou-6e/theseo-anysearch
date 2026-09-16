@@ -291,10 +291,11 @@ def test_select_task_endpoints_picks_farthest_leaves(tmp_path):
     for element in elements:
         low, high = _world_aabb_m(element, settings=settings)
         centers[element.GlobalId] = (np.asarray(low) + np.asarray(high)) / 2.0
-    pair, rejections = select_task_endpoints(elements, graph, centers)
-    assert pair is not None
+    candidates, rejections = select_task_endpoints(elements, graph, centers)
+    # Exactly two leaves (segA, segB) means exactly one candidate pair.
+    assert len(candidates) == 1
     by_name = {element.Name: element.GlobalId for element in elements}
-    assert set(pair) == {by_name["segA"], by_name["segB"]}
+    assert set(candidates[0]) == {by_name["segA"], by_name["segB"]}
     assert rejections == []
 
 

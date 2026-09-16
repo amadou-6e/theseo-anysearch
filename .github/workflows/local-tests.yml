@@ -104,12 +104,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-local-tests
-      - name: Install optional ifcbench extra
-        run: python -m pip install --editable ".[ifcbench]"
+      - name: Install ifcopenshell for the IFC-Bench adapter/provider tests
+        run: python -m pip install "ifcopenshell>=0.8,<0.9"
       - run: >-
           python -m pytest
           tests/test_environments/test_unit
           tests/test_heuristic
+          tests/test_world_providers
           -m "not ray and not integration" -q
 
   experiment-tests:
