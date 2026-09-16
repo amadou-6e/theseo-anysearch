@@ -169,6 +169,14 @@ class Provider:
             for new_index, old_index in enumerate(order):
                 write_sidecar(root / f"task-{new_index:02d}.json", tasks[old_index])
                 write_sidecar(root / f"reference-{new_index:02d}.json", references[old_index])
+            # The adapter's report arrays are index-aligned with the
+            # pre-rotation task/reference order; reorder them the same way
+            # so the report agrees with the rewritten task-NN.json files
+            # and the provider's own selected-task ordering, not the
+            # adapter's original order.
+            for key in ("task_ids", "reference_ids", "routes"):
+                if key in report and len(report[key]) == count:
+                    report[key] = [report[key][old_index] for old_index in order]
             report["provider_seed"] = seed
             report["seed_semantics"] = "rotates fixed accepted task ordering; static source geometry"
             (root / "report.json").write_text(

@@ -46,4 +46,5 @@ in each bundle.
 Current CLI attaches one world and one selected task per training YAML;
 generation does not start training.
 
-Governing merged spec: `amadou-6e/specs@f5e701b23c9c52a01f48ca7b76ed7be89a62268a`.
+Governing merged spec: `amadou-6e/specs@adcf97b3312d2cd4d1fd3cf9be85441559d2c5f9`
+(`projects/theseo-anysearch/ifc-bench-mep-provider.md`).

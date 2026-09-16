@@ -4,6 +4,7 @@ positioned inside the provider's own fixed canonical plumbing crop.
 No network access and no West Riverside Hospital source files are required.
 """
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -213,3 +214,60 @@ def test_seed_rotates_task_order_deterministically(tmp_path, monkeypatch):
     second_bundle = load_verified_world(second, use="evaluation")
     assert len(first_bundle.tasks) == len(second_bundle.tasks) == 1
     assert first_bundle.tasks[0].start_storage == second_bundle.tasks[0].start_storage
+
+
+def _fake_multi_task_export(source, root, *, discipline, partition, body_radius_m, storey_names, crop_bounds_m, verify_hashes):
+    """A stand-in for export_discipline with two distinguishable fake tasks,
+    isolating the provider's own rotation/report-consistency logic from
+    real geometry extraction.
+    """
+
+    from theseo_anysearch.environments.routing_manifests import RoutingReferenceRecord, RoutingTaskRecord, write_sidecar
+
+    root.mkdir(parents=True)
+    task_ids, reference_ids, routes = [], [], []
+    for index, start_x in enumerate((1, 9)):
+        task = RoutingTaskRecord(
+            world_identity_sha256="0" * 64,
+            provenance="derived", family="single_pipe",
+            start_storage=(start_x, 1, 1), goal_storage=(start_x + 1, 1, 1),
+            movement_model="fake", body_radius_m=body_radius_m,
+            derivation_reason="fake fixture task",
+        )
+        reference = RoutingReferenceRecord(task_identity_sha256=task.identity_sha256, claim="unverified")
+        write_sidecar(root / f"task-{index:02d}.json", task)
+        write_sidecar(root / f"reference-{index:02d}.json", reference)
+        task_ids.append(task.identity_sha256)
+        reference_ids.append(reference.identity_sha256)
+        routes.append({"task_identity_sha256": task.identity_sha256, "start_x": start_x})
+    return {
+        "rejected_task_strata": [], "task_ids": task_ids,
+        "reference_ids": reference_ids, "routes": routes,
+    }
+
+
+def test_report_task_order_matches_rotated_sidecar_files(tmp_path):
+    """Regression test for a real review finding: seed rotation rewrote
+    task-NN.json/reference-NN.json in rotated order but left report[
+    task_ids]/[reference_ids]/[routes] in the adapter's original order, so
+    the report disagreed with which task was actually task-00.json.
+    """
+
+    from theseo_anysearch.environments.routing_manifests import RoutingTaskRecord, read_sidecar
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "license.txt").write_text(LICENSE_TEXT, encoding="ascii")
+    with patch("anysearch_ifcbench.cached_sources", return_value=source), \
+         patch("anysearch_ifcbench.export_discipline", side_effect=_fake_multi_task_export):
+        output = tmp_path / "world"
+        # seed=1 on a 2-task roster rotates order [0, 1] -> [1, 0].
+        Provider().generate(
+            seed=1, output=output,
+            parameters={"discipline": "plumbing", "meters-per-voxel": 0.01},
+        )
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    written_task_00 = read_sidecar(output / "task-00.json", RoutingTaskRecord)
+    assert report["task_ids"][0] == written_task_00.identity_sha256
+    assert report["routes"][0]["task_identity_sha256"] == written_task_00.identity_sha256
+    assert written_task_00.start_storage == (9, 1, 1)

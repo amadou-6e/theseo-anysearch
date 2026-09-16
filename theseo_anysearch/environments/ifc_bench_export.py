@@ -73,7 +73,7 @@ from theseo_anysearch.worlds.manifest import WorldExtent
 SOURCE_ID = "ifc-bench-west-riverside-hospital"
 SOURCE_URL = "https://huggingface.co/datasets/sylvainHellin/ifc-bench"
 SOURCE_REVISION = "e1c4b0025ac42acf50f792e46a0ab33f4382e90e"  # tag v2.0.1
-GOVERNING_SPEC_SHA = "f5e701b23c9c52a01f48ca7b76ed7be89a62268a"
+GOVERNING_SPEC_SHA = "adcf97b3312d2cd4d1fd3cf9be85441559d2c5f9"  # ifc-bench-mep-provider.md
 GENERATOR_FAMILY = "ifc_bench_west_riverside_hospital_mep_v1"
 
 ALLOWED_SCHEMAS = ("IFC2X3", "IFC4")
