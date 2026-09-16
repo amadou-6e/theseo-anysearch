@@ -591,18 +591,29 @@ def select_task_endpoints(
     largest = max(components, key=len)
     if len(largest) < 2:
         return [], ["largest_connected_component_has_fewer_than_two_elements"]
-    leaves = [node for node in largest if len(graph[node]) <= 1] or list(largest)
+    # largest/graph[node] are sets, and Python's string hashing is
+    # randomized per process (PYTHONHASHSEED), so iterating them directly
+    # would make candidate order -- and therefore which task a given seed
+    # selects -- nondeterministic across processes. Sort every GlobalId
+    # sequence explicitly so the same input always yields the same roster.
+    leaves = sorted(node for node in largest if len(graph[node]) <= 1) or sorted(largest)
     pairs: dict[frozenset[str], float] = {}
     for leaf in leaves:
         farthest = max(
-            (other for other in leaves if other != leaf),
+            sorted(other for other in leaves if other != leaf),
             key=lambda other: float(np.linalg.norm(centers[leaf] - centers[other])),
             default=None,
         )
         if farthest is not None:
             key = frozenset({leaf, farthest})
             pairs[key] = float(np.linalg.norm(centers[leaf] - centers[farthest]))
-    ordered = sorted(pairs.items(), key=lambda item: -item[1])[:MAX_CANDIDATE_TASKS]
+    # Explicit secondary key: with leaves already sorted, dict insertion
+    # order is already deterministic, but breaking distance ties on the
+    # pair's own sorted identity makes that determinism self-evident here
+    # rather than resting on insertion-order-preservation reasoning.
+    ordered = sorted(
+        pairs.items(), key=lambda item: (-item[1], tuple(sorted(item[0])))
+    )[:MAX_CANDIDATE_TASKS]
     candidates = [tuple(sorted(key)) for key, _ in ordered]
     rejections = []
     if len(components) > 1:

@@ -114,6 +114,71 @@ def _wrh_plumbing_fixture(tmp_path) -> Path:
     return source_root
 
 
+def _wrh_plumbing_branching_fixture(tmp_path) -> Path:
+    """A three-way branch (one hub fitting, three leaf segments) inside the
+    plumbing canonical crop, so the real adapter derives two or more genuine
+    candidate tasks -- needed to exercise seed rotation through the real
+    pipeline (real extraction, real routes, real load_bundle validation),
+    not a hand-faked report.
+    """
+
+    box_low, box_high = CANONICAL_SCOPE["plumbing"]["crop_bounds_m"]
+    storey_name = CANONICAL_SCOPE["plumbing"]["storey_names"][0]
+    hub = (box_low[0] + 0.2, (box_low[1] + box_high[1]) / 2, box_low[2] + 0.2)
+
+    ifc_file = project_api.create_file(version="IFC4")
+    root_api.create_entity(ifc_file, ifc_class="IfcProject", name="Fixture")
+    unit_api.assign_unit(ifc_file, length={"is_metric": True, "raw": "METERS"})
+    body_context = context_api.add_context(ifc_file, context_type="Model")
+    body = context_api.add_context(
+        ifc_file, context_type="Model", context_identifier="Body",
+        target_view="MODEL_VIEW", parent=body_context,
+    )
+    site = root_api.create_entity(ifc_file, ifc_class="IfcSite", name="Site")
+    building = root_api.create_entity(ifc_file, ifc_class="IfcBuilding", name="Building")
+    ground = root_api.create_entity(ifc_file, ifc_class="IfcBuildingStorey", name="Ground")
+    ground.Elevation = 0.0
+    geometry_api.edit_object_placement(
+        ifc_file, product=ground, matrix=_direction_matrix((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    )
+    storey = root_api.create_entity(ifc_file, ifc_class="IfcBuildingStorey", name=storey_name)
+    storey.Elevation = hub[2]
+    geometry_api.edit_object_placement(
+        ifc_file, product=storey, matrix=_direction_matrix((0.0, 0.0, hub[2]), (0.0, 0.0, 1.0))
+    )
+    aggregate_api.assign_object(ifc_file, products=[site], relating_object=ifc_file.by_type("IfcProject")[0])
+    aggregate_api.assign_object(ifc_file, products=[building], relating_object=site)
+    aggregate_api.assign_object(ifc_file, products=[ground, storey], relating_object=building)
+
+    def make(name, ifc_class, radius, start, direction, length):
+        element = root_api.create_entity(ifc_file, ifc_class=ifc_class, name=name)
+        spatial_api.assign_container(ifc_file, products=[element], relating_structure=storey)
+        profile = ifc_file.create_entity("IfcCircleProfileDef", ProfileType="AREA", Radius=radius)
+        geometry_api.add_profile_representation(ifc_file, context=body, profile=profile, depth=length)
+        representations = [
+            rep for rep in ifc_file.by_type("IfcShapeRepresentation") if rep.ContextOfItems == body
+        ]
+        shape = ifc_file.create_entity("IfcProductDefinitionShape", Representations=[representations[-1]])
+        element.Representation = shape
+        geometry_api.edit_object_placement(ifc_file, product=element, matrix=_direction_matrix(start, direction))
+        return element
+
+    fitting = make("hub", "IfcPipeFitting", 0.01, hub, (1.0, 0.0, 0.0), 0.02)
+    seg_a = make("legA", "IfcPipeSegment", 0.01, hub, (1.0, 0.0, 0.0), 0.15)
+    seg_b = make("legB", "IfcPipeSegment", 0.01, hub, (0.0, 1.0, 0.0), 0.15)
+    seg_c = make("legC", "IfcPipeSegment", 0.01, hub, (0.0, 0.0, 1.0), 0.15)
+    fitting_ports = [system_api.add_port(ifc_file, element=fitting) for _ in range(3)]
+    for port, leg in zip(fitting_ports, (seg_a, seg_b, seg_c)):
+        leg_port = system_api.add_port(ifc_file, element=leg)
+        system_api.connect_port(ifc_file, port, leg_port)
+
+    source_root = tmp_path / "source"
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "license.txt").write_text(LICENSE_TEXT, encoding="ascii")
+    ifc_file.write(str(source_root / "plumb_ifc4.ifc"))
+    return source_root
+
+
 @pytest.mark.parametrize("parameters", [
     {"discipline": "hvac", "meters-per-voxel": 0.01},
     {"discipline": "plumbing", "meters-per-voxel": 0.5},
@@ -216,58 +281,46 @@ def test_seed_rotates_task_order_deterministically(tmp_path, monkeypatch):
     assert first_bundle.tasks[0].start_storage == second_bundle.tasks[0].start_storage
 
 
-def _fake_multi_task_export(source, root, *, discipline, partition, body_radius_m, storey_names, crop_bounds_m, verify_hashes):
-    """A stand-in for export_discipline with two distinguishable fake tasks,
-    isolating the provider's own rotation/report-consistency logic from
-    real geometry extraction.
-    """
+def test_report_task_order_matches_rotated_sidecar_files_and_is_validated(tmp_path):
+    """Regression test for two real review findings on the same rotation
+    step, exercised through the real pipeline (real extraction, real
+    routes, real load_bundle validation) rather than a hand-faked report
+    that could not establish either:
 
-    from theseo_anysearch.environments.routing_manifests import RoutingReferenceRecord, RoutingTaskRecord, write_sidecar
+    1. Seed rotation rewrote task-NN.json/reference-NN.json in rotated
+       order but left report[task_ids]/[reference_ids]/[routes] in the
+       adapter's original order, so the report disagreed with which task
+       was actually task-00.json.
+    2. The rotated result was published (renamed into its final output
+       location) without independently re-validating it, so a bug in the
+       rewrite step would only surface later, if at all.
 
-    root.mkdir(parents=True)
-    task_ids, reference_ids, routes = [], [], []
-    for index, start_x in enumerate((1, 9)):
-        task = RoutingTaskRecord(
-            world_identity_sha256="0" * 64,
-            provenance="derived", family="single_pipe",
-            start_storage=(start_x, 1, 1), goal_storage=(start_x + 1, 1, 1),
-            movement_model="fake", body_radius_m=body_radius_m,
-            derivation_reason="fake fixture task",
-        )
-        reference = RoutingReferenceRecord(task_identity_sha256=task.identity_sha256, claim="unverified")
-        write_sidecar(root / f"task-{index:02d}.json", task)
-        write_sidecar(root / f"reference-{index:02d}.json", reference)
-        task_ids.append(task.identity_sha256)
-        reference_ids.append(reference.identity_sha256)
-        routes.append({"task_identity_sha256": task.identity_sha256, "start_x": start_x})
-    return {
-        "rejected_task_strata": [], "task_ids": task_ids,
-        "reference_ids": reference_ids, "routes": routes,
-    }
-
-
-def test_report_task_order_matches_rotated_sidecar_files(tmp_path):
-    """Regression test for a real review finding: seed rotation rewrote
-    task-NN.json/reference-NN.json in rotated order but left report[
-    task_ids]/[reference_ids]/[routes] in the adapter's original order, so
-    the report disagreed with which task was actually task-00.json.
+    The branching fixture gives the real adapter at least two genuine
+    candidate tasks, so this also proves seed actually changes which task
+    is selected, not just a degenerate single-task rotation.
     """
 
     from theseo_anysearch.environments.routing_manifests import RoutingTaskRecord, read_sidecar
+    from theseo_anysearch.world_providers.bundle import load_bundle
 
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "license.txt").write_text(LICENSE_TEXT, encoding="ascii")
-    with patch("anysearch_ifcbench.cached_sources", return_value=source), \
-         patch("anysearch_ifcbench.export_discipline", side_effect=_fake_multi_task_export):
-        output = tmp_path / "world"
-        # seed=1 on a 2-task roster rotates order [0, 1] -> [1, 0].
-        Provider().generate(
-            seed=1, output=output,
-            parameters={"discipline": "plumbing", "meters-per-voxel": 0.01},
-        )
-    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
-    written_task_00 = read_sidecar(output / "task-00.json", RoutingTaskRecord)
-    assert report["task_ids"][0] == written_task_00.identity_sha256
-    assert report["routes"][0]["task_identity_sha256"] == written_task_00.identity_sha256
-    assert written_task_00.start_storage == (9, 1, 1)
+    source = _wrh_plumbing_branching_fixture(tmp_path)
+    task_00_by_seed = {}
+    for seed in (0, 1):
+        output = tmp_path / f"seed{seed}"
+        with patch("anysearch_ifcbench.cached_sources", return_value=source):
+            Provider().generate(
+                seed=seed, output=output,
+                parameters={"discipline": "plumbing", "meters-per-voxel": 0.01},
+            )
+        # generate() already calls load_bundle internally before publishing;
+        # calling it again here from the test independently confirms the
+        # *published* output is a fully valid bundle, not just that some
+        # internal call happened to succeed.
+        bundle = load_bundle(output, use="evaluation")
+        assert len(bundle.tasks) >= 2
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        written_task_00 = read_sidecar(output / "task-00.json", RoutingTaskRecord)
+        assert report["task_ids"][0] == written_task_00.identity_sha256
+        assert report["routes"][0]["task_identity_sha256"] == written_task_00.identity_sha256
+        task_00_by_seed[seed] = written_task_00.identity_sha256
+    assert task_00_by_seed[0] != task_00_by_seed[1]

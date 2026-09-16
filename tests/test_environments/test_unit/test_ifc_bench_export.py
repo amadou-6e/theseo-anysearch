@@ -510,3 +510,44 @@ def test_verify_route_against_solids_independently_catches_a_collision_the_voxel
             route, aabbs=aabbs, origin_m=np.zeros(3),
             meters_per_voxel=0.1, body_radius_m=0.02,
         )
+
+
+def test_select_task_endpoints_candidate_order_is_process_independent():
+    """Regression test for a real review finding: leaves/pairs were derived
+    by iterating Python sets of GlobalId strings directly, and string
+    hashing is randomized per process (PYTHONHASHSEED), so a tie in
+    leaf-pair distance could make the same input select a different
+    candidate order -- and therefore a different task for the same seed --
+    in another process. Runs the same tied-distance topology in two fresh
+    subprocesses with different explicit hash seeds and requires identical
+    output; this would fail against the pre-fix code (which used bare
+    ``set`` iteration for ``leaves`` and no secondary sort key).
+    """
+
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).with_name("_select_task_endpoints_subprocess.py")
+    outputs = []
+    for seed in ("0", "1", "2"):
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True, text=True, check=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        outputs.append(json.loads(result.stdout))
+    assert outputs[0]["rejections"] == []
+    # select_task_endpoints pairs each leaf with its own single farthest
+    # leaf, not every pairwise combination, so a fully-tied triangle (every
+    # leaf equidistant from every other) yields two candidates here, not
+    # three: A's and B's own farthest-leaf choices both resolve to the
+    # tie-break winner A (alphabetically first), so {A, B} is produced
+    # twice (deduplicated) and {B, C} is never generated. That per-leaf
+    # coverage limitation is a separate, non-blocking property of the
+    # heuristic; what this test asserts is that it is at least the exact
+    # same limitation -- the same two candidates, same order -- every time.
+    assert outputs[0]["candidates"] == [["A", "B"], ["A", "C"]]
+    assert outputs[0] == outputs[1] == outputs[2]

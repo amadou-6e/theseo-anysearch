@@ -22,6 +22,7 @@ from theseo_anysearch.environments.routing_manifests import (
     write_sidecar,
 )
 from theseo_anysearch.world_providers.api import GenerationSummary, ProviderInfo, ProviderParameter
+from theseo_anysearch.world_providers.bundle import load_bundle
 from theseo_anysearch.world_providers.source_cache import cached_sources
 
 BASE_URL = (
@@ -183,6 +184,15 @@ class Provider:
                 json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
             shutil.copyfile(source / "license.txt", root / "license.txt")
+            # Validate the rotated result -- not the adapter's pre-rotation
+            # output -- before ever publishing it: load_bundle independently
+            # re-reads and cross-checks every rewritten task-NN.json/
+            # reference-NN.json against world.json/split.json (matching
+            # world identities, no duplicates, split coverage, rights), so a
+            # bug in the rotation/rewrite step above is caught here rather
+            # than only surfacing later, after generate_world has already
+            # renamed the output into its final registered location.
+            load_bundle(root, use="evaluation")
             _rename_retrying(root, output)
         return GenerationSummary(
             rejected_task_strata=tuple(report.get("rejected_task_strata", ())),
