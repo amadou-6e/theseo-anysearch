@@ -205,19 +205,36 @@ def test_extra_and_entrypoint():
 
 
 def test_cli_help_does_not_download():
-    import click
-    from click.testing import CliRunner
-    from typer.main import get_command
-    from theseo_anysearch.cli.commands.worlds import app
-    with patch("theseo_anysearch.cli.commands.worlds.load_provider", return_value=Provider()), \
-         patch("anysearch_ifcbench.cached_sources") as download:
-        group = get_command(app)
-        command = group.get_command(click.Context(group), "ifcbench")
-        result = CliRunner().invoke(command, ["--help"])
-    assert result.exit_code == 0, result.output
-    assert "discipline" in result.output
-    assert "meters-per-voxel" in result.output
-    download.assert_not_called()
+    # Invokes the real root app object as a genuine subprocess (rather than
+    # typer.testing.CliRunner, which invokes commands directly and would not
+    # surface a mismatch between the dynamic provider command's exception
+    # family and the root app's error handler — see #471).
+    import subprocess
+    import sys
+    import textwrap
+
+    provider_src = str(Path(__file__).resolve().parents[2] / "providers/ifcbench/src")
+    code = textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {provider_src!r})
+        from unittest.mock import patch
+        from anysearch_ifcbench import Provider
+
+        with patch("theseo_anysearch.cli.commands.worlds.load_provider", return_value=Provider()), \\
+             patch("anysearch_ifcbench.cached_sources") as download:
+            from theseo_anysearch.cli.main import app
+            try:
+                app(["worlds", "ifcbench", "--help"])
+            except SystemExit as exc:
+                assert exc.code in (0, None), exc.code
+            assert not download.called
+    """)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    help_text = " ".join(result.stdout.split())
+    assert "discipline" in help_text
+    assert "meters-per-voxel" in help_text
 
 
 def test_zero_tasks_never_published(tmp_path):

@@ -23,10 +23,28 @@ from theseo_anysearch.world_providers.service import (
 # bundles its own internal Click implementation; a plain click.Command's `--help` or
 # parameter-validation failures raise exceptions from the *standalone* click package,
 # which TyperGroup's root error handler does not recognise, so they escape uncaught
-# instead of exiting cleanly (see #471).
+# instead of exiting cleanly (see #471). rich_markup_mode=None keeps their --help
+# output as plain single-line-per-option text (matching the previous plain click.Command
+# rendering) instead of Typer's Rich help panels, whose box-drawing borders otherwise
+# interrupt wrapped help text mid-phrase.
 _PARAMETER_TYPES: dict[str, type] = {
     "integer": int, "number": float, "text": str, "boolean": bool,
 }
+
+
+def _output_directory(_ctx: object, _parameter: object, value: str) -> Path:
+    """Same-family equivalent of click.Path(file_okay=False, path_type=Path).
+
+    A raw click.Path instance would raise its UsageError from the *standalone*
+    click package (the same family mismatch this module works around for
+    --help), so the directory-only contract on --output is reimplemented here
+    as a callback that raises typer.BadParameter instead.
+    """
+
+    output = Path(value)
+    if output.exists() and not output.is_dir():
+        raise typer.BadParameter(f"'{output}' is a file; --output must be a directory path")
+    return output
 
 
 class ProviderGroup(TyperGroup):
@@ -46,11 +64,14 @@ class ProviderGroup(TyperGroup):
                     typer.echo(message, err=True)
                     raise typer.Exit(1)
 
-                return TyperCommand(cmd_name, callback=broken_provider)
+                return TyperCommand(cmd_name, callback=broken_provider, rich_markup_mode=None)
             return None
         options: list[click.Parameter] = [
             TyperOption(param_decls=["--seed"], type=int, required=True),
-            TyperOption(param_decls=["--output"], type=Path, required=True),
+            TyperOption(
+                param_decls=["--output"], type=str, required=True,
+                callback=_output_directory,
+            ),
         ]
         for parameter in provider.info.parameters:
             options.append(TyperOption(
@@ -79,7 +100,10 @@ class ProviderGroup(TyperGroup):
                 "previews": sorted(report["previews"]),
             }, sort_keys=True))
 
-        return TyperCommand(cmd_name, params=options, callback=invoke_provider, help=provider.info.description)
+        return TyperCommand(
+            cmd_name, params=options, callback=invoke_provider,
+            help=provider.info.description, rich_markup_mode=None,
+        )
 
 
 app = typer.Typer(cls=ProviderGroup, help="List, generate, and select verified voxel worlds.")

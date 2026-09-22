@@ -164,6 +164,27 @@ def test_worlds_invalid_option_exits_cleanly_under_full_root_app(tmp_path: Path)
     assert "No such option" in result.stdout + result.stderr
 
 
+def test_worlds_file_output_is_rejected_cleanly_under_full_root_app(tmp_path: Path) -> None:
+    output = tmp_path / "not-a-directory"
+    output.write_text("occupied", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "theseo_anysearch.cli.main", "worlds", "fixture-boxes",
+            "--seed", "1", "--output", str(output),
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    # The root app renders CLI errors inside a Rich panel that word-wraps at the
+    # terminal width and pads each line with a "|" border, so normalise both
+    # whitespace and the border character before matching.
+    error_text = " ".join((result.stdout + result.stderr).replace("|", " ").split())
+    assert "is a file" in error_text
+    assert "--output must be a directory path" in error_text
+    assert output.read_text(encoding="utf-8") == "occupied"
+
+
 def test_worlds_broken_provider_help_and_invocation_exit_cleanly_under_full_root_app() -> None:
     setup = """
 from theseo_anysearch.world_providers import api as provider_api

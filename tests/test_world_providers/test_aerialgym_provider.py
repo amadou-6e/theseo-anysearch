@@ -11,22 +11,37 @@ from theseo_anysearch.world_providers.bundle import load_bundle
 
 
 def test_cli_help_lists_layouts_without_download():
-    import click
-    from click.testing import CliRunner
-    from typer.main import get_command
-    from theseo_anysearch.cli.commands.worlds import app
+    # Invokes the real root app object as a genuine subprocess (rather than
+    # typer.testing.CliRunner, which invokes commands directly and would not
+    # surface a mismatch between the dynamic provider command's exception
+    # family and the root app's error handler — see #471).
+    import subprocess
+    import sys
+    import textwrap
 
-    with patch("theseo_anysearch.cli.commands.worlds.load_provider", return_value=Provider()), \
-         patch("anysearch_aerialgym.cached_sources") as cache:
-        group = get_command(app)
-        command = group.get_command(click.Context(group), "aerialgym")
-        result = CliRunner().invoke(command, ["--help"])
-    assert result.exit_code == 0, result.output
-    help_text = " ".join(result.output.split())
+    provider_src = str(Path(__file__).resolve().parents[2] / "providers/aerialgym/src")
+    code = textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {provider_src!r})
+        from unittest.mock import patch
+        from anysearch_aerialgym import Provider
+
+        with patch("theseo_anysearch.cli.commands.worlds.load_provider", return_value=Provider()), \\
+             patch("anysearch_aerialgym.cached_sources") as cache:
+            from theseo_anysearch.cli.main import app
+            try:
+                app(["worlds", "aerialgym", "--help"])
+            except SystemExit as exc:
+                assert exc.code in (0, None), exc.code
+            assert not cache.called
+    """)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    help_text = " ".join(result.stdout.split())
     assert "detour (route around a blocking obstacle)" in help_text
     assert "altitude (change altitude to cross a barrier)" in help_text
     assert "Default: detour" in help_text
-    cache.assert_not_called()
 
 
 @pytest.mark.parametrize("parameters", [{"meters-per-voxel": 0.13}, {"layout": "unsupported"}, {"body-radius-m": float("nan")}])
