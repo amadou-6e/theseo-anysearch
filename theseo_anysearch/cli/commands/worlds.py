@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import typer
 import yaml
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup, TyperOption
 
 from theseo_anysearch.world_providers.api import installed_providers, load_provider, provider_errors
 from theseo_anysearch.world_providers.service import (
@@ -17,6 +17,16 @@ from theseo_anysearch.world_providers.service import (
     local_worlds,
     remote_catalog,
 )
+
+# Dynamic provider subcommands must be built from Typer's own command/option/exception
+# family (typer.core, typer.Exit) rather than the standalone `click` package. Typer
+# bundles its own internal Click implementation; a plain click.Command's `--help` or
+# parameter-validation failures raise exceptions from the *standalone* click package,
+# which TyperGroup's root error handler does not recognise, so they escape uncaught
+# instead of exiting cleanly (see #471).
+_PARAMETER_TYPES: dict[str, type] = {
+    "integer": int, "number": float, "text": str, "boolean": bool,
+}
 
 
 class ProviderGroup(TyperGroup):
@@ -33,22 +43,19 @@ class ProviderGroup(TyperGroup):
                 message = str(exc)
 
                 def broken_provider() -> None:
-                    raise click.ClickException(message)
+                    typer.echo(message, err=True)
+                    raise typer.Exit(1)
 
-                return click.Command(cmd_name, callback=broken_provider)
+                return TyperCommand(cmd_name, callback=broken_provider)
             return None
         options: list[click.Parameter] = [
-            click.Option(["--seed"], type=click.INT, required=True),
-            click.Option(["--output"], type=click.Path(path_type=Path, file_okay=False), required=True),
+            TyperOption(param_decls=["--seed"], type=int, required=True),
+            TyperOption(param_decls=["--output"], type=Path, required=True),
         ]
         for parameter in provider.info.parameters:
-            kind = {
-                "integer": click.INT, "number": click.FLOAT,
-                "text": click.STRING, "boolean": click.BOOL,
-            }[parameter.kind]
-            options.append(click.Option(
-                [f"--{parameter.name}"], type=kind, required=parameter.required,
-                default=parameter.default, help=parameter.help,
+            options.append(TyperOption(
+                param_decls=[f"--{parameter.name}"], type=_PARAMETER_TYPES[parameter.kind],
+                required=parameter.required, default=parameter.default, help=parameter.help,
             ))
 
         def invoke_provider(**kwargs: object) -> None:
@@ -60,8 +67,9 @@ class ProviderGroup(TyperGroup):
                     parameters={key.replace("_", "-"): value for key, value in kwargs.items() if value is not None},
                 )
             except (OSError, ValueError, PermissionError) as exc:
-                raise click.ClickException(str(exc)) from exc
-            click.echo(json.dumps({
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(1) from exc
+            typer.echo(json.dumps({
                 "output": str(Path(output).resolve()),
                 "world_identity_sha256": report["world_identity_sha256"],
                 "tasks_verified": len(list(Path(output).glob("task-*.json"))),
@@ -71,7 +79,7 @@ class ProviderGroup(TyperGroup):
                 "previews": sorted(report["previews"]),
             }, sort_keys=True))
 
-        return click.Command(cmd_name, params=options, callback=invoke_provider, help=provider.info.description)
+        return TyperCommand(cmd_name, params=options, callback=invoke_provider, help=provider.info.description)
 
 
 app = typer.Typer(cls=ProviderGroup, help="List, generate, and select verified voxel worlds.")

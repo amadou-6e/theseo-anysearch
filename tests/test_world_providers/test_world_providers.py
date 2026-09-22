@@ -129,6 +129,69 @@ def test_broken_optional_provider_does_not_break_builtin_list(monkeypatch: pytes
     assert "broken-provider  unavailable" in result.output
 
 
+# --- Full-root, subprocess-based dispatch checks -----------------------------
+#
+# `typer.testing.CliRunner` invokes commands directly through Click's `invoke()`,
+# which catches every exception generically regardless of its exact class. That
+# masks a family mismatch between the dynamic `ProviderGroup` subcommands and the
+# root Typer app: when Typer bundles its own internal Click implementation, a
+# subcommand built from the standalone `click` package raises `--help`/usage
+# exceptions from the wrong family, which the real root app's error handler does
+# not recognise, so they escape uncaught. Only running the actual root app in a
+# subprocess (as a real invocation would) surfaces that (see #471).
+
+
+def test_worlds_help_exits_cleanly_under_full_root_app_for_every_installed_provider() -> None:
+    for name in provider_api.installed_providers():
+        result = subprocess.run(
+            [sys.executable, "-m", "theseo_anysearch.cli.main", "worlds", name, "--help"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"{name}: {result.stdout}\n{result.stderr}"
+        assert "Traceback" not in result.stderr, f"{name}: {result.stderr}"
+
+
+def test_worlds_invalid_option_exits_cleanly_under_full_root_app(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "theseo_anysearch.cli.main", "worlds", "fixture-boxes",
+            "--seed", "1", "--output", str(tmp_path / "bad"), "--not-a-real-option", "x",
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    assert "No such option" in result.stdout + result.stderr
+
+
+def test_worlds_broken_provider_help_and_invocation_exit_cleanly_under_full_root_app() -> None:
+    setup = """
+from theseo_anysearch.world_providers import api as provider_api
+
+class BrokenEntryPoint:
+    name = "broken-provider"
+    def load(self):
+        raise ImportError("optional native dependency missing")
+
+provider_api.entry_points = lambda *, group: [BrokenEntryPoint()]
+from theseo_anysearch.cli.main import app
+"""
+    help_result = subprocess.run(
+        [sys.executable, "-c", setup + 'app(["worlds", "broken-provider", "--help"])'],
+        capture_output=True, text=True,
+    )
+    assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+    assert "Traceback" not in help_result.stderr
+
+    run_result = subprocess.run(
+        [sys.executable, "-c", setup + 'app(["worlds", "broken-provider"])'],
+        capture_output=True, text=True,
+    )
+    assert run_result.returncode == 1, run_result.stdout + run_result.stderr
+    assert "Traceback" not in run_result.stderr
+    assert "optional native dependency missing" in run_result.stdout + run_result.stderr
+
+
 def test_provider_parameter_schema_rejects_non_numeric_bounds() -> None:
     with pytest.raises(ValueError, match="only numeric"):
         provider_api.ProviderParameter("style", "text", minimum=0)
