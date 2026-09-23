@@ -40,7 +40,7 @@ def test_cli_help_does_not_download():
     import sys
     import textwrap
 
-    provider_src = str(Path(__file__).resolve().parents[2] / "providers/gazebo/src")
+    provider_src = str(Path(Path(__file__).resolve().parents[2], "providers", "gazebo", "src"))
     code = textwrap.dedent(f"""
         import sys
         sys.path.insert(0, {provider_src!r})

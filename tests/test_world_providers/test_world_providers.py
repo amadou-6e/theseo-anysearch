@@ -155,7 +155,7 @@ def test_worlds_invalid_option_exits_cleanly_under_full_root_app(tmp_path: Path)
     result = subprocess.run(
         [
             sys.executable, "-m", "theseo_anysearch.cli.main", "worlds", "fixture-boxes",
-            "--seed", "1", "--output", str(tmp_path / "bad"), "--not-a-real-option", "x",
+            "--seed", "1", "--output", str(Path(tmp_path, "bad")), "--not-a-real-option", "x",
         ],
         capture_output=True, text=True,
     )
@@ -165,7 +165,7 @@ def test_worlds_invalid_option_exits_cleanly_under_full_root_app(tmp_path: Path)
 
 
 def test_worlds_file_output_is_rejected_cleanly_under_full_root_app(tmp_path: Path) -> None:
-    output = tmp_path / "not-a-directory"
+    output = Path(tmp_path, "not-a-directory")
     output.write_text("occupied", encoding="utf-8")
     result = subprocess.run(
         [
@@ -210,7 +210,29 @@ from theseo_anysearch.cli.main import app
     )
     assert run_result.returncode == 1, run_result.stdout + run_result.stderr
     assert "Traceback" not in run_result.stderr
+    # Matches the "Error: <message>" convention the static worlds list/add
+    # commands already use, so dynamic and static commands stay consistent.
+    assert "Error: world provider 'broken-provider' is incompatible or broken: " in (
+        run_result.stdout + run_result.stderr
+    )
     assert "optional native dependency missing" in run_result.stdout + run_result.stderr
+
+
+def test_worlds_generate_failure_uses_error_prefix_under_full_root_app(tmp_path: Path) -> None:
+    root = Path(tmp_path, "cli-world")
+    root.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "theseo_anysearch.cli.main", "worlds", "fixture-boxes",
+            "--seed", "1", "--output", str(root),
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+    # Matches the "Error: <message>" convention the static worlds list/add
+    # commands already use, so dynamic and static commands stay consistent.
+    assert "Error: " in result.stdout + result.stderr
 
 
 def test_provider_parameter_schema_rejects_non_numeric_bounds() -> None:

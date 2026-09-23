@@ -61,7 +61,7 @@ class ProviderGroup(TyperGroup):
                 message = str(exc)
 
                 def broken_provider() -> None:
-                    typer.echo(message, err=True)
+                    typer.echo(f"Error: {message}", err=True)
                     raise typer.Exit(1)
 
                 return TyperCommand(cmd_name, callback=broken_provider, rich_markup_mode=None)
@@ -88,7 +88,7 @@ class ProviderGroup(TyperGroup):
                     parameters={key.replace("_", "-"): value for key, value in kwargs.items() if value is not None},
                 )
             except (OSError, ValueError, PermissionError) as exc:
-                typer.echo(str(exc), err=True)
+                typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(1) from exc
             typer.echo(json.dumps({
                 "output": str(Path(output).resolve()),
