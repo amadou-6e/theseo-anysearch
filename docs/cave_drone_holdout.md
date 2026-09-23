@@ -72,7 +72,7 @@ The pinned upstream code has one fixed generator recipe: fBm chambers,
 14 random-walker tunnels and one post-generation cavity filter. Changing its
 seed changes a layout **within that same family**. The output sidecars name
 that family explicitly and set `cross_family_holdout_supported: false`.
-Train/calibration/test seed assignments can test within-family variation only.
+Train/validation/test seed assignments can test within-family variation only.
 A claim about held-out chamber-versus-tunnel topology requires another source
 family or a separately versioned, reviewed generator intervention and fresh
 dataset identities. #414 should therefore be retained as a faithful adapter,

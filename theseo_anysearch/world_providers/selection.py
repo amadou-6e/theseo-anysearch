@@ -135,7 +135,7 @@ def add_to_experiment(world: Path, config_path: Path) -> dict[str, str]:
     existing = raw.get("worlds")
     if existing is not None and not isinstance(existing, dict):
         raise ValueError("worlds config must be a mapping")
-    if existing and existing.get("role") not in {"train", "calibration", "test"}:
+    if existing and existing.get("role") not in {"train", "validation", "test", "calibration"}:
         raise ValueError("worlds.role must identify the target data split")
     role = existing.get("role", "train") if existing else "train"
     if role != "train":

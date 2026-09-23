@@ -100,7 +100,11 @@ def test_cavedrone_requires_explicit_source_and_valid_parameters(
     with pytest.raises(ValueError, match="ANYSEARCH_CAVEDRONE_SOURCE"):
         provider.generate(seed=42, output=tmp_path / "world", parameters={})
     with pytest.raises(ValueError, match="partition"):
-        provider.generate(seed=42, output=tmp_path / "world", parameters={"partition": "validation"})
+        provider.generate(seed=42, output=tmp_path / "world", parameters={"partition": "bogus"})
+    # See #493: `calibration` is a deprecated alias for `validation`; generation
+    # must reject it, not silently accept it as an unrecognized legacy spelling.
+    with pytest.raises(ValueError, match="partition"):
+        provider.generate(seed=42, output=tmp_path / "world", parameters={"partition": "calibration"})
     with pytest.raises(ValueError, match="body-radius-m"):
         provider.generate(seed=42, output=tmp_path / "world", parameters={"body-radius-m": -0.1})
     with pytest.raises(ValueError, match="uint32"):

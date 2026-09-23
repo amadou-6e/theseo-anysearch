@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from theseo_anysearch.environments.routing_manifests import (
+    SCHEMA_VERSION,
     ArtifactRef,
     ConversionRecord,
     GridFrame,
@@ -29,7 +30,7 @@ from theseo_anysearch.environments.routing_manifests import (
     verify_artifact,
     write_sidecar,
 )
-from theseo_anysearch.worlds.manifest import WorldExtent
+from theseo_anysearch.worlds.manifest import WorldExtent, world_contract_fingerprint
 
 
 def _source(*, rights: RightsRecord | None = None) -> SourceRecord:
@@ -328,6 +329,112 @@ def test_split_rejects_roof_or_site_leakage() -> None:
     unrelated_root_same_site = roof.model_copy(update={"root_geometry_id": "other-scene"})
     with pytest.raises(ValidationError, match="site"):
         RoutingSplitRecord(dataset_id="test", members=(first, unrelated_root_same_site))
+
+
+def _write_legacy_split_json(path, *, dataset_id: str, member: dict) -> str:
+    """Write a split.json naming the deprecated `calibration` partition, by hand.
+
+    This deliberately never touches SplitMember/RoutingSplitRecord/write_sidecar,
+    so it stands in for genuinely independent evidence: a file that already
+    existed on disk before #493, not a byte copy of anything this test process
+    constructed through the model layer. The identity is computed directly with
+    the same canonical-hash primitive read_sidecar() itself relies on, so a
+    tampered or hand-miscomputed identity would be caught the same way a real
+    corrupted sidecar would be.
+    """
+
+    member_payload = {"schema_version": SCHEMA_VERSION, **member}
+    split_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "dataset_id": dataset_id,
+        "members": [member_payload],
+    }
+    identity = world_contract_fingerprint(
+        {"record_type": "RoutingSplitRecord", "payload": split_payload}
+    )
+    envelope = {
+        "record_type": "RoutingSplitRecord",
+        "identity_sha256": identity,
+        "payload": split_payload,
+    }
+    path.write_text(json.dumps(envelope), encoding="utf-8")
+    return identity
+
+
+def test_calibration_is_rejected_by_ordinary_construction() -> None:
+    """See #493: `validation` replaces `calibration` as the canonical split name.
+
+    Ordinary construction must never produce a "calibration" record — only
+    read_sidecar(), loading an already-written split.json, may. This is what
+    keeps the "nothing new ever writes it" invariant enforced rather than
+    aspirational: there is no public way to construct one directly.
+    """
+
+    world = _bundle()["worlds"][0]
+    fields = dict(
+        world_identity_sha256=world.identity_sha256,
+        root_geometry_id="root",
+        topology_family="room",
+    )
+    with pytest.raises(ValidationError, match="deprecated alias"):
+        SplitMember(**fields, partition="calibration")
+    with pytest.raises(ValidationError, match="deprecated alias"):
+        SplitMember.model_validate({**fields, "partition": "calibration"})
+
+    canonical = SplitMember(**fields, partition="validation")
+    assert canonical.partition == "validation"
+
+
+def test_legacy_calibration_split_sidecar_loads_hashes_unchanged_and_cannot_be_rewritten(
+    tmp_path,
+) -> None:
+    world = _bundle()["worlds"][0]
+    path = tmp_path / "split.json"
+    expected_identity = _write_legacy_split_json(
+        path,
+        dataset_id="fixture",
+        member={
+            "world_identity_sha256": world.identity_sha256,
+            "root_geometry_id": "legacy-root",
+            "topology_family": "room",
+            "site_id": None,
+            "partition": "calibration",
+        },
+    )
+    reloaded = read_sidecar(path, RoutingSplitRecord)
+    assert reloaded.members[0].partition == "calibration"
+    assert reloaded.identity_sha256 == expected_identity
+
+    # write_sidecar() must refuse to persist a record naming "calibration",
+    # even one obtained legitimately from read_sidecar() itself — the deprecated
+    # name can only ever exist in a file that already had it, never a new one.
+    with pytest.raises(ValueError, match="calibration"):
+        write_sidecar(tmp_path / "rewritten-split.json", reloaded)
+    assert not (tmp_path / "rewritten-split.json").exists()
+
+
+def test_legacy_and_canonical_partitions_still_reject_root_geometry_leakage(tmp_path) -> None:
+    """A root geometry cannot be assigned to both the legacy and canonical name."""
+
+    world = _bundle()["worlds"][0]
+    path = tmp_path / "split.json"
+    _write_legacy_split_json(
+        path,
+        dataset_id="fixture",
+        member={
+            "world_identity_sha256": world.identity_sha256,
+            "root_geometry_id": "same-scene",
+            "topology_family": "room",
+            "site_id": None,
+            "partition": "calibration",
+        },
+    )
+    legacy = read_sidecar(path, RoutingSplitRecord).members[0]
+    relabeled = legacy.model_copy(
+        update={"world_identity_sha256": "6" * 64, "partition": "validation"}
+    )
+    with pytest.raises(ValidationError, match="root geometry"):
+        RoutingSplitRecord(dataset_id="test", members=(legacy, relabeled))
 
 
 def test_box_observation_keeps_unknown_separate_from_free() -> None:

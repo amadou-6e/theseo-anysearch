@@ -5,6 +5,13 @@ Governing contract:
 This issue implements the provider-neutral CLI and a deterministic fixture;
 the CaveDrone wheel and its upstream-source setup belong to #430.
 
+`validation` is the canonical name for the held-out model-selection split
+(formerly `calibration`, #493). New generation and CLI output always use
+`validation`. An already-written `split.json` or experiment YAML that names
+`calibration` keeps loading unchanged — `calibration` remains a recognized,
+deprecated `Partition`/`role` value so its content-addressed identity is never
+silently altered — but nothing writes that name going forward.
+
 ```text
 anysearch worlds list
 anysearch worlds list --remote
@@ -88,7 +95,7 @@ anysearch worlds add worlds/cave-42 --config experiments/train.yaml
 ```
 
 `list` advertises native 192 x 56 x 192 extent and 0.5 m voxels. The optional
-`--partition` is `train` (default), `calibration`, or `test`;
+`--partition` is `train` (default), `validation`, or `test`;
 `--body-radius-m` defaults to 0.25. There is no arbitrary native resolution
 parameter. The generated report names rejected task strata and the single
 `cavedronesim_native_chamber_tunnel_v1` topology family. Different seeds are

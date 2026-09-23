@@ -671,8 +671,8 @@ def export_discipline(
 
     if discipline not in DISCIPLINE_TYPES:
         raise ValueError(f"unknown discipline: {discipline!r}")
-    if partition not in {"train", "calibration", "test"}:
-        raise ValueError("partition must be train, calibration or test")
+    if partition not in {"train", "validation", "test"}:
+        raise ValueError("partition must be train, validation or test")
     if output_dir.exists():
         raise FileExistsError("output directory already exists")
     if crop_bounds_m is not None:
@@ -965,7 +965,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--discipline", choices=("plumbing", "electrical"), required=True)
-    parser.add_argument("--partition", choices=("train", "calibration", "test"), required=True)
+    parser.add_argument("--partition", choices=("train", "validation", "test"), required=True)
     parser.add_argument("--body-radius-m", type=float, default=None)
     parser.add_argument(
         "--storey-name", action="append", default=None,

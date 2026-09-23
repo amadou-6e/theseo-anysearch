@@ -224,6 +224,31 @@ def test_invalid_layout_and_existing_output_are_rejected(tmp_path, synthetic_sou
         export_scene(synthetic_source, output, revision=_revision(synthetic_source), seed=0, layout="detour")
 
 
+def test_legacy_calibration_partition_is_rejected_not_silently_accepted(tmp_path):
+    """See #493: `validation` replaces `calibration`; export must reject the old name.
+
+    Partition validation runs before touching the source, so this needs no fixture.
+    """
+
+    with pytest.raises(ValueError, match="invalid partition"):
+        export_scene(
+            tmp_path, tmp_path / "out", revision="0" * 40, seed=0, layout="detour",
+            partition="calibration",
+        )
+    assert not (tmp_path / "out").exists()
+
+
+def test_validation_partition_is_accepted_past_input_checks(tmp_path):
+    """Partition validation runs before touching the source, so this needs no fixture."""
+
+    with pytest.raises(ValueError) as excinfo:
+        export_scene(
+            tmp_path, tmp_path / "out", revision="0" * 40, seed=0, layout="detour",
+            partition="validation",
+        )
+    assert "partition" not in str(excinfo.value)
+
+
 def test_non_git_source_root_fails_closed(tmp_path):
     source = tmp_path / "archive"
     source.mkdir()

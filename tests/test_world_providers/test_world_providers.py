@@ -185,6 +185,21 @@ def test_add_rejects_conflicting_geometry_and_split(tmp_path: Path) -> None:
     assert "training worlds only" in result.output
 
 
+def test_add_rejects_legacy_calibration_role_config_cleanly(tmp_path: Path) -> None:
+    """See #493: `calibration` is a deprecated alias for `validation` `role`/`partition`.
+
+    An experiment YAML naming the legacy role must still parse and fail with the
+    same clear message as any other non-train role, not a raw validation error.
+    """
+
+    root = _world(tmp_path)
+    config = tmp_path / "experiment.yaml"
+    config.write_text(_base_config_with_role("calibration"), encoding="utf-8")
+    result = CliRunner().invoke(app, ["worlds", "add", str(root), "--config", str(config)])
+    assert result.exit_code != 0
+    assert "training worlds only" in result.output
+
+
 def test_loader_rechecks_world_after_manual_yaml_or_artifact_edit(tmp_path: Path) -> None:
     root = _world(tmp_path)
     config = tmp_path / "experiment.yaml"

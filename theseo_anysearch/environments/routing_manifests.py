@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import Annotated, Literal, TypeVar
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from theseo_anysearch.worlds.manifest import (
     WorldExtent,
@@ -22,7 +31,17 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 StorageCoordinate = tuple[StrictInt, StrictInt, StrictInt]
 Use = Literal["evaluation", "training", "redistribution"]
-Partition = Literal["train", "calibration", "test"]
+Partition = Literal["train", "validation", "test"]
+# Deprecated alias for "validation" (see #493), so an already-written,
+# content-addressed split.json naming it keeps loading and hashing to its
+# original identity_sha256. Only this module's own read_sidecar() may
+# construct a record naming it, via the module-private _ALLOW_LEGACY_PARTITION
+# validation context; that context is intentionally not exported. Everything
+# else (SplitMember(...), a plain .model_validate(...), the CLI, every
+# provider/exporter, and write_sidecar()) must go through ordinary Partition
+# and can never produce or persist it.
+LEGACY_PARTITION: Literal["calibration"] = "calibration"
+_ALLOW_LEGACY_PARTITION = {"allow_legacy_partition": True}
 SCHEMA_VERSION = 1
 
 
@@ -317,7 +336,19 @@ class SplitMember(RoutingRecord):
     root_geometry_id: Name
     topology_family: Name
     site_id: Name | None = None
-    partition: Partition
+    partition: Partition | Literal["calibration"]
+
+    @field_validator("partition")
+    @classmethod
+    def _reject_legacy_partition_outside_read_sidecar(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        if value == LEGACY_PARTITION and not (info.context or {}).get("allow_legacy_partition"):
+            raise ValueError(
+                "partition 'calibration' is a deprecated alias for 'validation'; "
+                "only read_sidecar() may load it from an existing split.json"
+            )
+        return value
 
 
 class RoutingSplitRecord(RoutingRecord):
@@ -327,8 +358,8 @@ class RoutingSplitRecord(RoutingRecord):
     @model_validator(mode="after")
     def reject_group_leakage(self) -> RoutingSplitRecord:
         seen_worlds: set[str] = set()
-        roots: dict[str, Partition] = {}
-        sites: dict[str, Partition] = {}
+        roots: dict[str, str] = {}
+        sites: dict[str, str] = {}
         for member in self.members:
             if member.world_identity_sha256 in seen_worlds:
                 raise ValueError("split contains a duplicate world")
@@ -505,6 +536,13 @@ RecordT = TypeVar("RecordT", bound=RoutingRecord)
 def write_sidecar(path: Path, record: RoutingRecord) -> None:
     """Write an immutable canonical JSON envelope; never overwrite an existing sidecar."""
 
+    if isinstance(record, RoutingSplitRecord) and any(
+        member.partition == LEGACY_PARTITION for member in record.members
+    ):
+        raise ValueError(
+            "refusing to write a split naming the deprecated 'calibration' partition; "
+            "only an existing split.json may already contain it"
+        )
     payload = record.canonical_payload()
     envelope = {
         "record_type": type(record).__name__,
@@ -546,7 +584,7 @@ def read_sidecar(path: Path, record_type: type[RecordT]) -> RecordT:
         raise ValueError("invalid routing sidecar envelope")
     if envelope["record_type"] != record_type.__name__:
         raise ValueError("routing sidecar has the wrong record type")
-    record = record_type.model_validate(envelope["payload"])
+    record = record_type.model_validate(envelope["payload"], context=_ALLOW_LEGACY_PARTITION)
     if record.identity_sha256 != envelope["identity_sha256"]:
         raise ValueError("routing sidecar identity does not match its content")
     return record

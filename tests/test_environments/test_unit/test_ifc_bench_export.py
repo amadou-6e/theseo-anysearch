@@ -381,7 +381,7 @@ def test_export_discipline_refuses_existing_output(tmp_path):
 def test_export_discipline_rejects_unreviewed_training_without_evidence(tmp_path):
     source_root = _build_ifc(tmp_path, kind="plumbing")
     output = tmp_path / "out"
-    # Training is allowed under CC BY 3.0 evidence; calibration/eval too, so this
+    # Training is allowed under CC BY 3.0 evidence; validation/eval too, so this
     # only exercises the discipline/partition validation, not a rights failure.
     report = export_discipline(
         source_root, output, discipline="plumbing", partition="train", verify_hashes=False,
@@ -396,6 +396,29 @@ def test_export_discipline_rejects_unknown_discipline(tmp_path):
             source_root, tmp_path / "out",
             discipline="hvac", partition="test", verify_hashes=False,
         )
+
+
+def test_legacy_calibration_partition_is_rejected_not_silently_accepted(tmp_path):
+    """See #493: `validation` replaces `calibration`; export must reject the old name.
+
+    Partition validation runs before touching the source, so this needs no fixture.
+    """
+
+    with pytest.raises(ValueError, match="train, validation or test"):
+        export_discipline(
+            tmp_path, tmp_path / "out",
+            discipline="plumbing", partition="calibration", verify_hashes=False,
+        )
+    assert not (tmp_path / "out").exists()
+
+
+def test_validation_partition_is_accepted_end_to_end(tmp_path):
+    source_root = _build_ifc(tmp_path, kind="plumbing")
+    report = export_discipline(
+        source_root, tmp_path / "out",
+        discipline="plumbing", partition="validation", verify_hashes=False,
+    )
+    assert report["partition"] == "validation"
 
 
 def test_export_discipline_electrical_uses_cable_carrier_types(tmp_path):

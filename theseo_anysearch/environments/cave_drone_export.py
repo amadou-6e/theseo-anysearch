@@ -236,8 +236,8 @@ def export_seed(
 
     if type(seed) is not int or not 0 <= seed <= 0xFFFFFFFF:
         raise ValueError("seed must be a uint32 integer")
-    if partition not in {"train", "calibration", "test"}:
-        raise ValueError("partition must be train, calibration or test")
+    if partition not in {"train", "validation", "test"}:
+        raise ValueError("partition must be train, validation or test")
     if output_dir.exists():
         raise FileExistsError("output directory already exists")
     source = verify_upstream(source_root)
@@ -377,7 +377,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--partition", choices=("train", "calibration", "test"), required=True)
+    parser.add_argument("--partition", choices=("train", "validation", "test"), required=True)
     parser.add_argument("--body-radius-m", type=float, default=0.25)
     parser.add_argument("--compiler", default="g++")
     args = parser.parse_args()

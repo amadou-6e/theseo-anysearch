@@ -119,3 +119,19 @@ def test_invalid_source_revision_fails_closed(tmp_path: Path) -> None:
     with pytest.raises((subprocess.CalledProcessError, ValueError)):
         export_seed(tmp_path, tmp_path / "out", seed=1, partition="test")
     assert not (tmp_path / "out").exists()
+
+
+def test_legacy_calibration_partition_is_rejected_not_silently_accepted(tmp_path: Path) -> None:
+    """See #493: `validation` replaces `calibration`; export must reject the old name."""
+
+    with pytest.raises(ValueError, match="train, validation or test"):
+        export_seed(tmp_path, tmp_path / "out", seed=1, partition="calibration")
+    assert not (tmp_path / "out").exists()
+
+
+def test_validation_partition_is_accepted_past_input_checks(tmp_path: Path) -> None:
+    """Partition validation runs before touching the source, so this needs no fixture."""
+
+    with pytest.raises((subprocess.CalledProcessError, ValueError)) as excinfo:
+        export_seed(tmp_path, tmp_path / "out", seed=1, partition="validation")
+    assert "partition" not in str(excinfo.value)

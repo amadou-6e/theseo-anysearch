@@ -4,6 +4,10 @@ Develop promotion (#452) includes the standalone exporter and route checker.
 The compact preparation command below belongs to the historical encoder study
 on `exp/perception-encoder`, not to the develop CLI; its experimental encoder
 dependencies are intentionally not promoted. Existing evidence is unchanged.
+`calibration` below names the split partition literally as it was passed to
+`--partition` and hashed into `cavedrone-route-426-plan.json` at the time; it
+is intentionally left as-is rather than relabeled to the current canonical
+`validation` name (#493), so the recorded hashes stay reproducible.
 
 Status: CPU-only source export and dataset preparation, **not** model training,
 an encoder result, a native flight task, or a cross-family transfer test.

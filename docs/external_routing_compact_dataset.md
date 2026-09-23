@@ -68,7 +68,7 @@ identity before use. No raw grids, source assets or model weights enter Git.
 
 Complete source layouts and sites must remain in one partition. Multiple
 topology families require an explicitly named test-only family; a single family
-can support only a narrower claim. A three-way train/calibration/test partition
+can support only a narrower claim. A three-way train/validation/test partition
 is marked `three_way`; otherwise the report says `incomplete_not_fit_ready`.
 Rows and all controls share the same query IDs, offsets and labels. For a
 checkpoint supplied later, `extract_frozen_features` accepts only a fully
