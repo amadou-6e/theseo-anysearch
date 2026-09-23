@@ -32,14 +32,16 @@ Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 StorageCoordinate = tuple[StrictInt, StrictInt, StrictInt]
 Use = Literal["evaluation", "training", "redistribution"]
 Partition = Literal["train", "validation", "test"]
-# Deprecated alias for "validation" (see #493). Only read_sidecar() may
-# construct a record naming it, by passing ALLOW_LEGACY_PARTITION as its
-# model_validate context, so an already-written, content-addressed split.json
-# naming it keeps loading and hashing to its original identity_sha256. Direct
-# construction (SplitMember(...), plain .model_validate(...), the CLI, every
-# provider/exporter) must go through ordinary Partition and can never produce it.
+# Deprecated alias for "validation" (see #493), so an already-written,
+# content-addressed split.json naming it keeps loading and hashing to its
+# original identity_sha256. Only this module's own read_sidecar() may
+# construct a record naming it, via the module-private _ALLOW_LEGACY_PARTITION
+# validation context; that context is intentionally not exported. Everything
+# else (SplitMember(...), a plain .model_validate(...), the CLI, every
+# provider/exporter, and write_sidecar()) must go through ordinary Partition
+# and can never produce or persist it.
 LEGACY_PARTITION: Literal["calibration"] = "calibration"
-ALLOW_LEGACY_PARTITION = {"allow_legacy_partition": True}
+_ALLOW_LEGACY_PARTITION = {"allow_legacy_partition": True}
 SCHEMA_VERSION = 1
 
 
@@ -534,6 +536,13 @@ RecordT = TypeVar("RecordT", bound=RoutingRecord)
 def write_sidecar(path: Path, record: RoutingRecord) -> None:
     """Write an immutable canonical JSON envelope; never overwrite an existing sidecar."""
 
+    if isinstance(record, RoutingSplitRecord) and any(
+        member.partition == LEGACY_PARTITION for member in record.members
+    ):
+        raise ValueError(
+            "refusing to write a split naming the deprecated 'calibration' partition; "
+            "only an existing split.json may already contain it"
+        )
     payload = record.canonical_payload()
     envelope = {
         "record_type": type(record).__name__,
@@ -575,7 +584,7 @@ def read_sidecar(path: Path, record_type: type[RecordT]) -> RecordT:
         raise ValueError("invalid routing sidecar envelope")
     if envelope["record_type"] != record_type.__name__:
         raise ValueError("routing sidecar has the wrong record type")
-    record = record_type.model_validate(envelope["payload"], context=ALLOW_LEGACY_PARTITION)
+    record = record_type.model_validate(envelope["payload"], context=_ALLOW_LEGACY_PARTITION)
     if record.identity_sha256 != envelope["identity_sha256"]:
         raise ValueError("routing sidecar identity does not match its content")
     return record
