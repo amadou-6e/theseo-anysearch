@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from theseo_anysearch.environments.routing_manifests import (
+    ALLOW_LEGACY_PARTITION,
     ArtifactRef,
     ConversionRecord,
     GridFrame,
@@ -330,30 +331,41 @@ def test_split_rejects_roof_or_site_leakage() -> None:
         RoutingSplitRecord(dataset_id="test", members=(first, unrelated_root_same_site))
 
 
-def test_validation_is_the_canonical_partition_and_calibration_is_a_legacy_alias() -> None:
+def _legacy_split_member(**fields) -> SplitMember:
+    """Build a SplitMember naming the deprecated `calibration` partition.
+
+    This is the *only* sanctioned way to construct one outside read_sidecar()
+    itself: ordinary construction (SplitMember(...), a bare .model_validate(...),
+    the CLI, every provider/exporter) must reject "calibration" outright.
+    """
+
+    return SplitMember.model_validate(fields, context=ALLOW_LEGACY_PARTITION)
+
+
+def test_calibration_is_rejected_by_ordinary_construction_but_validation_is_canonical() -> None:
     """See #493: `validation` replaces `calibration` as the canonical split name.
 
-    `calibration` must remain an accepted `Partition` value so an already-written,
-    content-addressed split.json naming it keeps loading and hashing to its
-    original identity_sha256; new code must never write it.
+    Ordinary construction must never produce a "calibration" record — only
+    read_sidecar()'s explicit legacy context may. This is what keeps the
+    "nothing new ever writes it" invariant enforced rather than aspirational.
     """
 
     world = _bundle()["worlds"][0]
-    legacy = SplitMember(
+    fields = dict(
         world_identity_sha256=world.identity_sha256,
-        root_geometry_id="legacy-root",
+        root_geometry_id="root",
         topology_family="room",
-        partition="calibration",
     )
-    canonical = SplitMember(
-        world_identity_sha256="7" * 64,
-        root_geometry_id="canonical-root",
-        topology_family="room",
-        partition="validation",
-    )
-    split = RoutingSplitRecord(dataset_id="fixture", members=(legacy, canonical))
-    assert split.members[0].partition == "calibration"
-    assert split.members[1].partition == "validation"
+    with pytest.raises(ValidationError, match="deprecated alias"):
+        SplitMember(**fields, partition="calibration")
+    with pytest.raises(ValidationError, match="deprecated alias"):
+        SplitMember.model_validate({**fields, "partition": "calibration"})
+
+    canonical = SplitMember(**fields, partition="validation")
+    assert canonical.partition == "validation"
+
+    legacy = _legacy_split_member(**fields, partition="calibration")
+    assert legacy.partition == "calibration"
 
 
 def test_legacy_calibration_split_sidecar_loads_and_hashes_unchanged(tmp_path) -> None:
@@ -361,7 +373,7 @@ def test_legacy_calibration_split_sidecar_loads_and_hashes_unchanged(tmp_path) -
     legacy = RoutingSplitRecord(
         dataset_id="fixture",
         members=(
-            SplitMember(
+            _legacy_split_member(
                 world_identity_sha256=world.identity_sha256,
                 root_geometry_id="legacy-root",
                 topology_family="room",
@@ -377,12 +389,18 @@ def test_legacy_calibration_split_sidecar_loads_and_hashes_unchanged(tmp_path) -
     assert reloaded.members[0].partition == "calibration"
     assert reloaded.identity_sha256 == legacy.identity_sha256 == envelope["identity_sha256"]
 
+    # A hand-crafted split.json (simulating one written before #493, entirely
+    # independent of the Python object above) must load identically.
+    raw_path = tmp_path / "raw-split.json"
+    raw_path.write_bytes(path.read_bytes())
+    assert read_sidecar(raw_path, RoutingSplitRecord).identity_sha256 == legacy.identity_sha256
+
 
 def test_legacy_and_canonical_partitions_still_reject_root_geometry_leakage() -> None:
     """A root geometry cannot be assigned to both the legacy and canonical name."""
 
     world = _bundle()["worlds"][0]
-    legacy = SplitMember(
+    legacy = _legacy_split_member(
         world_identity_sha256=world.identity_sha256,
         root_geometry_id="same-scene",
         topology_family="room",
