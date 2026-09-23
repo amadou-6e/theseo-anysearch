@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class WorldSelectionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    role: Literal["train", "calibration", "test"]
+    # "calibration" is a deprecated alias for "validation", accepted only so an
+    # existing experiment YAML naming it still parses (see #493).
+    role: Literal["train", "validation", "test", "calibration"]
     study_id: str = Field(min_length=1)
     study_root: Path = Path(".")
     root: Path

@@ -22,7 +22,10 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 StorageCoordinate = tuple[StrictInt, StrictInt, StrictInt]
 Use = Literal["evaluation", "training", "redistribution"]
-Partition = Literal["train", "calibration", "test"]
+# "calibration" is a deprecated alias for "validation", accepted only so an
+# already-written, content-addressed split.json naming it keeps validating and
+# hashing to its original identity_sha256 (see #493). Never write "calibration".
+Partition = Literal["train", "validation", "test", "calibration"]
 SCHEMA_VERSION = 1
 
 

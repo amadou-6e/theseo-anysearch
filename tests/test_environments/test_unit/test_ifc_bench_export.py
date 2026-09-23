@@ -381,7 +381,7 @@ def test_export_discipline_refuses_existing_output(tmp_path):
 def test_export_discipline_rejects_unreviewed_training_without_evidence(tmp_path):
     source_root = _build_ifc(tmp_path, kind="plumbing")
     output = tmp_path / "out"
-    # Training is allowed under CC BY 3.0 evidence; calibration/eval too, so this
+    # Training is allowed under CC BY 3.0 evidence; validation/eval too, so this
     # only exercises the discipline/partition validation, not a rights failure.
     report = export_discipline(
         source_root, output, discipline="plumbing", partition="train", verify_hashes=False,

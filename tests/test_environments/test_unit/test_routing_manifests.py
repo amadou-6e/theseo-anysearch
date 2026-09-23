@@ -330,6 +330,71 @@ def test_split_rejects_roof_or_site_leakage() -> None:
         RoutingSplitRecord(dataset_id="test", members=(first, unrelated_root_same_site))
 
 
+def test_validation_is_the_canonical_partition_and_calibration_is_a_legacy_alias() -> None:
+    """See #493: `validation` replaces `calibration` as the canonical split name.
+
+    `calibration` must remain an accepted `Partition` value so an already-written,
+    content-addressed split.json naming it keeps loading and hashing to its
+    original identity_sha256; new code must never write it.
+    """
+
+    world = _bundle()["worlds"][0]
+    legacy = SplitMember(
+        world_identity_sha256=world.identity_sha256,
+        root_geometry_id="legacy-root",
+        topology_family="room",
+        partition="calibration",
+    )
+    canonical = SplitMember(
+        world_identity_sha256="7" * 64,
+        root_geometry_id="canonical-root",
+        topology_family="room",
+        partition="validation",
+    )
+    split = RoutingSplitRecord(dataset_id="fixture", members=(legacy, canonical))
+    assert split.members[0].partition == "calibration"
+    assert split.members[1].partition == "validation"
+
+
+def test_legacy_calibration_split_sidecar_loads_and_hashes_unchanged(tmp_path) -> None:
+    world = _bundle()["worlds"][0]
+    legacy = RoutingSplitRecord(
+        dataset_id="fixture",
+        members=(
+            SplitMember(
+                world_identity_sha256=world.identity_sha256,
+                root_geometry_id="legacy-root",
+                topology_family="room",
+                partition="calibration",
+            ),
+        ),
+    )
+    path = tmp_path / "split.json"
+    write_sidecar(path, legacy)
+    envelope = json.loads(path.read_bytes())
+    assert envelope["payload"]["members"][0]["partition"] == "calibration"
+    reloaded = read_sidecar(path, RoutingSplitRecord)
+    assert reloaded.members[0].partition == "calibration"
+    assert reloaded.identity_sha256 == legacy.identity_sha256 == envelope["identity_sha256"]
+
+
+def test_legacy_and_canonical_partitions_still_reject_root_geometry_leakage() -> None:
+    """A root geometry cannot be assigned to both the legacy and canonical name."""
+
+    world = _bundle()["worlds"][0]
+    legacy = SplitMember(
+        world_identity_sha256=world.identity_sha256,
+        root_geometry_id="same-scene",
+        topology_family="room",
+        partition="calibration",
+    )
+    relabeled = legacy.model_copy(
+        update={"world_identity_sha256": "6" * 64, "partition": "validation"}
+    )
+    with pytest.raises(ValidationError, match="root geometry"):
+        RoutingSplitRecord(dataset_id="test", members=(legacy, relabeled))
+
+
 def test_box_observation_keeps_unknown_separate_from_free() -> None:
     truth = np.zeros((5, 5, 5), dtype=np.uint8)
     truth[2, 2, 2] = 1

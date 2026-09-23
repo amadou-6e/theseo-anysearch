@@ -22,7 +22,7 @@ anysearch worlds add worlds/cave-42 --config experiments/train.yaml
 ```
 
 The native output is a 192 x 56 x 192 full-occupancy grid with 0.5 m voxels.
-`--partition` may be `train` (default), `calibration`, or `test`, and
+`--partition` may be `train` (default), `validation`, or `test`, and
 `--body-radius-m` defaults to 0.25. There is no native voxel-resolution knob.
 The core verifies every derived six-axis swept-sphere route against complete
 occupied voxel cubes, then writes six PNG views and `verification.json`.

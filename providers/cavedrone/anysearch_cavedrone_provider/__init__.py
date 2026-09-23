@@ -31,7 +31,7 @@ class Provider:
         parameters=(
             ProviderParameter(
                 "partition", "text", default="train",
-                help="Split role: train, calibration, or test (default: train)",
+                help="Split role: train, validation, or test (default: train)",
             ),
             ProviderParameter(
                 "body-radius-m", "number", default=0.25, minimum=0, maximum=2,
@@ -46,8 +46,8 @@ class Provider:
         if set(parameters) - {"partition", "body-radius-m"}:
             raise ValueError("unsupported CaveDrone provider parameter")
         partition = parameters.get("partition", "train")
-        if partition not in {"train", "calibration", "test"}:
-            raise ValueError("partition must be train, calibration, or test")
+        if partition not in {"train", "validation", "test"}:
+            raise ValueError("partition must be train, validation, or test")
         radius = parameters.get("body-radius-m", 0.25)
         if type(radius) not in (int, float) or not math.isfinite(radius) or not 0 <= radius <= 2:
             raise ValueError("body-radius-m must be a finite number from 0 to 2")

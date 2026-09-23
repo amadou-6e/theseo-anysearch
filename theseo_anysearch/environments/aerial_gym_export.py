@@ -351,7 +351,7 @@ def export_scene(
         raise FileExistsError(output)
     if not math.isfinite(body_radius_m) or body_radius_m < 0:
         raise ValueError("body radius must be finite and nonnegative")
-    if partition not in {"train", "calibration", "test"}:
+    if partition not in {"train", "validation", "test"}:
         raise ValueError("invalid partition")
     instances = scene_instances(seed, layout)
     paths = sorted(set(CONFIG) | {item.urdf for item in instances})
