@@ -110,7 +110,8 @@ def test_disabled_capability_requires_explicit_replacement(tmp_path):
     with pytest.raises(ValueError, match="explicit replacement"):
         validate(recipe)
     recipe.overrides.replacements["reward:segment_countdown_goal"] = "reward:builtin"
-    assert validate(recipe)["valid"]
+    with pytest.raises(ValueError, match="not selected"):
+        validate(recipe)
     recipe.overrides.disabled_capabilities = ["reward:unknown"]
     recipe.overrides.replacements = {"reward:unknown": "reward:builtin"}
     with pytest.raises(ValueError, match="does not exist"):
@@ -164,6 +165,23 @@ def test_capability_replacement_must_be_qualified_and_kind_compatible(tmp_path):
     recipe.overrides.replacements = {"reward:shaped": "scenario:none"}
     with pytest.raises(ValueError, match="changes kind"):
         validate(recipe)
+
+
+def test_selected_action_capability_is_replaced_in_effective_pipeline(tmp_path):
+    checkpoint = fixture(tmp_path)
+    config_path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(config_path.read_text())
+    raw["env"]["action"]["predicates"] = ["custom_gate", "bounds"]
+    config_path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    recipe.extension_bindings = ["predicate:custom_gate", "reward:kept"]
+    recipe.overrides.disabled_capabilities = ["predicate:custom_gate"]
+    recipe.overrides.replacements = {"predicate:custom_gate": "predicate:valid_action"}
+    result = validate(recipe)
+    assert [item["name"] for item in result["effective_config"]["env"]["action"]["predicates"]] == [
+        "valid_action", "bounds"
+    ]
+    assert result["active_extension_bindings"] == ["reward:kept"]
 
 
 def test_missing_parent_provenance_fails(tmp_path):

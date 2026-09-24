@@ -328,8 +328,11 @@ def _qualified(value: str) -> tuple[str, str]:
 
 
 def _replace_selector(items: list[dict[str, Any]] | None, source: str, target: str) -> list[dict[str, Any]] | None:
-    if items is None:
-        return None
+    if items is None or not any(
+        (item if isinstance(item, dict) else {"name": item}).get("name") == source
+        for item in items
+    ):
+        raise ValueError(f"disabled action capability is not selected: {source}")
     replaced = []
     for item in items:
         current = item if isinstance(item, dict) else {"name": item}
@@ -361,6 +364,9 @@ def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) ->
             if target_name not in {"none", "builtin"} and target not in recipe.extension_bindings:
                 raise ValueError(f"unknown reward replacement: {target}")
             rewards = env["rewards"]
+            provider = rewards.get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled reward capability is not selected: {source}")
             if target_name == "none":
                 for key in ("step_cost", "collision_cost", "goal_reward", "distance_shaping",
                             "invalid_action_cost", "construction_residual_weight",
@@ -378,6 +384,9 @@ def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) ->
             key = f"{source_kind}s"
             env["action"][key] = _replace_selector(env["action"].get(key), source_name, target_name)
         elif source_kind == "scenario":
+            provider = env["scenarios"].get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled scenario capability is not selected: {source}")
             if target_name == "none":
                 env["scenarios"]["provider"] = None
             elif target not in recipe.extension_bindings:
@@ -385,6 +394,9 @@ def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) ->
             else:
                 env["scenarios"]["provider"] = {"name": target_name, "parameters": {}}
         elif source_kind == "geometry":
+            provider = env["geometry"].get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled geometry capability is not selected: {source}")
             if target_name == "none":
                 env["geometry"]["provider"] = None
             elif target not in recipe.extension_bindings:
