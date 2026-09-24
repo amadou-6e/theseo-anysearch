@@ -384,15 +384,20 @@ def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) ->
             key = f"{source_kind}s"
             env["action"][key] = _replace_selector(env["action"].get(key), source_name, target_name)
         elif source_kind == "scenario":
-            provider = env["scenarios"].get("provider")
-            if not isinstance(provider, dict) or provider.get("name") != source_name:
+            selections = [env["scenarios"], raw["evaluation"]["scenarios"]]
+            selected = [block for block in selections
+                        if isinstance(block.get("provider"), dict)
+                        and block["provider"].get("name") == source_name]
+            if not selected:
                 raise ValueError(f"disabled scenario capability is not selected: {source}")
             if target_name == "none":
-                env["scenarios"]["provider"] = None
+                for block in selected:
+                    block["provider"] = None
             elif target not in recipe.extension_bindings:
                 raise ValueError(f"unknown scenario replacement: {target}")
             else:
-                env["scenarios"]["provider"] = {"name": target_name, "parameters": {}}
+                for block in selected:
+                    block["provider"] = {"name": target_name, "parameters": {}}
         elif source_kind == "geometry":
             provider = env["geometry"].get("provider")
             if not isinstance(provider, dict) or provider.get("name") != source_name:
@@ -549,6 +554,9 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             raise ValueError(f"selected extension bindings are absent from manifest: {missing}")
         verified.append("extension_bindings")
     resolved, changes, capability_changes = resolve(recipe, world, base)
+    execution_supported = (recipe.scope == "evaluation"
+                           and resolved.training.algorithm.lower() == "ppo"
+                           and resolved.env.agent_count == 1)
     return {"valid": True, "scope": recipe.scope, "verified": verified, "changes": changes,
             "capability_changes": capability_changes,
             "active_extension_bindings": [item for item in recipe.extension_bindings
@@ -559,5 +567,6 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             "provenance_gaps": recipe.provenance_gaps,
             "runtime": {"python": sys.version.split()[0], "platform": platform.platform()},
             "config_migration": recipe.config_migration.model_dump(mode="json"),
-            "execution_supported": False,
-            "execution_blocker": "this implementation slice validates recipes; policy execution is not enabled yet"}
+            "execution_supported": execution_supported,
+            "execution_blocker": (None if execution_supported else
+                                  "execution currently supports single-agent PPO evaluation only")}
