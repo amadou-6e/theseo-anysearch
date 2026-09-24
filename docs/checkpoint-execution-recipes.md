@@ -42,5 +42,7 @@ anysearch apply <bundle>/recipe.yaml --output-dir <runs> --iterations 10
 For continuation, `--iterations 10` means at most ten *additional* iterations;
 for fine-tuning it means ten iterations in the new run. The executor currently
 supports single-agent PPO and bundled compiled geometry or a generated grid.
+Staged-run checkpoints are rejected for training execution until stage state is
+captured and restored at the checkpoint boundary.
 Historical checkpoints without per-checkpoint auxiliary state can still be
 evaluated or fine-tuned, but cannot claim exact continuation.

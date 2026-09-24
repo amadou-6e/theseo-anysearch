@@ -38,6 +38,17 @@ def test_continuation_refuses_checkpoint_without_curriculum_snapshot(tmp_path):
         train_recipe(recipe, base=tmp_path, output_dir=tmp_path / "runs", iterations=1)
 
 
+def test_training_refuses_staged_checkpoint_without_stage_state(tmp_path):
+    checkpoint = _fixture(tmp_path)
+    path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(path.read_text())
+    raw["staging"] = {"stages": [{"name": "first", "completion": {
+        "type": "iterations", "iterations": 1}}]}
+    path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "fine_tuning")
+    assert "staged-run" in validate(recipe)["execution_blocker"]
+
+
 @pytest.mark.parametrize("scope,initial,final", [
     ("continuation", 3, 5), ("fine_tuning", 0, 2),
 ])

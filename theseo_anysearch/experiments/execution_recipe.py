@@ -558,7 +558,9 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
     if resolved.training.algorithm.lower() != "ppo" or resolved.env.agent_count != 1:
         execution_blocker = "execution currently supports single-agent PPO only"
     elif recipe.scope != "evaluation":
-        if (resolved.env.geometry.stl_path or resolved.env.geometry.stl_paths
+        if resolved.staging is not None and resolved.staging.enabled:
+            execution_blocker = "training execution does not support staged-run checkpoints"
+        elif (resolved.env.geometry.stl_path or resolved.env.geometry.stl_paths
                 or resolved.env.geometry.pool):
             execution_blocker = "training requires bundled compiled geometry or generated grid"
         elif recipe.scope == "continuation":
