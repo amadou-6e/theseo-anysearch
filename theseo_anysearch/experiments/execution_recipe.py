@@ -419,6 +419,8 @@ def resolve(recipe: ExecutionRecipe, world: Path | None = None,
     effective_world = world or (Path(recipe.overrides.world_manifest)
                                 if recipe.overrides.world_manifest else None)
     changes: list[dict[str, Any]] = []
+    if effective_world is None and (recipe.overrides.task is not None or recipe.overrides.routes is not None):
+        raise ValueError("task and routes decisions require a replacement world")
     if effective_world is not None:
         if not effective_world.is_absolute():
             effective_world = (base or Path.cwd()) / effective_world

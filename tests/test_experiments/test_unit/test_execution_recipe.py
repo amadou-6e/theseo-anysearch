@@ -162,6 +162,13 @@ def test_world_swap_requires_explicit_geometry_dependent_decisions(tmp_path):
     assert result["changes"][-1]["to"] == "2" * 64
 
 
+def test_task_decision_without_world_is_rejected(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    recipe.overrides.task = GeometryDecision(mode="clear")
+    with pytest.raises(ValueError, match="require a replacement world"):
+        validate(recipe)
+
+
 def test_no_reward_replacement_is_explicit_and_preserves_other_capabilities(tmp_path):
     checkpoint = fixture(tmp_path)
     config_path = checkpoint.parent.parent / "experiment.yaml"
