@@ -1168,6 +1168,13 @@ class TrajectoryWriter:
         """Buffer one episode for the current iteration."""
         self._buffer.append(episode)
 
+    def write_episode(
+        self, path: str, episode: VoxelEpisodeData, *,
+        experiment_name: str, run_id: str,
+    ) -> None:
+        """Persist one evaluation episode without best-of-batch selection."""
+        self._write_snapshot(path, episode, 0, episode.total_reward, experiment_name, run_id)
+
     def _write_snapshot(
         self,
         json_path: str,

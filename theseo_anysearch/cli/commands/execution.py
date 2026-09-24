@@ -34,8 +34,11 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
           routes_config: Path | None = typer.Option(None, "--routes-config", exists=True, dir_okay=False),
           disable_capability: list[str] | None = typer.Option(None, "--disable-capability"),
           replace_capability: list[str] | None = typer.Option(None, "--replace-capability"),
+          output_dir: Path | None = typer.Option(None, "--output-dir"),
+          episodes: int | None = typer.Option(None, "--episodes", min=1),
+          seed: int | None = typer.Option(None, "--seed"),
           dry_run: bool = typer.Option(False, "--dry-run")) -> None:
-    """Validate a recipe. Execution remains blocked until the executor is implemented."""
+    """Validate a recipe and, for evaluation scope, run its restored policy."""
     loaded = ExecutionRecipe.load(recipe)
     if task is not None:
         value = yaml.safe_load(task_config.read_text(encoding="utf-8")) if task_config else None
@@ -56,5 +59,12 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
     result = validate(loaded, world, recipe.parent)
     print(json.dumps(result, indent=2))
     if not dry_run:
-        typer.echo("Refusing execution: use --dry-run; policy execution is not implemented yet.", err=True)
-        raise typer.Exit(2)
+        if output_dir is None:
+            raise typer.BadParameter("--output-dir is required for execution")
+        from theseo_anysearch.experiments.execution_evaluate import evaluate
+
+        destination = evaluate(loaded, base=recipe.parent, output_dir=output_dir,
+                               episodes=episodes or result["effective_config"]["evaluation"]["episodes"],
+                               seed=seed if seed is not None else result["effective_config"]["evaluation"]["seed"],
+                               world=world)
+        typer.echo(str(destination))

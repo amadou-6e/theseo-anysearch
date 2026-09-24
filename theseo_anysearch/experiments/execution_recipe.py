@@ -549,6 +549,9 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             raise ValueError(f"selected extension bindings are absent from manifest: {missing}")
         verified.append("extension_bindings")
     resolved, changes, capability_changes = resolve(recipe, world, base)
+    execution_supported = (recipe.scope == "evaluation"
+                           and resolved.training.algorithm.lower() == "ppo"
+                           and resolved.env.agent_count == 1)
     return {"valid": True, "scope": recipe.scope, "verified": verified, "changes": changes,
             "capability_changes": capability_changes,
             "active_extension_bindings": [item for item in recipe.extension_bindings
@@ -559,5 +562,6 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             "provenance_gaps": recipe.provenance_gaps,
             "runtime": {"python": sys.version.split()[0], "platform": platform.platform()},
             "config_migration": recipe.config_migration.model_dump(mode="json"),
-            "execution_supported": False,
-            "execution_blocker": "this implementation slice validates recipes; policy execution is not enabled yet"}
+            "execution_supported": execution_supported,
+            "execution_blocker": (None if execution_supported else
+                                  "execution currently supports single-agent PPO evaluation only")}

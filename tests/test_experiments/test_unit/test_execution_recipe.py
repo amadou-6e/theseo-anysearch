@@ -41,7 +41,7 @@ def test_clone_round_trip_and_scope(tmp_path):
     assert loaded == recipe
     result = validate(loaded)
     assert result["valid"] and "optimizer" in result["inactive"]
-    assert result["execution_supported"] is False
+    assert result["execution_supported"] is True
     assert loaded.policy_contract["action"]["mode"] == "discrete_18"
 
 
