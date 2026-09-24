@@ -430,7 +430,9 @@ def resolve(recipe: ExecutionRecipe, world: Path | None = None,
         geometry.update({"extent": extent, "grid_size": None,
                          "compiled_world_path": str(effective_world.parent.resolve()),
                          "compiled_world_catalog_path": None,
-                         "world_identity_sha256": manifest.identity_sha256})
+                         "world_identity_sha256": manifest.identity_sha256,
+                         "sources": [], "stl_path": None, "stl_paths": None,
+                         "boxes": None, "pool": None, "scale_range": None})
         for name in ("task", "routes"):
             decision = getattr(recipe.overrides, name)
             assert decision is not None
@@ -446,8 +448,10 @@ def resolve(recipe: ExecutionRecipe, world: Path | None = None,
             raw["env"]["task"] = task.value
         if routes.mode == "clear":
             raw["env"]["waypoint_curriculum"] = {"enabled": False}
+            raw["env"]["waypoints_file"] = None
         elif routes.mode == "replace":
             raw["env"]["waypoint_curriculum"] = routes.value
+            raw["env"]["waypoints_file"] = None
         old = recipe.checkpoint_state.get("world_contract") or {}
         if old.get("extent") and list(old["extent"]) != extent:
             changes.append({"component": "world.extent", "from": old["extent"], "to": extent})
@@ -457,6 +461,10 @@ def resolve(recipe: ExecutionRecipe, world: Path | None = None,
     capability_changes = _apply_capability_overrides(raw, recipe)
     resolved = ExperimentConfig(**_resolve_typed_configs(raw))
     if effective_world is not None:
+        from theseo_anysearch.worlds.residency import has_compiled_world_episode_source
+
+        if not has_compiled_world_episode_source(resolved.env.to_runtime_dict()):
+            raise ValueError("replacement world has no waypoint, route, curriculum, or scenario episode source")
         extent = resolved.env.geometry.extent
         assert extent is not None
         points = []
@@ -529,8 +537,12 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             raise ValueError("extension semantic bindings do not match the archived manifest")
         extension_names = set(bindings)
         manifest_kinds = {item.split(":", 1)[0] for item in bindings}
-        missing = sorted(item for item in _selected_extension_bindings(config)
-                         if item.split(":", 1)[0] in manifest_kinds and item not in extension_names)
+        missing = sorted(
+            item for item in _selected_extension_bindings(config)
+            if item.split(":", 1)[0] in manifest_kinds
+            and item not in extension_names
+            and item.split(":", 1)[1] not in _BUILTIN_CAPABILITIES.get(item.split(":", 1)[0], set())
+        )
         if missing:
             raise ValueError(f"selected extension bindings are absent from manifest: {missing}")
         verified.append("extension_bindings")
