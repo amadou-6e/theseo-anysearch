@@ -83,9 +83,38 @@ def test_portable_bundle_relocates_and_verifies(tmp_path):
         validate(loaded, base=moved)
 
 
+def test_portable_bundle_preserves_extension_layout(tmp_path):
+    checkpoint = fixture(tmp_path)
+    extension = checkpoint.parent.parent / "native_extension"
+    extension.mkdir()
+    binary = extension / "rules.dll"
+    binary.write_bytes(b"library")
+    (extension / "extension.json").write_text(json.dumps({"library": binary.name,
+        "capabilities": ["reward"], "rewards": ["shaped"], "predicates": [],
+        "outcomes": [], "scenarios": [], "geometries": []}))
+    portable = make_portable(clone(checkpoint, "evaluation"), tmp_path / "bundle")
+    paths = {artifact.role: artifact.path for artifact in portable.extension}
+    assert Path(paths["extension_manifest"]).parent == Path(paths["extension_binary"]).parent
+    assert Path(paths["extension_binary"]).name == "rules.dll"
+
+
 def test_source_revision_is_detected(tmp_path):
     checkpoint = fixture(tmp_path)
     (checkpoint.parent.parent / "provenance.json").write_text(json.dumps({"source_commit": "abc123"}))
     recipe = clone(checkpoint, "evaluation")
     assert recipe.provenance["source_revision"] == "abc123"
     assert recipe.provenance_gaps == []
+
+
+def test_bundle_failure_is_clean_and_never_overwrites(tmp_path, monkeypatch):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    bundle = tmp_path / "bundle"
+    monkeypatch.setattr("theseo_anysearch.experiments.execution_recipe.shutil.copytree",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("copy failed")))
+    with pytest.raises(OSError, match="copy failed"):
+        make_portable(recipe, bundle)
+    assert not bundle.exists()
+    assert not list(tmp_path.glob(".bundle.*"))
+    bundle.mkdir()
+    with pytest.raises(FileExistsError):
+        make_portable(recipe, bundle)
