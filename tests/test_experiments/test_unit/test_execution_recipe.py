@@ -1,9 +1,18 @@
 import json
+import hashlib
+import platform
+import sys
 from pathlib import Path
 import pytest
 import yaml
 
-from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, clone, make_portable, validate
+from theseo_anysearch.experiments.execution_recipe import (
+    ExecutionRecipe,
+    GeometryDecision,
+    clone,
+    make_portable,
+    validate,
+)
 
 
 def fixture(tmp_path: Path):
@@ -37,7 +46,14 @@ def test_clone_round_trip_and_scope(tmp_path):
 
 
 def test_world_difference_and_tamper_detection(tmp_path):
-    recipe = clone(fixture(tmp_path), "continuation")
+    checkpoint = fixture(tmp_path)
+    config_path = checkpoint.parent.parent / "experiment.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["env"]["waypoint_curriculum"] = {
+        "enabled": True, "initial_start": [1, 1, 1], "initial_goal": [2, 1, 1]
+    }
+    config_path.write_text(yaml.safe_dump(config))
+    recipe = clone(checkpoint, "continuation")
     world = tmp_path / "manifest.json"
     world.write_text(json.dumps({
         "schema_version": 1, "coordinate_type": "u32",
@@ -48,6 +64,8 @@ def test_world_difference_and_tamper_detection(tmp_path):
         "chunk_shape": {"x": 32, "y": 32, "z": 32}, "chunks": [],
         "identity_sha256": "1" * 64,
     }))
+    recipe.overrides.task = GeometryDecision.preserve()
+    recipe.overrides.routes = GeometryDecision.preserve()
     result = validate(recipe, world)
     assert [change["component"] for change in result["changes"]] == ["world.extent", "world"]
     Path(recipe.experiment.path).write_text("tampered")
@@ -65,7 +83,7 @@ def test_clone_explicitly_migrates_legacy_config_and_materializes_defaults(tmp_p
     recipe = clone(checkpoint, "evaluation")
     assert "env.obs_mode -> env.observation.mode" in recipe.config_migration.transforms
     assert "env.max_steps" in recipe.config_migration.materialized_defaults
-    assert recipe.schema_version == 2
+    assert recipe.schema_version == 3
     assert recipe.policy_contract["connectors"]["api_stack"] == "connector_v2"
 
 
@@ -90,8 +108,8 @@ def test_schema_one_recipe_is_upgraded_from_its_archived_config(tmp_path):
     path = tmp_path / "recipe.yaml"
     path.write_text(yaml.safe_dump(payload))
     loaded = ExecutionRecipe.load(path)
-    assert loaded.schema_version == 2
-    assert loaded.provenance["recipe_migrations"] == ["1 -> 2"]
+    assert loaded.schema_version == 3
+    assert loaded.provenance["recipe_migrations"] == ["1 -> 2", "2 -> 3"]
     assert loaded.policy_contract["action"]["mode"] == "discrete_18"
 
 
@@ -99,13 +117,122 @@ def test_disabled_capability_requires_explicit_replacement(tmp_path):
     recipe = clone(fixture(tmp_path), "evaluation")
     recipe.extension_bindings = ["reward:segment_countdown_goal"]
     recipe.overrides.disabled_capabilities = ["reward:segment_countdown_goal"]
-    with pytest.raises(ValueError, match="explicit replacements"):
+    with pytest.raises(ValueError, match="explicit replacement"):
         validate(recipe)
     recipe.overrides.replacements["reward:segment_countdown_goal"] = "reward:builtin"
-    assert validate(recipe)["valid"]
-    recipe.overrides.disabled_capabilities = ["reward:unknown"]
-    with pytest.raises(ValueError, match="do not exist"):
+    with pytest.raises(ValueError, match="not selected"):
         validate(recipe)
+    recipe.overrides.disabled_capabilities = ["reward:unknown"]
+    recipe.overrides.replacements = {"reward:unknown": "reward:builtin"}
+    with pytest.raises(ValueError, match="does not exist"):
+        validate(recipe)
+
+
+def test_world_swap_requires_explicit_geometry_dependent_decisions(tmp_path):
+    checkpoint = fixture(tmp_path)
+    config_path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(config_path.read_text())
+    raw["env"]["waypoints_file"] = "old-waypoints.json"
+    raw["env"]["geometry"]["boxes"] = [[1, 1, 1, 2, 2, 2]]
+    raw["env"]["waypoint_curriculum"] = {
+        "enabled": True, "initial_start": [1, 1, 1], "initial_goal": [2, 1, 1]
+    }
+    config_path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    world = tmp_path / "manifest.json"
+    world.write_text(json.dumps({
+        "schema_version": 1, "coordinate_type": "u32",
+        "storage_coordinate_convention": "zero_based",
+        "environment_coordinate_convention": "one_based",
+        "environment_min": [1, 1, 1], "source_origin": [0, 0, 0],
+        "extent": {"x": 64, "y": 32, "z": 32},
+        "chunk_shape": {"x": 32, "y": 32, "z": 32}, "chunks": [],
+        "identity_sha256": "2" * 64,
+    }))
+    with pytest.raises(ValueError, match="explicit task and routes"):
+        validate(recipe, world)
+    recipe.overrides.task = GeometryDecision(mode="clear")
+    recipe.overrides.routes = GeometryDecision(mode="clear")
+    with pytest.raises(ValueError, match="no waypoint, route, curriculum, or scenario"):
+        validate(recipe, world)
+    recipe.overrides.routes = GeometryDecision.preserve()
+    result = validate(recipe, world)
+    assert result["effective_config"]["env"]["waypoint_curriculum"]["enabled"] is True
+    assert result["effective_config"]["env"]["geometry"]["boxes"] is None
+    assert result["changes"][-1]["to"] == "2" * 64
+
+
+def test_task_decision_without_world_is_rejected(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    recipe.overrides.task = GeometryDecision(mode="clear")
+    with pytest.raises(ValueError, match="require a replacement world"):
+        validate(recipe)
+
+
+def test_no_reward_replacement_is_explicit_and_preserves_other_capabilities(tmp_path):
+    checkpoint = fixture(tmp_path)
+    config_path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(config_path.read_text())
+    raw["env"]["rewards"] = {"provider": "shaped", "goal_reward": 7.0,
+                              "step_cost": -1.0, "distance_reward_mode": "zone"}
+    config_path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    recipe.extension_bindings = ["reward:shaped", "scenario:kept"]
+    recipe.overrides.disabled_capabilities = ["reward:shaped"]
+    recipe.overrides.replacements = {"reward:shaped": "reward:none"}
+    result = validate(recipe)
+    rewards = result["effective_config"]["env"]["rewards"]
+    assert rewards["provider"] is None
+    assert rewards["goal_reward"] == rewards["step_cost"] == 0.0
+    assert rewards["distance_reward_mode"] == "progress"
+    assert result["active_extension_bindings"] == ["scenario:kept"]
+
+
+def test_capability_replacement_must_be_qualified_and_kind_compatible(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    recipe.extension_bindings = ["reward:shaped"]
+    recipe.overrides.disabled_capabilities = ["reward:shaped"]
+    recipe.overrides.replacements = {"reward:shaped": "scenario:none"}
+    with pytest.raises(ValueError, match="changes kind"):
+        validate(recipe)
+
+
+def test_selected_action_capability_is_replaced_in_effective_pipeline(tmp_path):
+    checkpoint = fixture(tmp_path)
+    config_path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(config_path.read_text())
+    raw["env"]["action"]["predicates"] = ["custom_gate", "bounds"]
+    config_path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    recipe.extension_bindings = ["predicate:custom_gate", "reward:kept"]
+    recipe.overrides.disabled_capabilities = ["predicate:custom_gate"]
+    recipe.overrides.replacements = {"predicate:custom_gate": "predicate:valid_action"}
+    result = validate(recipe)
+    assert [item["name"] for item in result["effective_config"]["env"]["action"]["predicates"]] == [
+        "valid_action", "bounds"
+    ]
+    assert result["active_extension_bindings"] == ["reward:kept"]
+
+
+def test_multi_capability_manifest_accepts_builtin_action_pipeline(tmp_path):
+    checkpoint = fixture(tmp_path)
+    extension = checkpoint.parent.parent / "native_extension"
+    extension.mkdir()
+    binary = extension / "rules.dll"
+    binary.write_bytes(b"test library")
+    (extension / "extension.json").write_text(json.dumps({
+        "abi_version": 2,
+        "source_sha256": "0" * 64,
+        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "library": binary.name,
+        "capabilities": ["reward", "predicate"],
+        "rewards": ["shaped"],
+        "predicates": ["custom_gate"],
+        "platform": sys.platform,
+        "machine": platform.machine(),
+    }))
+    recipe = clone(checkpoint, "evaluation")
+    assert validate(recipe)["valid"]
 
 
 def test_missing_parent_provenance_fails(tmp_path):

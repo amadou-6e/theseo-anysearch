@@ -64,9 +64,23 @@ class Artifact(BaseModel):
     sha256: str
 
 
+class GeometryDecision(BaseModel):
+    """Explicit treatment of geometry-dependent configuration after a world swap."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["preserve", "clear", "replace"]
+    value: dict[str, Any] | None = None
+
+    @classmethod
+    def preserve(cls) -> "GeometryDecision":
+        return cls(mode="preserve")
+
+
 class Overrides(BaseModel):
     model_config = ConfigDict(extra="forbid")
     world_manifest: str | None = None
+    task: GeometryDecision | None = None
+    routes: GeometryDecision | None = None
     disabled_capabilities: list[str] = Field(default_factory=list)
     replacements: dict[str, str] = Field(default_factory=dict)
 
@@ -83,7 +97,7 @@ class ConfigMigration(BaseModel):
 
 class ExecutionRecipe(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     scope: Literal["evaluation", "continuation", "fine_tuning"]
     source_run: str
     checkpoint: Artifact
@@ -115,6 +129,9 @@ class ExecutionRecipe(BaseModel):
             raw["policy_contract"] = _policy_contract(config)
             raw["config_migration"] = migration.model_dump(mode="json")
             raw.setdefault("provenance", {}).setdefault("recipe_migrations", []).append("1 -> 2")
+        if raw.get("schema_version") == 2:
+            raw["schema_version"] = 3
+            raw.setdefault("provenance", {}).setdefault("recipe_migrations", []).append("2 -> 3")
         return cls.model_validate(raw)
 
 
@@ -297,6 +314,177 @@ def make_portable(recipe: ExecutionRecipe, directory: Path) -> ExecutionRecipe:
                                      "extension": copied[2:extension_end], "assets": copied[extension_end:]})
 
 
+_BUILTIN_CAPABILITIES = {
+    "predicate": {"valid_action", "bounds", "unoccupied"},
+    "outcome": {"cursor_movement", "trail_placement"},
+}
+
+
+def _qualified(value: str) -> tuple[str, str]:
+    kind, separator, name = value.partition(":")
+    if not separator or kind not in {"reward", "predicate", "outcome", "scenario", "geometry"} or not name:
+        raise ValueError(f"capability must be qualified as kind:name: {value}")
+    return kind, name
+
+
+def _replace_selector(items: list[dict[str, Any]] | None, source: str, target: str) -> list[dict[str, Any]] | None:
+    if items is None or not any(
+        (item if isinstance(item, dict) else {"name": item}).get("name") == source
+        for item in items
+    ):
+        raise ValueError(f"disabled action capability is not selected: {source}")
+    replaced = []
+    for item in items:
+        current = item if isinstance(item, dict) else {"name": item}
+        replaced.append({**current, "name": target} if current.get("name") == source else current)
+    return replaced
+
+
+def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) -> list[str]:
+    disabled = recipe.overrides.disabled_capabilities
+    replacements = recipe.overrides.replacements
+    unknown_replacements = sorted(set(replacements).difference(disabled))
+    if unknown_replacements:
+        raise ValueError(f"replacement sources are not disabled: {unknown_replacements}")
+    changes: list[str] = []
+    env = raw["env"]
+    for source in disabled:
+        if source not in recipe.extension_bindings:
+            raise ValueError(f"disabled extension binding does not exist: {source}")
+        if source not in replacements:
+            raise ValueError(f"disabled capability requires explicit replacement: {source}")
+        source_kind, source_name = _qualified(source)
+        target = replacements[source]
+        target_kind, target_name = _qualified(target)
+        if target_kind != source_kind:
+            raise ValueError(f"capability replacement changes kind: {source} -> {target}")
+        if target in recipe.extension_bindings and target in disabled:
+            raise ValueError(f"capability replacement is also disabled: {target}")
+        if source_kind == "reward":
+            if target_name not in {"none", "builtin"} and target not in recipe.extension_bindings:
+                raise ValueError(f"unknown reward replacement: {target}")
+            rewards = env["rewards"]
+            provider = rewards.get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled reward capability is not selected: {source}")
+            if target_name == "none":
+                for key in ("step_cost", "collision_cost", "goal_reward", "distance_shaping",
+                            "invalid_action_cost", "construction_residual_weight",
+                            "construction_overshoot_weight"):
+                    rewards[key] = 0.0
+                rewards["distance_reward_mode"] = "progress"
+                rewards["provider"] = None
+            elif target_name == "builtin":
+                rewards["provider"] = None
+            else:
+                rewards["provider"] = {"name": target_name, "parameters": {}}
+        elif source_kind in {"predicate", "outcome"}:
+            if target not in recipe.extension_bindings and target_name not in _BUILTIN_CAPABILITIES[source_kind]:
+                raise ValueError(f"unknown {source_kind} replacement: {target}")
+            key = f"{source_kind}s"
+            env["action"][key] = _replace_selector(env["action"].get(key), source_name, target_name)
+        elif source_kind == "scenario":
+            provider = env["scenarios"].get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled scenario capability is not selected: {source}")
+            if target_name == "none":
+                env["scenarios"]["provider"] = None
+            elif target not in recipe.extension_bindings:
+                raise ValueError(f"unknown scenario replacement: {target}")
+            else:
+                env["scenarios"]["provider"] = {"name": target_name, "parameters": {}}
+        elif source_kind == "geometry":
+            provider = env["geometry"].get("provider")
+            if not isinstance(provider, dict) or provider.get("name") != source_name:
+                raise ValueError(f"disabled geometry capability is not selected: {source}")
+            if target_name == "none":
+                env["geometry"]["provider"] = None
+            elif target not in recipe.extension_bindings:
+                raise ValueError(f"unknown geometry replacement: {target}")
+            else:
+                env["geometry"]["provider"] = {"name": target_name, "parameters": {}}
+        changes.append(f"{source} -> {target}")
+    return changes
+
+
+def resolve(recipe: ExecutionRecipe, world: Path | None = None,
+            base: Path | None = None) -> tuple[ExperimentConfig, list[dict[str, Any]], list[str]]:
+    """Resolve explicit overrides into one strictly validated experiment configuration."""
+    experiment_path = Path(recipe.experiment.path)
+    if not experiment_path.is_absolute():
+        experiment_path = (base or Path.cwd()) / experiment_path
+    archived = yaml.safe_load(experiment_path.read_text(encoding="utf-8"))
+    config, _ = _migrate_config(archived)
+    raw = config.model_dump(by_alias=True, mode="json")
+    effective_world = world or (Path(recipe.overrides.world_manifest)
+                                if recipe.overrides.world_manifest else None)
+    changes: list[dict[str, Any]] = []
+    if effective_world is None and (recipe.overrides.task is not None or recipe.overrides.routes is not None):
+        raise ValueError("task and routes decisions require a replacement world")
+    if effective_world is not None:
+        if not effective_world.is_absolute():
+            effective_world = (base or Path.cwd()) / effective_world
+        if recipe.overrides.task is None or recipe.overrides.routes is None:
+            raise ValueError("world replacement requires explicit task and routes decisions")
+        manifest = WorldManifest.model_validate_json(effective_world.read_text(encoding="utf-8"))
+        extent = list(manifest.extent.as_tuple())
+        geometry = raw["env"]["geometry"]
+        geometry.update({"extent": extent, "grid_size": None,
+                         "compiled_world_path": str(effective_world.parent.resolve()),
+                         "compiled_world_catalog_path": None,
+                         "world_identity_sha256": manifest.identity_sha256,
+                         "sources": [], "stl_path": None, "stl_paths": None,
+                         "boxes": None, "pool": None, "scale_range": None})
+        for name in ("task", "routes"):
+            decision = getattr(recipe.overrides, name)
+            assert decision is not None
+            if decision.mode == "replace" and decision.value is None:
+                raise ValueError(f"{name} replacement requires a value")
+            if decision.mode != "replace" and decision.value is not None:
+                raise ValueError(f"{name} {decision.mode} decision cannot include a value")
+        task = recipe.overrides.task
+        routes = recipe.overrides.routes
+        if task.mode == "clear":
+            raw["env"]["task"] = {}
+        elif task.mode == "replace":
+            raw["env"]["task"] = task.value
+        if routes.mode == "clear":
+            raw["env"]["waypoint_curriculum"] = {"enabled": False}
+            raw["env"]["waypoints_file"] = None
+        elif routes.mode == "replace":
+            raw["env"]["waypoint_curriculum"] = routes.value
+            raw["env"]["waypoints_file"] = None
+        old = recipe.checkpoint_state.get("world_contract") or {}
+        if old.get("extent") and list(old["extent"]) != extent:
+            changes.append({"component": "world.extent", "from": old["extent"], "to": extent})
+        changes.append({"component": "world", "from": old.get("identity_sha256")
+                        or old.get("catalog_identity_sha256"), "to": manifest.identity_sha256,
+                        "manifest": str(effective_world.resolve())})
+    capability_changes = _apply_capability_overrides(raw, recipe)
+    resolved = ExperimentConfig(**_resolve_typed_configs(raw))
+    if effective_world is not None:
+        from theseo_anysearch.worlds.residency import has_compiled_world_episode_source
+
+        if not has_compiled_world_episode_source(resolved.env.to_runtime_dict()):
+            raise ValueError("replacement world has no waypoint, route, curriculum, or scenario episode source")
+        extent = resolved.env.geometry.extent
+        assert extent is not None
+        points = []
+        curriculum = resolved.env.waypoint_curriculum
+        if curriculum.initial_start: points.append(curriculum.initial_start)
+        if curriculum.initial_goal: points.append(curriculum.initial_goal)
+        for route in curriculum.routes:
+            points.append(route.start); points.extend(route.waypoints)
+        points.extend(resolved.env.task.construction_target_voxels)
+        goal = resolved.env.task.goal
+        if hasattr(goal, "position") and goal.position is not None: points.append(goal.position)
+        if hasattr(goal, "voxels"): points.extend(goal.voxels)
+        if any(any(value < 1 or value > extent[index] for index, value in enumerate(point))
+               for point in points):
+            raise ValueError("replacement world does not contain configured task/curriculum coordinates")
+    return resolved, changes, capability_changes
+
+
 def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | None = None) -> dict[str, Any]:
     artifacts = [recipe.checkpoint, recipe.experiment, *recipe.extension, *recipe.assets]
     verified = []
@@ -351,44 +539,21 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             raise ValueError("extension semantic bindings do not match the archived manifest")
         extension_names = set(bindings)
         manifest_kinds = {item.split(":", 1)[0] for item in bindings}
-        missing = sorted(item for item in _selected_extension_bindings(config)
-                         if item.split(":", 1)[0] in manifest_kinds and item not in extension_names)
+        missing = sorted(
+            item for item in _selected_extension_bindings(config)
+            if item.split(":", 1)[0] in manifest_kinds
+            and item not in extension_names
+            and item.split(":", 1)[1] not in _BUILTIN_CAPABILITIES.get(item.split(":", 1)[0], set())
+        )
         if missing:
             raise ValueError(f"selected extension bindings are absent from manifest: {missing}")
         verified.append("extension_bindings")
-    effective_world = world or (Path(recipe.overrides.world_manifest) if recipe.overrides.world_manifest else None)
-    if effective_world is not None and not effective_world.is_absolute():
-        effective_world = (base or Path.cwd()) / effective_world
-    changes = []
-    if effective_world:
-        manifest_model = WorldManifest.model_validate_json(effective_world.read_text(encoding="utf-8"))
-        old = recipe.checkpoint_state.get("world_contract") or {}
-        new_extent = list(manifest_model.extent.as_tuple())
-        points = []
-        curriculum = config.env.waypoint_curriculum
-        if curriculum.initial_start: points.append(curriculum.initial_start)
-        if curriculum.initial_goal: points.append(curriculum.initial_goal)
-        for route in curriculum.routes:
-            points.append(route.start); points.extend(route.waypoints)
-        points.extend(config.env.task.construction_target_voxels)
-        goal = config.env.task.goal
-        if hasattr(goal, "position") and goal.position is not None: points.append(goal.position)
-        if hasattr(goal, "voxels"): points.extend(goal.voxels)
-        if any(any(value < 1 or value > new_extent[index] for index, value in enumerate(point))
-               for point in points):
-            raise ValueError("replacement world does not contain configured task/curriculum coordinates")
-        if new_extent and old.get("extent") and list(new_extent) != list(old["extent"]):
-            changes.append({"component": "world.extent", "from": old["extent"], "to": new_extent})
-        changes.append({"component": "world", "from": old.get("identity_sha256") or old.get("catalog_identity_sha256"),
-                        "to": manifest_model.identity_sha256, "manifest": str(effective_world.resolve())})
-    if recipe.overrides.disabled_capabilities:
-        unknown = [c for c in recipe.overrides.disabled_capabilities if c not in recipe.extension_bindings]
-        if unknown:
-            raise ValueError(f"disabled extension bindings do not exist: {unknown}")
-        missing = [c for c in recipe.overrides.disabled_capabilities if c not in recipe.overrides.replacements]
-        if missing:
-            raise ValueError(f"disabled capabilities require explicit replacements: {missing}")
+    resolved, changes, capability_changes = resolve(recipe, world, base)
     return {"valid": True, "scope": recipe.scope, "verified": verified, "changes": changes,
+            "capability_changes": capability_changes,
+            "active_extension_bindings": [item for item in recipe.extension_bindings
+                                          if item not in recipe.overrides.disabled_capabilities],
+            "effective_config": resolved.model_dump(by_alias=True, mode="json"),
             "inactive": (["learner", "optimizer", "exploration", "curriculum_adaptation"]
                          if recipe.scope == "evaluation" else []),
             "provenance_gaps": recipe.provenance_gaps,
