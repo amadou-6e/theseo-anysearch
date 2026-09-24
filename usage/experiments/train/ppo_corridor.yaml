@@ -1,0 +1,47 @@
+description: >
+  Trains PPO to route two agents through a simple L-shaped corridor. It uses a shallower encoder and serves as a focused benchmark for constrained navigation.
+
+experiment:
+  name: ppo-corridor-routing
+  output_dir: ../../../runtime/experiments
+  seed: 1337
+
+env:
+  agent_count: 2
+  max_steps: 96
+
+  geometry:
+    stl_path: usage/geometries/corridor_l.stl
+    scale: 30.0
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 300
+  checkpoint_interval: 50
+  trajectory_every: 10
+  video_every: 50
+
+algorithm_config:
+  lr: 5.0e-4
+  train_batch_size: 2048
+  clip_param: 0.3
+  num_sgd_iter: 5
+  lambda_: 0.9
+  kl_coeff: 0.1
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 2             # shallower encoder — geometry is simple
+
+renders:
+  camera_positions:
+    - name: side
+      yaw: 0.0
+      pitch: 10.0
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000

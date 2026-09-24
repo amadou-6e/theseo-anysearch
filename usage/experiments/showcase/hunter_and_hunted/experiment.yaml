@@ -1,0 +1,77 @@
+description: >
+  Demonstrates heterogeneous agents with ordered actions and asymmetric rewards.
+  The hunted moves first by one voxel. The hunter then moves two voxels through
+  experiment-local Rust predicate and outcome extensions.
+
+experiment:
+  name: hunter-and-hunted
+  output_dir: runtime/hunter_and_hunted
+  seed: 42
+
+env:
+  max_steps: 50
+  seed: 42
+  geometry:
+    grid_size: 32
+  observation:
+    mode: box
+    box_radius: 2
+  action:
+    mode: discrete_26
+    behavior: cursor_navigation
+  rewards:
+    step_cost: 0.0
+    collision_cost: 0.0
+    goal_reward: 0.0
+    distance_shaping: 0.0
+  agents:
+    - id: hunted
+      policy: hunted
+      start: [16, 16, 16]
+      action:
+        mode: discrete_26
+        behavior: cursor_navigation
+    - id: hunter
+      policy: hunter
+      start: [4, 4, 4]
+      action:
+        mode: discrete_26
+        behavior: cursor_navigation
+        predicates:
+          - valid_action
+          - name: double_step_in_bounds
+            parameters:
+              multiplier: 2
+        outcomes:
+          - name: double_step
+            parameters:
+              multiplier: 2
+  hunter_and_hunted:
+    hunter: hunter
+    hunted: hunted
+    capture_distance: 1
+    hunter_capture_reward: 1.0
+    hunted_escape_reward: 1.0
+
+training:
+  algorithm: multi_agent_voxel_ppo
+  runner: local
+  iterations: 1
+  require_gpu: false
+  num_env_runners: 1
+  trajectory_every: 1
+
+evaluation:
+  episodes: 1
+  seed: 42
+  num_env_runners: 1
+
+algorithm_config:
+  lr: 0.001
+  train_batch_size: 256
+  minibatch_size: 64
+  num_sgd_iter: 2
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu

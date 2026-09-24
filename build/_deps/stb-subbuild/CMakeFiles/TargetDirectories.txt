@@ -1,3 +1,0 @@
-/workspaces/theseo-anysearch/build/_deps/stb-subbuild/CMakeFiles/stb-populate.dir
-/workspaces/theseo-anysearch/build/_deps/stb-subbuild/CMakeFiles/edit_cache.dir
-/workspaces/theseo-anysearch/build/_deps/stb-subbuild/CMakeFiles/rebuild_cache.dir

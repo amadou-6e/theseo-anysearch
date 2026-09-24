@@ -1,0 +1,2 @@
+"""Theseo AnySearch Python package."""
+
