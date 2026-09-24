@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,14 @@ class CheckpointManager:
             Path(checkpoint_dir, "state.json"),
             stored_state.model_dump(),
         )
+        # Auxiliary training state must be frozen with this exact iteration.
+        # A later run-level state file is not evidence for an older checkpoint.
+        for relative in ("curriculum/state.json", "early_stop_state.json"):
+            source = Path(self._root.parent, relative)
+            if source.is_file():
+                target = checkpoint_dir / "anysearch_state" / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
         self._write_json(
             Path(self._root, "latest.json"),
             {"path": str(checkpoint_dir), "iteration": state.iteration},
