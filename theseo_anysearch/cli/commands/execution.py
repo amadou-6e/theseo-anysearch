@@ -37,8 +37,9 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
           output_dir: Path | None = typer.Option(None, "--output-dir"),
           episodes: int | None = typer.Option(None, "--episodes", min=1),
           seed: int | None = typer.Option(None, "--seed"),
+          iterations: int | None = typer.Option(None, "--iterations", min=1),
           dry_run: bool = typer.Option(False, "--dry-run")) -> None:
-    """Validate a recipe and, for evaluation scope, run its restored policy."""
+    """Validate and execute an evaluation, continuation, or fine-tuning recipe."""
     loaded = ExecutionRecipe.load(recipe)
     if task is not None:
         value = yaml.safe_load(task_config.read_text(encoding="utf-8")) if task_config else None
@@ -61,10 +62,22 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
     if not dry_run:
         if output_dir is None:
             raise typer.BadParameter("--output-dir is required for execution")
-        from theseo_anysearch.experiments.execution_evaluate import evaluate
+        if loaded.scope == "evaluation":
+            if iterations is not None:
+                raise typer.BadParameter("--iterations applies only to training scopes")
+            from theseo_anysearch.experiments.execution_evaluate import evaluate
 
-        destination = evaluate(loaded, base=recipe.parent, output_dir=output_dir,
-                               episodes=episodes or result["effective_config"]["evaluation"]["episodes"],
-                               seed=seed if seed is not None else result["effective_config"]["evaluation"]["seed"],
-                               world=world)
+            destination = evaluate(loaded, base=recipe.parent, output_dir=output_dir,
+                                   episodes=episodes or result["effective_config"]["evaluation"]["episodes"],
+                                   seed=seed if seed is not None else result["effective_config"]["evaluation"]["seed"],
+                                   world=world)
+        else:
+            if iterations is None:
+                raise typer.BadParameter("--iterations is required for continuation and fine-tuning")
+            if episodes is not None or seed is not None:
+                raise typer.BadParameter("--episodes and --seed apply only to evaluation")
+            from theseo_anysearch.experiments.execution_train import train_recipe
+
+            destination = train_recipe(loaded, base=recipe.parent, output_dir=output_dir,
+                                       iterations=iterations, world=world)
         typer.echo(str(destination))

@@ -45,3 +45,15 @@ def test_checkpoint_rejects_changed_geometry_task_contract(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="geometry/task contract mismatch"):
         manager.restore(_Algorithm(), checkpoint)
+
+
+def test_checkpoint_freezes_auxiliary_training_state(tmp_path) -> None:
+    curriculum = tmp_path / "curriculum" / "state.json"
+    curriculum.parent.mkdir()
+    curriculum.write_text('{"stage": 2}')
+    (tmp_path / "early_stop_state.json").write_text('{"consecutive": 1}')
+    checkpoint = CheckpointManager(tmp_path).save(
+        _Algorithm(), CheckpointState(iteration=3, rllib_path="unused"))
+    curriculum.write_text('{"stage": 9}')
+    assert (checkpoint / "anysearch_state/curriculum/state.json").read_text() == '{"stage": 2}'
+    assert (checkpoint / "anysearch_state/early_stop_state.json").read_text() == '{"consecutive": 1}'

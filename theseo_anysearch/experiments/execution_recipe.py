@@ -554,9 +554,34 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             raise ValueError(f"selected extension bindings are absent from manifest: {missing}")
         verified.append("extension_bindings")
     resolved, changes, capability_changes = resolve(recipe, world, base)
-    execution_supported = (recipe.scope == "evaluation"
-                           and resolved.training.algorithm.lower() == "ppo"
-                           and resolved.env.agent_count == 1)
+    execution_blocker = None
+    if resolved.training.algorithm.lower() != "ppo" or resolved.env.agent_count != 1:
+        execution_blocker = "execution currently supports single-agent PPO only"
+    elif recipe.scope != "evaluation":
+        if resolved.staging is not None and resolved.staging.enabled:
+            execution_blocker = "training execution does not support staged-run checkpoints"
+        elif (resolved.env.geometry.stl_path or resolved.env.geometry.stl_paths
+                or resolved.env.geometry.pool):
+            execution_blocker = "training requires bundled compiled geometry or generated grid"
+        elif recipe.scope == "continuation":
+            if changes or capability_changes:
+                execution_blocker = "exact continuation cannot change world, task, routes, or capabilities"
+            elif not recipe.checkpoint_state.get("world_contract"):
+                execution_blocker = "exact continuation requires a checkpoint world contract"
+            else:
+                checkpoint_path = Path(recipe.checkpoint.path)
+                if not checkpoint_path.is_absolute():
+                    checkpoint_path = (base or Path.cwd()) / checkpoint_path
+                required = []
+                if resolved.env.waypoint_curriculum.enabled:
+                    required.append("curriculum/state.json")
+                if resolved.training.early_stop.enabled:
+                    required.append("early_stop_state.json")
+                missing = [name for name in required
+                           if not (checkpoint_path / "anysearch_state" / name).is_file()]
+                if missing:
+                    execution_blocker = "missing checkpoint-local training state: " + ", ".join(missing)
+    execution_supported = execution_blocker is None
     return {"valid": True, "scope": recipe.scope, "verified": verified, "changes": changes,
             "capability_changes": capability_changes,
             "active_extension_bindings": [item for item in recipe.extension_bindings
@@ -568,5 +593,4 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
             "runtime": {"python": sys.version.split()[0], "platform": platform.platform()},
             "config_migration": recipe.config_migration.model_dump(mode="json"),
             "execution_supported": execution_supported,
-            "execution_blocker": (None if execution_supported else
-                                  "execution currently supports single-agent PPO evaluation only")}
+            "execution_blocker": execution_blocker}
