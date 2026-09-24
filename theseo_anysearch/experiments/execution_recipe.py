@@ -384,15 +384,20 @@ def _apply_capability_overrides(raw: dict[str, Any], recipe: ExecutionRecipe) ->
             key = f"{source_kind}s"
             env["action"][key] = _replace_selector(env["action"].get(key), source_name, target_name)
         elif source_kind == "scenario":
-            provider = env["scenarios"].get("provider")
-            if not isinstance(provider, dict) or provider.get("name") != source_name:
+            selections = [env["scenarios"], raw["evaluation"]["scenarios"]]
+            selected = [block for block in selections
+                        if isinstance(block.get("provider"), dict)
+                        and block["provider"].get("name") == source_name]
+            if not selected:
                 raise ValueError(f"disabled scenario capability is not selected: {source}")
             if target_name == "none":
-                env["scenarios"]["provider"] = None
+                for block in selected:
+                    block["provider"] = None
             elif target not in recipe.extension_bindings:
                 raise ValueError(f"unknown scenario replacement: {target}")
             else:
-                env["scenarios"]["provider"] = {"name": target_name, "parameters": {}}
+                for block in selected:
+                    block["provider"] = {"name": target_name, "parameters": {}}
         elif source_kind == "geometry":
             provider = env["geometry"].get("provider")
             if not isinstance(provider, dict) or provider.get("name") != source_name:

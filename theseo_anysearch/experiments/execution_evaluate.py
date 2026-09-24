@@ -78,7 +78,7 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
         # Gaps are recorded, not disguised as complete reproducibility.
         report["reproducibility"] = "provenance gaps recorded"
     from theseo_anysearch.experiments.models import ExperimentConfig
-    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer
+    from theseo_anysearch.rllib.algorithms.ppo import PPOTrainer, _evaluation_env_config
 
     config = ExperimentConfig.model_validate(report["effective_config"])
     if config.training.algorithm.lower() != "ppo" or config.env.agent_count != 1:
@@ -107,10 +107,11 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
     algorithm = None
     try:
         algorithm = PPOTrainer.build_algorithm_from_settings(settings, env_config=env)
-        store.write_json("runtime_env_config.json", env)
+        evaluation_env = _evaluation_env_config(settings, env)
+        store.write_json("runtime_env_config.json", evaluation_env)
         algorithm.restore(str(_artifact_path(recipe.checkpoint.path, base).resolve()))
         before = _policy_digest(algorithm)
-        batch = collect_eval_episodes(algorithm, env, episodes, seed=seed)
+        batch = collect_eval_episodes(algorithm, evaluation_env, episodes, seed=seed)
         after = _policy_digest(algorithm)
         if before != after:
             raise RuntimeError("policy weights changed during evaluation")
@@ -118,7 +119,7 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
         if checkpoint_after != recipe.checkpoint.sha256:
             raise RuntimeError("checkpoint files changed during evaluation")
         metrics = EvaluationMetrics.from_voxel_episodes(
-            batch, env, min_success_rate=config.evaluation.min_success_rate)
+            batch, evaluation_env, min_success_rate=config.evaluation.min_success_rate)
         writer = TrajectoryWriter(store, trajectory_every=1)
         paths = []
         for index, episode in enumerate(batch):

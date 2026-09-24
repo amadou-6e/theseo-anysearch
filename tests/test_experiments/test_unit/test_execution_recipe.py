@@ -128,6 +128,20 @@ def test_disabled_capability_requires_explicit_replacement(tmp_path):
         validate(recipe)
 
 
+def test_scenario_replacement_covers_evaluation_only_selection(tmp_path):
+    checkpoint = fixture(tmp_path)
+    path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(path.read_text())
+    raw["evaluation"] = {"scenarios": {"provider": {"name": "seeded_scenario"}}}
+    path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    recipe.extension_bindings = ["scenario:seeded_scenario"]
+    recipe.overrides.disabled_capabilities = ["scenario:seeded_scenario"]
+    recipe.overrides.replacements = {"scenario:seeded_scenario": "scenario:none"}
+    result = validate(recipe)
+    assert result["effective_config"]["evaluation"]["scenarios"]["provider"] is None
+
+
 def test_world_swap_requires_explicit_geometry_dependent_decisions(tmp_path):
     checkpoint = fixture(tmp_path)
     config_path = checkpoint.parent.parent / "experiment.yaml"
