@@ -7,7 +7,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, _sha, validate
+import yaml
+
+from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, _migrate_config, _sha, validate
 from theseo_anysearch.experiments.output import OutputStore
 from theseo_anysearch.experiments.trajectory import TrajectoryWriter, collect_eval_episodes
 from theseo_anysearch.rllib.trainer.evaluation.evaluator import EvaluationMetrics
@@ -16,6 +18,75 @@ from theseo_anysearch.rllib.trainer.evaluation.evaluator import EvaluationMetric
 def _artifact_path(path: str, base: Path) -> Path:
     value = Path(path)
     return value if value.is_absolute() else base / value
+
+
+def _safe_output_root(recipe: ExecutionRecipe, base: Path, output_dir: Path) -> Path:
+    """Keep new runs out of the immutable recipe and its verified inputs."""
+    root = output_dir.resolve()
+    if any(not Path(item.path).is_absolute() for item in
+           (recipe.checkpoint, recipe.experiment, *recipe.extension, *recipe.assets)):
+        if root.is_relative_to(base.resolve()):
+            raise ValueError("output directory cannot be inside a portable recipe bundle")
+    for item in (recipe.checkpoint, recipe.experiment, *recipe.extension, *recipe.assets):
+        path = _artifact_path(item.path, base).resolve()
+        protected = path if path.is_dir() else path.parent
+        if root.is_relative_to(protected):
+            raise ValueError(f"output directory overlaps verified {item.role}")
+    return root
+
+
+def _verify_replacement_world(recipe: ExecutionRecipe, world: Path | None, base: Path) -> None:
+    selected = world or (Path(recipe.overrides.world_manifest)
+                         if recipe.overrides.world_manifest else None)
+    if selected is None:
+        return
+    if not selected.is_absolute():
+        selected = base / selected
+    from theseo_anysearch.worlds.compiler import validate_compiled_world
+
+    compiled = validate_compiled_world(selected.resolve().parent)
+    if selected.resolve() != compiled.root / "manifest.json":
+        raise ValueError("replacement world must name its compiled manifest.json")
+
+
+def _verify_policy_spaces(recipe: ExecutionRecipe, effective_env: dict,
+                          base: Path, *, changed: bool) -> None:
+    """Reject changed observation/action shapes before restoring policy weights."""
+    if not changed:
+        return
+    from theseo_anysearch.environments.gymnasium.voxel_env import VoxelEnv
+
+    archived_path = _artifact_path(recipe.experiment.path, base)
+    archived, _ = _migrate_config(yaml.safe_load(archived_path.read_text(encoding="utf-8")))
+    source_env = archived.env.to_runtime_dict()
+    _rebind_artifacts(recipe, source_env, base, False)
+    source = VoxelEnv(source_env)
+    try:
+        target = VoxelEnv(effective_env)
+        try:
+            if source.observation_space != target.observation_space:
+                raise ValueError("replacement changes the policy observation space")
+            if source.action_space != target.action_space:
+                raise ValueError("replacement changes the policy action space")
+        finally:
+            target.close()
+    finally:
+        source.close()
+
+
+def preflight_runtime(recipe: ExecutionRecipe, report: dict, *, base: Path,
+                      world: Path | None = None, output_dir: Path | None = None) -> dict:
+    """Resolve runtime assets and spaces without starting Ray or writing a run."""
+    from theseo_anysearch.experiments.models import ExperimentConfig
+
+    _verify_replacement_world(recipe, world, base)
+    if output_dir is not None:
+        _safe_output_root(recipe, base, output_dir)
+    config = ExperimentConfig.model_validate(report["effective_config"])
+    env = config.env.to_runtime_dict()
+    _rebind_artifacts(recipe, env, base, world is not None or recipe.overrides.world_manifest is not None)
+    _verify_policy_spaces(recipe, env, base, changed=bool(report["changes"] or report["capability_changes"]))
+    return env
 
 
 def _policy_digest(algorithm: Any) -> str:
@@ -74,6 +145,8 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
     if episodes < 1:
         raise ValueError("evaluation requires at least one episode")
     report = validate(recipe, world, base)
+    env = preflight_runtime(recipe, report, base=base, world=world, output_dir=output_dir)
+    output_root = output_dir.resolve()
     if recipe.provenance_gaps:
         # Gaps are recorded, not disguised as complete reproducibility.
         report["reproducibility"] = "provenance gaps recorded"
@@ -83,10 +156,8 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
     config = ExperimentConfig.model_validate(report["effective_config"])
     if config.training.algorithm.lower() != "ppo" or config.env.agent_count != 1:
         raise ValueError("inference executor currently supports single-agent PPO only")
-    env = config.env.to_runtime_dict()
-    _rebind_artifacts(recipe, env, base, world is not None or recipe.overrides.world_manifest is not None)
     run_id = uuid.uuid4().hex
-    destination = output_dir.resolve() / run_id
+    destination = output_root / run_id
     destination.mkdir(parents=True, exist_ok=False)
     store = OutputStore(destination)
     settings = config.to_settings()
@@ -134,7 +205,7 @@ def evaluate(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
             "policy_sha256_after": after, "policy_unchanged": True,
             "checkpoint_sha256": checkpoint_after, "checkpoint_unchanged": True,
         })
-    except Exception as exc:
+    except BaseException as exc:
         store.write_json("execution_failure.json", {
             "run_id": run_id, "error_type": type(exc).__name__, "error": str(exc),
         })

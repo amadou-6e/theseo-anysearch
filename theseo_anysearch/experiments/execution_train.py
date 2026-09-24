@@ -8,7 +8,9 @@ from pathlib import Path
 
 import yaml
 
-from theseo_anysearch.experiments.execution_evaluate import _artifact_path, _policy_digest, _rebind_artifacts
+from theseo_anysearch.experiments.execution_evaluate import (
+    _artifact_path, _policy_digest, preflight_runtime,
+)
 from theseo_anysearch.experiments.execution_recipe import ExecutionRecipe, _sha, validate
 from theseo_anysearch.experiments.models import ExperimentConfig
 from theseo_anysearch.experiments.output import OutputStore
@@ -50,6 +52,8 @@ def train_recipe(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
     report = validate(recipe, world, base)
     if not report["execution_supported"]:
         raise ValueError(str(report["execution_blocker"]))
+    env = preflight_runtime(recipe, report, base=base, world=world, output_dir=output_dir)
+    output_root = output_dir.resolve()
     config = ExperimentConfig.model_validate(report["effective_config"])
     if config.training.algorithm.lower() != "ppo" or config.env.agent_count != 1:
         raise ValueError("training executor currently supports single-agent PPO only")
@@ -65,8 +69,6 @@ def train_recipe(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
     else:
         snapshots = []
         total_iterations = iterations
-    env = config.env.to_runtime_dict()
-    _rebind_artifacts(recipe, env, base, world is not None or recipe.overrides.world_manifest is not None)
     if recipe.scope == "continuation":
         from theseo_anysearch.worlds.manifest import world_contract
 
@@ -74,7 +76,7 @@ def train_recipe(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
             raise ValueError("exact continuation requires a matching checkpoint world contract")
     _bind_geometry(config, env)
     run_id = uuid.uuid4().hex
-    destination = output_dir.resolve() / run_id
+    destination = output_root / run_id
     destination.mkdir(parents=True, exist_ok=False)
     store = OutputStore(destination)
     config.training.output_dir = destination
@@ -161,7 +163,7 @@ def train_recipe(recipe: ExecutionRecipe, *, base: Path, output_dir: Path,
             "initial_policy_sha256": initial_policy_digest,
             "result_count": len(results), "resets": resets,
         })
-    except Exception as exc:
+    except BaseException as exc:
         store.write_json("execution_failure.json", {
             "run_id": run_id, "error_type": type(exc).__name__, "error": str(exc),
         })

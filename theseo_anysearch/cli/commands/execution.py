@@ -41,6 +41,16 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
           dry_run: bool = typer.Option(False, "--dry-run")) -> None:
     """Validate and execute an evaluation, continuation, or fine-tuning recipe."""
     loaded = ExecutionRecipe.load(recipe)
+    if (task == "replace") != (task_config is not None):
+        raise typer.BadParameter("--task replace requires --task-config; otherwise omit --task-config")
+    if (routes == "replace") != (routes_config is not None):
+        raise typer.BadParameter("--routes replace requires --routes-config; otherwise omit --routes-config")
+    if loaded.scope == "evaluation" and iterations is not None:
+        raise typer.BadParameter("--iterations applies only to training scopes")
+    if loaded.scope != "evaluation" and (episodes is not None or seed is not None):
+        raise typer.BadParameter("--episodes and --seed apply only to evaluation")
+    if loaded.scope != "evaluation" and not dry_run and iterations is None:
+        raise typer.BadParameter("--iterations is required for continuation and fine-tuning")
     if task is not None:
         value = yaml.safe_load(task_config.read_text(encoding="utf-8")) if task_config else None
         loaded.overrides.task = GeometryDecision(mode=task, value=value)
@@ -58,13 +68,18 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
             replacements[source] = target
         loaded.overrides.replacements = replacements
     result = validate(loaded, world, recipe.parent)
+    if result["execution_supported"]:
+        from theseo_anysearch.experiments.execution_evaluate import preflight_runtime
+
+        preflight_runtime(loaded, result, base=recipe.parent, world=world, output_dir=output_dir)
     print(json.dumps(result, indent=2))
     if not dry_run:
+        if not result["execution_supported"]:
+            typer.echo(str(result["execution_blocker"]), err=True)
+            raise typer.Exit(2)
         if output_dir is None:
             raise typer.BadParameter("--output-dir is required for execution")
         if loaded.scope == "evaluation":
-            if iterations is not None:
-                raise typer.BadParameter("--iterations applies only to training scopes")
             from theseo_anysearch.experiments.execution_evaluate import evaluate
 
             destination = evaluate(loaded, base=recipe.parent, output_dir=output_dir,
@@ -72,10 +87,6 @@ def apply(recipe: Path = typer.Argument(..., exists=True, dir_okay=False),
                                    seed=seed if seed is not None else result["effective_config"]["evaluation"]["seed"],
                                    world=world)
         else:
-            if iterations is None:
-                raise typer.BadParameter("--iterations is required for continuation and fine-tuning")
-            if episodes is not None or seed is not None:
-                raise typer.BadParameter("--episodes and --seed apply only to evaluation")
             from theseo_anysearch.experiments.execution_train import train_recipe
 
             destination = train_recipe(loaded, base=recipe.parent, output_dir=output_dir,

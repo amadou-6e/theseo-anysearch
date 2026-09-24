@@ -111,6 +111,20 @@ def test_schema_one_recipe_is_upgraded_from_its_archived_config(tmp_path):
     assert loaded.schema_version == 3
     assert loaded.provenance["recipe_migrations"] == ["1 -> 2", "2 -> 3"]
     assert loaded.policy_contract["action"]["mode"] == "discrete_18"
+    assert validate(loaded, base=tmp_path)["execution_supported"]
+
+
+def test_historical_recipe_cannot_read_outside_bundle_during_migration(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    payload = recipe.model_dump(mode="json")
+    payload["schema_version"] = 1
+    payload["experiment"]["path"] = "../run/experiment.yaml"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    path = bundle / "recipe.yaml"
+    path.write_text(yaml.safe_dump(payload))
+    with pytest.raises(ValueError, match="escapes the recipe bundle"):
+        ExecutionRecipe.load(path)
 
 
 def test_disabled_capability_requires_explicit_replacement(tmp_path):
@@ -228,6 +242,28 @@ def test_selected_action_capability_is_replaced_in_effective_pipeline(tmp_path):
     assert result["active_extension_bindings"] == ["reward:kept"]
 
 
+def test_multiple_capabilities_are_replaced_without_disabling_unrelated_binding(tmp_path):
+    checkpoint = fixture(tmp_path)
+    path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(path.read_text())
+    raw["env"]["rewards"] = {"provider": "shaped"}
+    raw["env"]["action"]["predicates"] = ["custom_gate", "bounds"]
+    path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    recipe.extension_bindings = ["reward:shaped", "predicate:custom_gate", "scenario:kept"]
+    recipe.overrides.disabled_capabilities = ["reward:shaped", "predicate:custom_gate"]
+    recipe.overrides.replacements = {
+        "reward:shaped": "reward:builtin",
+        "predicate:custom_gate": "predicate:valid_action",
+    }
+    report = validate(recipe)
+    assert report["active_extension_bindings"] == ["scenario:kept"]
+    assert report["effective_config"]["env"]["rewards"]["provider"] is None
+    assert [item["name"] for item in report["effective_config"]["env"]["action"]["predicates"]] == [
+        "valid_action", "bounds",
+    ]
+
+
 def test_multi_capability_manifest_accepts_builtin_action_pipeline(tmp_path):
     checkpoint = fixture(tmp_path)
     extension = checkpoint.parent.parent / "native_extension"
@@ -269,6 +305,15 @@ def test_portable_bundle_relocates_and_verifies(tmp_path):
     (moved / loaded.experiment.path).write_text("tampered")
     with pytest.raises(ValueError, match="tampered"):
         validate(loaded, base=moved)
+
+
+def test_relative_artifact_cannot_escape_portable_bundle(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    bundle = tmp_path / "bundle"
+    portable = make_portable(recipe, bundle)
+    portable.experiment.path = "../run/experiment.yaml"
+    with pytest.raises(ValueError, match="escapes the recipe bundle"):
+        validate(portable, base=bundle)
 
 
 def test_portable_bundle_preserves_extension_layout(tmp_path):

@@ -122,7 +122,10 @@ class ExecutionRecipe(BaseModel):
         if raw.get("schema_version") == 1:
             experiment = Path(raw["experiment"]["path"])
             if not experiment.is_absolute():
-                experiment = path.parent / experiment
+                bundle_root = path.parent.resolve()
+                experiment = (bundle_root / experiment).resolve()
+                if not experiment.is_relative_to(bundle_root):
+                    raise ValueError("resolved_experiment escapes the recipe bundle")
             config_raw = yaml.safe_load(experiment.read_text(encoding="utf-8"))
             config, migration = _migrate_config(config_raw)
             raw["schema_version"] = 2
@@ -495,7 +498,11 @@ def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | No
     verified = []
     for artifact in artifacts:
         path = Path(artifact.path)
-        if not path.is_absolute(): path = (base or Path.cwd()) / path
+        if not path.is_absolute():
+            bundle_root = (base or Path.cwd()).resolve()
+            path = (bundle_root / path).resolve()
+            if not path.is_relative_to(bundle_root):
+                raise ValueError(f"{artifact.role} escapes the recipe bundle: {artifact.path}")
         if not path.exists():
             raise FileNotFoundError(f"missing {artifact.role}: {path}")
         if _sha(path) != artifact.sha256:

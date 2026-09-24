@@ -18,14 +18,27 @@ scope-inactive state and unresolved provenance are printed explicitly.
 Archived YAML is explicitly migrated to the current typed schema; the migration
 and materialized defaults are recorded and validated before execution. A world
 replacement also requires explicit `--task` and `--routes` decisions (`preserve`,
-`clear`, or `replace`) and may be previewed with `--dry-run`.
+`clear`, or `replace`) and may be previewed with `--dry-run`:
+
+```powershell
+anysearch apply <bundle>/recipe.yaml --world <compiled-world>/manifest.json --task preserve --routes preserve --dry-run
+anysearch apply <bundle>/recipe.yaml --world <compiled-world>/manifest.json --task preserve --routes preserve --output-dir <evaluations> --episodes 10 --seed 42
+```
+
+Dry-run verifies artifact hashes, compiled-world integrity, and that the
+effective action/observation spaces still fit the saved policy. It creates no
+run. A recipe with `execution_supported: false` prints its specific blocker;
+running it without `--dry-run` exits nonzero. Replacing routes or task content
+requires `--routes-config` or `--task-config` only with the matching `replace`
+decision. A route-mode change that alters policy observation shape is refused.
 
 Evaluation makes learner, optimizer, exploration and curriculum adaptation
 inactive. It saves a fresh run ID, all requested trajectories, metrics, the
 effective/runtime configuration, and before/after policy and checkpoint hashes.
-Disabling an
-extension binding requires both an existing qualified binding such as
-`reward:segment_countdown_goal` and an explicit replacement.
+Disabling an extension binding requires both an existing qualified binding such
+as `reward:segment_countdown_goal` and an explicit replacement, for example
+`--disable-capability reward:segment_countdown_goal --replace-capability reward:segment_countdown_goal=reward:builtin`.
+Multiple qualified replacements can be supplied in one invocation.
 
 Continuation restores the full checkpoint, including RLlib learner and optimizer
 state and iteration/episode counters. It refuses a changed world or capability,
@@ -46,3 +59,12 @@ Staged-run checkpoints are rejected for training execution until stage state is
 captured and restored at the checkpoint boundary.
 Historical checkpoints without per-checkpoint auxiliary state can still be
 evaluated or fine-tuned, but cannot claim exact continuation.
+
+Each execution writes a new ID under `--output-dir`. `resolved_recipe.json` and
+`difference_manifest.json` record what was preserved or changed; evaluation
+adds `runtime_env_config.json`, `metrics.json`, `execution.json`, and one replay
+per requested episode under `trajectories/`. Training writes
+`effective_config.json`, a final checkpoint, and `execution.json` with the
+source and initial policy hashes. If execution is interrupted after output
+creation, `execution_failure.json` is written instead of a success record.
+Outputs cannot be placed inside the bundle or any verified source artifact.
