@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 import pytest
@@ -40,12 +39,60 @@ def test_clone_round_trip_and_scope(tmp_path):
 def test_world_difference_and_tamper_detection(tmp_path):
     recipe = clone(fixture(tmp_path), "continuation")
     world = tmp_path / "manifest.json"
-    world.write_text(json.dumps({"extent": [64, 32, 32], "identity_sha256": "new"}))
+    world.write_text(json.dumps({
+        "schema_version": 1, "coordinate_type": "u32",
+        "storage_coordinate_convention": "zero_based",
+        "environment_coordinate_convention": "one_based",
+        "environment_min": [1, 1, 1], "source_origin": [0, 0, 0],
+        "extent": {"x": 64, "y": 32, "z": 32},
+        "chunk_shape": {"x": 32, "y": 32, "z": 32}, "chunks": [],
+        "identity_sha256": "1" * 64,
+    }))
     result = validate(recipe, world)
     assert [change["component"] for change in result["changes"]] == ["world.extent", "world"]
     Path(recipe.experiment.path).write_text("tampered")
     with pytest.raises(ValueError, match="tampered"):
         validate(recipe)
+
+
+def test_clone_explicitly_migrates_legacy_config_and_materializes_defaults(tmp_path):
+    checkpoint = fixture(tmp_path)
+    path = checkpoint.parent.parent / "experiment.yaml"
+    raw = yaml.safe_load(path.read_text())
+    raw["env"] = {"agent_count": 1, "obs_mode": "box", "box_radius": 1,
+                  "action_mode": "discrete_18", "grid_size": 32}
+    path.write_text(yaml.safe_dump(raw))
+    recipe = clone(checkpoint, "evaluation")
+    assert "env.obs_mode -> env.observation.mode" in recipe.config_migration.transforms
+    assert "env.max_steps" in recipe.config_migration.materialized_defaults
+    assert recipe.schema_version == 2
+    assert recipe.policy_contract["connectors"]["api_stack"] == "connector_v2"
+
+
+def test_policy_contract_drift_is_rejected_even_with_updated_artifact_hash(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    path = Path(recipe.experiment.path)
+    raw = yaml.safe_load(path.read_text())
+    raw["env"]["action"]["mode"] = "discrete_6"
+    path.write_text(yaml.safe_dump(raw))
+    from theseo_anysearch.experiments.execution_recipe import _sha
+    recipe.experiment.sha256 = _sha(path)
+    with pytest.raises(ValueError, match="migration record|policy contract"):
+        validate(recipe)
+
+
+def test_schema_one_recipe_is_upgraded_from_its_archived_config(tmp_path):
+    recipe = clone(fixture(tmp_path), "evaluation")
+    payload = recipe.model_dump(mode="json")
+    payload["schema_version"] = 1
+    payload.pop("config_migration")
+    payload["policy_contract"] = {"legacy": True}
+    path = tmp_path / "recipe.yaml"
+    path.write_text(yaml.safe_dump(payload))
+    loaded = ExecutionRecipe.load(path)
+    assert loaded.schema_version == 2
+    assert loaded.provenance["recipe_migrations"] == ["1 -> 2"]
+    assert loaded.policy_contract["action"]["mode"] == "discrete_18"
 
 
 def test_disabled_capability_requires_explicit_replacement(tmp_path):
