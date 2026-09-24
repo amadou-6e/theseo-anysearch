@@ -65,6 +65,7 @@ Each execution writes a new ID under `--output-dir`. `resolved_recipe.json` and
 adds `runtime_env_config.json`, `metrics.json`, `execution.json`, and one replay
 per requested episode under `trajectories/`. Training writes
 `effective_config.json`, a final checkpoint, and `execution.json` with the
-source and initial policy hashes. If execution is interrupted after output
-creation, `execution_failure.json` is written instead of a success record.
+source and initial policy hashes. Caught interruptions after output creation
+write `execution_failure.json` instead of a success record; a hard process kill
+can leave only partial files.
 Outputs cannot be placed inside the bundle or any verified source artifact.
