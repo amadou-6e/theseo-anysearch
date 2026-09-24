@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import shutil
+import tempfile
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -46,9 +48,11 @@ class ExecutionRecipe(BaseModel):
     checkpoint_state: dict[str, Any]
     policy_contract: dict[str, Any]
     extension: list[Artifact] = Field(default_factory=list)
+    assets: list[Artifact] = Field(default_factory=list)
     extension_bindings: list[str] = Field(default_factory=list)
     overrides: Overrides = Field(default_factory=Overrides)
     provenance_gaps: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +77,8 @@ def clone(checkpoint: Path, scope: str) -> ExecutionRecipe:
                 "observation": raw["env"]["observation"], "action": raw["env"]["action"],
                 "task": raw["env"].get("task", {}), "rewards": raw["env"].get("rewards", {})}
     extension = []
+    assets = []
+    gaps = []
     ext_dir = run / "native_extension"
     bindings = []
     if (ext_dir / "extension.json").is_file():
@@ -84,19 +90,75 @@ def clone(checkpoint: Path, scope: str) -> ExecutionRecipe:
         for role, path in (("extension_manifest", ext_dir / "extension.json"),
                            ("extension_binary", ext_dir / manifest["library"])):
             extension.append(Artifact(role=role, path=str(path.resolve()), sha256=_sha(path)))
-    gaps = ["source revision is not recorded in this run"]
+    geometry = raw["env"].get("geometry") or {}
+    catalog_value = geometry.get("compiled_world_catalog_path")
+    if catalog_value:
+        relative = Path(str(catalog_value))
+        candidates = [config_path.parent / relative]
+        candidates.extend(parent / relative for parent in config_path.parents if (parent / ".git").exists())
+        catalog = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+        if catalog is not None:
+            assets.append(Artifact(role="geometry_catalog", path=str(catalog.parent), sha256=_sha(catalog.parent)))
+        else:
+            gaps.append(f"geometry catalog could not be resolved: {catalog_value}")
+    archived_worlds = run / "worlds"
+    if archived_worlds.is_dir():
+        assets.append(Artifact(role="archived_worlds", path=str(archived_worlds.resolve()), sha256=_sha(archived_worlds)))
+    provenance = {"python": sys.version.split()[0], "platform": platform.platform()}
+    for name in ("provenance.json", "source.json", "run.json"):
+        path = run / name
+        if path.is_file():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for key in ("source_commit", "git_sha", "commit_sha"):
+                if payload.get(key): provenance["source_revision"] = str(payload[key])
+    if not provenance.get("source_revision"):
+        gaps.append("source revision is not recorded in this run")
     return ExecutionRecipe(scope=scope, source_run=str(run.resolve()),
         checkpoint=Artifact(role="rllib_checkpoint", path=str(checkpoint), sha256=_sha(checkpoint)),
         experiment=Artifact(role="resolved_experiment", path=str(config_path.resolve()), sha256=_sha(config_path)),
         checkpoint_state=json.loads(state_path.read_text(encoding="utf-8")), policy_contract=contract,
-        extension=extension, extension_bindings=bindings, provenance_gaps=gaps)
+        extension=extension, assets=assets, extension_bindings=bindings,
+        provenance_gaps=gaps, provenance=provenance)
 
 
-def validate(recipe: ExecutionRecipe, world: Path | None = None) -> dict[str, Any]:
-    artifacts = [recipe.checkpoint, recipe.experiment, *recipe.extension]
+def make_portable(recipe: ExecutionRecipe, directory: Path) -> ExecutionRecipe:
+    """Copy immutable inputs into a new, self-verifying relocatable bundle."""
+    directory = directory.resolve()
+    if directory.exists():
+        raise FileExistsError(f"bundle destination already exists: {directory}")
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{directory.name}.", dir=directory.parent))
+    copied = []
+    try:
+        artifacts = staging / "artifacts"
+        artifacts.mkdir()
+        inputs = [recipe.checkpoint, recipe.experiment, *recipe.extension, *recipe.assets]
+        for index, artifact in enumerate(inputs):
+            source = Path(artifact.path)
+            if artifact.role == "rllib_checkpoint": target = artifacts / "checkpoint"
+            elif artifact.role == "resolved_experiment": target = artifacts / "experiment.yaml"
+            elif artifact.role.startswith("extension_"): target = artifacts / "native_extension" / source.name
+            else: target = artifacts / f"{index:02d}-{artifact.role}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir(): shutil.copytree(source, target)
+            else: shutil.copy2(source, target)
+            copied.append(Artifact(role=artifact.role,
+                path=target.relative_to(staging).as_posix(), sha256=_sha(target)))
+        staging.replace(directory)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    extension_end = 2 + len(recipe.extension)
+    return recipe.model_copy(update={"checkpoint": copied[0], "experiment": copied[1],
+                                     "extension": copied[2:extension_end], "assets": copied[extension_end:]})
+
+
+def validate(recipe: ExecutionRecipe, world: Path | None = None, base: Path | None = None) -> dict[str, Any]:
+    artifacts = [recipe.checkpoint, recipe.experiment, *recipe.extension, *recipe.assets]
     verified = []
     for artifact in artifacts:
         path = Path(artifact.path)
+        if not path.is_absolute(): path = (base or Path.cwd()) / path
         if not path.exists():
             raise FileNotFoundError(f"missing {artifact.role}: {path}")
         if _sha(path) != artifact.sha256:
