@@ -40,6 +40,7 @@ name = "regional-replay-bench"
 path = "src/bin/regional_replay_bench.rs"
 
 [dependencies]
+anysearch-environment-rule-contract = { path = "../environment_rule_contract", version = "0.1.0" }
 eframe = "0.31"
 egui = "0.31"
 glam = "0.29"
