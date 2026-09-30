@@ -48,18 +48,18 @@ torch-gpu = ["torch>=2.0"]
 anysearch = "theseo_anysearch.cli.main:app"
 
 [tool.setuptools.packages.find]
-include = ["theseo_anysearch*"]
+include = ["theseo_anysearch*", "theseo_world_providers*"]
 
 [tool.setuptools.package-data]
 theseo_anysearch = [
   "environments/cave_drone_bridge.cpp",
-  "world_providers/catalog.json",
   "extension_sdk/Cargo.toml",
   "extension_sdk/Cargo.lock",
   "extension_sdk/src/*.rs",
   "extension_sdk/macros/Cargo.toml",
   "extension_sdk/macros/src/*.rs",
 ]
+theseo_world_providers = ["catalog.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

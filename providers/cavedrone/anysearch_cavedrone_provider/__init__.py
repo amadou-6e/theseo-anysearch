@@ -14,7 +14,7 @@ from theseo_anysearch.environments.cave_drone_export import (
     UPSTREAM_COMMIT,
     export_seed,
 )
-from theseo_anysearch.world_providers.api import (
+from theseo_world_providers.api import (
     GenerationSummary,
     ProviderInfo,
     ProviderParameter,

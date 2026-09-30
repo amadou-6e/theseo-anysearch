@@ -1,5 +1,25 @@
 # Verified voxel-world providers
 
+## Package boundary
+
+Provider API version 1, discovery, routing sidecar contracts, bundle admission,
+previews, source cache, and the built-in fixture now live in the top-level
+`theseo_world_providers` Python package. Importing it does not initialize the
+AnySearch environment package or Ray. Existing
+`theseo_anysearch.world_providers.*` and routing/world-manifest import paths
+remain compatibility aliases with the same Python types. The discovery
+entry-point group remains `theseo_anysearch.world_providers`, so installed
+version-1 plugins are not orphaned by the package move.
+
+The AnySearch-only `worlds add` attachment and its typed experiment selection
+live in `theseo_anysearch.world_provider_adapter`. The CLI and experiment
+loader remain AnySearch responsibilities. The four optional wheels still use
+source-specific exporters in the AnySearch repository and declare the
+`theseo-anysearch` distribution as a dependency. This is a top-level source
+package boundary inside the existing distribution, **not** an independently
+installable SDK wheel or a separate repository. A later wheel split must move
+those exporters and their host dependencies, and test each plugin in isolation.
+
 Governing contract:
 [`specs@84caf742`](https://github.com/amadou-6e/specs/blob/84caf74220cc82e68e4d314fe8a98239d93f0927/projects/theseo-anysearch/world-provider-cli.md).
 This issue implements the provider-neutral CLI and a deterministic fixture;

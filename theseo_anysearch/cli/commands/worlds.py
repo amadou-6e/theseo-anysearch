@@ -10,8 +10,8 @@ import typer
 import yaml
 from typer.core import TyperGroup
 
-from theseo_anysearch.world_providers.api import installed_providers, load_provider, provider_errors
-from theseo_anysearch.world_providers.service import (
+from theseo_world_providers.api import installed_providers, load_provider, provider_errors
+from theseo_world_providers.service import (
     generate_world,
     load_verified_world,
     local_worlds,
@@ -114,7 +114,7 @@ def add_world(
 ) -> None:
     """Select a verified world in an existing training or tuning YAML."""
 
-    from theseo_anysearch.world_providers.selection import add_to_experiment
+    from theseo_anysearch.world_provider_adapter.selection import add_to_experiment
 
     try:
         result = add_to_experiment(world, config)

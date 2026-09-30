@@ -15,15 +15,15 @@ from theseo_anysearch.environments.ifc_bench_export import (
     SOURCE_REVISION,
     export_discipline,
 )
-from theseo_anysearch.environments.routing_manifests import (
+from theseo_world_providers.routing_manifests import (
     RoutingReferenceRecord,
     RoutingTaskRecord,
     read_sidecar,
     write_sidecar,
 )
-from theseo_anysearch.world_providers.api import GenerationSummary, ProviderInfo, ProviderParameter
-from theseo_anysearch.world_providers.bundle import load_bundle
-from theseo_anysearch.world_providers.source_cache import cached_sources
+from theseo_world_providers.api import GenerationSummary, ProviderInfo, ProviderParameter
+from theseo_world_providers.bundle import load_bundle
+from theseo_world_providers.source_cache import cached_sources
 
 BASE_URL = (
     "https://huggingface.co/datasets/sylvainHellin/ifc-bench/resolve/"

@@ -36,6 +36,7 @@ from theseo_anysearch.environments.routing_manifests import (
     write_sidecar,
 )
 from theseo_anysearch.worlds.manifest import WorldExtent
+from theseo_anysearch.worlds.rotation import rotation_from_rpy as _rotation
 
 CONVERTER_VERSION = "1"
 BOUNDS_MIN = (-5.0, -5.0, -3.0)
@@ -63,21 +64,6 @@ class Instance:
     urdf: str
     position_m: tuple[float, float, float]
     rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0)
-
-
-def _rotation(rpy: tuple[float, float, float]) -> np.ndarray:
-    roll, pitch, yaw = rpy
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    return np.array(
-        [
-            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-            [-sp, cp * sr, cp * cr],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _three(text: str | None, label: str) -> tuple[float, float, float]:
