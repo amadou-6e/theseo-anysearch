@@ -28,3 +28,12 @@ def test_legacy_imports_share_sdk_types_and_entry_point_group():
     assert LegacyInfo is ProviderInfo
     assert LegacyWorld is RoutingWorldRecord
     assert legacy_group == ENTRY_POINT_GROUP == "theseo_anysearch.world_providers"
+
+
+def test_catalog_paths_remain_a_host_only_contract():
+    import pytest
+
+    from theseo_world_providers.world_manifest import world_contract
+
+    with pytest.raises(ValueError, match="AnySearch host adapter"):
+        world_contract({"compiled_world_catalog_path": "catalog.json"})
