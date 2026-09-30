@@ -9,7 +9,6 @@ Download what you need and place the `.3dmap.zip` files in this directory.
 |---|---|---|---|
 | Industrial plants | 5 | 195×128×100 – 1257×457×304 | https://bitbucket.org/shortestpathlab/benchmarks/src/master/voxel-maps/industrial-plants/ |
 | Descent levels | 27 | up to 1401×678×1385 | https://bitbucket.org/shortestpathlab/benchmarks/src/master/voxel-maps/descent/ |
-| Warframe | 40 | ~105–1108 per axis | https://www.movingai.com/benchmarks/warframe/index.html |
 
 **Start with industrial plants** — they're small enough to load fully and dense
 enough to be interesting routing environments.
@@ -38,7 +37,7 @@ x y z
 or
 
 ```
-rev_voxel W H D      # free-space voxels listed (Warframe maps)
+rev_voxel W H D      # free-space voxels listed
 x y z
 ...
 ```
