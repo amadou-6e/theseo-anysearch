@@ -1,0 +1,72 @@
+description: >
+  Uses ASHA to tune PPO learning rate, batch size, and related optimization settings on stepped terrain. It provides an early-stopping hyperparameter baseline for PPO.
+
+experiment:
+  name: ppo-lr-batchsize-asha
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    boxes:              # goal region: upper-right quadrant of the grid
+      - [18, 18, 18, 28, 28, 28]
+
+  rewards:
+    goal_reward: 1.0
+    step_cost: -0.01
+    collision_cost: 0.1          # small penalty for hitting walls
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 300            # max per trial; ASHA will stop bad ones early
+  checkpoint_interval: 50
+  trajectory_every: 20
+  video_every: 100
+  require_gpu: false         # set true to assert a GPU is available before training
+
+evaluation:
+  episodes: 8
+  min_success_rate: 0.75
+
+algorithm_config:            # defaults; overridden per trial by search_space below
+  clip_param: 0.2
+  num_sgd_iter: 10
+  lambda_: 0.95
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 3
+
+tune_config:
+  scheduler: asha
+  num_samples: 30
+  metric: evaluation_navigation_score
+  mode: max
+  max_concurrent: 4
+  checkpoint_frequency: 10
+  max_environment_steps: 5000000
+  max_wall_time_s: 3600
+  target_success_rate: 0.75
+  preserve_trial_artifacts: true
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [1024, 2048, 4096, 8192]}
+      kl_coeff:         {uniform: [0.05, 0.5]}
+    model_config:
+      encoder_depth:    {choice: [2, 3, 4]}
+
+renders:
+  camera_positions:
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000

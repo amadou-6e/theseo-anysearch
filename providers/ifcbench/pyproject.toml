@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "theseo-anysearch-ifcbench"
+version = "0.1.0"
+description = "Cached IFC-Bench West Riverside Hospital MEP (plumbing/electrical) voxel-world provider"
+requires-python = ">=3.10"
+dependencies = [
+  "theseo-anysearch>=0.1.0,<0.2.0",
+  "ifcopenshell>=0.8,<0.9",
+]
+
+[project.entry-points."theseo_anysearch.world_providers"]
+ifcbench = "anysearch_ifcbench:Provider"
+
+[tool.setuptools.packages.find]
+where = ["src"]

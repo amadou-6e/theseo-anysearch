@@ -1,0 +1,115 @@
+description: >
+  Expands the PPO search boundaries around the strongest radius-1 box
+  waypoint-curriculum trials. The model search samples tapering networks by
+  choosing a base width, head width, and number of layers at each width.
+
+experiment:
+  name: ppo-box-r1-discrete18-waypoint-curriculum-expanded
+  output_dir: runtime/tune
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 96
+  seed: 42
+  trail_mode: true
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+    grid_size: 32
+
+  observation:
+    mode: box
+    box_radius: 1
+
+  action:
+    mode: discrete_18
+
+  rewards:
+    step_cost: -0.01
+    collision_cost: -0.1
+    goal_reward: 1.0
+    distance_shaping: 0.01
+    distance_reward_mode: progress
+
+  waypoint_curriculum:
+    enabled: true
+    initial_start: [9, 29, 1]
+    initial_goal: [6, 7, 1]
+    seed: 42
+    training_sampling:
+      current_stage_probability: 0.75
+      retained_stage_probability: 0.25
+
+training:
+  algorithm: ppo
+  model: fcnet
+  runner: local
+  iterations: 100
+  checkpoint_interval: 10
+  require_gpu: true
+  num_gpus: 0.3333333333333333
+  num_env_runners: 6
+  num_envs_per_env_runner: 4
+  num_gpus_per_env_runner: 0.0
+  trajectory_every: 10
+  best_trajectory: true
+  video_every: 0
+
+evaluation:
+  episodes: 10
+  seed: 142
+  min_success_rate: 0.8
+  num_env_runners: 0
+  num_envs_per_env_runner: 4
+  waypoint_curriculum:
+    enabled: true
+    frequency: 1
+    stages: all
+    episodes: 3
+    min_success_rate: 0.8
+    min_per_stage_success_rate: 0.67
+    advance:
+      mode: success
+      successes_required: 1
+
+algorithm_config:
+  lr: 0.00022330606666898814
+  train_batch_size: 4096
+  gamma: 0.9528847957241926
+  clip_param: 0.10943957247666965
+  kl_coeff: 0.1124007029997417
+  num_sgd_iter: 5
+  minibatch_size: 256
+  lambda_: 0.9423692880503198
+
+model_config:
+  hidden_sizes: [128, 128, 128, 128]
+  activation: relu
+
+tune_config:
+  scheduler: asha
+  num_samples: 20
+  metric: evaluation_success_rate
+  mode: max
+  max_concurrent: 3
+  checkpoint_frequency: 10
+  asha_config:
+    max_t: 100
+    grace_period: 10
+    reduction_factor: 2
+  search_space:
+    algorithm_config:
+      lr: {loguniform: [2.5e-5, 1.0e-3]}
+      gamma: {uniform: [0.90, 0.995]}
+      clip_param: {uniform: [0.05, 0.30]}
+      kl_coeff: {uniform: [0.03, 0.50]}
+      num_sgd_iter: {choice: [3, 5, 10, 15]}
+    model_config:
+      base_width: {choice: [128, 256, 512, 1024]}
+      head_width: {choice: [32, 64, 128, 256]}
+      layers_per_width: {choice: [1, 2, 3]}
+
+mlflow:
+  tracking_uri: sqlite:///runtime/experiments/mlflow.db

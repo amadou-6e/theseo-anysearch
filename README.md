@@ -1,85 +1,117 @@
-# Try Out Development Containers: C++
+# Theseo AnySearch
 
-[![Open in Dev Containers](https://img.shields.io/static/v1?label=Dev%20Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/microsoft/vscode-remote-try-cpp)
+Theseo AnySearch is a Python/Rust framework for navigation experiments in voxel
+and surface environments. Compare classical pathfinding with reinforcement
+learning, train and tune policies with Ray RLlib, and inspect saved trajectories
+with native replay and policy-explanation tools.
 
-A **development container** is a running container with a well-defined tool/runtime stack and its prerequisites. You can try out development containers with **[GitHub Codespaces](https://github.com/features/codespaces)** or **[Visual Studio Code Dev Containers](https://aka.ms/vscode-remote/containers)**.
+The project supports single-agent Gymnasium and multi-agent PettingZoo
+environments, imitation pretraining, staged curricula, and custom Python or
+Rust experiment extensions. MLflow and TensorBoard record experiment results.
 
-This is a sample project that lets you try out either option in a few easy steps. We have a variety of other [vscode-remote-try-*](https://github.com/search?q=org%3Amicrosoft+vscode-remote-try-&type=Repositories) sample projects, too.
+## Set up a development environment
 
-> **Note:** If you already have a Codespace or dev container, you can jump to the [Things to try](#things-to-try) section.
+Run the commands below from the repository root. The examples use PowerShell;
+on Linux or macOS, activate the environment with `source .venv/bin/activate`.
 
-## Setting up the development container
+Prerequisites:
 
-### GitHub Codespaces
-Follow these steps to open this sample in a Codespace:
-1. Click the **Code** drop-down menu.
-2. Click on the **Codespaces** tab.
-3. Click **Create codespace on main** .
+- Python 3.10 or newer. GitHub Actions validates Python 3.12 on Windows.
+- A stable Rust toolchain with Cargo, plus a native linker. On Windows, install
+  Visual Studio Build Tools with the **Desktop development with C++** workload
+  and a Windows SDK.
+- Git and enough disk space for PyTorch, Ray, and the native build artifacts.
 
-For more info, check out the [GitHub documentation](https://docs.github.com/en/free-pro-team@latest/github/developing-online-with-codespaces/creating-a-codespace#creating-a-codespace).
+```powershell
+git clone https://github.com/amadou-6e/theseo-anysearch.git
+cd theseo-anysearch
+git switch develop
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install --editable ".[dev,torch-cpu]" maturin
+python -m maturin develop --release --manifest-path theseo_anysearch/core/Cargo.toml
+anysearch --help
+```
 
-### VS Code Dev Containers
+Install both packages: the root project provides the `anysearch` CLI, while
+Maturin builds and installs the `theseo_core` native bindings into the active
+virtual environment. Rebuild the bindings after changing Rust code.
 
-If you already have VS Code and Docker installed, you can click the badge above or [here](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/microsoft/vscode-remote-try-cpp) to get started. Clicking these links will cause VS Code to automatically install the Dev Containers extension if needed, clone the source code into a container volume, and spin up a dev container for use.
+The `torch-cpu` and `torch-gpu` extras currently both declare `torch>=2.0`; they
+do not select a CPU-only or CUDA wheel. For a specific accelerator, install the
+appropriate PyTorch build for your machine. Training can require a GPU with
+`training.require_gpu: true`; the first example below needs no GPU.
 
-Follow these steps to open this sample in a container using the VS Code Dev Containers extension:
+## Run a first experiment
 
-1. If this is your first time using a development container, please ensure your system meets the pre-reqs (i.e. have Docker installed) in the [getting started steps](https://aka.ms/vscode-remote/containers/getting-started).
+Start with the checked-in [Dijkstra baseline](usage/experiments/heuristics/dijkstra/README.md).
+It searches a voxel action graph and writes a replayable trajectory without
+training a neural network.
 
-2. To use this repository, you can either open the repository in an isolated Docker volume:
+```powershell
+anysearch run usage/experiments/heuristics/dijkstra/run.yaml
+```
 
-    - Press <kbd>F1</kbd> and select the **Dev Containers: Try a Sample...** command.
-    - Choose the "C++" sample, wait for the container to start, and try things out!
-        > **Note:** Under the hood, this will use the **Dev Containers: Clone Repository in Container Volume...** command to clone the source code in a Docker volume instead of the local filesystem. [Volumes](https://docs.docker.com/storage/volumes/) are the preferred mechanism for persisting container data.
+Run this from the repository root so that the configuration's
+`usage/geometries/cube.stl` path resolves. The geometry is included in the
+repository; no map download is needed. The example uses local tracking
+(`mlflow: {}`), so a separate MLflow server is not required. Run artifacts are
+written beneath `runtime/experiments/dijkstra/`.
 
-   Or open a locally cloned copy of the code:
+To replay the result, build the viewer and replace `<run-id>` below with the
+run identifier printed by the command:
 
-   - Clone this repository to your local filesystem.
-   - Press <kbd>F1</kbd> and select the **Dev Containers: Open Folder in Container...** command.
-   - Select the cloned copy of this folder, wait for the container to start, and try things out!
+```powershell
+cargo build --release --manifest-path theseo_anysearch/core/Cargo.toml --bin voxel-replay
+anysearch replay file runtime/experiments/dijkstra/<run-id>/trajectories/heuristic_dijkstra.json
+```
 
-## Things to try
+Replay opens a native graphical interface and requires a desktop session.
+For a small learning run, see the five-iteration
+[PPO quick demo](usage/experiments/showcase/quick_demo.yaml) and the
+[showcase guide](usage/experiments/showcase/README.md).
 
-Once you have this sample opened, you'll be able to work with it like you would locally.
+## Find your way around
 
-Some things to try:
+| Directory | Responsibility |
+| --- | --- |
+| `theseo_anysearch/cli/` | Commands for running, tuning, inspecting, and replaying experiments |
+| `theseo_anysearch/settings/` and `experiments/` | Typed configuration, run lifecycle, tracking, and artifacts |
+| `theseo_anysearch/environments/` | Gymnasium and PettingZoo wrappers around native environments |
+| `theseo_anysearch/core/` | Rust simulation, geometry, rendering, and PyO3 bindings |
+| `theseo_anysearch/rllib/` | Policies, trainers, evaluation, curricula, tuning, and explanations |
+| `theseo_anysearch/heuristic/`, `imitation/`, and `garden/` | Pathfinding baselines, demonstration pretraining, and pretrained encoders |
+| `theseo_anysearch/extension_sdk/` | Rust SDK for experiment extensions |
+| `usage/`, `docs/`, and `tests/` | Examples, detailed guides, and automated tests |
 
-1. **Edit:**
-   - Open `main.cpp`
-   - Try adding some code and check out the language features.
-   - Make a spelling mistake and notice it is detected. The [Code Spell Checker](https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker) extension was automatically installed because it is referenced in `.devcontainer/devcontainer.json`.
-   - Also notice that utilities like `Vcpkg` and the [C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) extension are installed. Tools are installed in the `mcr.microsoft.com/devcontainers/cpp` image and Dev Container settings and metadata are automatically picked up from [image labels](https://containers.dev/implementors/reference/#labels).
+## Documentation
 
-1. **Terminal:** Press <kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>\`</kbd> and type `uname` and other Linux commands from the terminal window.
+- [Documentation overview](docs/index.md)
+- [Usage and examples](usage/README.md) and [experiment configuration](usage/experiments/README.md)
+- [Settings](theseo_anysearch/settings/README.md), [geometry](docs/geometries/README.md),
+  [actions](docs/actions/README.md), [observations](docs/observations/README.md),
+  and [rewards](docs/rewards/README.md)
+- [Training](docs/training/README.md), [staged training](docs/training/staging.md),
+  [evaluation](docs/training/evaluation.md), and [tuning](docs/tuning/README.md)
+- [Imitation pretraining](docs/imitation-pretraining.md) and
+  [policy explanations](docs/explainability/README.md)
+- [Native Rust extensions](docs/extensions/native_rust.md)
 
-1. **Build, Run, and Debug:**
-   - Open `main.cpp`
-   - Add a breakpoint (e.g. on line 7).
-   - Press <kbd>F5</kbd> to launch the app in the container.
-   - Once the breakpoint is hit, try hovering over variables, examining locals, and more.
+## Test and contribute
 
-1. **Install the GitHub CLI using a Dev Container Feature:**
-   - Press <kbd>F1</kbd> and select the **Dev Containers: Configure Container Features...** or **Codespaces: Configure Container Features...** command.
-   - Type "github" in the text box at the top.
-   - Check check box next to "GitHub CLI" (published by devcontainers) 
-   - Click OK
-   - Press <kbd>F1</kbd> and select the **Dev Containers: Rebuild Container** or **Codespaces: Rebuild Container** command so the modifications are picked up.
+With the development dependencies and native bindings installed, run the local
+suite from the repository root:
 
-## Contributing
+```powershell
+python -m pytest -m "not ray and not integration" -q
+```
 
-This project welcomes contributions and suggestions. Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.microsoft.com.
+See the [testing guide](docs/testing/README.md) for the marker contract and
+commands for integration and real-Ray tests. These require additional runtime
+resources and are selected separately from the lightweight suite.
 
-When you submit a pull request, a CLA-bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
-
-## License
-
-Copyright © Microsoft Corporation All rights reserved.<br />
-Licensed under the MIT License. See LICENSE in the project root for license information.
+Start changes with a GitHub issue, use a separate worktree and an issue branch
+such as `fix/123` or `feat/123` from the latest `origin/develop`, and open a draft
+pull request targeting `develop`. Keep generated runtime artifacts out of
+commits. See [How to contribute](docs/how-to-contribute.md) for more detail.

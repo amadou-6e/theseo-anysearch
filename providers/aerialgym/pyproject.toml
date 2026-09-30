@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "theseo-anysearch-aerialgym"
+version = "0.1.0"
+description = "Pinned cached Aerial Gym collision-box voxel-world provider"
+requires-python = ">=3.10"
+dependencies = ["theseo-anysearch>=0.1.0,<0.2.0"]
+
+[project.entry-points."theseo_anysearch.world_providers"]
+aerialgym = "anysearch_aerialgym:Provider"
+
+[tool.setuptools.packages.find]
+where = ["src"]

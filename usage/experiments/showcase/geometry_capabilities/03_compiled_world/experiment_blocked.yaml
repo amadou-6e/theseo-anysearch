@@ -1,0 +1,73 @@
+description: >
+  Points at the "blocked" 128x96x64 compiled pack from prepare_world.py, whose
+  dividing wall has no gap. Same start/goal as experiment_valid.yaml, same
+  extent, same everything except the wall -- this is deliberately unreachable:
+
+    anysearch geometry validate usage/experiments/showcase/geometry_capabilities/03_compiled_world/experiment_blocked.yaml --json
+
+  Compare its exit code and task_feasibility.rejection_reason against
+  experiment_valid.yaml's to see the CLI actually distinguish the two.
+
+  Run prepare_world.py first if runtime/geometry_capabilities/03_compiled_world
+  does not exist yet.
+
+experiment:
+  name: geometry-capabilities-compiled-world-blocked
+  output_dir: runtime/geometry_capabilities/03_compiled_world_blocked_run
+  seed: 42
+
+env:
+  max_steps: 400
+  seed: 42
+  agent_count: 1
+  trail_mode: false
+  waypoints_file: waypoints.json
+  geometry:
+    extent: [128, 96, 64]
+    compiled_world_path: ../../../../../runtime/geometry_capabilities/03_compiled_world/blocked/51295233c9b216b118140c4012244f97064fbb192c929dd40ec978b84db3a5d8
+    validation:
+      enabled: true
+      maximum_attempts: 1
+      maximum_search_nodes: 2000000
+      recovery_margin_steps: 16
+  observation:
+    mode: box
+    box_radius: 1
+  action:
+    mode: discrete_6
+    behavior: cursor_navigation
+    predicates:
+      - valid_action
+      - bounds
+      - unoccupied
+    outcomes:
+      - cursor_movement
+    history_length: 8
+  rewards:
+    step_cost: -0.01
+    goal_reward: 1.0
+    distance_shaping: 0.05
+    distance_reward_mode: progress
+
+training:
+  algorithm: ppo
+  runner: local
+  iterations: 5
+  require_gpu: false
+  num_env_runners: 1
+  trajectory_every: 1
+
+evaluation:
+  episodes: 2
+  seed: 42
+  num_env_runners: 1
+
+algorithm_config:
+  lr: 0.001
+  train_batch_size: 512
+  minibatch_size: 128
+  num_sgd_iter: 4
+
+model_config:
+  hidden_sizes: [64, 64]
+  activation: relu

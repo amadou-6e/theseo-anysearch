@@ -1,0 +1,57 @@
+description: >
+  Uses ASHA to tune SAC learning rate, batch size, target-update rate, n-step returns, and encoder settings. It is the off-policy counterpart to the PPO ASHA searches.
+
+experiment:
+  name: sac-offpolicy-asha
+  output_dir: ../../../runtime/experiments
+  seed: 42
+
+env:
+  agent_count: 4
+  max_steps: 96
+
+  geometry:
+    stl_path: usage/geometries/stepped_terrain.stl
+    scale: 40.0
+
+training:
+  algorithm: sac
+  runner: local
+  iterations: 300
+  checkpoint_interval: 50
+  trajectory_every: 20
+  video_every: 100
+
+algorithm_config:            # defaults; overridden per trial
+  tau: 0.005
+  n_step: 1
+
+model_config:
+  use_position_encoding: true
+  encoder_depth: 3
+
+tune_config:
+  scheduler: asha
+  num_samples: 24
+  metric: episode_reward_mean
+  mode: max
+  max_concurrent: 4
+  checkpoint_frequency: 10
+  search_space:
+    algorithm_config:
+      lr:               {loguniform: [1.0e-5, 1.0e-2]}
+      train_batch_size: {choice: [128, 256, 512]}
+      tau:              {loguniform: [1.0e-4, 1.0e-1]}
+      n_step:           {choice: [1, 3, 5]}
+    model_config:
+      encoder_depth:    {choice: [2, 3, 4]}
+      use_position_encoding: {choice: [true, false]}
+
+renders:
+  camera_positions:
+    - name: top
+      yaw: 0.0
+      pitch: 90.0
+
+mlflow:
+  tracking_uri: http://localhost:5000

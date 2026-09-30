@@ -1,0 +1,69 @@
+description: >
+  Demonstrates experiment-local Python and Rust scenario providers by placing
+  one goal next to the agent on an otherwise empty grid.
+
+experiment:
+  name: adjacent-goal-scenario-extension
+  output_dir: runtime/showcase
+  seed: 42
+
+env:
+  agent_count: 1
+  max_steps: 2
+  seed: 42
+  trail_mode: false
+  geometry:
+    grid_size: 32
+    boxes: []
+  observation:
+    mode: box
+    box_radius: 1
+  action:
+    mode: discrete_26
+  rewards:
+    step_cost: -0.01
+    collision_cost: -0.10
+    goal_reward: 1.0
+    distance_shaping: 0.10
+  scenarios:
+    provider: adjacent_goal_python
+
+training:
+  algorithm: dqn
+  model: voxel_encoder
+  runner: local
+  iterations: 25
+  checkpoint_interval: 10
+  require_gpu: false
+  num_env_runners: 2
+  num_envs_per_env_runner: 4
+  trajectory_every: 5
+  best_trajectory: true
+
+evaluation:
+  frequency: 1
+  episodes: 26
+  seed: 142
+  min_success_rate: 0.8
+  num_env_runners: 1
+  num_envs_per_env_runner: 4
+  scenarios:
+    provider:
+      name: adjacent_goal_rust
+      parameters:
+        seed_base: 142
+
+algorithm_config:
+  lr: 3.0e-4
+  gamma: 0.99
+  train_batch_size: 512
+  n_step: 1
+  dueling: true
+  double_q: true
+  replay_buffer_type: uniform
+  replay_buffer_capacity: 100000
+  warmup_steps: 1000
+
+model_config:
+  hidden_sizes: [128, 128, 128]
+  activation: relu

@@ -1,0 +1,170 @@
+solid corridor_l
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 20.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 120.0000 20.0000 0.0000
+      vertex 0.0000 20.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.0000 0.0000 20.0000
+      vertex 120.0000 20.0000 20.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 0.0000 0.0000 20.0000
+      vertex 0.0000 20.0000 20.0000
+      vertex 120.0000 20.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 20.0000
+      vertex 0.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 0.0000 20.0000 0.0000
+      vertex 120.0000 20.0000 20.0000
+      vertex 120.0000 20.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 0.0000 20.0000 0.0000
+      vertex 0.0000 20.0000 20.0000
+      vertex 120.0000 20.0000 20.0000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 0.0000 20.0000 20.0000
+      vertex 0.0000 20.0000 0.0000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.0000 0.0000 0.0000
+      vertex 0.0000 0.0000 20.0000
+      vertex 0.0000 20.0000 20.0000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 20.0000 0.0000
+      vertex 120.0000 20.0000 20.0000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 20.0000 20.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 120.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 120.0000 120.0000 0.0000
+      vertex 100.0000 120.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 100.0000 0.0000 20.0000
+      vertex 120.0000 120.0000 20.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 100.0000 0.0000 20.0000
+      vertex 100.0000 120.0000 20.0000
+      vertex 120.0000 120.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 120.0000 0.0000 20.0000
+      vertex 100.0000 0.0000 20.0000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 100.0000 120.0000 0.0000
+      vertex 120.0000 120.0000 20.0000
+      vertex 120.0000 120.0000 0.0000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 100.0000 120.0000 0.0000
+      vertex 100.0000 120.0000 20.0000
+      vertex 120.0000 120.0000 20.0000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 100.0000 120.0000 20.0000
+      vertex 100.0000 120.0000 0.0000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 100.0000 0.0000 0.0000
+      vertex 100.0000 0.0000 20.0000
+      vertex 100.0000 120.0000 20.0000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 120.0000 0.0000
+      vertex 120.0000 120.0000 20.0000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 120.0000 0.0000 0.0000
+      vertex 120.0000 120.0000 20.0000
+      vertex 120.0000 0.0000 20.0000
+    endloop
+  endfacet
+endsolid corridor_l

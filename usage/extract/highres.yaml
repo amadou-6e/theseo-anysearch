@@ -1,0 +1,13 @@
+extract:
+  pool_dir: runtime/geometry_pools/highres
+  target_per_source: 40          # base geometries per STL
+  scale_range: [100.0, 500.0]   # grid_size derived: int(scale_max) + 2*padding + 1 = 505
+  rotate: true                   # random SO(3) rotation of mesh before voxelization
+  workers: 8                     # parallel worker processes
+  min_fill_pct: 5.0              # reject if < 5% filled
+  min_free_pct: 10.0             # reject if < 10% free (agents need room to navigate)
+  connectivity_check: true       # reject if largest connected free component < 80% of free cells
+  sources:
+    - usage/geometries/stepped_terrain.stl
+    - usage/geometries/pipe_junction.stl
+    - usage/geometries/cube.stl

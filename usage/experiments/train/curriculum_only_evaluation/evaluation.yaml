@@ -1,0 +1,16 @@
+# Future task evaluation block, not a standalone runnable experiment.
+# Replace the evaluation block in a fresh preregistered configuration; do not
+# edit completed run 5034f160 or historical reproduction YAML from PR #217.
+evaluation:
+  enabled: false
+  seed: 142
+  waypoint_curriculum:
+    enabled: true
+    frequency: 5
+    stages: all
+    episodes: 3
+    min_success_rate: 0.8
+    min_per_stage_success_rate: 0.666
+    advance:
+      mode: success
+      successes_required: 1

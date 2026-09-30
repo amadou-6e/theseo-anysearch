@@ -1,0 +1,9 @@
+[package]
+name = "anysearch-geometry-native-example"
+version = "0.1.0"
+edition = "2021"
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+anysearch-extension = { path = "../../../../../../theseo_anysearch/extension_sdk" }
+serde_json = "1"
