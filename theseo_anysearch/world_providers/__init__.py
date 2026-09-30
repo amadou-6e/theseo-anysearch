@@ -1,21 +1,3 @@
-"""Optional, installable generators of verified voxel-routing worlds."""
+"""Compatibility import path for the top-level provider SDK."""
 
-from theseo_anysearch.world_providers.api import (
-    PARAMETER_TYPES,
-    GenerationSummary,
-    ProviderInfo,
-    ProviderParameter,
-    WorldProvider,
-    installed_providers,
-    load_provider,
-)
-
-__all__ = [
-    "PARAMETER_TYPES",
-    "GenerationSummary",
-    "ProviderInfo",
-    "ProviderParameter",
-    "WorldProvider",
-    "installed_providers",
-    "load_provider",
-]
+from theseo_world_providers import *  # noqa: F401,F403

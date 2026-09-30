@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 import numpy as np
 from scipy import ndimage
 
-from theseo_anysearch.environments.aerial_gym_export import _rotation
+from theseo_anysearch.worlds.rotation import rotation_from_rpy as _rotation
 from theseo_anysearch.environments.routing_manifests import (
     ArtifactRef,
     ConversionRecord,

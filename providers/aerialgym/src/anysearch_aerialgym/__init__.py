@@ -8,9 +8,9 @@ import shutil
 from pathlib import Path
 
 from theseo_anysearch.environments.aerial_gym_export import export_scene
-from theseo_anysearch.environments.routing_manifests import RightsRecord
-from theseo_anysearch.world_providers.api import GenerationSummary, ProviderInfo, ProviderParameter
-from theseo_anysearch.world_providers.source_cache import cached_sources
+from theseo_world_providers.routing_manifests import RightsRecord
+from theseo_world_providers.api import GenerationSummary, ProviderInfo, ProviderParameter
+from theseo_world_providers.source_cache import cached_sources
 
 REVISION = "f0d0f05283f7897bab5a1bcc7b19b91cebbab218"
 BASE_URL = f"https://raw.githubusercontent.com/ntnu-arl/aerial_gym_simulator/{REVISION}"
