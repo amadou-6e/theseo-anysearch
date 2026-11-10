@@ -22,7 +22,7 @@ use theseo_core::replay::lod::{
     chunks_intersecting_box, expand_chunk_halo, include_mandatory_chunks, select_chunks,
     CameraChunkView, ChunkBudgets,
 };
-use theseo_core::replay::overview::{project_orthographic, OverviewMesh, ProjectedVertex};
+use theseo_core::replay::overview::{OverviewMesh, ProjectedVertex};
 use theseo_core::replay::regional::{
     agent_region, agent_view_render_origin, camera_relative, RegionalReplayFrame,
     RegionalReplaySource, RenderOrigin, ReplayMutation,
@@ -732,18 +732,23 @@ mod regional_view_alignment_tests {
         );
         let local_agent = camera_relative(last_inside, inside_origin);
         let local_voxel = camera_relative(boundary_voxel, inside_origin);
-        let projected_agent = camera.project(local_agent.0, local_agent.1, local_agent.2);
-        let projected_voxel = camera.project(local_voxel.0, local_voxel.1, local_voxel.2);
+        let projected_agent = camera.camera_space(local_agent.0, local_agent.1, local_agent.2);
+        let projected_voxel = camera.camera_space(local_voxel.0, local_voxel.1, local_voxel.2);
         let overview_scale = EXTENT.into_iter().max().unwrap() as f32;
 
         assert!((projected_voxel.0 - projected_agent.0
             - (overview_voxel.x - overview_agent.x) * overview_scale)
             .abs()
             < 1e-4);
-        assert!((projected_voxel.1 - projected_agent.1
-            - (overview_voxel.y - overview_agent.y) * overview_scale)
-            .abs()
-            < 1e-4);
+        // The flat overview has an intentional depth lift; the perspective
+        // camera uses the unmodified camera-space vertical coordinate.
+        let (_, vertical_delta, _) = camera.camera_space(
+            local_voxel.0 - local_agent.0,
+            local_voxel.1 - local_agent.1,
+            local_voxel.2 - local_agent.2,
+        );
+        assert!((projected_voxel.1 - projected_agent.1 - vertical_delta).abs() < 1e-4);
+        assert!(overview_voxel.y.is_finite() && overview_agent.y.is_finite());
     }
 
     #[test]
@@ -832,7 +837,6 @@ struct Camera {
     yaw:   f32,   // radians — rotates x/z plane
     pitch: f32,   // radians — tilts up/down
     zoom:  f32,   // scale multiplier (1.0 = default)
-    perspective: bool,
     field_of_view_degrees: f32,
 }
 
@@ -842,19 +846,8 @@ impl Camera {
             yaw: 45.0_f32.to_radians(),
             pitch: 30.0_f32.to_radians(),
             zoom: 1.0,
-            perspective: false,
             field_of_view_degrees: 45.0,
         }
-    }
-
-    /// Project a 3-D grid coord to 2-D screen space (pre-bounds).
-    fn project(&self, x: f32, y: f32, z: f32) -> (f32, f32) {
-        let projected = project_orthographic(
-            [f64::from(x), f64::from(y), f64::from(z)],
-            self.yaw,
-            self.pitch,
-        );
-        (projected.x, projected.y)
     }
 
     fn camera_space(&self, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
@@ -865,82 +858,38 @@ impl Camera {
         (xr, -yr, depth)
     }
 
-    /// Axis-aligned bounding box of the full grid in projected 2-D space.
+    /// Rotation-independent framing distance and center of the full grid.
     fn bounds(&self, grid_size: f32) -> Bounds {
         let lo = 0.5f32;
         let hi = grid_size + 0.5;
-        let mut min_x = f32::INFINITY;
-        let mut max_x = f32::NEG_INFINITY;
-        let mut min_y = f32::INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-        for &xf in &[lo, hi] {
-            for &yf in &[lo, hi] {
-                for &zf in &[lo, hi] {
-                    let (px, py) = self.project(xf, yf, zf);
-                    if px < min_x { min_x = px; }
-                    if px > max_x { max_x = px; }
-                    if py < min_y { min_y = py; }
-                    if py > max_y { max_y = py; }
-                }
-            }
-        }
-        let pw = (max_x - min_x) * 0.05;
-        let ph = (max_y - min_y) * 0.05;
         Bounds {
-            min_x: min_x - pw,
-            max_x: max_x + pw,
-            min_y: min_y - ph,
-            max_y: max_y + ph,
-            // A cube's largest possible orthographic projection is bounded by
-            // its 3-D diagonal. Keep this span independent of yaw and pitch so
-            // orbiting never changes the apparent zoom.
+            // Rotation-independent framing based on the cube's 3-D diagonal.
             uniform_span: grid_size * 3.0_f32.sqrt() * 1.1,
             world_center: (lo + hi) * 0.5,
         }
     }
 
-    fn screen_scale(&self, rect: Rect, bounds: &Bounds) -> f32 {
-        rect.width().min(rect.height()) / bounds.uniform_span.max(1.0) * self.zoom
-    }
-
-    /// Map a 3-D coord to a pixel position inside `rect`, applying zoom.
+    /// Map a 3-D coord to pixels using perspective projection.
     #[inline]
     fn to_screen(&self, x: f32, y: f32, z: f32, rect: Rect, b: &Bounds) -> Pos2 {
-        if self.perspective {
-            let (px, py, depth) = self.camera_space(
-                x - b.world_center,
-                y - b.world_center,
-                z - b.world_center,
-            );
-            let camera_distance = b.uniform_span.max(1.0);
-            let near_plane = camera_distance * 0.01;
-            let distance = (camera_distance - depth).max(near_plane);
-            let half_fov = (self.field_of_view_degrees.clamp(15.0, 100.0) * 0.5)
-                .to_radians();
-            let focal_pixels = rect.width().min(rect.height()) * 0.5
-                / half_fov.tan()
-                * self.zoom;
-            return Pos2::new(
-                rect.center().x + px / distance * focal_pixels,
-                rect.center().y + py / distance * focal_pixels,
-            );
-        }
-        let (px, py) = self.project(x, y, z);
-        let cx = rect.center().x;
-        let cy = rect.center().y;
-        let scale = self.screen_scale(rect, b);
+        let (px, py, depth) = self.camera_space(
+            x - b.world_center, y - b.world_center, z - b.world_center,
+        );
+        let camera_distance = b.uniform_span.max(1.0);
+        let near_plane = camera_distance * 0.01;
+        let distance = (camera_distance - depth).max(near_plane);
+        let half_fov = (self.field_of_view_degrees * 0.5).to_radians();
+        let focal_pixels = rect.width().min(rect.height()) * 0.5
+            / half_fov.tan() * self.zoom;
         Pos2::new(
-            cx + (px - (b.min_x + b.max_x) * 0.5) * scale,
-            cy + (py - (b.min_y + b.max_y) * 0.5) * scale,
+            rect.center().x + px / distance * focal_pixels,
+            rect.center().y + py / distance * focal_pixels,
         )
     }
+
 }
 
 struct Bounds {
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
     uniform_span: f32,
     world_center: f32,
 }
@@ -958,10 +907,6 @@ mod camera_tests {
     fn screen_mapping_uses_one_scale_for_both_projected_axes() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -971,17 +916,13 @@ mod camera_tests {
         let horizontal = camera.to_screen(1.0, 0.0, 0.0, rect, &bounds);
         let vertical = camera.to_screen(0.0, -1.0, 0.0, rect, &bounds);
 
-        assert_eq!(horizontal.x - center.x, vertical.y - center.y);
+        assert!(((horizontal.x - center.x) - (vertical.y - center.y)).abs() < 1e-5);
     }
 
     #[test]
     fn projected_bounds_are_centered_when_the_viewport_aspect_differs() {
         let camera = test_camera();
         let bounds = Bounds {
-            min_x: -10.0,
-            max_x: 10.0,
-            min_y: -5.0,
-            max_y: 5.0,
             uniform_span: 20.0,
             world_center: 0.0,
         };
@@ -993,7 +934,7 @@ mod camera_tests {
     }
 
     #[test]
-    fn orbiting_does_not_change_the_screen_scale() {
+    fn orbiting_does_not_change_the_camera_distance() {
         let first = Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, ..Camera::default() };
         let second = Camera {
             yaw: 67.0_f32.to_radians(),
@@ -1001,14 +942,27 @@ mod camera_tests {
             zoom: 1.0,
             ..Camera::default()
         };
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(360.0, 200.0));
         let first_bounds = first.bounds(32.0);
         let second_bounds = second.bounds(32.0);
 
         assert_eq!(
-            first.screen_scale(rect, &first_bounds),
-            second.screen_scale(rect, &second_bounds),
+            first_bounds.uniform_span,
+            second_bounds.uniform_span,
         );
+    }
+
+    #[test]
+    fn default_camera_uses_perspective_without_a_toggle() {
+        let camera = Camera::default();
+        let bounds = camera.bounds(32.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0));
+        let center = bounds.world_center;
+        let width_at = |z| {
+            let first = camera.to_screen(center, center, z, rect, &bounds);
+            let second = camera.to_screen(center + 1.0, center, z, rect, &bounds);
+            (second - first).length()
+        };
+        assert!(width_at(center + 8.0) > width_at(center - 8.0));
     }
 
     #[test]
@@ -1016,7 +970,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -1035,7 +988,6 @@ mod camera_tests {
         let camera = Camera {
             yaw: 0.0,
             pitch: 0.0,
-            perspective: true,
             ..Camera::default()
         };
         let bounds = camera.bounds(32.0);
@@ -1053,16 +1005,176 @@ fn inset_position(point: ProjectedVertex, rect: Rect, scale: f32) -> Pos2 {
     Pos2::new(rect.center().x + point.x * scale, rect.center().y + point.y * scale)
 }
 
+fn overview_rect(outer: Rect, size: f32) -> Rect {
+    let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+    let size = size.clamp(140.0_f32.min(available), available);
+    Rect::from_min_size(outer.right_bottom() - Vec2::splat(size + 12.0), Vec2::splat(size))
+}
+
+fn resize_overview(ui: &mut egui::Ui, outer: Rect, size: &mut f32) -> bool {
+    let rect = overview_rect(outer, *size);
+    let grip = Rect::from_min_size(rect.left_top(), Vec2::splat(20.0));
+    let response = ui.interact(grip, ui.id().with("overview_resize"), Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeNwSe)
+        .on_hover_text("Drag this corner to resize the overview");
+    let resizing = response.dragged_by(egui::PointerButton::Primary);
+    if resizing {
+        let delta = response.drag_delta();
+        let available = (outer.width().min(outer.height()) - 24.0).max(0.0);
+        *size = (rect.width() - (delta.x + delta.y) * 0.5)
+            .clamp(140.0_f32.min(available), available);
+    }
+    resizing
+}
+
+fn overview_controls(
+    ui: &mut egui::Ui, outer: Rect, size: f32,
+    expanded: &mut bool, _show_bounds: &mut bool,
+) -> bool {
+    if !*expanded {
+        let rect = Rect::from_min_size(
+            outer.right_bottom() - Vec2::new(132.0, 40.0), Vec2::new(120.0, 28.0),
+        );
+        let response = ui.put(rect, egui::Button::new("Show overview"));
+        if response.clicked() { *expanded = true; }
+        return response.is_pointer_button_down_on() || response.clicked();
+    }
+    let rect = overview_rect(outer, size);
+    let collapse = ui.put(
+        Rect::from_min_size(rect.right_top() + Vec2::new(-28.0, 4.0), Vec2::splat(24.0)),
+        egui::Button::new("−"),
+    ).on_hover_text("Collapse overview");
+    if collapse.clicked() { *expanded = false; }
+    collapse.is_pointer_button_down_on() || collapse.clicked()
+}
+
+#[cfg(test)]
+mod overview_resize_tests {
+    use super::*;
+
+    fn controls_frame(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool,
+        events: Vec<egui::Event>) -> Rect
+    {
+        let mut outer = Rect::NOTHING;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                overview_controls(ui, outer, 300.0, expanded, bounds);
+            });
+        });
+        outer
+    }
+
+    fn click_control(ctx: &egui::Context, expanded: &mut bool, bounds: &mut bool, pos: Pos2) {
+        controls_frame(ctx, expanded, bounds, vec![egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: true, modifiers: egui::Modifiers::NONE }]);
+        controls_frame(ctx, expanded, bounds, vec![
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary,
+                pressed: false, modifiers: egui::Modifiers::NONE }]);
+    }
+
+    #[test]
+    fn overview_can_collapse_and_expand_without_sidebar() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let collapse = overview_rect(outer, 300.0).right_top() + Vec2::new(-16.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, collapse);
+        assert!(!expanded);
+        controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let expand = outer.right_bottom() - Vec2::new(72.0, 26.0);
+        click_control(&ctx, &mut expanded, &mut bounds, expand);
+        assert!(expanded);
+        assert!(bounds);
+    }
+
+    #[test]
+    fn former_bounds_button_does_not_toggle_world_bounds() {
+        let ctx = egui::Context::default();
+        let mut expanded = true;
+        let mut bounds = true;
+        let outer = controls_frame(&ctx, &mut expanded, &mut bounds, vec![]);
+        let position = overview_rect(outer, 300.0).right_top() + Vec2::new(-64.0, 16.0);
+        click_control(&ctx, &mut expanded, &mut bounds, position);
+        assert!(bounds);
+        assert!(expanded);
+    }
+
+    #[test]
+    fn overview_is_square_anchored_and_clamped_to_viewport() {
+        let outer = Rect::from_min_size(Pos2::new(30.0, 40.0), Vec2::new(800.0, 500.0));
+        for size in [1.0, 220.0, 10_000.0] {
+            let rect = overview_rect(outer, size);
+            assert_eq!(rect.width(), rect.height());
+            assert_eq!(rect.right_bottom(), outer.right_bottom() - Vec2::splat(12.0));
+            assert!(outer.contains_rect(rect));
+        }
+        assert_eq!(overview_rect(outer, 1.0).width(), 140.0);
+        assert_eq!(overview_rect(outer, 10_000.0).width(), 476.0);
+    }
+
+    #[test]
+    fn tiny_viewport_does_not_invert_resize_limits() {
+        let outer = Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0));
+        assert_eq!(overview_rect(outer, 220.0).width(), 76.0);
+    }
+
+    fn frame(ctx: &egui::Context, size: &mut f32, events: Vec<egui::Event>) -> (Rect, bool) {
+        let mut outer = Rect::NOTHING;
+        let mut resizing = false;
+        let _ = ctx.run(egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events, ..Default::default()
+        }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (response, _) = ui.allocate_painter(ui.available_size(), Sense::drag());
+                outer = response.rect;
+                resizing = resize_overview(ui, outer, size);
+            });
+        });
+        (outer, resizing)
+    }
+
+    #[test]
+    fn dragging_corner_expands_and_shrinks_without_orbit_input() {
+        for (delta, expected) in [(Vec2::splat(-30.0), 250.0), (Vec2::splat(30.0), 190.0)] {
+            let ctx = egui::Context::default();
+            let mut size = 220.0;
+            let (outer, _) = frame(&ctx, &mut size, vec![]);
+            let start = overview_rect(outer, size).left_top() + Vec2::splat(8.0);
+            frame(&ctx, &mut size, vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start, button: egui::PointerButton::Primary, pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            let (_, resizing) = frame(&ctx, &mut size, vec![egui::Event::PointerMoved(start + delta)]);
+            assert!(resizing, "resize must suppress camera orbit");
+            assert_eq!(size, expected);
+        }
+    }
+}
+
 fn draw_overview_inset(
     painter: &egui::Painter, outer: Rect, mesh: &OverviewMesh, camera: &Camera,
     size: f32, show_bounds: bool, agent_view: Option<(StorageCoord, u32)>,
 ) {
-    let inset_size = outer.width().min(outer.height()).min(size);
-    let rect = Rect::from_min_size(
-        outer.right_bottom() - Vec2::splat(inset_size + 12.0), Vec2::splat(inset_size),
-    );
+    let rect = overview_rect(outer, size);
     painter.rect_filled(rect, 6.0, Color32::from_rgba_premultiplied(8, 11, 17, 225));
     painter.rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_gray(75)), egui::StrokeKind::Inside);
+    for offset in [6.0, 11.0, 16.0] {
+        painter.line_segment([
+            rect.left_top() + Vec2::new(3.0, offset),
+            rect.left_top() + Vec2::new(offset, 3.0),
+        ], Stroke::new(1.5, Color32::from_gray(180)));
+    }
     let projected = mesh.project(camera.yaw, camera.pitch);
     let bounds_mesh = OverviewMesh { vertices: mesh.bounds_vertices(), indices: Vec::new(), extent: mesh.extent };
     let bounds_points = bounds_mesh.project(camera.yaw, camera.pitch);
@@ -1123,7 +1235,6 @@ fn draw_overview_inset(
             Color32::from_rgb(255, 230, 0),
         );
     }
-    painter.text(rect.left_top() + Vec2::splat(6.0), egui::Align2::LEFT_TOP, "World overview", egui::FontId::proportional(10.0), Color32::from_gray(190));
 }
 
 /// Back-to-front depth key for painter's algorithm.
@@ -2166,6 +2277,7 @@ impl eframe::App for VoxelReplayApp {
 
         let mut drag_delta = Vec2::ZERO;
         let mut scroll_y = 0.0;
+        let mut resizing_overview = false;
 
         if self.explain_tab {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -2302,16 +2414,6 @@ impl eframe::App for VoxelReplayApp {
                 ui.checkbox(&mut self.show_trail, "Show trail");
             }
             ui.separator();
-            ui.label(egui::RichText::new("Camera projection").strong());
-            ui.checkbox(&mut self.camera.perspective, "Perspective (vanishing points)");
-            ui.add_enabled_ui(self.camera.perspective, |ui| {
-                ui.add(
-                    Slider::new(&mut self.camera.field_of_view_degrees, 15.0..=100.0)
-                        .suffix("°")
-                        .text("field of view"),
-                    );
-            });
-            ui.separator();
             ui.label(egui::RichText::new("Render diagnostics").strong());
             ui.checkbox(&mut self.reveal_hidden_agent, "Reveal hidden agent (diagnostic)");
             ui.checkbox(&mut self.debug_face_colors, "Color faces by direction");
@@ -2341,13 +2443,6 @@ impl eframe::App for VoxelReplayApp {
                 if let Some(error) = &self.regional_error {
                     ui.colored_label(Color32::from_rgb(230, 100, 100), error);
                 }
-                ui.separator();
-                ui.label(egui::RichText::new("Global overview").strong());
-                ui.checkbox(&mut self.show_overview, "Show overview");
-                ui.add_enabled_ui(self.show_overview, |ui| {
-                    ui.add(Slider::new(&mut self.overview_size, 140.0..=420.0).text("size"));
-                    ui.checkbox(&mut self.show_overview_bounds, "Show world bounds");
-                });
                 if let Some(Err(error)) = self.overview_meshes.get(iter_idx) {
                     ui.colored_label(Color32::from_rgb(220, 150, 80), error);
                 }
@@ -2453,6 +2548,9 @@ impl eframe::App for VoxelReplayApp {
             // Allocate with drag sense so the cursor changes on hover
             let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
             (drag_delta, scroll_y) = scene_camera_input(ctx, &resp);
+            if self.show_overview && matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview = resize_overview(ui, resp.rect, &mut self.overview_size);
+            }
             let rect = resp.rect.shrink(20.0);
             painter.rect_filled(resp.rect, 0.0, Color32::from_rgb(12, 14, 20));
 
@@ -2678,6 +2776,13 @@ impl eframe::App for VoxelReplayApp {
                 }
             }
 
+            if matches!(self.overview_meshes.get(iter_idx), Some(Ok(_))) {
+                resizing_overview |= overview_controls(
+                    ui, resp.rect, self.overview_size,
+                    &mut self.show_overview, &mut self.show_overview_bounds,
+                );
+            }
+
             let agent_label = if is_multi {
                 format!("{} agents", agent_count)
             } else {
@@ -2731,7 +2836,7 @@ impl eframe::App for VoxelReplayApp {
         }
 
         // ---- Camera orbit (left-drag) + zoom (scroll) + reset (R) ----------
-        if drag_delta != Vec2::ZERO {
+        if drag_delta != Vec2::ZERO && !resizing_overview {
             self.camera.yaw   += drag_delta.x * 0.008;
             self.camera.pitch  = (self.camera.pitch - drag_delta.y * 0.006)
                 .clamp(-1.3, 1.3);
