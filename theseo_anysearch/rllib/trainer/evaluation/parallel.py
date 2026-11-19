@@ -87,9 +87,19 @@ class _PolicyAdapter:
         """Apply the same structured-observation flattening as Connector V2."""
         from gymnasium.spaces import flatten
 
-        runner = getattr(self._env_runner, "env_runner", self._env_runner)
-        env = getattr(runner, "env", None)
-        space = getattr(env, "single_observation_space", None)
+        candidates = (
+            self._env_runner,
+            getattr(self._env_runner, "env_runner", None),
+            getattr(self._env_runner, "eval_env_runner", None),
+        )
+        space = None
+        for candidate in candidates:
+            env = getattr(candidate, "env", None)
+            space = getattr(env, "single_observation_space", None)
+            if space is None:
+                space = getattr(env, "observation_space", None)
+            if space is not None:
+                break
         if space is None:
             return observations
         return [flatten(space, observation) for observation in observations]

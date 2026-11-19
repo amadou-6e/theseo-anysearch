@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from theseo_anysearch.rllib.trainer.evaluation.parallel import (
     AnySearchEvaluationFunction,
@@ -180,6 +181,44 @@ def test_stack_observations_preserves_nested_structure() -> None:
 
     assert stacked["box"].tolist() == [[1, 2], [5, 6]]
     assert [part.tolist() for part in stacked["goal"]] == [[3, 7], [4, 8]]
+
+
+def test_policy_adapter_flattens_gymnasium_observation_space() -> None:
+    from gymnasium.spaces import Box, Dict
+
+    space = Dict({
+        "first": Box(low=0.0, high=1.0, shape=(2,)),
+        "second": Box(low=0.0, high=1.0, shape=(1,)),
+    })
+    env_runner = SimpleNamespace(env=SimpleNamespace(observation_space=space))
+    observations = [{
+        "first": np.asarray([0.1, 0.2], dtype=np.float32),
+        "second": np.asarray([0.3], dtype=np.float32),
+    }]
+
+    flattened = _PolicyAdapter(env_runner)._module_observations(observations)
+
+    assert len(flattened) == 1
+    assert flattened[0].shape == (3,)
+    assert flattened[0].tolist() == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_policy_adapter_uses_local_evaluation_runner_space() -> None:
+    from gymnasium.spaces import Box, Dict
+
+    space = Dict({"value": Box(low=0.0, high=1.0, shape=(1,))})
+    algorithm = SimpleNamespace(
+        env_runner=SimpleNamespace(env=None),
+        eval_env_runner=SimpleNamespace(
+            env=SimpleNamespace(single_observation_space=space)
+        ),
+    )
+
+    flattened = _PolicyAdapter(algorithm)._module_observations([
+        {"value": np.asarray([0.5], dtype=np.float32)}
+    ])
+
+    assert flattened[0].tolist() == pytest.approx([0.5])
 
 
 def test_policy_adapter_batches_observations_for_policy(monkeypatch) -> None:
